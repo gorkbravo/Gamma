@@ -43,7 +43,14 @@ from src.application.iv_service import IVService, IVSurfaceRequest
 from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.maritime_service import MaritimeService
 from src.application.news_service import NewsService
-from src.application.prediction_market_service import PredictionMarketService
+from src.application.prediction_market_service import (
+    CALIBRATION_MAX_SAMPLE_MARKETS,
+    CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS,
+    HISTORY_RANGE_KEYS,
+    MAX_COMPARISON_LEGS,
+    RESOLUTION_CHOICES_MINUTES,
+    PredictionMarketService,
+)
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
 from src.application.research_action_registry import (
     ResearchActionPermissionError,
@@ -100,7 +107,11 @@ from src.services.copilot_evidence import resolve_result_evidence
 from src.models.macro import MacroMetricRecord, MacroSeriesHistory
 from src.models.news import NewsEventFeed, NewsEventItem
 from src.models.portfolio import PortfolioSnapshot, PositionItem
-from src.models.prediction_markets import PredictionProbabilityPoint
+from src.models.prediction_markets import (
+    CalibrationSummary,
+    PredictionProbabilityHistory,
+    PredictionProbabilityPoint,
+)
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import ResearchComparisonLeg, ResearchComparisonRequest
 from src.services.copilot_provider import CopilotProvider, CopilotRunCancelled
@@ -109,6 +120,27 @@ from src.utils.time import now_utc
 logger = logging.getLogger(__name__)
 
 MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
+
+# Lead-time calibration issues one provider history request per sampled
+# contract. The always-on prediction-market context therefore samples a small
+# set; the dedicated calibration tool exposes the full bounded range.
+PREDICTION_CONTEXT_CALIBRATION_SAMPLE = 12
+
+
+def _bounded_history_range(value: Any) -> str:
+    """Clamp a model-supplied lookback to the registered range keys."""
+    candidate = str(value or "").strip().lower()
+    return candidate if candidate in HISTORY_RANGE_KEYS else "max"
+
+
+def _bounded_history_resolution(value: Any) -> int | None:
+    """Clamp a model-supplied bar width; `None` means "let Gamma derive one"."""
+    if not isinstance(value, (int, float)):
+        return None
+    minutes = int(value)
+    if minutes < 1:
+        return None
+    return min(minutes, RESOLUTION_CHOICES_MINUTES[-1])
 
 DEFAULT_COPILOT_RUN_TIMEOUT_SECONDS = 300.0
 COPILOT_RUN_REPLAY_LIMIT = 512
@@ -766,19 +798,213 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="get_prediction_market_history_summary",
-                    description="Return a read-only summary of probability history for the selected prediction market.",
+                    description=(
+                        "Return read-only windowed probability history for the selected prediction market, with the "
+                        "requested-versus-effective range and resolution, window and coverage bounds, derived window "
+                        "statistics, and provider-limit warnings."
+                    ),
                     domains=("prediction_markets",),
                     parameters_schema={
                         "type": "object",
-                        "properties": {},
-                        "required": [],
+                        "properties": {
+                            "range": {
+                                "type": ["string", "null"],
+                                "description": (
+                                    "Lookback selector. One of "
+                                    f"{', '.join(HISTORY_RANGE_KEYS)}. Null uses the full available history."
+                                ),
+                            },
+                            "resolution_minutes": {
+                                "type": ["integer", "null"],
+                                "description": (
+                                    "Requested bar width in minutes, bounded to 1-1440. Null lets Gamma derive one "
+                                    "from the window span. A venue may serve a coarser bar and will report it."
+                                ),
+                            },
+                            "outcome_id": {
+                                "type": ["string", "null"],
+                                "description": "Specific outcome to chart. Null uses the market's primary outcome.",
+                            },
+                        },
+                        "required": ["range", "resolution_minutes", "outcome_id"],
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_prediction_market_history_summary,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "market_id": {"type": "string"},
+                            "window": {"type": "object"},
+                            "stats": {"type": "object"},
+                            "points": {"type": "array"},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["market_id", "window", "stats", "points", "warnings"],
+                    },
+                    provenance_behavior=(
+                        "Preserves the venue, origin, retrieval time, requested-versus-effective range and "
+                        "resolution, the windowing label, and every provider-limit warning."
+                    ),
+                    failure_modes=(
+                        "A venue rejects explicit windows beyond its own span limit and the series is clipped locally.",
+                        "A named lookback returns fewer bars at a finer resolution, so the effective range is shorter than requested.",
+                        "A contract listed recently has less history than the requested window.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="get_prediction_market_outcome_series",
+                    description=(
+                        "Return read-only per-outcome probability history for the selected prediction market so a "
+                        "multi-outcome book can be read as a ladder instead of only its first outcome."
+                    ),
+                    domains=("prediction_markets",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "range": {
+                                "type": ["string", "null"],
+                                "description": f"Lookback selector. One of {', '.join(HISTORY_RANGE_KEYS)}.",
+                            },
+                            "resolution_minutes": {
+                                "type": ["integer", "null"],
+                                "description": "Requested bar width in minutes, bounded to 1-1440.",
+                            },
+                        },
+                        "required": ["range", "resolution_minutes"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_prediction_market_outcome_series,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "market_id": {"type": "string"},
+                            "series": {"type": "array"},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["market_id", "series", "warnings"],
+                    },
+                    provenance_behavior=(
+                        "Each series keeps its provider outcome token and its own warnings; an outcome with no "
+                        "venue-side token is returned empty and labeled rather than inferred."
+                    ),
+                    failure_modes=(
+                        "A venue exposes no separate history token for some outcomes.",
+                        "Binary markets return a single series.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="compare_prediction_markets",
+                    description=(
+                        "Align several prediction-market contracts onto one timeline and return read-only per-leg "
+                        "statistics, pairwise spread analytics, correlation of probability changes, and a descriptive "
+                        "basket summary."
+                    ),
+                    domains=("prediction_markets",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "market_ids": {
+                                "type": ["array", "null"],
+                                "items": {"type": "string"},
+                                "description": (
+                                    f"Normalized market ids, at most {MAX_COMPARISON_LEGS}. Null compares the "
+                                    "selected contract against its related markets."
+                                ),
+                            },
+                            "range": {
+                                "type": ["string", "null"],
+                                "description": f"Lookback selector. One of {', '.join(HISTORY_RANGE_KEYS)}.",
+                            },
+                            "resolution_minutes": {
+                                "type": ["integer", "null"],
+                                "description": "Requested bar width in minutes, bounded to 1-1440.",
+                            },
+                        },
+                        "required": ["market_ids", "range", "resolution_minutes"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_compare_prediction_markets,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "legs": {"type": "array"},
+                            "pairs": {"type": "array"},
+                            "basket": {"type": "object"},
+                            "method_note": {"type": "string"},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["legs", "pairs", "basket", "method_note", "warnings"],
+                    },
+                    provenance_behavior=(
+                        "Carries the alignment and correlation method note plus every leg warning, so a spread claim "
+                        "cannot be separated from how the series were aligned."
+                    ),
+                    failure_modes=(
+                        "Contracts with no overlapping history produce no pair analytics.",
+                        "The probability sum is descriptive only and is not asserted to be a book overround.",
+                        "Spreads are research context, not executable prices; fees, sizing, and resolution criteria are not modeled.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="get_prediction_market_calibration",
+                    description=(
+                        "Return the venue's read-only calibration measured at fixed lead times before resolution, "
+                        "with per-bucket sample sizes, the minimum sample required to draw a curve, the sample "
+                        "period, and a separate settlement-convergence diagnostic."
+                    ),
+                    domains=("prediction_markets",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "lead_times_hours": {
+                                "type": ["array", "null"],
+                                "items": {"type": "integer"},
+                                "description": (
+                                    "Lead times before resolution, in hours. Supported: "
+                                    f"{', '.join(str(value) for value in CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS)}."
+                                ),
+                            },
+                            "sample_size": {
+                                "type": ["integer", "null"],
+                                "description": (
+                                    "Resolved contracts to sample, bounded to "
+                                    f"1-{CALIBRATION_MAX_SAMPLE_MARKETS}. Each sampled contract costs one provider "
+                                    "history request."
+                                ),
+                            },
+                        },
+                        "required": ["lead_times_hours", "sample_size"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_prediction_market_calibration,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "venue": {"type": "string"},
+                            "method": {"type": "string"},
+                            "is_validated": {"type": "boolean"},
+                            "curves": {"type": "array"},
+                            "settlement_convergence": {"type": ["object", "null"]},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["venue", "method", "is_validated", "curves", "warnings"],
+                    },
+                    timeout_seconds=90.0,
+                    provenance_behavior=(
+                        "Reports the measurement method, whether the sample cleared the stated minimum, per-bucket "
+                        "sample sizes, and the sample period, so a thin or fallback result cannot be read as a "
+                        "validated calibration."
+                    ),
+                    failure_modes=(
+                        "A venue with too few resolved contracts produces no plottable curve.",
+                        "A contract listed after the lead time has no observation at that lead time and is skipped.",
+                        "When no lead-time observation exists the result falls back to a settlement-print summary "
+                        "that is explicitly non-predictive and carries no curve.",
+                    ),
                 ),
                 _CopilotToolDefinition(
                     name="get_prediction_market_flow_context",
-                    description="Return read-only wallet, related-market, and calibration context for the selected prediction market.",
+                    description="Return read-only wallet and related-market context for the selected prediction market.",
                     domains=("prediction_markets",),
                     parameters_schema={
                         "type": "object",
@@ -6937,7 +7163,13 @@ class CopilotService:
         history = self.prediction_market_service.get_probability_history(market_id)
         wallet = self.prediction_market_service.get_wallet_summary(market_id)
         related = self.prediction_market_service.get_related_markets(market_id)
-        calibration = self.prediction_market_service.get_calibration_summary(market_id)
+        # Lead-time calibration costs one history request per sampled contract,
+        # so the always-on context build uses a deliberately small sample. The
+        # dedicated calibration tool exposes the full parameter set.
+        calibration = self.prediction_market_service.get_calibration_summary(
+            market_id,
+            sample_size=PREDICTION_CONTEXT_CALIBRATION_SAMPLE,
+        )
 
         summary_data = {
             "market_id": detail.market_id,
@@ -6986,20 +7218,7 @@ class CopilotService:
                 }
                 for row in related[:5]
             ],
-            "calibration_summary": {
-                "venue": calibration.venue if calibration else detail.venue,
-                "sample_size": calibration.sample_size if calibration else 0,
-                "buckets": [
-                    {
-                        "label": bucket.label,
-                        "sample_size": bucket.sample_size,
-                        "average_probability": bucket.average_probability,
-                        "realized_frequency": bucket.realized_frequency,
-                    }
-                    for bucket in (calibration.buckets[:5] if calibration else [])
-                ],
-                "warnings": list(calibration.warnings if calibration else []),
-            },
+            "calibration_summary": self._prediction_calibration_summary(calibration),
         }
         sources = [
             CopilotSourceRef(
@@ -8501,24 +8720,254 @@ class CopilotService:
         arguments: dict[str, Any],
         context: CopilotContextBundle,
     ) -> CopilotToolExecution:
-        del arguments
         market_id = self._prediction_market_id_from_bundle(context)
-        history = self.prediction_market_service.get_probability_history(market_id)
+        range_key = _bounded_history_range(arguments.get("range"))
+        resolution = _bounded_history_resolution(arguments.get("resolution_minutes"))
+        outcome_id = str(arguments.get("outcome_id") or "").strip() or None
+
+        history = self.prediction_market_service.get_history_series(
+            market_id,
+            range_key=range_key,
+            resolution_minutes=resolution,
+            outcome_id=outcome_id,
+        )
+        if history is None:
+            raise ValueError(f"Prediction market history is unavailable for: {market_id}")
+
         source = CopilotSourceRef(
             source_id="prediction.history.drilldown",
             label="Prediction history drilldown",
             kind="timeseries",
-            provider=history[-1].source_provider if history else "prediction_markets",
-            origin=history[-1].origin if history else "gamma.prediction.history",
-            description="Expanded history summary for the selected market.",
-            retrieved_at=history[-1].retrieved_at if history else None,
+            provider=history.source_provider or history.venue,
+            origin=history.origin or "gamma.prediction.history",
+            description=(
+                f"Windowed probability history for {market_id} over the {history.requested_range} window."
+            ),
+            retrieved_at=history.retrieved_at,
         )
         return CopilotToolExecution(
-            output=self._prediction_history_summary(history),
+            output=self._prediction_windowed_history_summary(history),
             trace=CopilotToolTrace(
                 tool_name="get_prediction_market_history_summary",
-                summary="Expanded the selected market's probability-history summary.",
-                arguments={},
+                summary=(
+                    f"Read {len(history.points)} probability observations for {market_id} over the "
+                    f"{history.requested_range} window at {history.effective_resolution_minutes or 'auto'}-minute bars."
+                ),
+                arguments={"range": range_key, "resolution_minutes": resolution, "outcome_id": outcome_id},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_prediction_market_outcome_series(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        market_id = self._prediction_market_id_from_bundle(context)
+        range_key = _bounded_history_range(arguments.get("range"))
+        resolution = _bounded_history_resolution(arguments.get("resolution_minutes"))
+
+        series = self.prediction_market_service.get_outcome_series(
+            market_id,
+            range_key=range_key,
+            resolution_minutes=resolution,
+        )
+        warnings: list[str] = []
+        for item in series:
+            warnings.extend(item.warnings)
+        source = CopilotSourceRef(
+            source_id="prediction.outcome_series.drilldown",
+            label="Prediction outcome ladder",
+            kind="timeseries",
+            provider=str(market_id.split(":", 1)[0]),
+            origin="gamma.prediction.outcome_history",
+            description=f"Per-outcome probability history for {market_id}.",
+            retrieved_at=next(
+                (point.retrieved_at for item in series for point in item.points if point.retrieved_at), None
+            ),
+        )
+        output = {
+            "market_id": market_id,
+            "requested_range": range_key,
+            "requested_resolution_minutes": resolution,
+            "series": [
+                {
+                    "outcome_id": item.outcome_id,
+                    "label": item.label,
+                    "current_probability": item.probability,
+                    "has_provider_token": item.token_id is not None,
+                    "observations": len(item.points),
+                    "first_probability": item.points[0].probability if item.points else None,
+                    "last_probability": item.points[-1].probability if item.points else None,
+                    "change": (
+                        item.points[-1].probability - item.points[0].probability if len(item.points) > 1 else None
+                    ),
+                    "warnings": list(item.warnings),
+                }
+                for item in series
+            ],
+            "warnings": warnings,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_prediction_market_outcome_series",
+                summary=f"Read {len(series)} outcome series for {market_id} over the {range_key} window.",
+                arguments={"range": range_key, "resolution_minutes": resolution},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_compare_prediction_markets(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        market_id = self._prediction_market_id_from_bundle(context)
+        range_key = _bounded_history_range(arguments.get("range"))
+        resolution = _bounded_history_resolution(arguments.get("resolution_minutes"))
+
+        requested = [str(value).strip() for value in (arguments.get("market_ids") or []) if str(value or "").strip()]
+        if not requested:
+            # With no explicit basket, comparing the selected contract against
+            # its resolved analogs is the question the tab exists to answer.
+            related = self.prediction_market_service.get_related_markets(market_id, limit=MAX_COMPARISON_LEGS - 1)
+            requested = [market_id, *[row.market_id for row in related]]
+        elif market_id not in requested:
+            requested = [market_id, *requested]
+        requested = requested[:MAX_COMPARISON_LEGS]
+
+        comparison = self.prediction_market_service.compare_markets(
+            requested,
+            range_key=range_key,
+            resolution_minutes=resolution,
+        )
+        source = CopilotSourceRef(
+            source_id="prediction.comparison.drilldown",
+            label="Prediction comparison drilldown",
+            kind="analytics",
+            provider=", ".join(sorted({leg.venue for leg in comparison.legs})) or "prediction_markets",
+            origin="gamma.prediction.comparison",
+            description=f"Aligned comparison of {len(comparison.legs)} contracts over the {range_key} window.",
+            retrieved_at=comparison.retrieved_at,
+        )
+        output = {
+            "requested_range": comparison.requested_range,
+            "effective_resolution_minutes": comparison.effective_resolution_minutes,
+            "window_start": comparison.window_start.isoformat() if comparison.window_start else None,
+            "window_end": comparison.window_end.isoformat() if comparison.window_end else None,
+            "legs": [
+                {
+                    "market_id": leg.market_id,
+                    "venue": leg.venue,
+                    "title": leg.title,
+                    "outcome_label": leg.outcome_label,
+                    "status": leg.status,
+                    "current_probability": leg.current_probability,
+                    "end_time": leg.end_time.isoformat() if leg.end_time else None,
+                    "observations": leg.stats.point_count if leg.stats else 0,
+                    "change": leg.stats.change if leg.stats else None,
+                    "high": leg.stats.high if leg.stats else None,
+                    "low": leg.stats.low if leg.stats else None,
+                    "daily_volatility": leg.stats.daily_volatility if leg.stats else None,
+                    "coverage_start": leg.coverage_start.isoformat() if leg.coverage_start else None,
+                    "coverage_end": leg.coverage_end.isoformat() if leg.coverage_end else None,
+                    "warnings": list(leg.warnings),
+                }
+                for leg in comparison.legs
+            ],
+            "pairs": [
+                {
+                    "left_market_id": pair.left_market_id,
+                    "right_market_id": pair.right_market_id,
+                    "overlap_points": pair.overlap_points,
+                    "current_spread": pair.current_spread,
+                    "mean_spread": pair.mean_spread,
+                    "min_spread": pair.min_spread,
+                    "max_spread": pair.max_spread,
+                    "spread_volatility": pair.spread_volatility,
+                    "current_spread_percentile": pair.current_spread_percentile,
+                    "change_correlation": pair.correlation,
+                    "warnings": list(pair.warnings),
+                }
+                for pair in comparison.pairs
+            ],
+            "basket": (
+                {
+                    "leg_count": comparison.basket.leg_count,
+                    "probability_sum": comparison.basket.probability_sum,
+                    "implied_overround": comparison.basket.implied_overround,
+                    "same_event": comparison.basket.same_event,
+                    "same_venue": comparison.basket.same_venue,
+                    "venues": list(comparison.basket.venues),
+                    "note": comparison.basket.note,
+                }
+                if comparison.basket is not None
+                else {}
+            ),
+            "method_note": comparison.transformation_note,
+            "warnings": list(comparison.warnings),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="compare_prediction_markets",
+                summary=(
+                    f"Aligned {len(comparison.legs)} contracts over the {range_key} window and computed "
+                    f"{len(comparison.pairs)} pairwise spread comparisons."
+                ),
+                arguments={"market_ids": requested, "range": range_key, "resolution_minutes": resolution},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_prediction_market_calibration(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        market_id = self._prediction_market_id_from_bundle(context)
+        lead_times = [
+            int(value)
+            for value in (arguments.get("lead_times_hours") or [])
+            if isinstance(value, (int, float)) and int(value) in CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS
+        ] or None
+        raw_sample = arguments.get("sample_size")
+        sample_size = (
+            max(1, min(int(raw_sample), CALIBRATION_MAX_SAMPLE_MARKETS))
+            if isinstance(raw_sample, (int, float))
+            else PREDICTION_CONTEXT_CALIBRATION_SAMPLE
+        )
+
+        calibration = self.prediction_market_service.get_calibration_summary(
+            market_id,
+            sample_size=sample_size,
+            lead_times_hours=lead_times,
+        )
+        if calibration is None:
+            raise ValueError(f"Prediction market calibration is unavailable for: {market_id}")
+
+        source = CopilotSourceRef(
+            source_id="prediction.calibration.drilldown",
+            label="Prediction calibration drilldown",
+            kind="analytics",
+            provider=calibration.source_provider or calibration.venue,
+            origin=calibration.origin,
+            description=f"Lead-time calibration for {calibration.venue} over {calibration.markets_sampled} contracts.",
+            retrieved_at=calibration.retrieved_at,
+        )
+        return CopilotToolExecution(
+            output=self._prediction_calibration_summary(calibration),
+            trace=CopilotToolTrace(
+                tool_name="get_prediction_market_calibration",
+                summary=(
+                    f"Measured {calibration.venue} calibration with method {calibration.method} over "
+                    f"{calibration.sample_size} lead-time observations."
+                ),
+                arguments={"lead_times_hours": lead_times, "sample_size": sample_size},
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -8533,7 +8982,6 @@ class CopilotService:
         market_id = self._prediction_market_id_from_bundle(context)
         wallet = self.prediction_market_service.get_wallet_summary(market_id)
         related = self.prediction_market_service.get_related_markets(market_id)
-        calibration = self.prediction_market_service.get_calibration_summary(market_id)
         sources: list[CopilotSourceRef] = []
         source_ids: list[str] = []
 
@@ -8563,19 +9011,6 @@ class CopilotService:
                 )
             )
             source_ids.append("prediction.related.drilldown")
-        if calibration is not None:
-            sources.append(
-                CopilotSourceRef(
-                    source_id="prediction.calibration.drilldown",
-                    label="Prediction calibration drilldown",
-                    kind="analytics",
-                    provider=calibration.source_provider,
-                    origin=calibration.origin,
-                    description="Expanded venue calibration data for the selected market.",
-                    retrieved_at=calibration.retrieved_at,
-                )
-            )
-            source_ids.append("prediction.calibration.drilldown")
 
         output = {
             "wallet_summary": {
@@ -8607,26 +9042,12 @@ class CopilotService:
                 }
                 for row in related
             ],
-            "calibration_summary": {
-                "venue": calibration.venue if calibration else None,
-                "sample_size": calibration.sample_size if calibration else 0,
-                "buckets": [
-                    {
-                        "label": row.label,
-                        "sample_size": row.sample_size,
-                        "average_probability": row.average_probability,
-                        "realized_frequency": row.realized_frequency,
-                    }
-                    for row in (calibration.buckets if calibration else [])
-                ],
-                "warnings": list(calibration.warnings if calibration else []),
-            },
         }
         return CopilotToolExecution(
             output=output,
             trace=CopilotToolTrace(
                 tool_name="get_prediction_market_flow_context",
-                summary="Expanded flow, related-market, and calibration context for the selected market.",
+                summary="Expanded flow and related-market context for the selected market.",
                 arguments={},
                 source_ids=source_ids,
             ),
@@ -12239,6 +12660,124 @@ class CopilotService:
             "origin": history.origin,
             "retrieved_at": history.retrieved_at.isoformat() if history.retrieved_at else None,
             "transformation_note": history.transformation_note,
+        }
+
+    @staticmethod
+    def _prediction_calibration_summary(calibration: CalibrationSummary | None) -> dict[str, Any]:
+        """Flatten a calibration summary without letting the model overclaim.
+
+        `method`, `is_validated`, and the per-curve `is_plottable` flag travel
+        with the numbers, because a curve measured on a settlement print or on
+        eleven contracts must not be described as a calibration result.
+        """
+        if calibration is None:
+            return {
+                "venue": None,
+                "method": None,
+                "is_validated": False,
+                "sample_size": 0,
+                "curves": [],
+                "warnings": ["Calibration is unavailable for this venue."],
+            }
+        return {
+            "venue": calibration.venue,
+            "method": calibration.method,
+            "is_validated": calibration.is_validated,
+            "sample_size": calibration.sample_size,
+            "lead_times_hours": list(calibration.lead_times_hours),
+            "minimum_bucket_sample": calibration.minimum_bucket_sample,
+            "minimum_curve_sample": calibration.minimum_curve_sample,
+            "resolved_markets_considered": calibration.resolved_markets_considered,
+            "markets_sampled": calibration.markets_sampled,
+            "sample_period_start": (
+                calibration.sample_period_start.isoformat() if calibration.sample_period_start else None
+            ),
+            "sample_period_end": (
+                calibration.sample_period_end.isoformat() if calibration.sample_period_end else None
+            ),
+            "curves": [
+                {
+                    "lead_time_hours": curve.lead_time_hours,
+                    "label": curve.label,
+                    "sample_size": curve.sample_size,
+                    "is_plottable": curve.is_plottable,
+                    "brier_score": curve.brier_score,
+                    "mean_signed_error": curve.mean_signed_error,
+                    "buckets": [
+                        {
+                            "label": bucket.label,
+                            "sample_size": bucket.sample_size,
+                            "meets_minimum": bucket.meets_minimum,
+                            "average_probability": bucket.average_probability,
+                            "realized_frequency": bucket.realized_frequency,
+                        }
+                        for bucket in curve.buckets
+                    ],
+                    "warnings": list(curve.warnings),
+                }
+                for curve in calibration.curves
+            ],
+            "settlement_convergence": (
+                {
+                    "sample_size": calibration.convergence.sample_size,
+                    "average_distance_to_outcome": calibration.convergence.average_distance_to_outcome,
+                    "share_within_five_points": calibration.convergence.share_within_five_points,
+                    "note": calibration.convergence.note,
+                }
+                if calibration.convergence is not None
+                else None
+            ),
+            "transformation_note": calibration.transformation_note,
+            "warnings": list(calibration.warnings),
+        }
+
+    @staticmethod
+    def _prediction_windowed_history_summary(history: PredictionProbabilityHistory) -> dict[str, Any]:
+        """Flatten a windowed history without losing what the window actually was.
+
+        The requested-versus-effective range, the windowing label, and the
+        provider-limit warnings travel with the points, so a clipped series can
+        never be described as a full history.
+        """
+        stats = history.stats
+        return {
+            "market_id": history.market_id,
+            "venue": history.venue,
+            "outcome_id": history.outcome_id,
+            "outcome_label": history.outcome_label,
+            "window": {
+                "requested_range": history.requested_range,
+                "effective_range": history.effective_range,
+                "requested_resolution_minutes": history.requested_resolution_minutes,
+                "effective_resolution_minutes": history.effective_resolution_minutes,
+                "window_start": history.window_start.isoformat() if history.window_start else None,
+                "window_end": history.window_end.isoformat() if history.window_end else None,
+                "coverage_start": history.coverage_start.isoformat() if history.coverage_start else None,
+                "coverage_end": history.coverage_end.isoformat() if history.coverage_end else None,
+                "windowing": history.windowing,
+            },
+            "stats": {
+                "observations": stats.point_count if stats else 0,
+                "first_probability": stats.first_probability if stats else None,
+                "last_probability": stats.last_probability if stats else None,
+                "change": stats.change if stats else None,
+                "high": stats.high if stats else None,
+                "low": stats.low if stats else None,
+                "range_width": stats.range_width if stats else None,
+                "percentile_of_range": stats.percentile_of_range if stats else None,
+                "max_move": stats.max_move if stats else None,
+                "max_move_at": stats.max_move_at.isoformat() if stats and stats.max_move_at else None,
+                "daily_volatility": stats.daily_volatility if stats else None,
+                "share_above_half": stats.share_above_half if stats else None,
+                "span_days": stats.span_days if stats else None,
+                "largest_gap_seconds": stats.largest_gap_seconds if stats else None,
+            },
+            "points": [
+                {"timestamp": point.timestamp.isoformat(), "probability": point.probability}
+                for point in history.points[-48:]
+            ],
+            "transformation_note": history.transformation_note,
+            "warnings": list(history.warnings),
         }
 
     @staticmethod

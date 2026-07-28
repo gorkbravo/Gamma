@@ -31,6 +31,8 @@
   export let onRefresh: ((forceRefresh?: boolean) => Promise<unknown> | void) | null = null;
   export let is3D = false;
   export let connected = false;
+  /** Chokepoint an inbound cross-tab handoff asked the map to open. */
+  export let focusChokepointId: string | null = null;
 
   type OverlayKey = "chokepoints" | "tradeFlows" | "fleet" | "eventReplay";
   type DetailSelection =
@@ -76,6 +78,7 @@
   let settingsOpen = false;
   let displaySettingsOpen = false;
   let selectedDetail: DetailSelection = null;
+  let appliedFocusChokepointId: string | null = null;
   let activeOverlays: Record<OverlayKey, boolean> = {
     chokepoints: true,
     tradeFlows: false,
@@ -100,6 +103,13 @@
     null;
   $: replayMax = selectedReplayTrack ? Math.max(selectedReplayTrack.points.length - 1, 0) : 0;
   $: if (replayIndex > replayMax) replayIndex = replayMax;
+  // An inbound handoff names a chokepoint; open its detail shelf so the entity
+  // the sending tab selected is not lost on arrival.
+  $: if (focusChokepointId && focusChokepointId !== appliedFocusChokepointId && summaryIndex[focusChokepointId]) {
+    appliedFocusChokepointId = focusChokepointId;
+    activeOverlays = { ...activeOverlays, chokepoints: true };
+    selectedDetail = { kind: "chokepoint", id: focusChokepointId };
+  }
   $: selectedChokepoint = selectedDetail?.kind === "chokepoint" ? summaryIndex[selectedDetail.id] : null;
   $: selectedFlow = selectedDetail?.kind === "flow" ? flowSummaries.find((f) => f.flow_id === selectedDetail?.id) ?? null : null;
   $: selectedVessel = selectedDetail?.kind === "vessel" ? displayVessels.find((v) => v.vessel_id === selectedDetail?.id) ?? null : null;

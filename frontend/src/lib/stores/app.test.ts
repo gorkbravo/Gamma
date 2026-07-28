@@ -21,6 +21,7 @@ import type {
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
+  PredictionOutcomeSeriesResponse,
   PredictionProbabilityHistoryResponse,
   PredictionWalletSummary,
   PortfolioHistoryResponse,
@@ -71,6 +72,7 @@ import {
   loadMacroWorkspace,
   loadNewsFeed,
   loadPortfolioSnapshot,
+  loadPredictionMarketCalibration,
   loadPredictionMarketScreener,
   clearStrategyLabHandoffs,
   clearStaleStrategyLabHandoffs,
@@ -92,6 +94,7 @@ import {
   portfolioPerformance,
   portfolioSnapshot,
   providerUsage,
+  predictionCalibrationSample,
   predictionMarketCalibration,
   predictionMarketDetail,
   predictionMarketHistory,
@@ -1175,16 +1178,10 @@ describe("app store orchestration", () => {
         }
       ]
     };
-    const calibration: PredictionCalibrationSummary = {
-      venue: "polymarket",
-      sample_size: 12,
-      buckets: [],
-      observations: [],
-      warnings: [],
-      source_provider: "polymarket",
-      retrieved_at: "2026-03-01T05:00:00Z",
-      origin: "polymarket.calibration",
-      transformation_note: "Calibration uses last traded probabilities as a proxy."
+    const outcomeSeries: PredictionOutcomeSeriesResponse = {
+      market_id: "polymarket:fed-cut",
+      requested_range: "max",
+      series: []
     };
 
     const fetchMock = vi
@@ -1194,7 +1191,7 @@ describe("app store orchestration", () => {
       .mockResolvedValueOnce(ok(history))
       .mockResolvedValueOnce(ok(wallet))
       .mockResolvedValueOnce(ok(related))
-      .mockResolvedValueOnce(ok(calibration));
+      .mockResolvedValueOnce(ok(outcomeSeries));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadPredictionMarketScreener({
@@ -1210,8 +1207,49 @@ describe("app store orchestration", () => {
     expect(get(predictionMarketHistory)?.points[0]?.probability).toBe(0.45);
     expect(get(predictionMarketWallet)?.participants[0]?.display_name).toBe("Desk One");
     expect(get(predictionMarketRelated)?.related[0]?.venue).toBe("kalshi");
-    expect(get(predictionMarketCalibration)?.sample_size).toBe(12);
+    // Lead-time calibration costs one provider request per sampled contract, so
+    // the contract bundle must not fetch it.
+    expect(fetchMock.mock.calls.every((call) => !String(call[0]).includes("/calibration"))).toBe(true);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")).sort_by).toBe("open_interest_desc");
+  });
+
+  it("requests calibration with explicit lead times and sample size", async () => {
+    const calibration: PredictionCalibrationSummary = {
+      venue: "polymarket",
+      sample_size: 24,
+      method: "lead_time_history",
+      is_validated: true,
+      lead_times_hours: [24, 168],
+      curves: [],
+      minimum_bucket_sample: 5,
+      minimum_curve_sample: 20,
+      resolved_markets_considered: 40,
+      markets_sampled: 40,
+      markets_without_history: 16,
+      sample_period_start: "2026-01-01T00:00:00Z",
+      sample_period_end: "2026-06-01T00:00:00Z",
+      sample_categories: { Politics: 24 },
+      research_share: 1,
+      convergence: null,
+      observations: [],
+      warnings: [],
+      source_provider: "polymarket",
+      retrieved_at: "2026-06-01T05:00:00Z",
+      origin: "prediction_market_service.calibration.polymarket",
+      transformation_note: "Lead-time sampled."
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(calibration));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadPredictionMarketCalibration("polymarket:fed-cut", { leadTimes: [24, 168], sampleSize: 80 });
+
+    const requestedUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
+    expect(requestedUrl).toContain("/prediction-markets/markets/polymarket:fed-cut/calibration");
+    expect(requestedUrl).toContain("sample=80");
+    expect(requestedUrl).toContain("lead=24");
+    expect(requestedUrl).toContain("lead=168");
+    expect(get(predictionMarketCalibration)?.method).toBe("lead_time_history");
+    expect(get(predictionCalibrationSample)).toBe(80);
   });
 
   it("loads the crypto workspace and selected token bundle together", async () => {

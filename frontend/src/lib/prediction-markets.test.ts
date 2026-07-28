@@ -1,21 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  MAX_CALIBRATION_LEAD_TIMES,
   MAX_COMPARE_LEGS,
   MAX_WATCHLIST_ENTRIES,
+  PREDICTION_COMPARE_STORAGE_KEY,
+  PREDICTION_MIGRATION_FLAG_KEY,
+  PREDICTION_WATCHLIST_STORAGE_KEY,
+  buildCalibrationRows,
   buildOutcomeLadder,
+  calibrationCurveFor,
+  describeCalibrationMethod,
   describeHistoryCoverage,
   formatResolution,
-  loadCompareSelection,
-  loadWatchlist,
+  markLegacyResearchMigrated,
   normalizeCompareSelection,
   normalizeWatchlist,
-  saveCompareSelection,
-  saveWatchlist,
+  readLegacyResearch,
   sortPairsByDislocation,
-  toggleCompareSelection,
-  toggleWatchlistEntry
+  toggleCalibrationLeadTime,
+  toggleCompareSelection
 } from "./prediction-markets";
 import type {
+  PredictionCalibrationCurve,
+  PredictionCalibrationSummary,
   PredictionMarket,
   PredictionOutcomeSeries,
   PredictionPairAnalytics,
@@ -123,27 +130,12 @@ function stubLocalStorage() {
   });
 }
 
-describe("prediction market watchlist", () => {
+describe("legacy watchlist normalization", () => {
   beforeEach(stubLocalStorage);
 
-  it("round-trips entries through storage", () => {
-    const entries = toggleWatchlistEntry([], makeMarket("polymarket:a"));
-    saveWatchlist(entries);
-
-    expect(loadWatchlist().map((entry) => entry.market_id)).toEqual(["polymarket:a"]);
-  });
-
-  it("toggles an existing entry off", () => {
-    const market = makeMarket("polymarket:a");
-    const added = toggleWatchlistEntry([], market);
-    const removed = toggleWatchlistEntry(added, market);
-
-    expect(removed).toEqual([]);
-  });
-
-  it("keeps the newest entries when the cap is exceeded", () => {
-    let entries = normalizeWatchlist(
-      Array.from({ length: MAX_WATCHLIST_ENTRIES }, (_, index) => ({
+  it("keeps at most the capped number of entries", () => {
+    const entries = normalizeWatchlist(
+      Array.from({ length: MAX_WATCHLIST_ENTRIES + 5 }, (_, index) => ({
         market_id: `polymarket:${index}`,
         venue: "polymarket",
         title: `Market ${index}`,
@@ -151,10 +143,8 @@ describe("prediction market watchlist", () => {
         added_at: "2026-03-01T00:00:00Z"
       }))
     );
-    entries = toggleWatchlistEntry(entries, makeMarket("polymarket:newest"));
 
     expect(entries).toHaveLength(MAX_WATCHLIST_ENTRIES);
-    expect(entries[0].market_id).toBe("polymarket:newest");
   });
 
   it("drops malformed persisted records instead of throwing", () => {
@@ -170,12 +160,6 @@ describe("prediction market watchlist", () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0].title).toBe("A");
-  });
-
-  it("survives a storage read failure", () => {
-    localStorage.setItem("gamma.predictionMarkets.watchlist.v1", "{not json");
-
-    expect(loadWatchlist()).toEqual([]);
   });
 });
 
@@ -196,11 +180,6 @@ describe("comparison basket", () => {
     const result = toggleCompareSelection(full, "polymarket:extra");
 
     expect(result).toBe(full);
-  });
-
-  it("round-trips the basket through storage", () => {
-    saveCompareSelection(["polymarket:a", "kalshi:b"]);
-    expect(loadCompareSelection()).toEqual(["polymarket:a", "kalshi:b"]);
   });
 
   it("normalizes persisted junk", () => {
@@ -281,5 +260,164 @@ describe("pair ranking", () => {
     sortPairsByDislocation(pairs);
 
     expect(pairs[0].left_market_id).toBe("a");
+  });
+});
+
+function makeCurve(
+  leadHours: number,
+  options: { sample?: number; plottable?: boolean; buckets?: { label: string; n: number; predicted: number; realized: number; meets: boolean }[] } = {}
+): PredictionCalibrationCurve {
+  return {
+    lead_time_hours: leadHours,
+    label: leadHours % 24 === 0 ? `T-${leadHours / 24}d` : `T-${leadHours}h`,
+    sample_size: options.sample ?? 24,
+    buckets: (options.buckets ?? []).map((bucket) => ({
+      label: bucket.label,
+      sample_size: bucket.n,
+      average_probability: bucket.predicted,
+      realized_frequency: bucket.realized,
+      lead_time_hours: leadHours,
+      meets_minimum: bucket.meets,
+      source_provider: "polymarket",
+      retrieved_at: null,
+      origin: "prediction_market_service.calibration.polymarket",
+      transformation_note: null
+    })),
+    brier_score: 0.2,
+    mean_signed_error: 0.05,
+    is_plottable: options.plottable ?? true,
+    warnings: []
+  };
+}
+
+function makeCalibration(
+  curves: PredictionCalibrationCurve[],
+  overrides: Partial<PredictionCalibrationSummary> = {}
+): PredictionCalibrationSummary {
+  return {
+    venue: "polymarket",
+    sample_size: curves.reduce((total, curve) => total + curve.sample_size, 0),
+    method: "lead_time_history",
+    is_validated: curves.some((curve) => curve.is_plottable),
+    lead_times_hours: curves.map((curve) => curve.lead_time_hours),
+    curves,
+    minimum_bucket_sample: 5,
+    minimum_curve_sample: 20,
+    resolved_markets_considered: 60,
+    markets_sampled: 40,
+    markets_without_history: 4,
+    sample_period_start: "2026-01-01T00:00:00Z",
+    sample_period_end: "2026-06-01T00:00:00Z",
+    sample_categories: { Politics: 12 },
+    research_share: 1,
+    convergence: null,
+    observations: [],
+    warnings: [],
+    source_provider: "polymarket",
+    retrieved_at: "2026-06-01T00:00:00Z",
+    origin: "prediction_market_service.calibration.polymarket",
+    transformation_note: "Lead-time sampled.",
+    ...overrides
+  };
+}
+
+describe("calibration lead times", () => {
+  it("keeps at least one lead time selected", () => {
+    expect(toggleCalibrationLeadTime([24], 24)).toEqual([24]);
+  });
+
+  it("adds a lead time in ascending order and caps the count", () => {
+    expect(toggleCalibrationLeadTime([168], 24)).toEqual([24, 168]);
+    const full = [6, 24, 72].slice(0, MAX_CALIBRATION_LEAD_TIMES);
+    expect(toggleCalibrationLeadTime(full, 168)).toBe(full);
+  });
+
+  it("removes a lead time when more than one is selected", () => {
+    expect(toggleCalibrationLeadTime([24, 168], 24)).toEqual([168]);
+  });
+});
+
+describe("calibration rows", () => {
+  it("computes realized-minus-priced error per bucket", () => {
+    const rows = buildCalibrationRows(
+      makeCurve(24, {
+        buckets: [{ label: "50-75%", n: 8, predicted: 0.6, realized: 0.75, meets: true }]
+      })
+    );
+
+    expect(rows[0].error).toBeCloseTo(0.15);
+    expect(rows[0].meets_minimum).toBe(true);
+  });
+
+  it("returns nothing when there is no curve", () => {
+    expect(buildCalibrationRows(null)).toEqual([]);
+  });
+
+  it("selects the requested lead time and falls back to a drawn curve", () => {
+    const summary = makeCalibration([makeCurve(24), makeCurve(168)]);
+
+    expect(calibrationCurveFor(summary, 168)?.lead_time_hours).toBe(168);
+    expect(calibrationCurveFor(summary, 999)?.lead_time_hours).toBe(24);
+    expect(calibrationCurveFor(null, 24)).toBeNull();
+  });
+
+  it("prefers a curve that cleared the minimum when nothing is selected", () => {
+    const summary = makeCalibration([makeCurve(24, { plottable: false }), makeCurve(168, { plottable: true })]);
+
+    expect(calibrationCurveFor(summary, null)?.lead_time_hours).toBe(168);
+  });
+
+  it("still shows a withheld curve when no curve cleared the minimum", () => {
+    const summary = makeCalibration([makeCurve(24, { plottable: false }), makeCurve(168, { plottable: false })]);
+
+    expect(calibrationCurveFor(summary, null)?.lead_time_hours).toBe(24);
+  });
+});
+
+describe("calibration method label", () => {
+  it("names the measured method and how many curves cleared the minimum", () => {
+    const summary = makeCalibration([makeCurve(24), makeCurve(168, { plottable: false })]);
+
+    const label = describeCalibrationMethod(summary);
+    expect(label).toContain("Lead-time history");
+    expect(label).toContain("T-1d / T-7d");
+    expect(label).toContain("1/2 above minimum");
+  });
+
+  it("marks the deprecated settlement path as unvalidated", () => {
+    const summary = makeCalibration([], {
+      method: "settlement_last_trade_deprecated",
+      is_validated: false
+    });
+
+    expect(describeCalibrationMethod(summary)).toContain("UNVALIDATED");
+  });
+});
+
+describe("legacy research migration", () => {
+  beforeEach(stubLocalStorage);
+
+  it("reads local records once and then reports nothing to migrate", () => {
+    // Written the way a previous build wrote them, not through a helper the
+    // migration itself owns.
+    localStorage.setItem(
+      PREDICTION_WATCHLIST_STORAGE_KEY,
+      JSON.stringify([
+        { market_id: "polymarket:a", venue: "polymarket", title: "A", probability: 0.4, added_at: "2026-03-01" }
+      ])
+    );
+    localStorage.setItem(PREDICTION_COMPARE_STORAGE_KEY, JSON.stringify(["polymarket:a", "kalshi:b"]));
+
+    const legacy = readLegacyResearch();
+    expect(legacy?.watchlist.map((entry) => entry.market_id)).toEqual(["polymarket:a"]);
+    expect(legacy?.comparison_basket).toEqual(["polymarket:a", "kalshi:b"]);
+
+    markLegacyResearchMigrated();
+    expect(readLegacyResearch()).toBeNull();
+  });
+
+  it("marks an empty browser as migrated so it never re-checks", () => {
+    expect(readLegacyResearch()).toBeNull();
+    expect(localStorage.getItem(PREDICTION_MIGRATION_FLAG_KEY)).toBeTruthy();
   });
 });

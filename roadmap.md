@@ -69,7 +69,7 @@ The implemented app state is materially ahead of the original second-pass starti
 - `SITREP` is the locked Research home and cross-domain triage surface. It reuses Research, Macro, Commodities, Prediction Markets, and News payloads, plus media/provider/status context, rather than acting as a standalone provider.
 - `Equity Research` owns equity market overview, scope analysis, comparables, scenario context, and saved equity research. `Strategy Lab` owns imported return streams, weighted Gamma object compositions, backtest/analyze views, regime/stress lenses, and saved runs.
 - `Macro` is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare. It has FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, US event, prediction-market linkage, coherence/lead-lag, policy path, event-study, bilateral trade-context, and country-comparison logic.
-- `Prediction Markets` is now a four-mode workspace (Screener, Contract, Compare, Calibration) with Polymarket/Kalshi adapters, screener/detail/wallet/related/calibration routes, range- and resolution-controlled probability history with derived window statistics, per-outcome history, a multi-contract comparison route with spread and change-correlation analytics, venue status, filtering, canonicalization, freshness, research ranking, and locally persisted watchlists and comparison baskets. Its Calibration mode is the one analytic in the tab that is not trustworthy yet: it buckets resolved markets by a settlement-converged last-trade price and needs to be rebuilt on a fixed pre-resolution lead time.
+- `Prediction Markets` is a four-mode workspace (Screener, Contract, Compare, Calibration) with Polymarket/Kalshi adapters, screener/detail/wallet/related routes, range- and resolution-controlled probability history with derived window statistics, per-outcome history, multi-contract comparison with spread and change-correlation analytics, event-level books that sum sibling contracts and report completeness, read-only order-book depth behind every spread reading, outward Macro/Commodities/Sealanes handoffs, backend-persisted watchlists and named comparison sets, venue status, filtering, canonicalization, freshness, and research ranking. Its Calibration mode was rebuilt on 2026-07-27 to sample each resolved contract at fixed pre-resolution lead times; the settlement print is now only a convergence diagnostic and a curve is withheld unless the sample clears a stated minimum.
 - `Crypto` is a substantial first-pass workspace with CoinGecko and GeckoTerminal adapters, token overview/deep-dive/flows-liquidity modes, narratives, synthetic portfolios, DEX liquidity, flow proxies, comparison analytics, and Copilot grounding.
 - `Fundamentals` is a deep current-roadmap workspace with Overview, Financials, Peers, DCF, Reverse Valuation, and Reference / Filings modes. It uses SEC/EdgarTools ingestion, IBKR market context, local peer/DCF persistence, raw-versus-normalized inspection, DCF snapshots, reverse solves, and Copilot tools.
 - `Commodities` is a first-pass current-roadmap domain tab with six modes, sample/EIA/FRED/IBKR provider paths, curve/spread/inventory/event/cross-domain models, Energy and Metals analytics, and Copilot grounding.
@@ -93,7 +93,7 @@ This table tracks the visible app tabs as of 2026-07-25. Percentages are pragmat
 | Research | `Equity Research` | ~80% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, comparables depth, scenario context, explicit provider selection, and a visible warning when synthetic-scope short legs are dropped. Now a self-contained view with latest-day KPIs and price provenance. |
 | Research | `Strategy Lab` | ~78% | Deepen Gamma object composition, saved-run workflows, and read-only sandbox architecture decisions; fix composer state-loss traps (legs reset on tab switch, silent compose no-op before validation). Signed long/short books, all-mode UI polish, the Risk handoff, Copilot grounding, and signed per-leg Risk decomposition with aggregate-metric preservation and legacy-book fallback landed in June/July. |
 | Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. Individual FRED, comparison, and IBKR FX series failures now degrade explicitly without discarding the remaining snapshot. |
-| Research | `Prediction Markets` | ~85% | Rebuild calibration on a fixed pre-resolution lead time: it currently buckets resolved markets by their settlement-converged `lastTradePrice`, so the mode reports near-perfect calibration close to by construction and must be treated as unvalidated. Then give Copilot the new windowed-history and comparison contracts, add an event-level book view that sums sibling markets honestly, move watchlists and comparison baskets to backend persistence, add outward Macro/Commodities/Sealanes handoffs, and surface book depth behind spread readings. The July 26 pass added the four-mode workspace (Screener, Contract, Compare, Calibration), user-selected history ranges/resolutions with derived window statistics, per-outcome history, multi-contract spread/correlation analytics, encoded Polymarket and Kalshi request limits, and persisted watchlists and comparison baskets. Intent search remains semantically honest and verified as a live corroboration path. |
+| Research | `Prediction Markets` | ~95% | All six items of the third pass landed on July 27 and were verified live: lead-time calibration, Copilot windowed-history/outcome/comparison/calibration tools, event-level books, backend-persisted saved research, outward cross-domain handoffs, and read-only order-book depth. What is left is provider-shaped rather than missing code. Polymarket's recent settlement flow is almost entirely sports contracts and its market list pages 100 at a time, so a research-category calibration sample is not reachable from that venue today - the mode correctly withholds a curve and says why, but the number a user wants is only available from Kalshi. Related-market matching was not deepened for commodity and maritime events, and the Sealanes side of the handoff can only open a chokepoint detail shelf because Workstream 9 is paused at a single-map prototype. |
 | Research | `Crypto` | ~74% | Add real wallet/transfer adapters, persistent narrative baskets, deeper pool monitoring, transaction-level DEX context, derivatives overlays, and saved crypto research sessions. |
 | Research | `Fundamentals` | Complete (100% current pass) | Complete-for-now US SEC company research workspace. July 13 completion added exact-match focus continuity with explicit unsupported-instrument states, keyboard/browser-drivable search, Fundamentals-to-Strategy-Lab/Copilot/Equity Research/Risk/Options handoffs, YoY/QoQ statement trends, amendment/restatement context, terminal-value multiple framing, section-level degradation warnings, and targeted browser/reliability coverage. Broader non-US providers and consensus-estimate depth remain optional future expansion, not current-pass blockers. |
 | Research | `Commodities` | ~75% | Add vendor-grade futures-chain history, continuous/roll-adjusted mapping, historical curve snapshots, real metals warehouse data, seasonal inventory surprise models, unit-normalized basis checks, and live cross-domain handoff flows. The `% CHG` prior-close fix, dated daily references, and coherent fresh-to-cached drill retention are verified live; cached change remains `N/A` unless the exact provider current/prior pair is retained. |
@@ -111,7 +111,7 @@ The current pass should be considered complete when:
 - provider-backed paths have smoke coverage or explicit unavailable/degraded labels, rather than silently falling back to sample data or blank states;
 - cross-tab handoffs that already exist preserve the selected entity/lens well enough for normal research use;
 - provider usage, provenance, freshness, and read-only boundary warnings are visible enough that a user can tell what is live/provider-backed, delayed, cached, sample, stale, derived, or unsupported;
-- every shipped analytic measures what its label claims, or is explicitly marked unvalidated - the current Prediction Markets calibration curve is the open example;
+- every shipped analytic measures what its label claims, or is explicitly marked unvalidated - the Prediction Markets calibration curve was the open example and was closed on 2026-07-27 by measuring at fixed pre-resolution lead times and withholding the curve below a stated minimum;
 - README run commands, validation commands, and provider setup notes are accurate;
 - beta-facing diagnostics, empty states, and first-run guidance are good enough for a trusted tester who has not read the code.
 
@@ -1588,7 +1588,7 @@ Earlier drafts considered `Ask`, `Synthesize`, `Plan`, `Memo`, `Sessions`, and l
 - `Streaming and run lifecycle`: checkpoint 1 complete, with Checkpoint 3 restart replay complete. The supported OpenAI SDK consumes typed Responses events; Agent and custom-loop Operator runs use one server-owned Gamma event contract with monotonic ids, completed function arguments, tools, warnings, confirmations, refusal/incomplete/provider-error/usage states, cancellation, timeout, bounded replay, disconnect survival, exactly one persisted terminal, and faithful restart reconstruction of retained run/session state. UI deltas remain provisional memory state rather than durable truth.
 - `Session persistence`: checkpoint 3 complete. Schema-v3 local persistence stores and replays sessions, turns, context snapshots, role/effort/scope, provider/model resolution, plans, events, confirmations, usage, traces, warnings, source registries, and artifact links. Rename, archive, restore, delete, legacy migration, unsupported-future-version handling, interrupted writes, and non-destructive corrupted-record recovery have focused coverage.
 - `Artifacts, memos, and reports`: checkpoint 3 complete. The dedicated workspace exposes selected-session memos/reports with source-turn selection, concise/full templates, editable title/body, debounced autosave state, canonical evidence preview, duplication, delete confirmation, overwrite confirmation, stable selection, and provenance-preserving Markdown export.
-- `Read-only tools and grounding`: checkpoint 5 complete. Copilot has versioned, budgeted context builders across every selectable scope plus bounded tools for Portfolio, Research, Strategy Lab, Risk, IV, Macro, Commodities, Prediction Markets, Crypto, Fundamentals, Sealanes, item-level news, and synthesis. The priority IV, commodity-curve/fundamentals, and equity-research drilldowns preserve provider-native identifiers, assumptions, warnings, freshness, and honest navigation support. Coverage is measured against the domain contracts that existed at checkpoint 5; the prediction-market tools still use the pre-second-pass history call and do not yet reach windowed history, per-outcome series, or multi-contract comparison (see Workstream 10, remaining item 2). A domain that gains new contracts should be re-checked against this gate rather than assumed still covered.
+- `Read-only tools and grounding`: checkpoint 5 complete. Copilot has versioned, budgeted context builders across every selectable scope plus bounded tools for Portfolio, Research, Strategy Lab, Risk, IV, Macro, Commodities, Prediction Markets, Crypto, Fundamentals, Sealanes, item-level news, and synthesis. The priority IV, commodity-curve/fundamentals, and equity-research drilldowns preserve provider-native identifiers, assumptions, warnings, freshness, and honest navigation support. Coverage is measured against the domain contracts that existed at checkpoint 5. The prediction-market tools were re-checked against this gate on 2026-07-27 and now expose windowed history with requested-versus-effective range and resolution, per-outcome series, bounded multi-contract comparison, and lead-time calibration, each carrying its provider-limit warnings and method note. A domain that gains new contracts should be re-checked against this gate rather than assumed still covered.
 - `Research Operator foundation`: checkpoint 4 remains complete. The registry, permission families, live events, safe-boundary cancellation, narrow DCF proposal flow, traces, and deterministic/feature-flagged SDK paths are real. The default path is not yet the desired adaptive Operator: it still relies heavily on predetermined plans, shallow argument inference, active-context-dependent tools, and a final execution summary disconnected from model synthesis.
 - `Diagnostics, routing, and release evidence`: checkpoint 6 foundations remain complete. Versioned model/storage policy, resolved routing/usage/latency/call/cancellation replay, explicit unavailable metrics, safe diagnostic ids, and Settings/run-inspector guidance are implemented. End-state release evidence follows completion of the Operator work, then accessibility/focus/reduced-motion, narrow-layout, first-run, and representative live validation.
 - `Voice and optional external deep research`: excluded from Copilot V2 100%. They remain later opt-in extensions after the text workspace passes its release gate.
@@ -2166,10 +2166,10 @@ At the end of Maritime Intelligence V2, Gamma should provide a credible maritime
 
 ## Workstream 10 - Prediction Markets V2
 
-_Status: In progress (~85%)_
+_Status: In progress (~95%)_
 _Dependency marker: Parallelizable_
-_Parallelization note: The calibration and Copilot items are self-contained. The event-book and outward-handoff items are better done alongside Macro Events / Regimes and Commodities Events / Cross-Domain work._
-_Current implementation snapshot: Prediction Markets is a four-mode workspace with Polymarket and Kalshi adapters, screener with full filter exposure, windowed probability history with derived statistics, per-outcome history, multi-contract comparison analytics, wallet summary, related-market matching, calibration summary, venue status, canonicalization, freshness labels, research ranking, and Copilot history/flow tools._
+_Parallelization note: The remaining gaps are provider- and Sealanes-shaped rather than self-contained. Deepening related-market matching for commodity and maritime events is better done alongside Commodities Events / Cross-Domain and a resumed Workstream 9._
+_Current implementation snapshot: Prediction Markets is a four-mode workspace with Polymarket and Kalshi adapters, screener with full filter exposure, windowed probability history with derived statistics, per-outcome history, multi-contract comparison analytics, event-level books with completeness reporting, read-only order-book depth, outward cross-domain handoffs, backend-persisted watchlists and named comparison sets, lead-time calibration, wallet summary, related-market matching, venue status, canonicalization, freshness labels, research ranking, and Copilot history/outcome/comparison/calibration tools._
 
 _This workstream was previously scoped as opportunistic hardening. That framing is retired: the second pass showed the tab has enough of its own analytical surface to justify direct work, and it surfaced one correctness problem that should not wait for another tab to request it._
 
@@ -2183,74 +2183,45 @@ _Second pass completed 2026-07-26 - history depth, multi-contract comparison, an
 - _`Frontend`: the screener exposes the previously backend-only volume, liquidity, probability-band, days-to-resolution, and repricing filters; contract mode has range and resolution controls, an outcome ladder with overlay charting, and `[`/`]` stepping through screener results; watchlists and comparison baskets persist locally._
 - _`Verification`: 39 prediction-market backend tests inside a 488-test suite, 338 frontend tests, typecheck, production build, desktop check, and a live browser pass against Polymarket and Kalshi covering all four modes, range switching, comparison analytics, and watchlist persistence across reload, with no console errors._
 
+_Third pass completed 2026-07-27 - the six remaining items, all verified against live Polymarket and Kalshi:_
+
+- _`Calibration rebuilt on lead time`: the adapter path used to bucket each resolved market by its settlement-converged last trade, which asked "when the venue said 97%, did it happen?" using a price that only said 97% because it already had. `PredictionMarketService.build_venue_calibration` now reads each resolved contract's own history at fixed lead times (`6h|24h|72h|168h`, default T-1d and T-7d) through a bounded window ending at that contract's resolution, and buckets on that value. The lead time is part of the bucket's identity. A curve is withheld unless it clears 20 contracts, two buckets of at least 5, and a 6-hour settlement span; per-bucket counts are shown regardless so the shortfall is visible. The response states method, validation status, lead times, sample period, venue, research-category composition, and Brier score. The settlement print survives only as a convergence diagnostic, and the last-trade path is retained solely as a labeled non-predictive fallback for when no lead-time observation exists._
+- _`Calibration measures what it claims, live`: a Kalshi run on 2026-07-27 (120 sampled contracts, 1181 considered) produced a drawn T-7d curve over 29 observations, 100% research-category, spanning 55 hours - the 0-10% bucket priced 1.2% and realized 0%, the 90-100% bucket priced 97.7% and realized 100%, Brier 0.031. The same run's convergence diagnostic shows why the old measurement flattered the venue: settlement prints sat a mean 1.8 probability points from the realized outcome, 94% of them within five points. A Polymarket run made the point more directly still - one sampled contract was quoted 19.5% seven days out, printed 99.9% at settlement, and resolved YES._
+- _`Copilot reaches the current contracts`: `get_prediction_market_history_summary` now takes `range`, `resolution_minutes`, and `outcome_id` and returns the full windowed contract including the windowing label and provider-limit warnings; `get_prediction_market_outcome_series`, `compare_prediction_markets`, and `get_prediction_market_calibration` were added as bounded read-only registry actions. Out-of-range arguments are clamped rather than passed through. The comparison method note travels with any spread or correlation output, and calibration output carries `method`, `is_validated`, and per-curve `is_plottable` so a thin or fallback result cannot be described as a validated calibration._
+- _`Event-level books`: `GET /prediction-markets/markets/{id}/event-book` resolves a venue's sibling contracts, sums them, and reports completeness as `complete`, `truncated`, `partial_pricing`, or `unavailable`. The sum is only presented as an overround when the book is complete, every leg is priced, and the venue's own grouping indicates mutually exclusive candidates - exclusivity is read from structure (one distinct group-item label per leg under one event), never inferred from prices. Siblings whose resolution wording or timing diverges from the book are flagged. A live 2028 US presidential-winner book returned 128 complete legs summing to 93.7%, a -6.3% overround. The ad hoc six-leg comparison basket keeps its deliberately hedged descriptive sum._
+- _`Saved research on the server`: `PredictionResearchStore` persists watchlists and named comparison sets as versioned JSON under the data directory, following the SITREP follow-up store layout, with caps of 60 entries and 24 sets and a record written by a newer schema skipped and reported rather than reinterpreted. The browser's `gamma.predictionMarkets.watchlist.v1` and `gamma.predictionMarkets.compareBasket.v1` records are imported once, with the migration flag written only after the server confirms the import. The working basket is stored as a reserved named set so it survives a browser change too._
+- _`Outward cross-domain handoffs`: `prediction_market_taxonomy.build_cross_domain_handoffs` maps a contract's own text against Gamma's registered commodity instruments, Sealanes chokepoints, and macro region/theme vocabularies, and emits a `CrossTabHandoffEnvelope` only when the target resolves. Each envelope carries the entity, the target mode, and the contract's event window as the lens; a match found only in resolution text rather than the headline is flagged. Sealanes gained a `focusChokepointId` path so an inbound handoff opens the named waterway instead of dropping the entity._
+- _`Depth behind every spread`: `GET /prediction-markets/markets/{id}/depth` returns read-only resting size - Polymarket CLOB levels directly, Kalshi's Yes ask side derived from its No bid book as one minus price - with notional within five probability points of the touch, book imbalance, and the slippage a $1,000 clip would pay. A book that cannot absorb the reference clip returns null and says so, because a spread that looks tradable on a two-level book is not. The contract spread KPI now reads as a width plus what backs it. This is market data only; no order path was added._
+- _`Provider behavior corrected along the way`: two live findings on 2026-07-27. Polymarket's `/markets?closed=true` defaults to oldest-first, returning 2020-era contracts that predate the CLOB and have no history at all, and it caps a page at 100 rows whatever limit is requested - closed discovery now orders by settlement time and pages. Settled outcome prices are also not always exact integers; older settlements report `0.9999989...` for the winning side, so the outcome resolver reads near-integer values tolerantly, but only for markets the venue already marks closed._
+- _`Verification`: 64 prediction-market backend tests inside a 534-test suite, 372 frontend tests, typecheck, production build, desktop check, and a live browser pass on port 5174 against a verification backend on 8010 covering all four modes - server-side watchlist toggles, working-basket and named-set persistence, the 128-leg event book, the depth ladder, the Send To panel, and both a withheld and a drawn calibration curve - with no console errors._
+
 ### Remaining work
 
-#### 1. Rebuild the calibration measurement - correctness, not coverage
+#### 1. Polymarket calibration has no research-category sample to measure
 
-This is the highest-priority item in the workstream and the reason the tab is not at 100%.
+The measurement is correct and the venue reports honestly, but the number a research user wants is currently only obtainable from Kalshi. Polymarket settles high-frequency sports contracts continuously, so the most recent several hundred settlements contain no research-category markets, and the market list pages 100 rows at a time. Gamma withholds the curve and states the composition and settlement span rather than presenting a sports-book snapshot as venue calibration.
 
-`BasePredictionMarketAdapter._build_calibration_summary` buckets each resolved market by `record.current_probability`. For a resolved Polymarket market that field is populated from `lastTradePrice` through `_polymarket_probability_proxy`, which is the final trade before settlement - a price that has already converged toward 0 or 1 because the outcome had become known.
+- reach research-category settlements without paging thousands of rows, which likely means a tag- or category-filtered closed-market query rather than deeper pagination,
+- consider caching lead-time observations across runs so a sample can accumulate over days instead of being rebuilt from one snapshot,
+- revisit whether a venue-level calibration label is the right frame at all, or whether the honest unit is per-category.
 
-The analytic therefore asks "when the venue said 97%, did it happen?" using a price that only said 97% *because* it had already happened. It will report near-perfect calibration close to by construction, which flatters the venue and misleads anyone who trusts the Calibration mode. The existing transformation note discloses the proxy honestly, but disclosure does not repair the measurement.
+#### 2. Related-market matching for commodity and maritime events
 
-An honest calibration curve needs the probability at a **fixed lead time before resolution**, not at settlement. The windowed history added in the second pass is exactly the machinery required, so this is now a contained change rather than a research project:
+The outward handoff taxonomy now resolves commodity instruments and chokepoints from contract text, but `_describe_related_market` was not taught the same vocabulary. A crude-oil contract and a Strait of Hormuz contract are related in a way lexical overlap will not find.
 
-- sample each resolved market's probability at one or more fixed lead times (for example T-24h and T-7d) using the windowed history path,
-- bucket on the lead-time probability and report the lead time as part of the bucket definition,
-- keep the settlement price only as a separate convergence diagnostic, never as a calibration input,
-- report per-bucket sample size and refuse to draw a curve below a stated minimum,
-- state the lead time, sample period, and venue in the response so two calibration runs are comparable,
-- treat the current `lastTradePrice` path as a deprecated fallback that must be labeled as non-predictive wherever it is still used.
+#### 3. Sealanes cannot receive a full handoff
 
-Until this lands, the Calibration mode should be treated as unvalidated.
-
-#### 2. Give Copilot the second-pass contracts
-
-Copilot's prediction-market tools still call the original `get_probability_history(market_id)` list method, so the model cannot request a range or resolution, cannot see any derived window statistic, and cannot run a comparison. Everything the second pass added is invisible to it.
-
-- expose windowed history, per-outcome history, and multi-contract comparison as bounded read-only registry actions,
-- carry the range, resolution, effective-versus-requested labels, and window statistics into the Copilot context contract,
-- preserve the provider-limit warnings so the model does not describe a clipped window as a full history,
-- keep the comparison method note attached to any claim built from spread or correlation output.
-
-#### 3. Event-level book view
-
-Polymarket represents a many-candidate race as many separate markets rather than one multi-outcome market. Per-outcome history solves the single-market case only; checking whether a 20-candidate book sums sensibly currently requires hand-ticking contracts into the comparison basket, and the comparison cap is six.
-
-- resolve an event's sibling markets server-side and return them as one book,
-- sum the book and report completeness explicitly, so the probability sum becomes a real overround check instead of the deliberately hedged descriptive number the comparison route returns today,
-- flag siblings whose resolution text materially differs, since near-identical prices across differently-resolving contracts is a research signal rather than an arbitrage,
-- keep the six-contract comparison cap for ad hoc baskets and treat the event book as a separate, larger surface.
-
-#### 4. Server-side saved research sets
-
-Watchlists and comparison baskets are browser-local `localStorage` only, which is inconsistent with the rest of the platform - SITREP follow-ups already made this exact migration from local storage to a backend store with schema validation and a one-time import.
-
-- move watchlists and comparison baskets into a backend store with schema versioning and caps,
-- migrate existing `gamma.predictionMarkets.watchlist.v1` and `gamma.predictionMarkets.compareBasket.v1` records once,
-- support named comparison sets so a recurring cross-venue comparison can be reopened.
-
-#### 5. Outward cross-domain handoffs
-
-The tab consumes handoffs and sends contracts to Strategy Lab, but does not push context outward, which is the linkage this roadmap has asked for repeatedly from the Macro and Commodities side.
-
-- Prediction Markets to Macro Events / Regimes with the contract's event window,
-- Prediction Markets to Commodities Events / Cross-Domain for energy and metals contracts,
-- Prediction Markets to Sealanes for chokepoint and shipping-disruption contracts,
-- better geopolitical and commodity market taxonomy to make those targets resolvable,
-- improved related-market matching for commodity and maritime events.
-
-#### 6. Book depth
-
-Only best bid, best ask, and spread are surfaced. A wide pairwise dislocation means something different at a few hundred dollars of resting size than at several hundred thousand, so depth is needed before any spread reading can be called meaningful. Order-book depth is read-only market data and stays inside the product boundary; it must not acquire order entry.
+The maritime envelope carries a chokepoint id and the map now opens that chokepoint's detail shelf, but Workstream 9 is paused at a single-map prototype with no registered modes to land on. The target mode in a Sealanes handoff is therefore currently decorative. This unblocks when Workstream 9 resumes.
 
 ### Progression notes
 
-Items 1 and 2 are self-contained and should be done first: the first is a correctness fix, and the second is cheap leverage on work already paid for. Items 3 through 6 are genuine feature depth and can be sequenced against Macro Events / Regimes, Commodities Events / Cross-Domain, and Sealanes chokepoint work.
+The correctness work is done; what remains is data reach rather than product surface. Item 1 is the one that matters for trust, and it is a provider-access problem rather than a modeling one. Items 2 and 3 should be sequenced against Commodities Events / Cross-Domain and a resumed Workstream 9 respectively.
 
 ### Deliverable
 
 Prediction Markets should become a workspace whose analytics can be trusted without caveat: a calibration curve measured at a stated lead time, Copilot able to reason over the same history and comparison contracts the UI uses, event books that sum honestly, saved research that survives a browser, and depth context behind every spread reading.
+
+All of that is now built and live-verified. The remaining distance to "without caveat" is that one venue cannot currently supply a research-category calibration sample, which Gamma reports rather than papers over. A number that is missing and says so is the acceptable end state here; a number that is wrong is not.
 
 ---
 
@@ -2637,9 +2608,9 @@ Deepen the live first-pass commodity research tab into a fuller workspace with b
 
 Harden the paused Sealanes prototype around AIS, vessels, chokepoints, routes, event replay, trade-flow interpretation, and later shadow-fleet/risk analytics.
 
-### Workstream 10 - Prediction Markets Targeted V2
+### Workstream 10 - Prediction Markets V2
 
-Add only targeted prediction-market improvements driven by Macro, Commodities, Sealanes, or Copilot needs.
+Close the calibration correctness gap, give Copilot the tab's current contracts, and add the event-book, saved-research, cross-domain-handoff, and depth surfaces. Done as of 2026-07-27; what is left is provider data reach rather than product surface.
 
 ### Workstream 11 - Beta Readiness
 

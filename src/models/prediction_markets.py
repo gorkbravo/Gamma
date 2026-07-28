@@ -267,6 +267,162 @@ class PredictionMarketComparison:
     transformation_note: str | None = None
 
 
+# Saved research sets are versioned so a stored record written by an older build
+# can be recognized rather than silently reinterpreted.
+PREDICTION_RESEARCH_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class PredictionWatchlistEntry:
+    id: str
+    market_id: str
+    venue: str
+    title: str
+    probability: float | None = None
+    note: str = ""
+    saved_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class PredictionComparisonSet:
+    """A named, reopenable comparison basket."""
+
+    id: str
+    name: str
+    market_ids: list[str] = field(default_factory=list)
+    range_key: str = "max"
+    resolution_minutes: int | None = None
+    note: str = ""
+    saved_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class PredictionSavedResearch:
+    schema_version: int = PREDICTION_RESEARCH_SCHEMA_VERSION
+    watchlist: list[PredictionWatchlistEntry] = field(default_factory=list)
+    comparison_sets: list[PredictionComparisonSet] = field(default_factory=list)
+    watchlist_limit: int = 0
+    comparison_set_limit: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PredictionEventBookLeg:
+    market_id: str
+    venue: str
+    title: str
+    subtitle: str | None
+    outcome_label: str | None
+    probability: float | None
+    best_bid: float | None
+    best_ask: float | None
+    spread: float | None
+    volume: float | None
+    liquidity: float | None
+    open_interest: float | None
+    status: str
+    end_time: datetime | None
+    resolution_source: str | None
+    is_anchor: bool = False
+    divergence_flags: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PredictionEventBookCompleteness:
+    """Whether the summed book is the venue's whole event.
+
+    A probability sum is only an overround check if nothing is missing from the
+    sum. `status` says which of those conditions failed rather than leaving the
+    caller to infer it from a leg count.
+    """
+
+    status: str
+    legs_returned: int
+    legs_priced: int
+    cap: int
+    truncated: bool
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class PredictionEventBook:
+    """Every sibling contract a venue groups under one event.
+
+    Polymarket represents an N-candidate race as N separate binary markets, so
+    checking whether a book sums sensibly means resolving the siblings first.
+    `overround_is_meaningful` is the gate: the sum is only presented as an
+    overround when the book is complete, fully priced, and the venue's own
+    grouping indicates mutually exclusive candidates.
+    """
+
+    venue: str
+    anchor_market_id: str
+    event_id: str | None = None
+    event_title: str | None = None
+    provider_event_id: str | None = None
+    legs: list[PredictionEventBookLeg] = field(default_factory=list)
+    probability_sum: float | None = None
+    implied_overround: float | None = None
+    favorite_market_id: str | None = None
+    exclusivity_signal: str = "unverified"
+    overround_is_meaningful: bool = False
+    completeness: PredictionEventBookCompleteness | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class PredictionBookLevel:
+    price: float
+    size: float
+    notional: float
+    cumulative_size: float
+    cumulative_notional: float
+
+
+@dataclass(frozen=True)
+class PredictionOrderBookDepth:
+    """Resting size behind a quote. Read-only market data; no order entry.
+
+    A spread reading is not interpretable on its own: two contracts quoting the
+    same 4-point spread are different research objects when one has $500 resting
+    and the other $500k. `notional_within_band` and the slippage estimates are
+    what make the spread mean something.
+    """
+
+    market_id: str
+    venue: str
+    outcome_id: str | None = None
+    outcome_label: str | None = None
+    token_id: str | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
+    mid: float | None = None
+    spread: float | None = None
+    bids: list[PredictionBookLevel] = field(default_factory=list)
+    asks: list[PredictionBookLevel] = field(default_factory=list)
+    depth_band: float = 0.05
+    bid_notional_within_band: float | None = None
+    ask_notional_within_band: float | None = None
+    total_bid_notional: float | None = None
+    total_ask_notional: float | None = None
+    depth_imbalance: float | None = None
+    # Probability points of slippage from the touch to fill a reference clip.
+    reference_clip_notional: float = 1000.0
+    bid_slippage_reference: float | None = None
+    ask_slippage_reference: float | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
 @dataclass(frozen=True)
 class WalletActivityRecord:
     participant_id: str
@@ -339,10 +495,19 @@ class PredictionMarketScreenerResult:
 
 @dataclass(frozen=True)
 class CalibrationBucket:
+    """One probability band of a calibration curve.
+
+    `lead_time_hours` is part of the bucket's identity, not decoration: the
+    same band measured a day before resolution and a week before resolution are
+    different measurements of different things.
+    """
+
     label: str
     sample_size: int
     average_probability: float | None
     realized_frequency: float | None
+    lead_time_hours: int = 0
+    meets_minimum: bool = False
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -356,6 +521,12 @@ class CalibrationObservation:
     probability: float
     outcome: bool
     settled_at: datetime | None
+    lead_time_hours: int = 0
+    observed_at: datetime | None = None
+    observation_lag_hours: float | None = None
+    # The final trade before settlement. Reported so the convergence
+    # diagnostic is inspectable; it is never an input to a bucket.
+    settlement_probability: float | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -363,10 +534,71 @@ class CalibrationObservation:
 
 
 @dataclass(frozen=True)
-class CalibrationSummary:
-    venue: str
+class CalibrationCurve:
+    """Every bucket measured at one fixed lead time before resolution.
+
+    `is_plottable` is false when the sample is too thin to draw honestly; a
+    consumer must respect it rather than rendering a shape from three markets.
+    """
+
+    lead_time_hours: int
+    label: str
     sample_size: int
     buckets: list[CalibrationBucket] = field(default_factory=list)
+    brier_score: float | None = None
+    mean_signed_error: float | None = None
+    is_plottable: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CalibrationConvergence:
+    """How far the settlement print had already collapsed toward the outcome.
+
+    This exists to show *why* the settlement price cannot be a calibration
+    input. It is a diagnostic and is never bucketed.
+    """
+
+    sample_size: int
+    average_settlement_probability: float | None = None
+    average_distance_to_outcome: float | None = None
+    share_within_five_points: float | None = None
+    note: str = ""
+
+
+CALIBRATION_METHOD_LEAD_TIME = "lead_time_history"
+CALIBRATION_METHOD_SETTLEMENT = "settlement_last_trade_deprecated"
+
+
+@dataclass(frozen=True)
+class CalibrationSummary:
+    """Venue calibration measured at fixed pre-resolution lead times.
+
+    `method` and `is_validated` are load-bearing. A summary built from the
+    deprecated settlement-price path reports `is_validated=False` and carries
+    no curves, because a price that already knows the answer cannot measure
+    foresight.
+    """
+
+    venue: str
+    sample_size: int
+    method: str = CALIBRATION_METHOD_SETTLEMENT
+    is_validated: bool = False
+    lead_times_hours: list[int] = field(default_factory=list)
+    curves: list[CalibrationCurve] = field(default_factory=list)
+    minimum_bucket_sample: int = 0
+    minimum_curve_sample: int = 0
+    resolved_markets_considered: int = 0
+    markets_sampled: int = 0
+    markets_without_history: int = 0
+    sample_period_start: datetime | None = None
+    sample_period_end: datetime | None = None
+    # Which research categories the sampled contracts fell into. A venue-level
+    # number measured mostly on sports settlements does not describe the venue's
+    # macro book, so the composition travels with the result.
+    sample_categories: dict[str, int] = field(default_factory=dict)
+    research_share: float | None = None
+    convergence: CalibrationConvergence | None = None
     observations: list[CalibrationObservation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     source_provider: str = ""

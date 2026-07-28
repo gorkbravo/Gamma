@@ -5,25 +5,37 @@
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import { flashOnChange } from "../lib/flash";
   import {
+    CALIBRATION_LEAD_TIME_CHOICES,
+    CALIBRATION_SAMPLE_CHOICES,
+    DEFAULT_CALIBRATION_LEAD_TIMES,
+    DEFAULT_CALIBRATION_SAMPLE,
     HISTORY_RANGES,
     MAX_COMPARE_LEGS,
     RESOLUTION_CHOICES,
+    PREDICTION_WORKING_BASKET_NAME,
+    buildCalibrationRows,
     buildOutcomeLadder,
+    calibrationCurveFor,
     comparisonColor,
+    describeCalibrationMethod,
     describeHistoryCoverage,
     formatResolution,
-    loadCompareSelection,
-    loadWatchlist,
-    saveCompareSelection,
-    saveWatchlist,
     sortPairsByDislocation,
+    toggleCalibrationLeadTime,
     toggleCompareSelection,
-    toggleWatchlistEntry,
-    type OutcomeLadderRow,
-    type PredictionWatchlistEntry
+    type CalibrationBucketRow,
+    type OutcomeLadderRow
   } from "../lib/prediction-markets";
   import type {
+    CrossTabHandoffEnvelope,
+    PredictionCalibrationCurve,
     PredictionCalibrationSummary,
+    PredictionComparisonSet,
+    PredictionEventBook,
+    PredictionEventBookLeg,
+    PredictionOrderBookDepth,
+    PredictionSavedResearch,
+    PredictionSavedWatchlistEntry,
     PredictionHistoryRange,
     PredictionMarket,
     PredictionMarketComparison,
@@ -48,13 +60,35 @@
   export let comparison: PredictionMarketComparison | null = null;
   export let wallet: PredictionWalletSummary | null = null;
   export let related: RelatedPredictionMarketListResponse | null = null;
+  export let eventBook: PredictionEventBook | null = null;
+  export let depth: PredictionOrderBookDepth | null = null;
+  export let crossDomainHandoffs: CrossTabHandoffEnvelope[] = [];
+  export let onCrossDomainHandoff:
+    | ((handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void)
+    | undefined = undefined;
   export let calibration: PredictionCalibrationSummary | null = null;
   export let historyRange: PredictionHistoryRange = "max";
   export let historyResolution: number | null = null;
   export let historyOutcomeId: string | null = null;
+  export let calibrationLeadTimes: number[] = [...DEFAULT_CALIBRATION_LEAD_TIMES];
+  export let calibrationSample: number = DEFAULT_CALIBRATION_SAMPLE;
   export let loading = false;
   export let historyLoading = false;
   export let compareLoading = false;
+  export let calibrationLoading = false;
+  export let savedResearch: PredictionSavedResearch | null = null;
+  export let compareSelection: string[] = [];
+  export let savedLoading = false;
+  export let onToggleWatchlist: ((market: PredictionMarket) => Promise<unknown> | void) | undefined = undefined;
+  export let onSetCompareSelection: ((marketIds: string[]) => void) | undefined = undefined;
+  export let onSaveComparisonSet:
+    | ((options: { name: string; marketIds: string[] }) => Promise<unknown> | void)
+    | undefined = undefined;
+  export let onDeleteComparisonSet: ((setId: string) => Promise<unknown> | void) | undefined = undefined;
+  export let onLoadEventBook: ((marketId: string) => Promise<unknown> | void) | undefined = undefined;
+  export let onLoadCalibration:
+    | ((marketId: string, options?: { leadTimes?: number[]; sampleSize?: number }) => Promise<unknown> | void)
+    | undefined = undefined;
   export let onLoadScreener: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
   export let onSelectMarket: (marketId: string) => Promise<unknown> | void;
   export let onLoadHistory:
@@ -111,8 +145,9 @@
   let lastSubmittedKey = "";
   let currentScreenerKey = "";
 
-  let watchlist: PredictionWatchlistEntry[] = [];
-  let compareSelection: string[] = [];
+  let watchlist: PredictionSavedWatchlistEntry[] = [];
+  let namedSets: PredictionComparisonSet[] = [];
+  let newSetName = "";
   let compareNotice = "";
   let lastComparedKey = "";
   let showOutcomeOverlay = true;
@@ -150,6 +185,20 @@
     return "";
   }
 
+  const HANDOFF_TAB_LABELS: Record<string, string> = {
+    macro: "Macro",
+    commodities: "Commodities",
+    maritime: "Sealanes"
+  };
+  const handoffTabLabel = (tabId: string) => HANDOFF_TAB_LABELS[tabId] ?? tabId;
+  const leadTimeLabel = (hours: number) => (hours % 24 === 0 && hours >= 24 ? `T-${hours / 24}D` : `T-${hours}H`);
+
+  function completenessTone(statusValue: string | null | undefined) {
+    if (statusValue === "complete") return "fresh";
+    if (statusValue === "truncated" || statusValue === "partial_pricing") return "stale";
+    return "muted";
+  }
+
   function venueTone(statusValue: string | null | undefined) {
     if (statusValue === "active") return "fresh";
     if (statusValue === "filtered") return "delayed";
@@ -174,8 +223,6 @@
   }
 
   onMount(() => {
-    watchlist = loadWatchlist();
-    compareSelection = loadCompareSelection();
     autoRunReady = true;
     if (!screener?.markets?.length) {
       void runScreener();
@@ -295,8 +342,7 @@
   }
 
   function toggleWatch(market: PredictionMarket) {
-    watchlist = toggleWatchlistEntry(watchlist, market);
-    saveWatchlist(watchlist);
+    void onToggleWatchlist?.(market);
   }
 
   function isWatched(marketId: string | null | undefined) {
@@ -309,20 +355,48 @@
       next === compareSelection && !compareSelection.includes(marketId)
         ? `Comparison holds ${MAX_COMPARE_LEGS} contracts; remove one first.`
         : "";
-    compareSelection = next;
-    saveCompareSelection(compareSelection);
+    if (next !== compareSelection) {
+      onSetCompareSelection?.(next);
+    }
   }
 
   function clearCompare() {
-    compareSelection = [];
     compareNotice = "";
-    saveCompareSelection(compareSelection);
+    onSetCompareSelection?.([]);
+  }
+
+  function saveCurrentSet() {
+    const name = newSetName.trim();
+    if (!name || compareSelection.length < 2 || !onSaveComparisonSet) return;
+    void onSaveComparisonSet({ name, marketIds: compareSelection });
+    newSetName = "";
+  }
+
+  function openSavedSet(record: PredictionComparisonSet) {
+    onSetCompareSelection?.([...record.market_ids]);
   }
 
   async function runComparison() {
     if (!onCompare || compareSelection.length < 2) return;
     lastComparedKey = compareKey;
     await onCompare(compareSelection, { range: historyRange, resolutionMinutes: historyResolution });
+  }
+
+  async function runCalibration() {
+    if (!calibrationMarketId || !onLoadCalibration) return;
+    lastCalibrationKey = calibrationKey;
+    await onLoadCalibration(calibrationMarketId, {
+      leadTimes: calibrationLeadTimes,
+      sampleSize: calibrationSample
+    });
+  }
+
+  function applyCalibrationLeadTime(hours: number) {
+    const next = toggleCalibrationLeadTime(calibrationLeadTimes, hours);
+    if (next === calibrationLeadTimes) return;
+    calibrationLeadTimes = next;
+    activeLeadTime = next.includes(activeLeadTime ?? -1) ? activeLeadTime : next[0];
+    void runCalibration();
   }
 
   function sendSelectedMarketToStrategyLab(open = false) {
@@ -404,7 +478,25 @@
   let rankedPairs: PredictionMarketComparison["pairs"] = [];
   let compareKey = "";
   let hasWalletRows = false;
-  let hasCalibrationData = false;
+  interface DepthRow {
+    index: number;
+    bidPrice: number | null;
+    bidNotional: number | null;
+    askPrice: number | null;
+    askNotional: number | null;
+  }
+  let depthLevels: DepthRow[] = [];
+  let depthBackingLabel = "no depth";
+  let eventBookFavorite: PredictionEventBookLeg | null = null;
+  let eventBookFlagged = 0;
+  let eventBookQuoted = 0;
+  let lastEventBookMarketId = "";
+  let calibrationMarketId: string | null = null;
+  let activeLeadTime: number | null = null;
+  let activeCurve: PredictionCalibrationCurve | null = null;
+  let calibrationRows: CalibrationBucketRow[] = [];
+  let calibrationKey = "";
+  let lastCalibrationKey = "";
 
   const fallbackVenueStatus = (venue: VenueKey): PredictionVenueStatus => ({
     venue,
@@ -466,7 +558,68 @@
   $: biggestGap =
     related?.related?.slice().sort((left, right) => (right.price_gap ?? -1) - (left.price_gap ?? -1))[0] ?? null;
   $: hasWalletRows = Boolean(wallet?.participants?.length);
-  $: hasCalibrationData = Boolean(calibration?.buckets?.length || calibration?.observations?.length);
+  $: watchlist = savedResearch?.watchlist ?? [];
+  // The working basket is stored as a reserved set so it survives a browser
+  // change; it is not a research set the user named and should not be listed.
+  $: namedSets = (savedResearch?.comparison_sets ?? []).filter(
+    (record) => record.name !== PREDICTION_WORKING_BASKET_NAME
+  );
+
+  $: depthLevels = Array.from(
+    { length: Math.min(Math.max(depth?.bids.length ?? 0, depth?.asks.length ?? 0), 12) },
+    (_, index) => ({
+      index,
+      bidPrice: depth?.bids[index]?.price ?? null,
+      bidNotional: depth?.bids[index]?.notional ?? null,
+      askPrice: depth?.asks[index]?.price ?? null,
+      askNotional: depth?.asks[index]?.notional ?? null
+    })
+  );
+  // The spread KPI states what backs it: the same width means different things
+  // at $2k of resting size and at $200k.
+  $: depthBackingLabel = (() => {
+    const near = (depth?.bid_notional_within_band ?? 0) + (depth?.ask_notional_within_band ?? 0);
+    if (!depth || (!depth.bids.length && !depth.asks.length)) return "no resting depth";
+    return `${fmt(near, 0)} within ${pct(depth.depth_band, 0)}`;
+  })();
+
+  $: eventBookFavorite =
+    eventBook?.legs.find((leg) => leg.market_id === eventBook?.favorite_market_id) ?? eventBook?.legs[0] ?? null;
+  $: eventBookFlagged = eventBook?.legs.filter((leg) => leg.divergence_flags.length).length ?? 0;
+  // A venue lists empty candidate slots inside a race. They belong in the sum
+  // (they contribute zero) but should not read as live quotes.
+  $: eventBookQuoted = eventBook?.legs.filter((leg) => (leg.liquidity ?? 0) || (leg.volume ?? 0)).length ?? 0;
+  $: if (mode === "contract" && detail?.market_id && onLoadEventBook && detail.market_id !== lastEventBookMarketId) {
+    lastEventBookMarketId = detail.market_id;
+    void onLoadEventBook(detail.market_id);
+  }
+
+  // Calibration is venue-level but the route is addressed by contract, so fall
+  // back to the first screened row when nothing is open yet.
+  $: calibrationMarketId = detail?.market_id ?? screener?.markets?.[0]?.market_id ?? null;
+  $: calibrationComposition =
+    Object.entries(calibration?.sample_categories ?? {})
+      .slice(0, 2)
+      .map(([label, count]) => `${label} ${count}`)
+      .join(" | ") || "—";
+  // Observations follow the drawn curve, which is not always the selected one.
+  $: observationLeadLabel = calibration?.observations?.length
+    ? `${leadTimeLabel(calibration.observations[0].lead_time_hours)} | `
+    : "";
+  $: activeCurve = calibrationCurveFor(calibration, activeLeadTime);
+  $: calibrationRows = buildCalibrationRows(activeCurve);
+  $: calibrationKey = JSON.stringify({
+    venue: calibrationMarketId?.split(":")[0] ?? "",
+    leads: calibrationLeadTimes,
+    sample: calibrationSample
+  });
+  $: if (mode === "calibration" && calibrationMarketId && onLoadCalibration && calibrationKey !== lastCalibrationKey) {
+    lastCalibrationKey = calibrationKey;
+    void onLoadCalibration(calibrationMarketId, {
+      leadTimes: calibrationLeadTimes,
+      sampleSize: calibrationSample
+    });
+  }
 
   $: if (screener?.venues?.length) {
     const next = { ...cachedVenueStatuses };
@@ -783,7 +936,7 @@
         <article class="panel table-panel">
           <div class="table-header">
             <span>Watchlist</span>
-            <small>{watchlist.length} saved</small>
+            <small>{watchlist.length}/{savedResearch?.watchlist_limit ?? 0} saved{savedLoading ? " | SAVING..." : ""}</small>
           </div>
           {#if watchlist.length}
             <table>
@@ -817,7 +970,14 @@
               </tbody>
             </table>
           {:else}
-            <p class="empty-state">Star a contract to keep it here across sessions.</p>
+            <p class="empty-state">Star a contract to keep it on the server across browsers.</p>
+          {/if}
+          {#if savedResearch?.warnings?.length}
+            <div class="panel-notes">
+              {#each savedResearch.warnings as warning}
+                <div class="note-row"><span class="note-tag">Saved</span><p>{warning}</p></div>
+              {/each}
+            </div>
           {/if}
         </article>
 
@@ -983,9 +1143,11 @@
               <small>{dayStamp(detail?.end_time)}</small>
             </article>
             <article class="metric">
-              <span>Top Flow</span>
-              <strong>{topWallet ? truncName(topWallet.display_name) : "N/A"}</strong>
-              <small>{topWallet ? pct(wallet?.top_participant_share) : "—"}</small>
+              <span>Spread</span>
+              <strong class={(depth?.spread ?? detail?.spread ?? 0) >= 0.05 ? "elevated" : ""}
+                >{pct(depth?.spread ?? detail?.spread, 1)}</strong
+              >
+              <small>{depthBackingLabel}</small>
             </article>
           </div>
 
@@ -1054,6 +1216,102 @@
                 {/each}
               </tbody>
             </table>
+          </article>
+        {/if}
+
+        {#if eventBook && eventBook.legs.length > 1}
+          <article class="panel table-panel">
+            <div class="table-header">
+              <span>Event Book</span>
+              <small>
+                {eventBook.legs.length} legs |
+                <span class={completenessTone(eventBook.completeness?.status)}
+                  >{eventBook.completeness?.status ?? "unknown"}</span
+                >
+              </small>
+            </div>
+            <div class="kpi-strip">
+              <article class="metric">
+                <span>Book Sum</span>
+                <strong class={eventBook.overround_is_meaningful ? "" : "muted"}>{pct(eventBook.probability_sum)}</strong>
+                <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
+              </article>
+              <article class="metric">
+                <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
+                <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
+                  >{signedPct(eventBook.implied_overround)}</strong
+                >
+                <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
+              </article>
+              <article class="metric">
+                <span>Favorite</span>
+                <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
+                <small>{pct(eventBookFavorite?.probability)}</small>
+              </article>
+              <article class="metric">
+                <span>Flagged</span>
+                <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
+                <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
+              </article>
+            </div>
+            <div class="table-scroll tall">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Contract</th>
+                    <th class="num">Prob</th>
+                    <th class="num">Bid</th>
+                    <th class="num">Ask</th>
+                    <th class="num">Spread</th>
+                    <th class="num">Liquidity</th>
+                    <th class="num">Volume</th>
+                    <th>Terms</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each eventBook.legs as leg (leg.market_id)}
+                    {@const unquoted = !(leg.liquidity ?? 0) && !(leg.volume ?? 0)}
+                    <tr
+                      class="clickable-row"
+                      class:selected={leg.is_anchor}
+                      on:click={() => onSelectMarket(leg.market_id)}
+                    >
+                      <td class="wrap-cell">
+                        <strong>{truncName(leg.subtitle ?? leg.title, 44)}</strong>
+                        {#if leg.divergence_flags.length}<small>{leg.divergence_flags[0]}</small>{/if}
+                      </td>
+                      <td class="num"><span class={marketTone(leg.probability)}>{pct(leg.probability)}</span></td>
+                      <td class="num">{pct(leg.best_bid)}</td>
+                      <td class="num">{unquoted ? "N/A" : pct(leg.best_ask)}</td>
+                      <td class="num {!unquoted && (leg.spread ?? 0) >= 0.05 ? 'elevated' : ''}"
+                        >{unquoted ? "N/A" : pct(leg.spread)}</td
+                      >
+                      <td class="num">{fmt(leg.liquidity)}</td>
+                      <td class="num">{fmt(leg.volume)}</td>
+                      <td>
+                        {#if leg.divergence_flags.length}
+                          <span class="stale">differs</span>
+                        {:else if unquoted}
+                          <span class="muted">unquoted</span>
+                        {:else}
+                          <span class="muted">aligned</span>
+                        {/if}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            {#if eventBook.warnings.length || eventBook.completeness?.note}
+              <div class="panel-notes">
+                {#each eventBook.warnings as warning}
+                  <div class="note-row"><span class="note-tag">Warning</span><p>{warning}</p></div>
+                {/each}
+                {#if eventBook.completeness?.note}
+                  <div class="note-row info"><span class="note-tag">Coverage</span><p>{eventBook.completeness.note}</p></div>
+                {/if}
+              </div>
+            {/if}
           </article>
         {/if}
 
@@ -1150,6 +1408,50 @@
           </div>
         </article>
 
+        <article class="panel table-panel">
+          <div class="table-header">
+            <span>Send To</span>
+            <small>{crossDomainHandoffs.length} resolved targets</small>
+          </div>
+          {#if crossDomainHandoffs.length}
+            <table>
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>Entity</th>
+                  <th>Lens</th>
+                  <th class="tick-col"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each crossDomainHandoffs as handoff (handoff.intended_target_tab + (handoff.selected_entity?.normalized_id ?? ""))}
+                  <tr class="clickable-row" on:click={() => onCrossDomainHandoff?.(handoff)}>
+                    <td>
+                      <strong>{handoffTabLabel(handoff.intended_target_tab)}</strong>
+                    </td>
+                    <td class="wrap-cell">
+                      <strong>{truncName(handoff.selected_entity?.label, 26)}</strong>
+                      {#if handoff.warnings.length}<small>{handoff.warnings[0]}</small>{/if}
+                    </td>
+                    <td>{handoff.intended_target_mode ?? "default"}</td>
+                    <td class="tick-col">
+                      <button
+                        type="button"
+                        class="tick"
+                        aria-label={`Open in ${handoffTabLabel(handoff.intended_target_tab)}`}
+                        disabled={!onCrossDomainHandoff}
+                        on:click|stopPropagation={() => onCrossDomainHandoff?.(handoff)}>→</button
+                      >
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {:else}
+            <p class="empty-state">No cross-domain target resolves from this contract's text.</p>
+          {/if}
+        </article>
+
         <article class="panel composition-panel">
           <div class="panel-header"><span class="eyebrow">Metadata</span></div>
           <div class="meta-flat">
@@ -1179,6 +1481,72 @@
             <div class="description-box">
               <small class="group-label">Resolution Text</small>
               <p>{detail.description}</p>
+            </div>
+          {/if}
+        </article>
+
+        <article class="panel table-panel">
+          <div class="table-header">
+            <span>Book Depth</span>
+            <small>read-only | ±{pct(depth?.depth_band ?? 0.05, 0)} band</small>
+          </div>
+          {#if depthLevels.length}
+            <div class="kpi-strip">
+              <article class="metric">
+                <span>Bid Depth</span>
+                <strong>{fmt(depth?.bid_notional_within_band, 0)}</strong>
+                <small>total {fmt(depth?.total_bid_notional, 0)}</small>
+              </article>
+              <article class="metric">
+                <span>Ask Depth</span>
+                <strong>{fmt(depth?.ask_notional_within_band, 0)}</strong>
+                <small>total {fmt(depth?.total_ask_notional, 0)}</small>
+              </article>
+              <article class="metric">
+                <span>Imbalance</span>
+                <strong class={toneOf(depth?.depth_imbalance)}>{signedPct(depth?.depth_imbalance, 0)}</strong>
+                <small>bid vs ask</small>
+              </article>
+              <article class="metric">
+                <span>{fmt(depth?.reference_clip_notional, 0)} Cost</span>
+                <strong class={depth?.ask_slippage_reference == null ? "stale" : "elevated"}
+                  >{depth?.ask_slippage_reference == null ? "N/A" : signedPct(depth.ask_slippage_reference, 2)}</strong
+                >
+                <small
+                  >{depth?.bid_slippage_reference == null
+                    ? "sell N/A"
+                    : `sell ${signedPct(depth.bid_slippage_reference, 2)}`}</small
+                >
+              </article>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th class="num">Bid Size</th>
+                  <th class="num">Bid</th>
+                  <th class="num">Ask</th>
+                  <th class="num">Ask Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each depthLevels as level (level.index)}
+                  <tr>
+                    <td class="num">{fmt(level.bidNotional, 0)}</td>
+                    <td class="num positive">{pct(level.bidPrice, 1)}</td>
+                    <td class="num negative">{pct(level.askPrice, 1)}</td>
+                    <td class="num">{fmt(level.askNotional, 0)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {:else}
+            <p class="empty-state">{loading ? "LOADING..." : "No resting depth returned for this contract."}</p>
+          {/if}
+          {#if depth?.warnings?.length}
+            <div class="panel-notes">
+              {#each depth.warnings as warning}
+                <div class="note-row"><span class="note-tag">Depth</span><p>{warning}</p></div>
+              {/each}
             </div>
           {/if}
         </article>
@@ -1288,6 +1656,58 @@
           <div class="panel-notes">
             <div class="note-row"><span class="note-tag">Limit</span><p>{compareNotice}</p></div>
           </div>
+        {/if}
+      </article>
+
+      <article class="panel table-panel">
+        <div class="table-header">
+          <span>Saved Sets</span>
+          <small>{namedSets.length}/{savedResearch?.comparison_set_limit ?? 0}{savedLoading ? " | SAVING..." : ""}</small>
+        </div>
+        <div class="save-row">
+          <input
+            bind:value={newSetName}
+            placeholder="Name this comparison"
+            maxlength="120"
+            on:keydown={(event) => event.key === "Enter" && saveCurrentSet()}
+          />
+          <button
+            type="button"
+            class="auto"
+            disabled={!newSetName.trim() || compareSelection.length < 2 || savedLoading}
+            on:click={saveCurrentSet}>Save</button
+          >
+        </div>
+        {#if namedSets.length}
+          <table>
+            <thead>
+              <tr>
+                <th>Set</th>
+                <th class="num">Legs</th>
+                <th>Range</th>
+                <th class="tick-col"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each namedSets as record (record.id)}
+                <tr class="clickable-row" on:click={() => openSavedSet(record)}>
+                  <td class="wrap-cell"><strong>{truncName(record.name, 40)}</strong></td>
+                  <td class="num">{record.market_ids.length}</td>
+                  <td>{record.range_key.toUpperCase()}</td>
+                  <td class="tick-col">
+                    <button
+                      type="button"
+                      class="tick"
+                      aria-label="Delete set"
+                      on:click|stopPropagation={() => onDeleteComparisonSet?.(record.id)}>✕</button
+                    >
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <p class="empty-state">Name a basket to reopen a recurring cross-venue comparison later.</p>
         {/if}
       </article>
 
@@ -1444,57 +1864,171 @@
     </div>
   {:else}
     <div class="calibration-grid">
+      <article class="panel control-panel wide">
+        <div class="control-row">
+          <div class="segmented" role="group" aria-label="Calibration lead time">
+            {#each CALIBRATION_LEAD_TIME_CHOICES as choice}
+              <button
+                type="button"
+                class:selected={calibrationLeadTimes.includes(choice.hours)}
+                disabled={calibrationLoading}
+                on:click={() => applyCalibrationLeadTime(choice.hours)}
+              >
+                {choice.label}
+              </button>
+            {/each}
+          </div>
+          <label class="inline">
+            <span>Sample</span>
+            <select bind:value={calibrationSample} disabled={calibrationLoading} on:change={() => runCalibration()}>
+              {#each CALIBRATION_SAMPLE_CHOICES as choice}
+                <option value={choice}>{choice}</option>
+              {/each}
+            </select>
+          </label>
+          <div class="method-line">
+            <span class={calibration?.is_validated ? "fresh" : "stale"}>
+              {calibration?.is_validated ? "MEASURED" : "UNVALIDATED"}
+            </span>
+            <small>{describeCalibrationMethod(calibration)}</small>
+          </div>
+          <div class="nav-actions">
+            <button type="button" class="auto" disabled={!calibrationMarketId || calibrationLoading} on:click={() => runCalibration()}
+              >Recompute</button
+            >
+          </div>
+        </div>
+        <div class="kpi-grid five">
+          <article class="metric">
+            <span>Venue</span>
+            <strong>{calibration?.venue ?? "N/A"}</strong>
+            <small>{calibration?.markets_sampled ?? 0} of {calibration?.resolved_markets_considered ?? 0} resolved</small>
+          </article>
+          <article class="metric">
+            <span>Observations</span>
+            <strong>{calibration?.sample_size ?? 0}</strong>
+            <small>min {calibration?.minimum_curve_sample ?? 0} per curve</small>
+          </article>
+          <article class="metric">
+            <span>Sample Period</span>
+            <strong>{dayStamp(calibration?.sample_period_start)} → {dayStamp(calibration?.sample_period_end)}</strong>
+            <small>{calibration?.markets_without_history ?? 0} without history</small>
+          </article>
+          <article class="metric">
+            <span>Research Share</span>
+            <strong class={(calibration?.research_share ?? 1) < 0.5 ? "stale" : ""}
+              >{pct(calibration?.research_share, 0)}</strong
+            >
+            <small>{calibrationComposition}</small>
+          </article>
+          <article class="metric">
+            <span>Settlement Drift</span>
+            <strong class="elevated">{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
+            <small>{pct(calibration?.convergence?.share_within_five_points, 0)} within 5pts of outcome</small>
+          </article>
+        </div>
+      </article>
+
       <article class="panel table-panel">
         <div class="table-header">
-          <span>Calibration Buckets</span>
-          <small>{calibration?.venue ?? "N/A"} | n={calibration?.sample_size ?? 0}</small>
+          <span>Reliability by Bucket</span>
+          <small>{activeCurve?.label ?? "N/A"} | n={activeCurve?.sample_size ?? 0}</small>
         </div>
-        {#if hasCalibrationData}
+        {#if calibrationRows.length}
           <table>
             <thead>
               <tr>
                 <th>Bucket</th>
-                <th class="num">Avg Prob</th>
+                <th class="num">Priced</th>
                 <th class="num">Realized</th>
                 <th class="num">Error</th>
-                <th class="num">Sample</th>
+                <th class="num">n</th>
+                <th class="reliability-col">Priced / Realized</th>
               </tr>
             </thead>
             <tbody>
-              {#each calibration?.buckets ?? [] as bucket}
-                {@const error =
-                  bucket.realized_frequency != null && bucket.average_probability != null
-                    ? bucket.realized_frequency - bucket.average_probability
-                    : null}
+              {#each calibrationRows as row (row.label)}
                 <tr>
-                  <td>{bucket.label}</td>
-                  <td class="num">{pct(bucket.average_probability)}</td>
-                  <td class="num">{pct(bucket.realized_frequency)}</td>
-                  <td class="num {toneOf(error)}">{signedPct(error)}</td>
-                  <td class="num">{bucket.sample_size}</td>
+                  <td>{row.label}</td>
+                  <td class="num">{pct(row.predicted)}</td>
+                  <td class="num">{pct(row.realized)}</td>
+                  <td class="num {toneOf(row.error)}">{signedPct(row.error)}</td>
+                  <td class="num {row.meets_minimum ? '' : 'stale'}">{row.sample_size}</td>
+                  <td class="reliability-col">
+                    {#if activeCurve?.is_plottable && row.meets_minimum}
+                      <div class="reliability">
+                        <i class="predicted" style={`width:${Math.round((row.predicted ?? 0) * 100)}%`}></i>
+                        <i class="realized" style={`width:${Math.round((row.realized ?? 0) * 100)}%`}></i>
+                      </div>
+                    {:else}
+                      <span class="muted">below minimum</span>
+                    {/if}
+                  </td>
                 </tr>
               {/each}
             </tbody>
           </table>
         {:else}
-          <p class="empty-state">Calibration unavailable for this venue.</p>
+          <p class="empty-state">
+            {calibrationLoading
+              ? "LOADING..."
+              : calibrationMarketId
+                ? "No lead-time observations were measured for this venue."
+                : "Select a contract to choose a venue."}
+          </p>
         {/if}
-        {#if calibration?.warnings?.length || calibration?.transformation_note}
+        {#if activeCurve?.warnings?.length}
           <div class="panel-notes">
-            {#each calibration?.warnings ?? [] as warning}
-              <div class="note-row"><span class="note-tag">Warning</span><p>{warning}</p></div>
+            {#each activeCurve.warnings as warning}
+              <div class="note-row"><span class="note-tag">Sample</span><p>{warning}</p></div>
             {/each}
-            {#if calibration?.transformation_note}
-              <div class="note-row info"><span class="note-tag">Method</span><p>{calibration.transformation_note}</p></div>
-            {/if}
           </div>
         {/if}
       </article>
 
       <article class="panel table-panel">
         <div class="table-header">
-          <span>Settled Observations</span>
-          <small>{calibration?.observations?.length ?? 0} rows</small>
+          <span>Lead Times</span>
+          <small>settlement price excluded</small>
+        </div>
+        {#if calibration?.curves?.length}
+          <table>
+            <thead>
+              <tr>
+                <th>Lead</th>
+                <th class="num">n</th>
+                <th class="num">Brier</th>
+                <th class="num">Mean Err</th>
+                <th>Curve</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each calibration.curves as curve (curve.lead_time_hours)}
+                <tr
+                  class="clickable-row"
+                  class:selected={activeCurve?.lead_time_hours === curve.lead_time_hours}
+                  on:click={() => (activeLeadTime = curve.lead_time_hours)}
+                >
+                  <td><strong>{curve.label}</strong></td>
+                  <td class="num">{curve.sample_size}</td>
+                  <td class="num">{curve.brier_score == null ? "N/A" : curve.brier_score.toFixed(3)}</td>
+                  <td class="num {toneOf(curve.mean_signed_error)}">{signedPct(curve.mean_signed_error)}</td>
+                  <td><span class={curve.is_plottable ? "fresh" : "stale"}>{curve.is_plottable ? "drawn" : "withheld"}</span></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <p class="empty-state">{calibrationLoading ? "LOADING..." : "No lead-time curve was measured."}</p>
+        {/if}
+      </article>
+
+      <article class="panel table-panel">
+        <div class="table-header">
+          <span>Sampled Contracts</span>
+          <small
+            >{observationLeadLabel}{calibration?.observations?.length ?? 0} rows</small
+          >
         </div>
         {#if calibration?.observations?.length}
           <div class="table-scroll tall">
@@ -1502,18 +2036,20 @@
               <thead>
                 <tr>
                   <th>Market</th>
-                  <th class="num">Priced</th>
+                  <th class="num">At Lead</th>
+                  <th class="num">At Settle</th>
                   <th>Outcome</th>
                   <th class="num">Surprise</th>
                   <th>Settled</th>
                 </tr>
               </thead>
               <tbody>
-                {#each calibration.observations as observation (observation.market_id)}
+                {#each calibration.observations as observation (observation.market_id + observation.lead_time_hours)}
                   {@const surprise = (observation.outcome ? 1 : 0) - observation.probability}
                   <tr class="clickable-row" on:click={() => openContract(observation.market_id)}>
-                    <td class="wrap-cell"><strong>{truncName(observation.title, 56)}</strong></td>
+                    <td class="wrap-cell"><strong>{truncName(observation.title, 48)}</strong></td>
                     <td class="num">{pct(observation.probability)}</td>
+                    <td class="num muted">{pct(observation.settlement_probability)}</td>
                     <td class={observation.outcome ? "positive" : "negative"}>{observation.outcome ? "YES" : "NO"}</td>
                     <td class="num {toneOf(surprise)}">{signedPct(surprise)}</td>
                     <td>{dayStamp(observation.settled_at)}</td>
@@ -1523,9 +2059,25 @@
             </table>
           </div>
         {:else}
-          <p class="empty-state">No settled observations for this venue.</p>
+          <p class="empty-state">{calibrationLoading ? "LOADING..." : "No contract was sampled at the selected lead time."}</p>
         {/if}
       </article>
+
+      {#if calibration?.warnings?.length || calibration?.transformation_note || calibration?.convergence?.note}
+        <article class="panel wide">
+          <div class="notes-list">
+            {#each calibration?.warnings ?? [] as warning}
+              <div class="note-row"><span class="note-tag">Warning</span><p>{warning}</p></div>
+            {/each}
+            {#if calibration?.convergence?.note}
+              <div class="note-row"><span class="note-tag">Convergence</span><p>{calibration.convergence.note}</p></div>
+            {/if}
+            {#if calibration?.transformation_note}
+              <div class="note-row info"><span class="note-tag">Method</span><p>{calibration.transformation_note}</p></div>
+            {/if}
+          </div>
+        </article>
+      {/if}
     </div>
   {/if}
 
@@ -1574,6 +2126,10 @@
   .calibration-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
+  }
+
+  .calibration-grid .wide {
+    grid-column: 1 / -1;
   }
 
   /* ── Mode bar ────────────────────────────────────────────── */
@@ -1735,6 +2291,17 @@
     gap: var(--space-3);
   }
 
+  .save-row {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .save-row button {
+    min-width: 4rem;
+  }
+
   /* ── KPI strips ──────────────────────────────────────────── */
 
   .kpi-grid {
@@ -1747,6 +2314,11 @@
 
   .kpi-grid.four {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 0;
+  }
+
+  .kpi-grid.five {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     border-top: 0;
   }
 
@@ -1945,6 +2517,58 @@
   .segmented button.selected {
     color: var(--text-0);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  label.inline {
+    grid-auto-flow: column;
+    align-items: center;
+    gap: var(--space-3);
+    width: auto;
+  }
+
+  label.inline select {
+    width: 4.5rem;
+  }
+
+  .method-line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .method-line span {
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  /* Two thin bars per bucket: priced against realized. Drawn only when the
+     bucket clears the stated minimum, so a shape is never implied by three
+     contracts. */
+  .reliability {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 8rem;
+  }
+
+  .reliability i {
+    display: block;
+    height: var(--space-2);
+    min-width: 1px;
+  }
+
+  .reliability .predicted {
+    background: var(--chart-primary);
+  }
+
+  .reliability .realized {
+    background: var(--chart-secondary);
+  }
+
+  .reliability-col {
+    width: 10rem;
+    white-space: normal;
   }
 
   .venue-picker {
@@ -2321,7 +2945,8 @@
     .screener-foot,
     .calibration-grid,
     .kpi-strip,
-    .kpi-grid.four {
+    .kpi-grid.four,
+    .kpi-grid.five {
       grid-template-columns: 1fr;
     }
   }

@@ -5,18 +5,31 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from src.api.schemas.prediction_markets import (
     CalibrationSummaryResponseModel,
     PredictionComparisonRequestModel,
+    PredictionComparisonSetRequestModel,
+    PredictionCrossDomainHandoffListResponseModel,
+    PredictionEventBookResponseModel,
     PredictionMarketComparisonResponseModel,
     PredictionMarketListResponseModel,
     PredictionMarketModel,
     PredictionMarketScreenerRequestModel,
+    PredictionOrderBookDepthResponseModel,
     PredictionOutcomeSeriesModel,
     PredictionOutcomeSeriesResponseModel,
     PredictionProbabilityHistoryResponseModel,
+    PredictionResearchImportRequestModel,
+    PredictionSavedResearchResponseModel,
+    PredictionWatchlistRequestModel,
     RelatedMarketListResponseModel,
     RelatedMarketModel,
     WalletSummaryResponseModel,
 )
-from src.application.prediction_market_service import HISTORY_RANGE_KEYS
+from src.application.prediction_market_service import (
+    CALIBRATION_DEFAULT_SAMPLE_MARKETS,
+    CALIBRATION_MAX_SAMPLE_MARKETS,
+    CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS,
+    HISTORY_RANGE_KEYS,
+    MAX_EVENT_BOOK_LEGS,
+)
 
 
 router = APIRouter(tags=["prediction_markets"])
@@ -30,6 +43,97 @@ def prediction_market_screener(
     runtime = request.app.state.runtime
     result = runtime.prediction_market_service.screener(payload.to_domain())
     return PredictionMarketListResponseModel.from_domain(result)
+
+
+@router.get("/prediction-markets/saved", response_model=PredictionSavedResearchResponseModel)
+def prediction_market_saved_research(request: Request) -> PredictionSavedResearchResponseModel:
+    runtime = request.app.state.runtime
+    return PredictionSavedResearchResponseModel.from_domain(
+        runtime.prediction_market_service.get_saved_research()
+    )
+
+
+@router.post("/prediction-markets/saved/watchlist", response_model=PredictionSavedResearchResponseModel)
+def prediction_market_add_watchlist_entry(
+    payload: PredictionWatchlistRequestModel,
+    request: Request,
+) -> PredictionSavedResearchResponseModel:
+    runtime = request.app.state.runtime
+    try:
+        saved = runtime.prediction_market_service.add_watchlist_entry(
+            market_id=payload.market_id,
+            venue=payload.venue,
+            title=payload.title,
+            probability=payload.probability,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PredictionSavedResearchResponseModel.from_domain(saved)
+
+
+@router.delete(
+    "/prediction-markets/saved/watchlist/{market_id}",
+    response_model=PredictionSavedResearchResponseModel,
+)
+def prediction_market_remove_watchlist_entry(
+    market_id: str,
+    request: Request,
+) -> PredictionSavedResearchResponseModel:
+    runtime = request.app.state.runtime
+    saved = runtime.prediction_market_service.remove_watchlist_entry(market_id)
+    if saved is None:
+        raise HTTPException(status_code=404, detail=f"Watchlist entry not found: {market_id}")
+    return PredictionSavedResearchResponseModel.from_domain(saved)
+
+
+@router.post("/prediction-markets/saved/comparison-sets", response_model=PredictionSavedResearchResponseModel)
+def prediction_market_save_comparison_set(
+    payload: PredictionComparisonSetRequestModel,
+    request: Request,
+) -> PredictionSavedResearchResponseModel:
+    runtime = request.app.state.runtime
+    try:
+        saved = runtime.prediction_market_service.save_comparison_set(
+            name=payload.name,
+            market_ids=list(payload.market_ids),
+            set_id=payload.set_id,
+            range_key=payload.range_key,
+            resolution_minutes=payload.resolution_minutes,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PredictionSavedResearchResponseModel.from_domain(saved)
+
+
+@router.delete(
+    "/prediction-markets/saved/comparison-sets/{set_id}",
+    response_model=PredictionSavedResearchResponseModel,
+)
+def prediction_market_delete_comparison_set(
+    set_id: str,
+    request: Request,
+) -> PredictionSavedResearchResponseModel:
+    runtime = request.app.state.runtime
+    saved = runtime.prediction_market_service.delete_comparison_set(set_id)
+    if saved is None:
+        raise HTTPException(status_code=404, detail=f"Comparison set not found: {set_id}")
+    return PredictionSavedResearchResponseModel.from_domain(saved)
+
+
+@router.post("/prediction-markets/saved/import", response_model=PredictionSavedResearchResponseModel)
+def prediction_market_import_saved_research(
+    payload: PredictionResearchImportRequestModel,
+    request: Request,
+) -> PredictionSavedResearchResponseModel:
+    runtime = request.app.state.runtime
+    saved = runtime.prediction_market_service.import_legacy_research(
+        watchlist=[row.model_dump() for row in payload.watchlist],
+        comparison_basket=list(payload.comparison_basket),
+        basket_name=payload.basket_name,
+    )
+    return PredictionSavedResearchResponseModel.from_domain(saved)
 
 
 @router.get("/prediction-markets/markets/{market_id}", response_model=PredictionMarketModel)
@@ -129,6 +233,57 @@ def prediction_market_wallet_summary(market_id: str, request: Request) -> Wallet
 
 
 @router.get(
+    "/prediction-markets/markets/{market_id}/handoffs",
+    response_model=PredictionCrossDomainHandoffListResponseModel,
+)
+def prediction_market_cross_domain_handoffs(
+    market_id: str,
+    request: Request,
+) -> PredictionCrossDomainHandoffListResponseModel:
+    runtime = request.app.state.runtime
+    handoffs = runtime.prediction_market_service.get_cross_domain_handoffs(market_id)
+    if handoffs is None:
+        raise HTTPException(status_code=404, detail=f"Prediction market not found: {market_id}")
+    return PredictionCrossDomainHandoffListResponseModel(
+        market_id=market_id,
+        handoffs=[envelope.to_dict() for envelope in handoffs],
+    )
+
+
+@router.get(
+    "/prediction-markets/markets/{market_id}/depth",
+    response_model=PredictionOrderBookDepthResponseModel,
+)
+def prediction_market_depth(
+    market_id: str,
+    request: Request,
+    outcome_id: str | None = Query(default=None, max_length=256),
+) -> PredictionOrderBookDepthResponseModel:
+    """Read-only resting depth behind a contract's quote. No order entry."""
+    runtime = request.app.state.runtime
+    depth = runtime.prediction_market_service.get_order_book_depth(market_id, outcome_id=outcome_id)
+    if depth is None:
+        raise HTTPException(status_code=404, detail=f"Prediction market not found: {market_id}")
+    return PredictionOrderBookDepthResponseModel.from_domain(depth)
+
+
+@router.get(
+    "/prediction-markets/markets/{market_id}/event-book",
+    response_model=PredictionEventBookResponseModel,
+)
+def prediction_market_event_book(
+    market_id: str,
+    request: Request,
+    limit: int = Query(default=MAX_EVENT_BOOK_LEGS, ge=2, le=MAX_EVENT_BOOK_LEGS),
+) -> PredictionEventBookResponseModel:
+    runtime = request.app.state.runtime
+    book = runtime.prediction_market_service.get_event_book(market_id, limit=limit)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Prediction market not found: {market_id}")
+    return PredictionEventBookResponseModel.from_domain(book)
+
+
+@router.get(
     "/prediction-markets/markets/{market_id}/related",
     response_model=RelatedMarketListResponseModel,
 )
@@ -145,9 +300,32 @@ def prediction_market_related(market_id: str, request: Request) -> RelatedMarket
     "/prediction-markets/markets/{market_id}/calibration",
     response_model=CalibrationSummaryResponseModel,
 )
-def prediction_market_calibration(market_id: str, request: Request) -> CalibrationSummaryResponseModel:
+def prediction_market_calibration(
+    market_id: str,
+    request: Request,
+    sample_size: int = Query(
+        default=CALIBRATION_DEFAULT_SAMPLE_MARKETS,
+        ge=1,
+        le=CALIBRATION_MAX_SAMPLE_MARKETS,
+        alias="sample",
+    ),
+    lead_times: list[int] | None = Query(default=None, alias="lead"),
+) -> CalibrationSummaryResponseModel:
+    for lead in lead_times or []:
+        if lead not in CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unsupported calibration lead time '{lead}'. Supported hours: "
+                    f"{', '.join(str(value) for value in CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS)}."
+                ),
+            )
     runtime = request.app.state.runtime
-    summary = runtime.prediction_market_service.get_calibration_summary(market_id)
+    summary = runtime.prediction_market_service.get_calibration_summary(
+        market_id,
+        sample_size=sample_size,
+        lead_times_hours=lead_times,
+    )
     if summary is None:
         raise HTTPException(status_code=404, detail=f"Prediction market not found: {market_id}")
     return CalibrationSummaryResponseModel.from_domain(summary)

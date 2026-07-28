@@ -8,6 +8,7 @@
   export let loading = false;
   export let mode: MaritimeMode = "live_map";
   export let onLoadWorkspace: (options?: MaritimeLoadOptions) => Promise<unknown> | void;
+  export let focusChokepointId: string | null = null;
 
   let map3D = false;
 
@@ -37,6 +38,7 @@
       coverage={workspace?.coverage ?? null}
       warnings={workspace?.warnings ?? []}
       {loading}
+      {focusChokepointId}
       onRefresh={refresh}
       connected={workspace?.coverage?.coverage_status === "live" || workspace?.coverage?.coverage_status === "partial"}
     />

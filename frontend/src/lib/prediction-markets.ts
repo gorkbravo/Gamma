@@ -1,4 +1,6 @@
 import type {
+  PredictionCalibrationCurve,
+  PredictionCalibrationSummary,
   PredictionHistoryRange,
   PredictionMarket,
   PredictionMarketComparison,
@@ -7,8 +9,13 @@ import type {
   PredictionProbabilityHistoryResponse
 } from "./api/types";
 
+// Retained only so the one-time migration can find what a previous build wrote.
+// Saved research now lives in the backend store.
 export const PREDICTION_WATCHLIST_STORAGE_KEY = "gamma.predictionMarkets.watchlist.v1";
 export const PREDICTION_COMPARE_STORAGE_KEY = "gamma.predictionMarkets.compareBasket.v1";
+export const PREDICTION_MIGRATION_FLAG_KEY = "gamma.predictionMarkets.serverMigration.v1";
+/** Reserved set name holding the current working basket so it survives a browser change. */
+export const PREDICTION_WORKING_BASKET_NAME = "Working basket";
 
 export const MAX_WATCHLIST_ENTRIES = 40;
 export const MAX_COMPARE_LEGS = 6;
@@ -22,6 +29,24 @@ export const HISTORY_RANGES: readonly { id: PredictionHistoryRange; label: strin
   { id: "1y", label: "1Y" },
   { id: "max", label: "MAX" }
 ];
+
+/**
+ * Lead times a calibration curve can be measured at, in hours. The ceiling is
+ * a provider constraint mirrored from the backend: a longer lookback cannot be
+ * requested as an explicit window ending at a contract's own resolution.
+ */
+export const CALIBRATION_LEAD_TIME_CHOICES: readonly { hours: number; label: string }[] = [
+  { hours: 6, label: "T-6H" },
+  { hours: 24, label: "T-1D" },
+  { hours: 72, label: "T-3D" },
+  { hours: 168, label: "T-7D" }
+];
+
+export const DEFAULT_CALIBRATION_LEAD_TIMES: readonly number[] = [24, 168];
+export const MAX_CALIBRATION_LEAD_TIMES = 3;
+/** Mirrors the backend default; smaller samples rarely clear the curve minimum. */
+export const DEFAULT_CALIBRATION_SAMPLE = 80;
+export const CALIBRATION_SAMPLE_CHOICES: readonly number[] = [20, 40, 80, 120];
 
 /** `null` means "let the backend pick a resolution from the window span". */
 export const RESOLUTION_CHOICES: readonly { id: number | null; label: string }[] = [
@@ -97,34 +122,6 @@ export function normalizeWatchlist(value: unknown): PredictionWatchlistEntry[] {
   return entries;
 }
 
-export function loadWatchlist(): PredictionWatchlistEntry[] {
-  return normalizeWatchlist(readStorage(PREDICTION_WATCHLIST_STORAGE_KEY));
-}
-
-export function saveWatchlist(entries: PredictionWatchlistEntry[]) {
-  writeStorage(PREDICTION_WATCHLIST_STORAGE_KEY, entries.slice(0, MAX_WATCHLIST_ENTRIES));
-}
-
-export function toggleWatchlistEntry(
-  entries: PredictionWatchlistEntry[],
-  market: PredictionMarket
-): PredictionWatchlistEntry[] {
-  const existing = entries.some((entry) => entry.market_id === market.market_id);
-  if (existing) {
-    return entries.filter((entry) => entry.market_id !== market.market_id);
-  }
-  return [
-    {
-      market_id: market.market_id,
-      venue: market.venue,
-      title: market.title,
-      probability: market.current_probability,
-      added_at: new Date().toISOString()
-    },
-    ...entries
-  ].slice(0, MAX_WATCHLIST_ENTRIES);
-}
-
 export function normalizeCompareSelection(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -141,14 +138,6 @@ export function normalizeCompareSelection(value: unknown): string[] {
   return [...seen];
 }
 
-export function loadCompareSelection(): string[] {
-  return normalizeCompareSelection(readStorage(PREDICTION_COMPARE_STORAGE_KEY));
-}
-
-export function saveCompareSelection(marketIds: string[]) {
-  writeStorage(PREDICTION_COMPARE_STORAGE_KEY, marketIds.slice(0, MAX_COMPARE_LEGS));
-}
-
 /**
  * Add or remove a contract from the comparison basket.
  * Returns the unchanged list when the cap is already reached so the caller can
@@ -162,6 +151,36 @@ export function toggleCompareSelection(selection: string[], marketId: string): s
     return selection;
   }
   return [...selection, marketId];
+}
+
+export interface LegacyPredictionResearch {
+  watchlist: PredictionWatchlistEntry[];
+  comparison_basket: string[];
+}
+
+/**
+ * Read what an older build persisted in this browser. Returns `null` once the
+ * migration has already run, so a second load does not re-import records the
+ * user has since deleted on the server.
+ */
+export function readLegacyResearch(): LegacyPredictionResearch | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+  if (localStorage.getItem(PREDICTION_MIGRATION_FLAG_KEY)) {
+    return null;
+  }
+  const watchlist = normalizeWatchlist(readStorage(PREDICTION_WATCHLIST_STORAGE_KEY));
+  const comparison_basket = normalizeCompareSelection(readStorage(PREDICTION_COMPARE_STORAGE_KEY));
+  if (!watchlist.length && !comparison_basket.length) {
+    markLegacyResearchMigrated();
+    return null;
+  }
+  return { watchlist, comparison_basket };
+}
+
+export function markLegacyResearchMigrated() {
+  writeStorage(PREDICTION_MIGRATION_FLAG_KEY, new Date().toISOString());
 }
 
 export function formatResolution(minutes: number | null | undefined): string {
@@ -244,6 +263,83 @@ export function buildOutcomeLadder(series: PredictionOutcomeSeries[]): OutcomeLa
       };
     })
     .sort((left, right) => (right.probability ?? -1) - (left.probability ?? -1));
+}
+
+/**
+ * Add or remove a calibration lead time. At least one must stay selected and
+ * the count is capped, because each lead time is a separate measurement the
+ * backend has to sample.
+ */
+export function toggleCalibrationLeadTime(selected: number[], hours: number): number[] {
+  if (selected.includes(hours)) {
+    return selected.length <= 1 ? selected : selected.filter((value) => value !== hours);
+  }
+  if (selected.length >= MAX_CALIBRATION_LEAD_TIMES) {
+    return selected;
+  }
+  return [...selected, hours].sort((left, right) => left - right);
+}
+
+export interface CalibrationBucketRow {
+  label: string;
+  sample_size: number;
+  meets_minimum: boolean;
+  predicted: number | null;
+  realized: number | null;
+  error: number | null;
+}
+
+/** Flatten a curve into table rows, carrying the per-bucket minimum forward. */
+export function buildCalibrationRows(curve: PredictionCalibrationCurve | null): CalibrationBucketRow[] {
+  if (!curve) {
+    return [];
+  }
+  return curve.buckets.map((bucket) => ({
+    label: bucket.label,
+    sample_size: bucket.sample_size,
+    meets_minimum: bucket.meets_minimum,
+    predicted: bucket.average_probability,
+    realized: bucket.realized_frequency,
+    error:
+      bucket.realized_frequency == null || bucket.average_probability == null
+        ? null
+        : bucket.realized_frequency - bucket.average_probability
+  }));
+}
+
+/**
+ * Curve to show for a lead time. With no explicit selection, prefer one that
+ * cleared the minimum: opening on a withheld curve makes a measured result look
+ * like a failed one.
+ */
+export function calibrationCurveFor(
+  summary: PredictionCalibrationSummary | null,
+  leadHours: number | null
+): PredictionCalibrationCurve | null {
+  if (!summary?.curves?.length) {
+    return null;
+  }
+  const requested = summary.curves.find((curve) => curve.lead_time_hours === leadHours);
+  if (requested) {
+    return requested;
+  }
+  return summary.curves.find((curve) => curve.is_plottable) ?? summary.curves[0];
+}
+
+/**
+ * One line stating what the number actually is. A summary built from the
+ * deprecated settlement path must never read like a calibration result.
+ */
+export function describeCalibrationMethod(summary: PredictionCalibrationSummary | null): string {
+  if (!summary) {
+    return "No calibration loaded";
+  }
+  if (summary.method !== "lead_time_history") {
+    return "UNVALIDATED - settlement print only, no curve measured";
+  }
+  const leads = summary.curves.map((curve) => curve.label).join(" / ") || "no lead time";
+  const plottable = summary.curves.filter((curve) => curve.is_plottable).length;
+  return `Lead-time history | ${leads} | n=${summary.sample_size} | ${plottable}/${summary.curves.length} above minimum`;
 }
 
 export function comparisonLegLabel(comparison: PredictionMarketComparison | null, marketId: string): string {

@@ -4,11 +4,23 @@ import math
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Sequence
 
+from src.application.prediction_market_taxonomy import build_cross_domain_handoffs
+from src.models.handoff import CrossTabHandoffEnvelope
 from src.models.prediction_markets import (
+    CALIBRATION_METHOD_LEAD_TIME,
+    CALIBRATION_METHOD_SETTLEMENT,
+    CalibrationBucket,
+    CalibrationConvergence,
+    CalibrationCurve,
+    CalibrationObservation,
     CalibrationSummary,
     PredictionBasketSummary,
     PredictionComparisonLeg,
+    PredictionEventBook,
+    PredictionEventBookCompleteness,
+    PredictionEventBookLeg,
     PredictionHistoryFetch,
     PredictionHistoryStats,
     PredictionHistoryWindow,
@@ -16,16 +28,22 @@ from src.models.prediction_markets import (
     PredictionMarketFreshness,
     PredictionMarketRecord,
     PredictionMarketScreenerResult,
+    PredictionOrderBookDepth,
     PredictionOutcomeSeries,
     PredictionPairAnalytics,
     PredictionProbabilityHistory,
+    PredictionProbabilityPoint,
+    PredictionSavedResearch,
     PredictionSpreadPoint,
     PredictionVenueStatus,
     RelatedMarketRecord,
     WalletSummary,
 )
-from src.services.prediction_market_adapters import PredictionMarketAdapter
+from src.services.prediction_market_adapters import PredictionMarketAdapter, build_settlement_convergence
 from src.utils.time import ensure_utc, now_utc
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type hints only
+    from src.services.prediction_research_store import PredictionResearchStore
 
 ALLOWED_RESEARCH_CATEGORIES = ("Politics", "Finance", "Geopolitics", "Crypto", "Economy", "Tech/AI")
 EXACT_CATEGORY_ALIASES = {
@@ -168,6 +186,49 @@ RESOLUTION_CHOICES_MINUTES = (1, 5, 15, 60, 360, 1440)
 AUTO_RESOLUTION_TARGET_POINTS = 900
 MAX_COMPARISON_LEGS = 6
 MAX_OUTCOME_SERIES = 8
+# Calibration is measured at fixed lead times before resolution. The ceiling is
+# a provider constraint, not a preference: Polymarket only accepts an explicit
+# start/end span of roughly 14 days, and a longer lookback has to be requested
+# as a named interval relative to *now*, which returns nothing useful for a
+# contract that settled months ago. Every supported lead time plus its margin
+# therefore has to fit inside that explicit window.
+CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS: tuple[int, ...] = (6, 24, 72, 168)
+CALIBRATION_DEFAULT_LEAD_TIMES_HOURS: tuple[int, ...] = (24, 168)
+CALIBRATION_MAX_LEAD_TIMES = 3
+# A bucket below this is reported with its sample size but never drawn.
+CALIBRATION_MIN_BUCKET_SAMPLE = 5
+# A curve below this is reported as not plottable regardless of bucket shape.
+CALIBRATION_MIN_CURVE_SAMPLE = 20
+# A live probe on 2026-07-27 needed roughly this many resolved contracts before
+# a venue produced enough lead-time observations to clear the curve minimum.
+CALIBRATION_DEFAULT_SAMPLE_MARKETS = 80
+CALIBRATION_MAX_SAMPLE_MARKETS = 120
+# Resolved contracts pulled before sampling. One venue request, not one per
+# contract, so a wide pull is cheap.
+CALIBRATION_DISCOVERY_LIMIT = 500
+# A sample whose settlements all landed inside this span is one settlement
+# batch, not a sample across market conditions.
+CALIBRATION_MIN_SAMPLE_PERIOD_HOURS = 6.0
+CALIBRATION_BUCKET_EDGES: tuple[tuple[float, float, str], ...] = (
+    (0.0, 0.1, "0-10%"),
+    (0.1, 0.25, "10-25%"),
+    (0.25, 0.5, "25-50%"),
+    (0.5, 0.75, "50-75%"),
+    (0.75, 0.9, "75-90%"),
+    (0.9, 1.000001, "90-100%"),
+)
+CALIBRATION_WINDOW_RANGE_KEY = "calibration"
+CALIBRATION_WINDOW_RESOLUTION_MINUTES = 60
+CALIBRATION_MAX_OBSERVATION_ROWS = 16
+# An event book is a separate, larger surface than the ad hoc comparison basket,
+# which stays capped at MAX_COMPARISON_LEGS. A live probe on 2026-07-27 showed a
+# US presidential-winner event listing well past 48 candidates, and a book that
+# is always truncated can never earn the overround claim, so the cap is set
+# above realistic race sizes.
+MAX_EVENT_BOOK_LEGS = 160
+# A sibling resolving this far from the book's median resolution date is not
+# resolving on the same terms, whatever its price says.
+EVENT_BOOK_RESOLUTION_DRIFT_DAYS = 3.0
 MIN_PAIR_OVERLAP_POINTS = 12
 MAX_SPREAD_SERIES_POINTS = 600
 MAX_ALIGNED_GRID_POINTS = 2000
@@ -193,8 +254,100 @@ class PredictionMarketScreenerRequest:
 
 
 class PredictionMarketService:
-    def __init__(self, adapters: dict[str, PredictionMarketAdapter]) -> None:
+    def __init__(
+        self,
+        adapters: dict[str, PredictionMarketAdapter],
+        research_store: "PredictionResearchStore | None" = None,
+    ) -> None:
         self.adapters = adapters
+        self.research_store = research_store
+
+    # ── Saved research sets ──────────────────────────────────────────────
+
+    def _require_research_store(self) -> "PredictionResearchStore":
+        if self.research_store is None:
+            raise RuntimeError("Saved prediction research is not configured in this runtime.")
+        return self.research_store
+
+    def get_saved_research(self) -> PredictionSavedResearch:
+        return self._require_research_store().get_saved_research()
+
+    def add_watchlist_entry(
+        self,
+        *,
+        market_id: str,
+        venue: str = "",
+        title: str = "",
+        probability: float | None = None,
+        note: str = "",
+    ) -> PredictionSavedResearch:
+        store = self._require_research_store()
+        resolved_venue = venue or str(market_id.split(":", 1)[0])
+        resolved_title = title
+        resolved_probability = probability
+        if not resolved_title or resolved_probability is None:
+            # A watchlist row saved from a stale screener payload would otherwise
+            # freeze a probability that is already wrong; resolve it once here.
+            detail = self.get_market_detail(market_id)
+            if detail is not None:
+                resolved_title = resolved_title or detail.title
+                resolved_venue = detail.venue or resolved_venue
+                if resolved_probability is None:
+                    resolved_probability = detail.current_probability
+        store.add_watchlist_entry(
+            market_id=market_id,
+            venue=resolved_venue,
+            title=resolved_title or market_id,
+            probability=resolved_probability,
+            note=note,
+        )
+        return store.get_saved_research()
+
+    def remove_watchlist_entry(self, market_id: str) -> PredictionSavedResearch | None:
+        store = self._require_research_store()
+        if not store.remove_watchlist_entry(market_id):
+            return None
+        return store.get_saved_research()
+
+    def save_comparison_set(
+        self,
+        *,
+        name: str,
+        market_ids: list[str],
+        set_id: str | None = None,
+        range_key: str = "max",
+        resolution_minutes: int | None = None,
+        note: str = "",
+    ) -> PredictionSavedResearch:
+        store = self._require_research_store()
+        store.save_comparison_set(
+            name=name,
+            market_ids=market_ids,
+            set_id=set_id,
+            range_key=range_key if range_key in HISTORY_RANGE_KEYS else "max",
+            resolution_minutes=resolution_minutes,
+            note=note,
+        )
+        return store.get_saved_research()
+
+    def delete_comparison_set(self, set_id: str) -> PredictionSavedResearch | None:
+        store = self._require_research_store()
+        if not store.delete_comparison_set(set_id):
+            return None
+        return store.get_saved_research()
+
+    def import_legacy_research(
+        self,
+        *,
+        watchlist: list[dict] | None = None,
+        comparison_basket: list[str] | None = None,
+        basket_name: str = "Imported basket",
+    ) -> PredictionSavedResearch:
+        return self._require_research_store().import_legacy_records(
+            watchlist=watchlist,
+            comparison_basket=comparison_basket,
+            basket_name=basket_name,
+        )
 
     def screener(self, request: PredictionMarketScreenerRequest) -> PredictionMarketScreenerResult:
         venues = request.venues or sorted(self.adapters)
@@ -588,11 +741,780 @@ class PredictionMarketService:
             return strong[:limit]
         return ordered[: min(limit, 3)]
 
-    def get_calibration_summary(self, market_id: str, *, sample_size: int = 30) -> CalibrationSummary | None:
+    def get_cross_domain_handoffs(self, market_id: str) -> list[CrossTabHandoffEnvelope] | None:
+        """Outward handoffs this contract can open with a resolvable target."""
+        detail = self.get_market_detail(market_id)
+        if detail is None:
+            return None
+        return build_cross_domain_handoffs(detail)
+
+    def get_order_book_depth(
+        self,
+        market_id: str,
+        *,
+        outcome_id: str | None = None,
+    ) -> PredictionOrderBookDepth | None:
+        """Resting size behind the selected contract's quote.
+
+        Depth is an optional adapter capability, probed the same way windowed
+        history is, so a venue or test double without a book endpoint degrades
+        to a labeled empty result rather than an error.
+        """
         adapter = self._resolve_adapter(market_id)
         if adapter is None:
             return None
-        return adapter.build_calibration_summary(sample_size=sample_size)
+        market = adapter.get_market(self._provider_market_id(market_id))
+        if market is None:
+            return None
+        detail = self._canonicalize_market(market)
+        outcome = self._resolve_outcome(detail, outcome_id)
+
+        fetch_book = getattr(adapter, "get_order_book", None)
+        if not callable(fetch_book):
+            return PredictionOrderBookDepth(
+                market_id=detail.market_id,
+                venue=detail.venue,
+                outcome_id=outcome.outcome_id if outcome else None,
+                outcome_label=outcome.label if outcome else detail.probability_label,
+                best_bid=detail.best_bid,
+                best_ask=detail.best_ask,
+                spread=detail.spread,
+                warnings=[f"{detail.venue} does not expose order-book depth in this runtime."],
+                source_provider=detail.source_provider,
+                retrieved_at=detail.retrieved_at,
+                origin=detail.origin,
+            )
+        try:
+            depth = fetch_book(detail, outcome_token_id=outcome.token_id if outcome else None)
+        except Exception as exc:
+            return PredictionOrderBookDepth(
+                market_id=detail.market_id,
+                venue=detail.venue,
+                outcome_id=outcome.outcome_id if outcome else None,
+                outcome_label=outcome.label if outcome else detail.probability_label,
+                best_bid=detail.best_bid,
+                best_ask=detail.best_ask,
+                spread=detail.spread,
+                warnings=[f"{detail.venue} depth request failed: {exc}"],
+                source_provider=detail.source_provider,
+                retrieved_at=detail.retrieved_at,
+                origin=detail.origin,
+            )
+
+        warnings = list(depth.warnings)
+        if not depth.bids and not depth.asks:
+            warnings.append(
+                "No resting depth was returned, so this contract's spread cannot be read as a tradable width.",
+            )
+        elif depth.bid_slippage_reference is None or depth.ask_slippage_reference is None:
+            warnings.append(
+                f"The book cannot absorb the ${depth.reference_clip_notional:,.0f} reference clip on at least one "
+                "side; the quoted spread only applies to smaller size.",
+            )
+        return replace(depth, warnings=warnings)
+
+    def get_event_book(self, market_id: str, *, limit: int = MAX_EVENT_BOOK_LEGS) -> PredictionEventBook | None:
+        """Resolve every sibling contract a venue groups under one event.
+
+        The ad hoc comparison route deliberately refuses to call its probability
+        sum an overround, because a user-assembled basket of six contracts is not
+        a book. This is the case where the claim can be earned: the venue itself
+        says these contracts belong to one event, and the sum covers all of them.
+        """
+        detail = self.get_market_detail(market_id)
+        if detail is None:
+            return None
+        adapter = self._resolve_adapter(market_id)
+        if adapter is None:
+            return None
+
+        cap = max(2, min(int(limit or MAX_EVENT_BOOK_LEGS), MAX_EVENT_BOOK_LEGS))
+        retrieved_at = ensure_utc(now_utc())
+        origin = f"prediction_market_service.event_book.{detail.venue}"
+        transformation_note = (
+            "Sibling contracts are taken from the venue's own event grouping. The probability sum is only "
+            "presented as an overround when the book is complete, every leg is priced, and the venue groups the "
+            "legs as mutually exclusive candidates."
+        )
+
+        if not detail.provider_event_id:
+            return PredictionEventBook(
+                venue=detail.venue,
+                anchor_market_id=detail.market_id,
+                event_id=detail.event_id,
+                event_title=detail.event_title,
+                legs=[self._event_book_leg(detail, is_anchor=True)],
+                completeness=PredictionEventBookCompleteness(
+                    status="unavailable",
+                    legs_returned=1,
+                    legs_priced=1 if detail.current_probability is not None else 0,
+                    cap=cap,
+                    truncated=False,
+                    note=f"{detail.venue} does not group this contract under an event, so there is no book to sum.",
+                ),
+                warnings=["This contract is standalone on its venue; no sibling markets exist to sum."],
+                source_provider=detail.source_provider,
+                retrieved_at=retrieved_at,
+                origin=origin,
+                transformation_note=transformation_note,
+            )
+
+        try:
+            # Requesting one past the cap is what makes truncation detectable
+            # rather than assumed.
+            siblings = adapter.list_event_markets(detail, limit=cap + 1)
+        except Exception as exc:
+            return PredictionEventBook(
+                venue=detail.venue,
+                anchor_market_id=detail.market_id,
+                event_id=detail.event_id,
+                event_title=detail.event_title,
+                provider_event_id=detail.provider_event_id,
+                legs=[self._event_book_leg(detail, is_anchor=True)],
+                completeness=PredictionEventBookCompleteness(
+                    status="unavailable",
+                    legs_returned=1,
+                    legs_priced=1 if detail.current_probability is not None else 0,
+                    cap=cap,
+                    truncated=False,
+                    note=f"{detail.venue} event lookup failed: {exc}",
+                ),
+                warnings=[f"{detail.venue} event lookup failed: {exc}"],
+                source_provider=detail.source_provider,
+                retrieved_at=retrieved_at,
+                origin=origin,
+                transformation_note=transformation_note,
+            )
+
+        records = [detail]
+        seen = {detail.market_id}
+        for sibling in siblings:
+            candidate = self._canonicalize_market(sibling)
+            if candidate.market_id in seen:
+                continue
+            seen.add(candidate.market_id)
+            records.append(candidate)
+
+        truncated = len(records) > cap
+        records = records[:cap]
+        records.sort(key=lambda row: (-(row.current_probability or -1.0), row.title.lower()))
+
+        divergence = self._event_book_divergence(records)
+        legs = [
+            self._event_book_leg(
+                record,
+                is_anchor=record.market_id == detail.market_id,
+                divergence_flags=divergence.get(record.market_id, []),
+            )
+            for record in records
+        ]
+
+        priced = [leg for leg in legs if leg.probability is not None]
+        probability_sum = sum(leg.probability or 0.0 for leg in priced) if priced else None
+        exclusivity_signal = self._event_exclusivity_signal(records)
+        complete = len(legs) > 1 and not truncated and len(priced) == len(legs)
+        overround_is_meaningful = complete and exclusivity_signal == "venue_grouped_candidates"
+
+        if truncated:
+            status = "truncated"
+            note = f"The venue returned more than {cap} sibling contracts; the sum covers only the {cap} shown."
+        elif len(legs) <= 1:
+            status = "unavailable"
+            note = "The venue's event grouping returned no sibling contracts, so there is nothing to sum."
+        elif len(priced) < len(legs):
+            status = "partial_pricing"
+            note = f"{len(legs) - len(priced)} of {len(legs)} legs have no current probability; the sum is a lower bound."
+        else:
+            status = "complete"
+            note = f"All {len(legs)} contracts the venue lists under this event are included in the sum."
+
+        warnings: list[str] = []
+        if not overround_is_meaningful and probability_sum is not None and len(legs) > 1:
+            warnings.append(
+                "The probability sum is descriptive here, not an overround: "
+                + (
+                    note
+                    if status != "complete"
+                    else "the venue does not group these legs as mutually exclusive candidates."
+                )
+            )
+        flagged = [leg for leg in legs if leg.divergence_flags]
+        if flagged:
+            warnings.append(
+                f"{len(flagged)} contract(s) resolve on materially different terms or timing from the rest of the "
+                "book. Near-identical prices across differently-resolving contracts is a research question, not an "
+                "arbitrage.",
+            )
+
+        return PredictionEventBook(
+            venue=detail.venue,
+            anchor_market_id=detail.market_id,
+            event_id=detail.event_id,
+            event_title=detail.event_title,
+            provider_event_id=detail.provider_event_id,
+            legs=legs,
+            probability_sum=probability_sum,
+            implied_overround=(probability_sum - 1.0) if probability_sum is not None and len(legs) > 1 else None,
+            favorite_market_id=legs[0].market_id if legs and legs[0].probability is not None else None,
+            exclusivity_signal=exclusivity_signal,
+            overround_is_meaningful=overround_is_meaningful,
+            completeness=PredictionEventBookCompleteness(
+                status=status,
+                legs_returned=len(legs),
+                legs_priced=len(priced),
+                cap=cap,
+                truncated=truncated,
+                note=note,
+            ),
+            warnings=warnings,
+            source_provider=detail.source_provider,
+            retrieved_at=retrieved_at,
+            origin=origin,
+            transformation_note=transformation_note,
+        )
+
+    @staticmethod
+    def _event_book_leg(
+        record: PredictionMarketRecord,
+        *,
+        is_anchor: bool = False,
+        divergence_flags: list[str] | None = None,
+    ) -> PredictionEventBookLeg:
+        return PredictionEventBookLeg(
+            market_id=record.market_id,
+            venue=record.venue,
+            title=record.title,
+            subtitle=record.subtitle,
+            outcome_label=record.probability_label,
+            probability=record.current_probability,
+            best_bid=record.best_bid,
+            best_ask=record.best_ask,
+            spread=record.spread,
+            volume=record.volume,
+            liquidity=record.liquidity,
+            open_interest=record.open_interest,
+            status=record.status,
+            end_time=record.end_time,
+            resolution_source=record.resolution_source,
+            is_anchor=is_anchor,
+            divergence_flags=list(divergence_flags or []),
+        )
+
+    @staticmethod
+    def _event_exclusivity_signal(records: list[PredictionMarketRecord]) -> str:
+        """Does the venue's own grouping look like one row per candidate?
+
+        Gamma never infers exclusivity from prices. The only evidence it will
+        act on is structural: a venue that gives each leg its own distinct
+        group-item label under one event title is describing a race.
+        """
+        if len(records) < 3:
+            return "unverified"
+        subtitles = [str(record.subtitle or "").strip().lower() for record in records]
+        if any(not subtitle for subtitle in subtitles):
+            return "unverified"
+        if len(set(subtitles)) != len(subtitles):
+            return "unverified"
+        event_ids = {record.provider_event_id for record in records if record.provider_event_id}
+        if len(event_ids) != 1:
+            return "unverified"
+        return "venue_grouped_candidates"
+
+    @staticmethod
+    def _event_book_divergence(records: list[PredictionMarketRecord]) -> dict[str, list[str]]:
+        """Flag siblings whose resolution terms or timing differ from the book.
+
+        Two contracts priced the same are only comparable if they resolve the
+        same way. Divergent wording or a resolution date days away from the rest
+        of the book is exactly the case a user would otherwise read as a
+        mispricing.
+        """
+        flags: dict[str, list[str]] = {}
+        texts = {
+            record.market_id: _tokenize(str(record.resolution_source or record.description or ""))
+            for record in records
+        }
+        populated = [tokens for tokens in texts.values() if tokens]
+        if len(populated) >= 3:
+            counts: dict[str, int] = {}
+            for tokens in populated:
+                for token in tokens:
+                    counts[token] = counts.get(token, 0) + 1
+            shared = {token for token, count in counts.items() if count >= len(populated) / 2}
+            if len(shared) >= 4:
+                for market_id, tokens in texts.items():
+                    if not tokens:
+                        continue
+                    coverage = len(tokens & shared) / len(shared)
+                    if coverage < 0.5:
+                        flags.setdefault(market_id, []).append(
+                            f"Resolution text shares only {coverage:.0%} of the wording common to the rest of the book.",
+                        )
+
+        end_times = [ensure_utc(record.end_time) for record in records if record.end_time is not None]
+        if len(end_times) >= 3:
+            reference = _median_datetime(end_times)
+            for record in records:
+                end_time = ensure_utc(record.end_time)
+                if end_time is None or reference is None:
+                    continue
+                offset_days = (end_time - reference).total_seconds() / 86400.0
+                if abs(offset_days) > EVENT_BOOK_RESOLUTION_DRIFT_DAYS:
+                    direction = "later" if offset_days > 0 else "earlier"
+                    flags.setdefault(record.market_id, []).append(
+                        f"Resolves {abs(offset_days):.1f} days {direction} than the rest of the book.",
+                    )
+        return flags
+
+    def get_calibration_summary(
+        self,
+        market_id: str,
+        *,
+        sample_size: int = CALIBRATION_DEFAULT_SAMPLE_MARKETS,
+        lead_times_hours: Sequence[int] | None = None,
+    ) -> CalibrationSummary | None:
+        adapter = self._resolve_adapter(market_id)
+        if adapter is None:
+            return None
+        venue = str(getattr(adapter, "provider", "") or market_id.split(":", 1)[0]).strip().lower()
+        return self.build_venue_calibration(
+            adapter,
+            venue=venue,
+            sample_size=sample_size,
+            lead_times_hours=lead_times_hours,
+        )
+
+    def build_venue_calibration(
+        self,
+        adapter: PredictionMarketAdapter,
+        *,
+        venue: str,
+        sample_size: int = CALIBRATION_DEFAULT_SAMPLE_MARKETS,
+        lead_times_hours: Sequence[int] | None = None,
+    ) -> CalibrationSummary:
+        """Measure a venue's calibration at fixed lead times before resolution.
+
+        The question a calibration curve is supposed to answer is "when this
+        venue said 70%, how often did it happen?". Asking that of a resolved
+        market's last trade answers a different question, because that print was
+        made once the outcome was effectively known. Each resolved contract is
+        therefore sampled at `resolved_at - lead_time` from its own probability
+        history, and the settlement print is kept only as a convergence
+        diagnostic.
+        """
+        leads = self._normalize_lead_times(lead_times_hours)
+        bounded_sample = max(1, min(int(sample_size or CALIBRATION_DEFAULT_SAMPLE_MARKETS), CALIBRATION_MAX_SAMPLE_MARKETS))
+        retrieved_at = ensure_utc(now_utc())
+        origin = f"prediction_market_service.calibration.{venue}"
+
+        try:
+            # Over-fetch: a venue's most recent settlements are dominated by
+            # high-frequency contracts, so taking exactly `sample_size` of them
+            # produces a sample spanning minutes. A wider pull lets the
+            # research-first ordering below reach a broader period.
+            records = self._canonicalize_rows(
+                adapter.list_markets(status="closed", limit=CALIBRATION_DISCOVERY_LIMIT)
+            )
+        except Exception as exc:
+            return CalibrationSummary(
+                venue=venue,
+                sample_size=0,
+                method=CALIBRATION_METHOD_LEAD_TIME,
+                is_validated=False,
+                lead_times_hours=list(leads),
+                minimum_bucket_sample=CALIBRATION_MIN_BUCKET_SAMPLE,
+                minimum_curve_sample=CALIBRATION_MIN_CURVE_SAMPLE,
+                warnings=[f"{venue} resolved-market lookup failed: {exc}"],
+                source_provider=venue,
+                retrieved_at=retrieved_at,
+                origin=origin,
+            )
+
+        resolved = [
+            record
+            for record in records
+            if record.resolution_outcome is not None and (record.close_time or record.end_time) is not None
+        ]
+        resolved.sort(key=lambda record: ensure_utc(record.close_time or record.end_time), reverse=True)
+        # Research-category settlements first, most recent within each group.
+        # The composition is still reported: preferring them narrows the gap
+        # between what the label says and what was measured without pretending
+        # the rest of the venue does not exist.
+        sampled = [
+            *(record for record in resolved if record.category in ALLOWED_RESEARCH_CATEGORIES),
+            *(record for record in resolved if record.category not in ALLOWED_RESEARCH_CATEGORIES),
+        ][:bounded_sample]
+
+        observations_by_lead: dict[int, list[CalibrationObservation]] = {lead: [] for lead in leads}
+        markets_without_history = 0
+        contributing_settlements: list[datetime] = []
+        contributing_categories: dict[str, int] = {}
+        transformation_note = (
+            "Each resolved contract's probability is read from its own history at a fixed lead time before "
+            "resolution and bucketed on that value. The settlement print is excluded from the calibration input "
+            "and reported separately as a convergence diagnostic."
+        )
+
+        for record in sampled:
+            resolved_at = ensure_utc(record.close_time or record.end_time)
+            points = self._calibration_history_points(adapter, record, resolved_at=resolved_at, max_lead_hours=max(leads))
+            if not points:
+                markets_without_history += 1
+                continue
+            matched = False
+            for lead in leads:
+                observation = self._calibration_observation(
+                    record,
+                    points,
+                    resolved_at=resolved_at,
+                    lead_hours=lead,
+                    venue=venue,
+                    origin=origin,
+                    transformation_note=transformation_note,
+                )
+                if observation is not None:
+                    observations_by_lead[lead].append(observation)
+                    matched = True
+            if matched:
+                contributing_settlements.append(resolved_at)
+                label = record.category or "Uncategorized"
+                contributing_categories[label] = contributing_categories.get(label, 0) + 1
+
+        period_hours = (
+            (max(contributing_settlements) - min(contributing_settlements)).total_seconds() / 3600.0
+            if contributing_settlements
+            else 0.0
+        )
+        curves = [
+            self._calibration_curve(
+                lead,
+                observations_by_lead[lead],
+                venue=venue,
+                retrieved_at=retrieved_at,
+                origin=origin,
+                transformation_note=transformation_note,
+                period_hours=period_hours,
+            )
+            for lead in leads
+        ]
+        measured = sum(curve.sample_size for curve in curves)
+        convergence = build_settlement_convergence(sampled)
+
+        if measured == 0:
+            return self._deprecated_calibration_summary(
+                adapter,
+                venue=venue,
+                leads=leads,
+                sample_size=bounded_sample,
+                considered=len(resolved),
+                sampled=len(sampled),
+                markets_without_history=markets_without_history,
+                convergence=convergence,
+                retrieved_at=retrieved_at,
+            )
+
+        warnings: list[str] = []
+        if markets_without_history:
+            warnings.append(
+                f"{markets_without_history} of {len(sampled)} sampled contracts returned no probability history "
+                "at the requested lead times and were excluded.",
+            )
+        if len(sampled) and markets_without_history >= max(len(sampled) // 2, 2):
+            warnings.append(
+                f"More than half of the sampled {venue} contracts returned an empty history. That is also what "
+                "provider throttling looks like on this endpoint, so treat this sample as incomplete rather than "
+                "as evidence the venue has no history.",
+            )
+        if not any(curve.is_plottable for curve in curves):
+            warnings.append(
+                f"No lead time reached the {CALIBRATION_MIN_CURVE_SAMPLE}-contract minimum with at least two "
+                f"populated buckets, so no curve is drawn. Bucket counts are shown so the shortfall is visible.",
+            )
+
+        if contributing_settlements and period_hours < CALIBRATION_MIN_SAMPLE_PERIOD_HOURS:
+            warnings.append(
+                f"The measured contracts all settled within {period_hours:.1f} hours of each other. On a venue "
+                "that settles high-frequency contracts continuously, that is a snapshot of one settlement batch "
+                "rather than a sample across market conditions, so no curve is drawn from it.",
+            )
+
+        contributing_total = sum(contributing_categories.values())
+        research_count = sum(
+            count for label, count in contributing_categories.items() if label in ALLOWED_RESEARCH_CATEGORIES
+        )
+        research_share = (research_count / contributing_total) if contributing_total else None
+        if research_share is not None and research_share < 0.5:
+            top = sorted(contributing_categories.items(), key=lambda item: -item[1])[:3]
+            warnings.append(
+                f"Only {research_share:.0%} of the measured contracts fall into Gamma's research categories "
+                f"(largest groups: {', '.join(f'{label} {count}' for label, count in top)}). This measures the "
+                "venue as a whole, not the contracts this tab screens for.",
+            )
+
+        # Show the observations behind the curve a reader will actually be
+        # looking at: the drawn one if there is one, otherwise the best-sampled.
+        primary_lead = next(
+            (curve.lead_time_hours for curve in curves if curve.is_plottable),
+            max(leads, key=lambda lead: len(observations_by_lead[lead])),
+        )
+        return CalibrationSummary(
+            venue=venue,
+            sample_size=measured,
+            method=CALIBRATION_METHOD_LEAD_TIME,
+            is_validated=any(curve.is_plottable for curve in curves),
+            lead_times_hours=list(leads),
+            curves=curves,
+            minimum_bucket_sample=CALIBRATION_MIN_BUCKET_SAMPLE,
+            minimum_curve_sample=CALIBRATION_MIN_CURVE_SAMPLE,
+            resolved_markets_considered=len(resolved),
+            markets_sampled=len(sampled),
+            markets_without_history=markets_without_history,
+            sample_period_start=min(contributing_settlements) if contributing_settlements else None,
+            sample_period_end=max(contributing_settlements) if contributing_settlements else None,
+            sample_categories=dict(sorted(contributing_categories.items(), key=lambda item: -item[1])),
+            research_share=research_share,
+            convergence=convergence,
+            observations=sorted(
+                observations_by_lead[primary_lead],
+                key=lambda row: ensure_utc(row.settled_at) or retrieved_at,
+                reverse=True,
+            )[:CALIBRATION_MAX_OBSERVATION_ROWS],
+            warnings=warnings,
+            source_provider=venue,
+            retrieved_at=retrieved_at,
+            origin=origin,
+            transformation_note=transformation_note,
+        )
+
+    @staticmethod
+    def _normalize_lead_times(lead_times_hours: Sequence[int] | None) -> tuple[int, ...]:
+        if not lead_times_hours:
+            return CALIBRATION_DEFAULT_LEAD_TIMES_HOURS
+        selected: list[int] = []
+        for value in lead_times_hours:
+            try:
+                hours = int(value)
+            except (TypeError, ValueError):
+                continue
+            if hours in CALIBRATION_SUPPORTED_LEAD_TIMES_HOURS and hours not in selected:
+                selected.append(hours)
+        if not selected:
+            return CALIBRATION_DEFAULT_LEAD_TIMES_HOURS
+        return tuple(sorted(selected)[:CALIBRATION_MAX_LEAD_TIMES])
+
+    def _calibration_history_points(
+        self,
+        adapter: PredictionMarketAdapter,
+        record: PredictionMarketRecord,
+        *,
+        resolved_at: datetime,
+        max_lead_hours: int,
+    ) -> list[PredictionProbabilityPoint]:
+        """Fetch one bounded window per contract, ending at its resolution.
+
+        A single window covering the longest lead time serves every lead time,
+        which keeps the number of provider requests to one per contract. The
+        window deliberately ends at the contract's own resolution rather than at
+        "now", because a named lookback would be measured from today and return
+        nothing for a contract that settled months ago.
+        """
+        outcome = record.outcomes[0] if record.outcomes else None
+        window = PredictionHistoryWindow(
+            range_key=CALIBRATION_WINDOW_RANGE_KEY,
+            start=resolved_at - timedelta(hours=max_lead_hours) - _calibration_window_margin(max_lead_hours),
+            end=resolved_at,
+            resolution_minutes=CALIBRATION_WINDOW_RESOLUTION_MINUTES,
+            resolution_is_auto=False,
+            outcome_id=outcome.outcome_id if outcome else None,
+            outcome_token_id=outcome.token_id if outcome else None,
+        )
+        try:
+            fetch = self._fetch_history_window(adapter, record, window)
+        except Exception:
+            # A single unavailable contract must not sink the whole sample; it
+            # is counted as "no history" and reported in the summary.
+            return []
+        points = sorted(
+            (point for point in fetch.points if point.probability is not None),
+            key=lambda point: ensure_utc(point.timestamp),
+        )
+        return self._clip_points(points, window.start, window.end)
+
+    @staticmethod
+    def _calibration_observation(
+        record: PredictionMarketRecord,
+        points: list[PredictionProbabilityPoint],
+        *,
+        resolved_at: datetime,
+        lead_hours: int,
+        venue: str,
+        origin: str,
+        transformation_note: str,
+    ) -> CalibrationObservation | None:
+        """Last quote at or before `resolved_at - lead_hours`, if it is close enough.
+
+        A contract that only listed twelve hours before resolution has no T-7d
+        probability. Carrying an older quote forward indefinitely would quietly
+        relabel a T-30d price as a T-7d price, so an observation past the
+        tolerance is dropped instead of stretched.
+        """
+        target = resolved_at - timedelta(hours=lead_hours)
+        candidate: PredictionProbabilityPoint | None = None
+        for point in points:
+            if ensure_utc(point.timestamp) <= target:
+                candidate = point
+            else:
+                break
+        if candidate is None:
+            return None
+        observed_at = ensure_utc(candidate.timestamp)
+        lag_hours = (target - observed_at).total_seconds() / 3600.0
+        if lag_hours > _calibration_tolerance_hours(lead_hours):
+            return None
+        return CalibrationObservation(
+            market_id=record.market_id,
+            title=record.title,
+            probability=float(candidate.probability),
+            outcome=bool(record.resolution_outcome),
+            settled_at=resolved_at,
+            lead_time_hours=lead_hours,
+            observed_at=observed_at,
+            observation_lag_hours=lag_hours,
+            settlement_probability=record.current_probability,
+            source_provider=venue,
+            retrieved_at=candidate.retrieved_at or record.retrieved_at,
+            origin=origin,
+            transformation_note=transformation_note,
+        )
+
+    @staticmethod
+    def _calibration_curve(
+        lead_hours: int,
+        observations: list[CalibrationObservation],
+        *,
+        venue: str,
+        retrieved_at: datetime,
+        origin: str,
+        transformation_note: str,
+        period_hours: float,
+    ) -> CalibrationCurve:
+        label = _lead_time_label(lead_hours)
+        if not observations:
+            return CalibrationCurve(
+                lead_time_hours=lead_hours,
+                label=label,
+                sample_size=0,
+                is_plottable=False,
+                warnings=[f"No sampled contract had a quote within tolerance of {label}."],
+            )
+
+        buckets: list[CalibrationBucket] = []
+        for lower, upper, bucket_label in CALIBRATION_BUCKET_EDGES:
+            rows = [row for row in observations if lower <= row.probability < upper]
+            if not rows:
+                continue
+            buckets.append(
+                CalibrationBucket(
+                    label=bucket_label,
+                    sample_size=len(rows),
+                    average_probability=sum(row.probability for row in rows) / len(rows),
+                    realized_frequency=sum(1.0 if row.outcome else 0.0 for row in rows) / len(rows),
+                    lead_time_hours=lead_hours,
+                    meets_minimum=len(rows) >= CALIBRATION_MIN_BUCKET_SAMPLE,
+                    source_provider=venue,
+                    retrieved_at=retrieved_at,
+                    origin=origin,
+                    transformation_note=transformation_note,
+                )
+            )
+
+        populated = sum(1 for bucket in buckets if bucket.meets_minimum)
+        # The settlement span is part of the minimum, not a footnote. Forty
+        # contracts that all settled inside one batch are one observation of one
+        # market state, however many rows they add up to.
+        spans_enough_time = period_hours >= CALIBRATION_MIN_SAMPLE_PERIOD_HOURS
+        is_plottable = len(observations) >= CALIBRATION_MIN_CURVE_SAMPLE and populated >= 2 and spans_enough_time
+        warnings: list[str] = []
+        if not is_plottable:
+            warnings.append(
+                f"{len(observations)} contracts and {populated} buckets reached the minimum "
+                f"({CALIBRATION_MIN_CURVE_SAMPLE} contracts, {CALIBRATION_MIN_BUCKET_SAMPLE} per bucket, two "
+                f"buckets, {CALIBRATION_MIN_SAMPLE_PERIOD_HOURS:.0f}h settlement span; this sample spans "
+                f"{period_hours:.1f}h); the numbers are shown but no curve is drawn.",
+            )
+
+        realized = sum(1.0 if row.outcome else 0.0 for row in observations) / len(observations)
+        predicted = sum(row.probability for row in observations) / len(observations)
+        return CalibrationCurve(
+            lead_time_hours=lead_hours,
+            label=label,
+            sample_size=len(observations),
+            buckets=buckets,
+            brier_score=sum((row.probability - (1.0 if row.outcome else 0.0)) ** 2 for row in observations)
+            / len(observations),
+            mean_signed_error=realized - predicted,
+            is_plottable=is_plottable,
+            warnings=warnings,
+        )
+
+    def _deprecated_calibration_summary(
+        self,
+        adapter: PredictionMarketAdapter,
+        *,
+        venue: str,
+        leads: tuple[int, ...],
+        sample_size: int,
+        considered: int,
+        sampled: int,
+        markets_without_history: int,
+        convergence: CalibrationConvergence | None,
+        retrieved_at: datetime,
+    ) -> CalibrationSummary:
+        """Labeled fallback when no lead-time observation could be obtained.
+
+        The venue's settlement prints are still shown, but only as a convergence
+        diagnostic with `is_validated=False`; no curve is produced from them.
+        """
+        reason = (
+            f"No {venue} contract returned a probability quote within tolerance of any requested lead time "
+            f"({', '.join(_lead_time_label(lead) for lead in leads)}), so no calibration could be measured. "
+            "The venue's settlement prints are shown below as a convergence diagnostic only - they are not "
+            "predictive and are not bucketed."
+        )
+        try:
+            fallback = adapter.build_calibration_summary(sample_size=sample_size)
+        except Exception as exc:
+            return CalibrationSummary(
+                venue=venue,
+                sample_size=0,
+                method=CALIBRATION_METHOD_SETTLEMENT,
+                is_validated=False,
+                lead_times_hours=list(leads),
+                minimum_bucket_sample=CALIBRATION_MIN_BUCKET_SAMPLE,
+                minimum_curve_sample=CALIBRATION_MIN_CURVE_SAMPLE,
+                resolved_markets_considered=considered,
+                markets_sampled=sampled,
+                markets_without_history=markets_without_history,
+                convergence=convergence,
+                warnings=[reason, f"{venue} settlement fallback also failed: {exc}"],
+                source_provider=venue,
+                retrieved_at=retrieved_at,
+                origin=f"prediction_market_service.calibration.{venue}",
+            )
+        return replace(
+            fallback,
+            method=CALIBRATION_METHOD_SETTLEMENT,
+            is_validated=False,
+            lead_times_hours=list(leads),
+            curves=[],
+            minimum_bucket_sample=CALIBRATION_MIN_BUCKET_SAMPLE,
+            minimum_curve_sample=CALIBRATION_MIN_CURVE_SAMPLE,
+            resolved_markets_considered=max(considered, fallback.resolved_markets_considered),
+            markets_sampled=sampled,
+            markets_without_history=markets_without_history,
+            convergence=convergence or fallback.convergence,
+            warnings=[reason, *fallback.warnings],
+        )
 
     def _build_history_series(
         self,
@@ -623,30 +1545,15 @@ class PredictionMarketService:
             outcome=outcome,
         )
 
-        fetch_window = getattr(adapter, "get_history_window", None)
-        if callable(fetch_window):
-            try:
-                fetch = fetch_window(detail, window)
-            except Exception as exc:
-                return self._empty_history(
-                    detail,
-                    window,
-                    outcome,
-                    warnings=[*warnings, f"{detail.venue} history request failed: {exc}"],
-                )
-        else:
-            try:
-                fetch = PredictionHistoryFetch(
-                    points=list(adapter.get_history(detail)),
-                    windowing="client_clipped",
-                )
-            except Exception as exc:
-                return self._empty_history(
-                    detail,
-                    window,
-                    outcome,
-                    warnings=[*warnings, f"{detail.venue} history request failed: {exc}"],
-                )
+        try:
+            fetch = self._fetch_history_window(adapter, detail, window)
+        except Exception as exc:
+            return self._empty_history(
+                detail,
+                window,
+                outcome,
+                warnings=[*warnings, f"{detail.venue} history request failed: {exc}"],
+            )
 
         warnings.extend(fetch.warnings)
         points = sorted(
@@ -702,6 +1609,27 @@ class PredictionMarketService:
             retrieved_at=clipped[0].retrieved_at if clipped else detail.retrieved_at,
             origin=clipped[0].origin if clipped else detail.origin,
             transformation_note=clipped[0].transformation_note if clipped else None,
+        )
+
+    @staticmethod
+    def _fetch_history_window(
+        adapter: PredictionMarketAdapter,
+        detail: PredictionMarketRecord,
+        window: PredictionHistoryWindow,
+    ) -> PredictionHistoryFetch:
+        """Fetch a window, probing for the optional windowing capability.
+
+        `get_history_window` is an optional adapter capability. An adapter that
+        only implements the original `get_history(market)` still works; its
+        series is labeled `client_clipped` so the caller knows it must clip.
+        Provider failures propagate so the caller can report them in context.
+        """
+        fetch_window = getattr(adapter, "get_history_window", None)
+        if callable(fetch_window):
+            return fetch_window(detail, window)
+        return PredictionHistoryFetch(
+            points=list(adapter.get_history(detail)),
+            windowing="client_clipped",
         )
 
     def _empty_history(
@@ -1610,12 +2538,39 @@ def _clamp_up(value: int, choices: tuple[int, ...]) -> int:
     return choices[-1]
 
 
+def _lead_time_label(lead_hours: int) -> str:
+    if lead_hours % 24 == 0 and lead_hours >= 24:
+        return f"T-{lead_hours // 24}d"
+    return f"T-{lead_hours}h"
+
+
+def _calibration_window_margin(max_lead_hours: int) -> timedelta:
+    """Extra history requested before the earliest lead time.
+
+    Without it the T-7d sample would sit exactly on the window edge and would be
+    lost whenever a venue's first bar lands a few minutes late.
+    """
+    return timedelta(hours=max(24, int(max_lead_hours * 0.15)))
+
+
+def _calibration_tolerance_hours(lead_hours: int) -> float:
+    """How stale a quote may be and still count as the lead-time probability."""
+    return max(6.0, lead_hours * 0.25)
+
+
 def _auto_resolution_minutes(start: datetime, end: datetime) -> int:
     span_minutes = max((end - start).total_seconds() / 60, 1)
     return _clamp_up(
         max(int(span_minutes / AUTO_RESOLUTION_TARGET_POINTS), 1),
         RESOLUTION_CHOICES_MINUTES,
     )
+
+
+def _median_datetime(values: list[datetime]) -> datetime | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
 
 
 def _median(values: list[float]) -> float | None:

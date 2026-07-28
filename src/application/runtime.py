@@ -87,6 +87,7 @@ from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
+from src.services.prediction_research_store import PredictionResearchStore
 from src.services.sitrep_follow_up_store import SitrepFollowUpStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
@@ -319,11 +320,13 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     research_service = ResearchService(research_provider, saved_store=saved_research_store)
+    prediction_research_store = PredictionResearchStore(base_dir=resolved_history_dir / "prediction_markets")
     prediction_market_service = PredictionMarketService(
         adapters={
             "polymarket": trace_provider(PolymarketAdapter(cache), provider_usage, endpoint_prefix="prediction_markets"),
             "kalshi": trace_provider(KalshiAdapter(cache), provider_usage, endpoint_prefix="prediction_markets"),
-        }
+        },
+        research_store=prediction_research_store,
     )
     macro_service = MacroService(
         fred_adapter=trace_provider(FredMacroAdapter(cache), provider_usage, endpoint_prefix="macro"),

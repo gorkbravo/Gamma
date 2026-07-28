@@ -154,7 +154,10 @@ class MockCopilotProvider(CopilotProvider):
             return [("get_commodities_workspace_summary", {})]
         if domain == "prediction_markets":
             return [
-                ("get_prediction_market_history_summary", {}),
+                (
+                    "get_prediction_market_history_summary",
+                    {"range": "1m", "resolution_minutes": None, "outcome_id": None},
+                ),
                 ("get_prediction_market_flow_context", {}),
             ]
         if domain == "crypto":
@@ -520,7 +523,12 @@ class MockCopilotProvider(CopilotProvider):
         related = self._as_list(flow.get("related_markets")) or self._as_list(context.summary_data.get("related_markets"))
         title = selected_market.get("title") or "Selected market"
         venue = selected_market.get("venue") or "venue"
-        change = self._as_float(history.get("change"))
+        # The windowed contract nests derived statistics; the legacy context
+        # summary keeps them flat.
+        history_stats = self._as_dict(history.get("stats")) or history
+        history_window = self._as_dict(history.get("window"))
+        history_warnings = self._as_list(history.get("warnings"))
+        change = self._as_float(history_stats.get("change"))
         participant_share = self._as_float(wallet_summary.get("top_participant_share"))
 
         if change is not None and abs(change) >= 0.08:
@@ -530,8 +538,10 @@ class MockCopilotProvider(CopilotProvider):
         else:
             hypothesis = "The selected market needs to be framed through price history, related contracts, and flow rather than current probability alone."
 
+        window_label = str(history_window.get("effective_range") or history_window.get("requested_range") or "available")
         rationale = (
-            f"Gamma already has the {venue} contract detail for {title}, plus current history, flow, related-market, and calibration context."
+            f"Gamma already has the {venue} contract detail for {title}, plus a {window_label} probability window, "
+            "flow, and related-market context."
         )
         relationship = self._as_dict(related[0]).get("relationship") if related else "related-market"
         return ResearchCard(
@@ -551,6 +561,9 @@ class MockCopilotProvider(CopilotProvider):
                 "Venue freshness and history lag can distort apparent signal quality.",
                 "Wallet-level depth differs by venue, especially between Polymarket and Kalshi.",
                 "Calibration coverage is still thin and venue dependent.",
+                # Provider window limits must reach the card, or a clipped
+                # series gets described as a full history.
+                *[str(warning) for warning in history_warnings[:2]],
             ],
             next_steps=[
                 "Inspect whether the recent move is large relative to the loaded history window.",

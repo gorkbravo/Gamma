@@ -40,6 +40,13 @@ export {
 } from "./portfolio";
 import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
 import {
+  DEFAULT_CALIBRATION_LEAD_TIMES,
+  DEFAULT_CALIBRATION_SAMPLE,
+  PREDICTION_WORKING_BASKET_NAME,
+  markLegacyResearchMigrated,
+  readLegacyResearch
+} from "../prediction-markets";
+import {
   SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY,
   SITREP_FOLLOW_UP_STORAGE_KEY,
   buildSitrepFollowUpCreatePayload,
@@ -107,7 +114,11 @@ import type {
   MacroSnapshot,
   NewsEventFeedResponse,
   SitrepWorkspaceResponse,
+  CrossTabHandoffEnvelope,
   PredictionCalibrationSummary,
+  PredictionEventBook,
+  PredictionOrderBookDepth,
+  PredictionSavedResearch,
   PredictionHistoryRange,
   PredictionMarket,
   PredictionMarketComparison,
@@ -448,6 +459,13 @@ export const predictionMarketComparison = writable<PredictionMarketComparison | 
 export const predictionHistoryRange = writable<PredictionHistoryRange>("max");
 export const predictionHistoryResolution = writable<number | null>(null);
 export const predictionHistoryOutcomeId = writable<string | null>(null);
+export const predictionMarketEventBook = writable<PredictionEventBook | null>(null);
+export const predictionMarketDepth = writable<PredictionOrderBookDepth | null>(null);
+export const predictionMarketHandoffs = writable<CrossTabHandoffEnvelope[]>([]);
+export const predictionSavedResearch = writable<PredictionSavedResearch | null>(null);
+export const predictionCompareSelection = writable<string[]>([]);
+export const predictionCalibrationLeadTimes = writable<number[]>([...DEFAULT_CALIBRATION_LEAD_TIMES]);
+export const predictionCalibrationSample = writable<number>(DEFAULT_CALIBRATION_SAMPLE);
 export const cryptoWorkspace = writable<CryptoWorkspaceResponse | null>(null);
 export const selectedCryptoTokenId = writable<string | null>(null);
 export const cryptoTokenDetail = writable<CryptoToken | null>(null);
@@ -2533,6 +2551,220 @@ export async function runPredictionMarketComparison(
   }
 }
 
+function applySavedResearch(saved: PredictionSavedResearch | null) {
+  predictionSavedResearch.set(saved);
+  if (!saved) {
+    return saved;
+  }
+  const working = saved.comparison_sets.find((row) => row.name === PREDICTION_WORKING_BASKET_NAME);
+  if (working) {
+    predictionCompareSelection.set([...working.market_ids]);
+  }
+  return saved;
+}
+
+/**
+ * Load server-side saved research, migrating this browser's local records once.
+ * The migration flag is set only after the server confirms the import, so a
+ * failed request leaves the local records available for a later attempt.
+ */
+export async function loadPredictionSavedResearch() {
+  setLoading("predictionSaved", true);
+  try {
+    const legacy = readLegacyResearch();
+    if (legacy) {
+      const migrated = await postJson<PredictionSavedResearch>("/prediction-markets/saved/import", {
+        watchlist: legacy.watchlist.map((entry) => ({
+          market_id: entry.market_id,
+          venue: entry.venue,
+          title: entry.title,
+          probability: entry.probability
+        })),
+        comparison_basket: legacy.comparison_basket,
+        basket_name: PREDICTION_WORKING_BASKET_NAME
+      });
+      markLegacyResearchMigrated();
+      lastError.set("");
+      return applySavedResearch(migrated);
+    }
+    const response = await getJson<PredictionSavedResearch>("/prediction-markets/saved");
+    lastError.set("");
+    return applySavedResearch(response);
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionSaved", false);
+  }
+}
+
+export async function togglePredictionWatchlistEntry(market: {
+  market_id: string;
+  venue?: string | null;
+  title?: string | null;
+  current_probability?: number | null;
+}) {
+  const saved = get(predictionSavedResearch);
+  const isWatched = Boolean(saved?.watchlist.some((entry) => entry.market_id === market.market_id));
+  setLoading("predictionSaved", true);
+  try {
+    const response = isWatched
+      ? await deleteJson<PredictionSavedResearch>(
+          `/prediction-markets/saved/watchlist/${market.market_id}`
+        )
+      : await postJson<PredictionSavedResearch>("/prediction-markets/saved/watchlist", {
+          market_id: market.market_id,
+          venue: market.venue ?? "",
+          title: market.title ?? "",
+          probability: market.current_probability ?? null
+        });
+    lastError.set("");
+    return applySavedResearch(response);
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionSaved", false);
+  }
+}
+
+export async function savePredictionComparisonSet(options: {
+  name: string;
+  marketIds: string[];
+  setId?: string | null;
+  rangeKey?: string;
+  resolutionMinutes?: number | null;
+  note?: string;
+}) {
+  setLoading("predictionSaved", true);
+  try {
+    const response = await postJson<PredictionSavedResearch>("/prediction-markets/saved/comparison-sets", {
+      name: options.name,
+      market_ids: options.marketIds,
+      set_id: options.setId ?? null,
+      range_key: options.rangeKey ?? get(predictionHistoryRange),
+      resolution_minutes: options.resolutionMinutes ?? get(predictionHistoryResolution),
+      note: options.note ?? ""
+    });
+    lastError.set("");
+    return applySavedResearch(response);
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionSaved", false);
+  }
+}
+
+export async function deletePredictionComparisonSet(setId: string) {
+  setLoading("predictionSaved", true);
+  try {
+    const response = await deleteJson<PredictionSavedResearch>(
+      `/prediction-markets/saved/comparison-sets/${setId}`
+    );
+    lastError.set("");
+    return applySavedResearch(response);
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionSaved", false);
+  }
+}
+
+let workingBasketHandle: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Update the working comparison basket and persist it to the server.
+ * Persistence is debounced because ticking four contracts should cost one
+ * write, not four.
+ */
+export function setPredictionCompareSelection(marketIds: string[]) {
+  predictionCompareSelection.set([...marketIds]);
+  if (workingBasketHandle) {
+    clearTimeout(workingBasketHandle);
+  }
+  workingBasketHandle = setTimeout(() => {
+    workingBasketHandle = null;
+    void persistPredictionWorkingBasket();
+  }, 600);
+}
+
+export async function persistPredictionWorkingBasket() {
+  const marketIds = get(predictionCompareSelection);
+  const saved = get(predictionSavedResearch);
+  const existing = saved?.comparison_sets.find((row) => row.name === PREDICTION_WORKING_BASKET_NAME);
+  if (!marketIds.length) {
+    if (!existing) {
+      return null;
+    }
+    return deletePredictionComparisonSet(existing.id);
+  }
+  return savePredictionComparisonSet({
+    name: PREDICTION_WORKING_BASKET_NAME,
+    marketIds,
+    setId: existing?.id ?? null
+  });
+}
+
+/**
+ * Resolve every sibling contract the venue groups under the selected event.
+ * Loaded on demand: an event with dozens of candidates is a bigger surface than
+ * the contract bundle needs by default.
+ */
+export async function loadPredictionMarketEventBook(marketId: string) {
+  setLoading("predictionEventBook", true);
+  try {
+    const response = await getJson<PredictionEventBook>(
+      `/prediction-markets/markets/${marketId}/event-book`
+    );
+    predictionMarketEventBook.set(response);
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionEventBook", false);
+  }
+}
+
+/**
+ * Lead-time calibration costs one provider history request per sampled
+ * contract, so it is loaded when the Calibration mode asks for it rather than
+ * bundled into every contract selection.
+ */
+export async function loadPredictionMarketCalibration(
+  marketId: string,
+  options: { leadTimes?: number[]; sampleSize?: number } = {}
+) {
+  const leadTimes = options.leadTimes ?? get(predictionCalibrationLeadTimes);
+  const sampleSize = options.sampleSize ?? get(predictionCalibrationSample);
+  predictionCalibrationLeadTimes.set(leadTimes);
+  predictionCalibrationSample.set(sampleSize);
+
+  const params = new URLSearchParams();
+  params.set("sample", String(sampleSize));
+  for (const lead of leadTimes) {
+    params.append("lead", String(lead));
+  }
+
+  setLoading("predictionCalibration", true);
+  try {
+    const response = await getJson<PredictionCalibrationSummary>(
+      `/prediction-markets/markets/${marketId}/calibration?${params.toString()}`
+    );
+    predictionMarketCalibration.set(response);
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionCalibration", false);
+  }
+}
+
 export async function selectPredictionMarket(
   marketId: string,
   options: { resetThread?: boolean } & PredictionHistoryOptions = {}
@@ -2541,13 +2773,17 @@ export async function selectPredictionMarket(
   if (options.resetThread ?? true) {
     resetCopilotCard("prediction_markets");
   }
-  // A new contract must not inherit the previous contract's outcome selection.
+  // A new contract must not inherit the previous contract's outcome selection
+  // or its event book.
   predictionHistoryOutcomeId.set(options.outcomeId ?? null);
   predictionMarketOutcomeSeries.set(null);
+  predictionMarketEventBook.set(null);
+  predictionMarketDepth.set(null);
+  predictionMarketHandoffs.set([]);
   setLoading("predictionDetail", true);
   try {
     const historyParams = predictionHistoryQuery(options);
-    const [detailResult, historyResult, walletResult, relatedResult, calibrationResult, outcomeResult] =
+    const [detailResult, historyResult, walletResult, relatedResult, outcomeResult, depthResult, handoffResult] =
       await Promise.allSettled([
       getJson<PredictionMarket>(`/prediction-markets/markets/${marketId}`),
       getJson<PredictionProbabilityHistoryResponse>(
@@ -2555,9 +2791,12 @@ export async function selectPredictionMarket(
       ),
       getJson<PredictionWalletSummary>(`/prediction-markets/markets/${marketId}/wallet-summary`),
       getJson<RelatedPredictionMarketListResponse>(`/prediction-markets/markets/${marketId}/related`),
-      getJson<PredictionCalibrationSummary>(`/prediction-markets/markets/${marketId}/calibration`),
       getJson<PredictionOutcomeSeriesResponse>(
         `/prediction-markets/markets/${marketId}/outcome-history?${historyParams.toString()}`
+      ),
+      getJson<PredictionOrderBookDepth>(`/prediction-markets/markets/${marketId}/depth`),
+      getJson<{ market_id: string; handoffs: CrossTabHandoffEnvelope[] }>(
+        `/prediction-markets/markets/${marketId}/handoffs`
       )
     ]);
 
@@ -2583,17 +2822,23 @@ export async function selectPredictionMarket(
     } else {
       errors.push(relatedResult.reason);
     }
-    if (calibrationResult.status === "fulfilled") {
-      predictionMarketCalibration.set(calibrationResult.value);
-    } else {
-      errors.push(calibrationResult.reason);
-    }
     if (outcomeResult.status === "fulfilled") {
       predictionMarketOutcomeSeries.set(outcomeResult.value);
     } else {
       // Per-outcome history is additive context; a venue without outcome tokens
       // must not turn the whole contract load into an error.
       predictionMarketOutcomeSeries.set(null);
+    }
+    if (depthResult.status === "fulfilled") {
+      predictionMarketDepth.set(depthResult.value);
+    } else {
+      // Same rule for depth: a venue without a public book must not fail the load.
+      predictionMarketDepth.set(null);
+    }
+    if (handoffResult.status === "fulfilled") {
+      predictionMarketHandoffs.set(handoffResult.value.handoffs ?? []);
+    } else {
+      predictionMarketHandoffs.set([]);
     }
 
     if (errors.length === 0) {

@@ -7,13 +7,16 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from src.models.prediction_markets import (
-    CalibrationBucket,
+    CALIBRATION_METHOD_SETTLEMENT,
+    CalibrationConvergence,
     CalibrationObservation,
     CalibrationSummary,
+    PredictionBookLevel,
     PredictionHistoryFetch,
     PredictionHistoryWindow,
     PredictionMarketOutcome,
     PredictionMarketRecord,
+    PredictionOrderBookDepth,
     PredictionProbabilityPoint,
     WalletActivityRecord,
     WalletSummary,
@@ -84,6 +87,12 @@ POLYMARKET_DEFAULT_FIDELITY = 60
 # only accepts these named lookback intervals. Anything longer must be requested
 # as a named interval and clipped by the caller.
 POLYMARKET_MAX_WINDOW_DAYS = 14
+# Settled outcome prices are not always exact integers; see
+# `_resolve_polymarket_outcome`.
+POLYMARKET_SETTLEMENT_EPSILON = 1e-3
+# The gamma `/markets` endpoint caps a page at 100 rows whatever limit is asked
+# for, so a deeper pull has to page (verified 2026-07-27).
+POLYMARKET_PAGE_SIZE = 100
 POLYMARKET_MAX_INTERVAL_FIDELITY = 1440
 POLYMARKET_INTERVAL_COVERAGE_DAYS: tuple[tuple[str, float], ...] = (
     ("1h", 1 / 24),
@@ -93,6 +102,14 @@ POLYMARKET_INTERVAL_COVERAGE_DAYS: tuple[tuple[str, float], ...] = (
     ("1m", 31.0),
 )
 KALSHI_PERIOD_INTERVAL_CHOICES = (1, 60, 1440)
+KALSHI_ORDERBOOK_DEPTH = 32
+# Order-book depth is read-only market data. Gamma reads resting size so a
+# spread reading can be interpreted; it never routes an order.
+ORDER_BOOK_LEVEL_LIMIT = 32
+# Probability points either side of the touch counted as "near" depth.
+ORDER_BOOK_DEPTH_BAND = 0.05
+# Reference clip used to express a spread as a cost rather than a width.
+ORDER_BOOK_REFERENCE_CLIP = 1000.0
 # Kalshi rejects candlestick requests that would exceed this many periods.
 KALSHI_MAX_CANDLESTICKS = 5000
 DEFAULT_RESOLUTION_BY_RANGE: dict[str, int] = {
@@ -166,6 +183,19 @@ class BasePredictionMarketAdapter:
         origin: str,
         transformation_note: str,
     ) -> CalibrationSummary:
+        """Deprecated settlement-price path, retained as a labeled fallback.
+
+        The probability available on a resolved record is the venue's final
+        print, which has already converged toward 0 or 1 because the outcome
+        became known. Bucketing on it measures convergence, not foresight, so
+        this method deliberately returns **no calibration curve**. It reports a
+        convergence diagnostic instead, and the summary is marked
+        `is_validated=False` wherever it is used.
+
+        The lead-time calibration that replaces it lives in
+        `PredictionMarketService`, which needs windowed history and therefore
+        cannot be computed from a screener payload alone.
+        """
         resolved = [
             record
             for record in records
@@ -175,47 +205,27 @@ class BasePredictionMarketAdapter:
             (record.retrieved_at for record in resolved if record.retrieved_at is not None),
             default=now_utc(),
         )
+        base_warnings = [
+            "This summary uses the venue's final pre-settlement print, which had already converged toward the "
+            "known outcome. It is a convergence diagnostic, not a calibration measurement, and no curve is drawn "
+            "from it.",
+        ]
         if not resolved:
             return CalibrationSummary(
                 venue=self.provider,
                 sample_size=0,
-                warnings=["No resolved markets with calibration inputs were available."],
+                method=CALIBRATION_METHOD_SETTLEMENT,
+                is_validated=False,
+                warnings=["No resolved markets with settlement prints were available.", *base_warnings],
                 source_provider=self.provider,
                 retrieved_at=retrieved_at,
                 origin=origin,
                 transformation_note=transformation_note,
             )
 
-        bucket_ranges = [
-            (0.0, 0.1, "0-10%"),
-            (0.1, 0.25, "10-25%"),
-            (0.25, 0.5, "25-50%"),
-            (0.5, 0.75, "50-75%"),
-            (0.75, 0.9, "75-90%"),
-            (0.9, 1.000001, "90-100%"),
+        settled_times = [
+            settled for record in resolved if (settled := record.close_time or record.end_time) is not None
         ]
-        buckets: list[CalibrationBucket] = []
-        for start, end, label in bucket_ranges:
-            rows = [
-                record for record in resolved if record.current_probability is not None and start <= record.current_probability < end
-            ]
-            if not rows:
-                continue
-            average_probability = sum(record.current_probability or 0.0 for record in rows) / len(rows)
-            realized_frequency = sum(1.0 if record.resolution_outcome else 0.0 for record in rows) / len(rows)
-            buckets.append(
-                CalibrationBucket(
-                    label=label,
-                    sample_size=len(rows),
-                    average_probability=average_probability,
-                    realized_frequency=realized_frequency,
-                    source_provider=self.provider,
-                    retrieved_at=retrieved_at,
-                    origin=origin,
-                    transformation_note=transformation_note,
-                )
-            )
-
         observations = [
             CalibrationObservation(
                 market_id=record.market_id,
@@ -223,6 +233,7 @@ class BasePredictionMarketAdapter:
                 probability=float(record.current_probability or 0.0),
                 outcome=bool(record.resolution_outcome),
                 settled_at=record.close_time or record.end_time,
+                settlement_probability=float(record.current_probability or 0.0),
                 source_provider=self.provider,
                 retrieved_at=record.retrieved_at,
                 origin=origin,
@@ -233,8 +244,14 @@ class BasePredictionMarketAdapter:
         return CalibrationSummary(
             venue=self.provider,
             sample_size=len(resolved),
-            buckets=buckets,
+            method=CALIBRATION_METHOD_SETTLEMENT,
+            is_validated=False,
+            resolved_markets_considered=len(resolved),
+            sample_period_start=min(settled_times) if settled_times else None,
+            sample_period_end=max(settled_times) if settled_times else None,
+            convergence=build_settlement_convergence(resolved),
             observations=observations,
+            warnings=base_warnings,
             source_provider=self.provider,
             retrieved_at=retrieved_at,
             origin=origin,
@@ -271,11 +288,11 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
                 limit=limit,
                 force_refresh=force_refresh,
             )
+        if status == "closed":
+            return self._list_closed_markets(limit=limit, force_refresh=force_refresh)
         params: dict[str, Any] = {"limit": max(limit, 1)}
         if status == "open":
             params.update({"active": "true", "closed": "false"})
-        elif status == "closed":
-            params.update({"closed": "true"})
         cache_key = self.cache.make_key("prediction_markets", self.provider, "screener", status, str(limit))
         payload, retrieved_at = self._fetch_cached_json(
             cache_key,
@@ -285,6 +302,52 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
         )
         markets = payload if isinstance(payload, list) else []
         return [self._normalize_market(item, retrieved_at=retrieved_at, origin="polymarket.gamma.markets") for item in markets]
+
+    def _list_closed_markets(self, *, limit: int, force_refresh: bool) -> list[PredictionMarketRecord]:
+        """Most recently settled contracts, paged.
+
+        Two provider behaviors force this shape (verified 2026-07-27): the
+        default order is oldest-first, which returns 2020-era contracts that
+        predate the CLOB and have no probability history at all, and the page
+        size caps at 100 regardless of the requested limit.
+        """
+        target = max(limit, 1)
+        records: list[PredictionMarketRecord] = []
+        seen: set[str] = set()
+        for offset in range(0, target, POLYMARKET_PAGE_SIZE):
+            params: dict[str, Any] = {
+                "closed": "true",
+                "limit": POLYMARKET_PAGE_SIZE,
+                "order": "closedTime",
+                "ascending": "false",
+            }
+            if offset:
+                params["offset"] = offset
+            cache_key = self.cache.make_key(
+                "prediction_markets", self.provider, "screener", "closed", "recent", str(offset)
+            )
+            payload, retrieved_at = self._fetch_cached_json(
+                cache_key,
+                f"{self._gamma_base}/markets",
+                params,
+                force_refresh=force_refresh,
+            )
+            page = payload if isinstance(payload, list) else []
+            if not page:
+                break
+            for item in page:
+                if not isinstance(item, dict):
+                    continue
+                market_id = str(item.get("id") or "").strip()
+                if not market_id or market_id in seen:
+                    continue
+                seen.add(market_id)
+                records.append(
+                    self._normalize_market(item, retrieved_at=retrieved_at, origin="polymarket.gamma.markets")
+                )
+            if len(page) < POLYMARKET_PAGE_SIZE:
+                break
+        return records[:target]
 
     def _list_search_markets(
         self,
@@ -558,6 +621,59 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             if "t" in point and "p" in point
         ]
 
+    def get_order_book(
+        self,
+        market: PredictionMarketRecord,
+        *,
+        outcome_token_id: str | None = None,
+    ) -> PredictionOrderBookDepth:
+        """Read-only CLOB depth for one outcome token.
+
+        This is market data, not an order path: Gamma reads resting size so a
+        spread reading can be interpreted, and never submits anything.
+        """
+        outcome = _outcome_for_token(market, outcome_token_id)
+        token_id = outcome_token_id or (outcome.token_id if outcome else None)
+        if not token_id:
+            return PredictionOrderBookDepth(
+                market_id=market.market_id,
+                venue=self.provider,
+                warnings=["Polymarket depth requires an outcome token id; none was available for this market."],
+                source_provider=self.provider,
+                origin="polymarket.clob.book",
+            )
+        cache_key = self.cache.make_key("prediction_markets", self.provider, "book", token_id)
+        payload, retrieved_at = self._fetch_cached_json(
+            cache_key,
+            f"{self._clob_base}/book",
+            {"token_id": token_id},
+        )
+        raw_bids = payload.get("bids", []) if isinstance(payload, dict) else []
+        raw_asks = payload.get("asks", []) if isinstance(payload, dict) else []
+        bids = _book_levels(
+            ((_to_float(row.get("price")), _to_float(row.get("size"))) for row in raw_bids if isinstance(row, dict)),
+            descending=True,
+        )
+        asks = _book_levels(
+            ((_to_float(row.get("price")), _to_float(row.get("size"))) for row in raw_asks if isinstance(row, dict)),
+            descending=False,
+        )
+        return build_order_book_depth(
+            market_id=market.market_id,
+            venue=self.provider,
+            bids=bids,
+            asks=asks,
+            outcome_id=outcome.outcome_id if outcome else None,
+            outcome_label=outcome.label if outcome else market.probability_label,
+            token_id=token_id,
+            retrieved_at=retrieved_at,
+            origin="polymarket.clob.book",
+            transformation_note=(
+                "Polymarket CLOB resting size for the selected outcome token. Sizes are contract units; notional "
+                "is size multiplied by price. Read-only market data."
+            ),
+        )
+
     def get_wallet_summary(self, market: PredictionMarketRecord) -> WalletSummary:
         condition_id = market.provider_condition_id or market.provider_market_id
         trades_key = self.cache.make_key("prediction_markets", self.provider, "trades", market.provider_market_id)
@@ -686,10 +802,20 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
         cache_key = self.cache.make_key("prediction_markets", self.provider, "event", event_id)
         payload, retrieved_at = self._fetch_cached_json(cache_key, f"{self._gamma_base}/events/{event_id}")
         raw_markets = payload.get("markets", []) if isinstance(payload, dict) else []
-        records = [
-            self._normalize_market(item, retrieved_at=retrieved_at, origin="polymarket.gamma.event_markets")
-            for item in raw_markets
-        ]
+        # The event endpoint's nested markets carry no `events` block, so without
+        # this stub every sibling would lose the event id and title that make it
+        # recognizable as part of one book.
+        event_stub = self._search_event_stub(payload) if isinstance(payload, dict) else {}
+        records = []
+        for item in raw_markets:
+            if not isinstance(item, dict):
+                continue
+            enriched = dict(item)
+            if not enriched.get("events") and event_stub.get("id"):
+                enriched["events"] = [event_stub]
+            records.append(
+                self._normalize_market(enriched, retrieved_at=retrieved_at, origin="polymarket.gamma.event_markets")
+            )
         return [record for record in records if record.market_id != market.market_id][:limit]
 
     def build_calibration_summary(self, *, sample_size: int = 30) -> CalibrationSummary:
@@ -697,15 +823,22 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
         return self._build_calibration_summary(
             records,
             sample_size=sample_size,
-            origin="polymarket.gamma.calibration",
-            transformation_note="Uses lastTradePrice as the pre-resolution probability proxy for resolved markets; resolved outcomePrices are retained only for realized outcomes and do not backfill missing predictive probabilities.",
+            origin="polymarket.gamma.settlement_convergence",
+            transformation_note=(
+                "Non-predictive: lastTradePrice on a resolved Polymarket market is the final print before "
+                "settlement, recorded after the outcome was effectively known. It is reported only as a "
+                "convergence diagnostic and is never bucketed as a calibration input."
+            ),
         )
 
     def _normalize_market(self, raw: dict[str, Any], *, retrieved_at: datetime, origin: str) -> PredictionMarketRecord:
         outcomes = _load_json_list(raw.get("outcomes"))
         outcome_prices = _load_json_list(raw.get("outcomePrices"))
         token_ids = _load_json_list(raw.get("clobTokenIds"))
-        resolution_outcome = _resolve_polymarket_outcome(outcome_prices)
+        resolution_outcome = _resolve_polymarket_outcome(
+            outcome_prices,
+            closed=str(raw.get("closed")).strip().lower() == "true",
+        )
         current_probability = _polymarket_probability_proxy(
             raw.get("lastTradePrice"),
             outcome_prices,
@@ -963,6 +1096,62 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         origin = "kalshi.historical_candlesticks" if historical else "kalshi.candlesticks"
         return self._normalize_candlesticks(candles, retrieved_at=retrieved_at, origin=origin)
 
+    def get_order_book(
+        self,
+        market: PredictionMarketRecord,
+        *,
+        outcome_token_id: str | None = None,
+    ) -> PredictionOrderBookDepth:
+        """Read-only Kalshi depth, normalized onto the YES probability axis.
+
+        Kalshi publishes two bid books. A resting bid to buy NO at p is an offer
+        to sell YES at 1-p, so the YES ask side is derived from the NO book
+        rather than left missing.
+        """
+        del outcome_token_id
+        if not market.provider_market_id:
+            return PredictionOrderBookDepth(
+                market_id=market.market_id,
+                venue=self.provider,
+                warnings=["Kalshi depth requires a market ticker."],
+                source_provider=self.provider,
+                origin="kalshi.orderbook",
+            )
+        cache_key = self.cache.make_key("prediction_markets", self.provider, "orderbook", market.provider_market_id)
+        payload, retrieved_at = self._fetch_cached_json(
+            cache_key,
+            f"{self._trade_base}/markets/{market.provider_market_id}/orderbook",
+            {"depth": KALSHI_ORDERBOOK_DEPTH},
+        )
+        book = payload.get("orderbook", {}) if isinstance(payload, dict) else {}
+        yes_rows = book.get("yes") if isinstance(book, dict) else None
+        no_rows = book.get("no") if isinstance(book, dict) else None
+        bids = _book_levels(_kalshi_levels(yes_rows), descending=True)
+        asks = _book_levels(
+            ((1.0 - price, size) for price, size in _kalshi_levels(no_rows) if price is not None and size is not None),
+            descending=False,
+        )
+        warnings: list[str] = []
+        if not bids and not asks:
+            warnings.append("Kalshi returned no resting depth for this market.")
+        return build_order_book_depth(
+            market_id=market.market_id,
+            venue=self.provider,
+            bids=bids,
+            asks=asks,
+            outcome_id=market.outcomes[0].outcome_id if market.outcomes else None,
+            outcome_label="Yes",
+            token_id=None,
+            retrieved_at=retrieved_at,
+            origin="kalshi.orderbook",
+            warnings=warnings,
+            transformation_note=(
+                "Kalshi publishes separate Yes and No bid books. The Yes ask side shown here is the No bid book "
+                "converted as one minus its price; sizes are contracts and notional is size multiplied by price. "
+                "Read-only market data."
+            ),
+        )
+
     def get_wallet_summary(self, market: PredictionMarketRecord) -> WalletSummary:
         cache_key = self.cache.make_key("prediction_markets", self.provider, "trades", market.provider_market_id)
         payload, retrieved_at = self._fetch_cached_json(
@@ -1056,8 +1245,12 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         return self._build_calibration_summary(
             records,
             sample_size=sample_size,
-            origin="kalshi.calibration",
-            transformation_note="Uses last_price_dollars as the final pre-resolution probability proxy and the resolved Kalshi result field for the realized outcome.",
+            origin="kalshi.settlement_convergence",
+            transformation_note=(
+                "Non-predictive: last_price_dollars on a settled Kalshi market is the final print before "
+                "settlement, recorded after the outcome was effectively known. It is reported only as a "
+                "convergence diagnostic and is never bucketed as a calibration input."
+            ),
         )
 
     def _status_queries(self, status: str) -> list[str | None]:
@@ -1304,6 +1497,184 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         )
 
 
+def _outcome_for_token(market: PredictionMarketRecord, token_id: str | None):
+    if token_id:
+        for outcome in market.outcomes:
+            if outcome.token_id == token_id:
+                return outcome
+    return market.outcomes[0] if market.outcomes else None
+
+
+def _kalshi_levels(rows: Any) -> list[tuple[float | None, float | None]]:
+    """Normalize `[[price, size], ...]` where price may be cents or dollars."""
+    levels: list[tuple[float | None, float | None]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, (list, tuple)) or len(row) < 2:
+            continue
+        price = _to_float(row[0])
+        size = _to_float(row[1])
+        if price is None or size is None:
+            continue
+        levels.append((price / 100.0 if price > 1.0 else price, size))
+    return levels
+
+
+def _book_levels(
+    rows,
+    *,
+    descending: bool,
+    limit: int = ORDER_BOOK_LEVEL_LIMIT,
+) -> list[PredictionBookLevel]:
+    cleaned = [
+        (price, size)
+        for price, size in rows
+        if price is not None and size is not None and size > 0 and 0.0 <= price <= 1.0
+    ]
+    cleaned.sort(key=lambda level: level[0], reverse=descending)
+    levels: list[PredictionBookLevel] = []
+    cumulative_size = 0.0
+    cumulative_notional = 0.0
+    for price, size in cleaned[:limit]:
+        notional = price * size
+        cumulative_size += size
+        cumulative_notional += notional
+        levels.append(
+            PredictionBookLevel(
+                price=price,
+                size=size,
+                notional=notional,
+                cumulative_size=cumulative_size,
+                cumulative_notional=cumulative_notional,
+            )
+        )
+    return levels
+
+
+def build_order_book_depth(
+    *,
+    market_id: str,
+    venue: str,
+    bids: list[PredictionBookLevel],
+    asks: list[PredictionBookLevel],
+    outcome_id: str | None,
+    outcome_label: str | None,
+    token_id: str | None,
+    retrieved_at: datetime,
+    origin: str,
+    transformation_note: str,
+    warnings: list[str] | None = None,
+    depth_band: float = ORDER_BOOK_DEPTH_BAND,
+    reference_clip: float = ORDER_BOOK_REFERENCE_CLIP,
+) -> PredictionOrderBookDepth:
+    """Turn two ladders into the numbers a spread reading needs to be meaningful."""
+    best_bid = bids[0].price if bids else None
+    best_ask = asks[0].price if asks else None
+    mid = (best_bid + best_ask) / 2.0 if best_bid is not None and best_ask is not None else None
+    spread = (best_ask - best_bid) if best_bid is not None and best_ask is not None else None
+
+    bid_band = (
+        sum(level.notional for level in bids if best_bid is not None and level.price >= best_bid - depth_band)
+        if bids
+        else None
+    )
+    ask_band = (
+        sum(level.notional for level in asks if best_ask is not None and level.price <= best_ask + depth_band)
+        if asks
+        else None
+    )
+    imbalance = None
+    if bid_band is not None and ask_band is not None and (bid_band + ask_band) > 0:
+        imbalance = (bid_band - ask_band) / (bid_band + ask_band)
+
+    return PredictionOrderBookDepth(
+        market_id=market_id,
+        venue=venue,
+        outcome_id=outcome_id,
+        outcome_label=outcome_label,
+        token_id=token_id,
+        best_bid=best_bid,
+        best_ask=best_ask,
+        mid=mid,
+        spread=spread,
+        bids=bids,
+        asks=asks,
+        depth_band=depth_band,
+        bid_notional_within_band=bid_band,
+        ask_notional_within_band=ask_band,
+        total_bid_notional=sum(level.notional for level in bids) if bids else None,
+        total_ask_notional=sum(level.notional for level in asks) if asks else None,
+        depth_imbalance=imbalance,
+        reference_clip_notional=reference_clip,
+        bid_slippage_reference=_sweep_slippage(bids, reference_clip, best_bid, sell_side=True),
+        ask_slippage_reference=_sweep_slippage(asks, reference_clip, best_ask, sell_side=False),
+        warnings=list(warnings or []),
+        source_provider=venue,
+        retrieved_at=retrieved_at,
+        origin=origin,
+        transformation_note=transformation_note,
+    )
+
+
+def _sweep_slippage(
+    levels: list[PredictionBookLevel],
+    clip_notional: float,
+    touch: float | None,
+    *,
+    sell_side: bool,
+) -> float | None:
+    """Probability points between the touch and the average fill for a clip.
+
+    `None` when the book cannot absorb the clip at all, which is itself the
+    answer: a spread that looks tradable on a two-level book is not.
+    """
+    if not levels or touch is None or clip_notional <= 0:
+        return None
+    remaining = clip_notional
+    filled_notional = 0.0
+    filled_size = 0.0
+    for level in levels:
+        if remaining <= 0:
+            break
+        take_notional = min(level.notional, remaining)
+        if level.price <= 0:
+            continue
+        take_size = take_notional / level.price
+        filled_notional += take_notional
+        filled_size += take_size
+        remaining -= take_notional
+    if remaining > 0 or filled_size <= 0:
+        return None
+    average_price = filled_notional / filled_size
+    return (touch - average_price) if sell_side else (average_price - touch)
+
+
+def build_settlement_convergence(records: list[PredictionMarketRecord]) -> CalibrationConvergence | None:
+    """Measure how close the final print already was to the realized outcome.
+
+    A high share of settlement prints sitting within a few points of 0 or 1 is
+    the evidence that bucketing on that price would report near-perfect
+    calibration by construction.
+    """
+    rows = [
+        (record.current_probability, 1.0 if record.resolution_outcome else 0.0)
+        for record in records
+        if record.current_probability is not None and record.resolution_outcome is not None
+    ]
+    if not rows:
+        return None
+    distances = [abs(probability - outcome) for probability, outcome in rows]
+    return CalibrationConvergence(
+        sample_size=len(rows),
+        average_settlement_probability=sum(probability for probability, _ in rows) / len(rows),
+        average_distance_to_outcome=sum(distances) / len(distances),
+        share_within_five_points=sum(1 for distance in distances if distance <= 0.05) / len(distances),
+        note=(
+            "Distance between the venue's final print and the realized outcome. A small distance means the price "
+            "had already converged, which is why settlement prints are excluded from the calibration input."
+        ),
+    )
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     text = str(value or "").strip()
     if not text or text.startswith("0001-01-01"):
@@ -1388,7 +1759,15 @@ def _spread(bid: float | None, ask: float | None) -> float | None:
     return ask - bid
 
 
-def _resolve_polymarket_outcome(outcome_prices: list[Any]) -> bool | None:
+def _resolve_polymarket_outcome(outcome_prices: list[Any], *, closed: bool = False) -> bool | None:
+    """Realized outcome from settled outcome prices.
+
+    Recent settlements report exact `["1","0"]`, but older ones report the
+    near-integer floats the AMM left behind (verified 2026-07-27:
+    `0.9999989...` for the winning side). The tolerant reading is applied only
+    to markets the venue already marks closed, so a live 0.999 quote is never
+    mistaken for a settlement.
+    """
     if not outcome_prices:
         return None
     first = _to_float(outcome_prices[0])
@@ -1396,6 +1775,12 @@ def _resolve_polymarket_outcome(outcome_prices: list[Any]) -> bool | None:
     if first == 1.0:
         return True
     if first == 0.0 and second == 1.0:
+        return False
+    if not closed or first is None:
+        return None
+    if first >= 1.0 - POLYMARKET_SETTLEMENT_EPSILON and (second is None or second <= POLYMARKET_SETTLEMENT_EPSILON):
+        return True
+    if first <= POLYMARKET_SETTLEMENT_EPSILON and second is not None and second >= 1.0 - POLYMARKET_SETTLEMENT_EPSILON:
         return False
     return None
 

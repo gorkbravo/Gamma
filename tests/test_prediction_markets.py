@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
-from src.application.prediction_market_service import PredictionMarketService, PredictionMarketScreenerRequest
+from src.application.prediction_market_service import (
+    MAX_EVENT_BOOK_LEGS,
+    PredictionMarketService,
+    PredictionMarketScreenerRequest,
+)
+from src.application.prediction_market_taxonomy import build_cross_domain_handoffs
 from src.application.runtime import build_runtime
 from src.models.prediction_markets import (
     CalibrationSummary,
@@ -21,6 +28,7 @@ from src.models.prediction_markets import (
 )
 from src.services.cache import CacheService
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
+from src.services.prediction_research_store import PREDICTION_WATCHLIST_LIMIT, PredictionResearchStore
 
 
 def test_polymarket_adapter_normalizes_and_caches_screener_results(tmp_path):
@@ -139,7 +147,7 @@ def test_polymarket_adapter_uses_public_search_for_query_and_category_discovery(
     assert not any("/markets|" in key for key in calls)
 
 
-def test_polymarket_calibration_excludes_resolved_settlement_prices_without_last_trade(tmp_path):
+def test_polymarket_settlement_summary_is_a_convergence_diagnostic_not_a_curve(tmp_path):
     def fake_fetch(url: str, params: dict | None = None):
         assert url.endswith("/markets")
         return [
@@ -200,11 +208,18 @@ def test_polymarket_calibration_excludes_resolved_settlement_prices_without_last
     assert trade_proxy.resolved_probability == 0.0
     assert trade_proxy.resolution_outcome is False
 
+    # The settlement path never produces a curve: the print it would bucket was
+    # made after the outcome was effectively known.
     assert summary.sample_size == 1
-    assert [bucket.label for bucket in summary.buckets] == ["10-25%"]
-    assert summary.buckets[0].average_probability == pytest.approx(0.24)
-    assert summary.buckets[0].realized_frequency == 0.0
+    assert summary.method == "settlement_last_trade_deprecated"
+    assert summary.is_validated is False
+    assert summary.curves == []
+    assert any("convergence diagnostic" in warning for warning in summary.warnings)
+    assert summary.convergence is not None
+    assert summary.convergence.sample_size == 1
+    assert summary.convergence.average_distance_to_outcome == pytest.approx(0.24)
     assert [observation.market_id for observation in summary.observations] == ["polymarket:resolved-with-trade"]
+    assert summary.observations[0].settlement_probability == pytest.approx(0.24)
 
 
 def test_polymarket_wallet_summary_uses_selected_outcome_probability_for_edge(tmp_path):
@@ -2230,3 +2245,824 @@ def test_polymarket_max_range_honors_an_explicit_fidelity(tmp_path):
     assert fetcher.calls[0][1]["fidelity"] == 360
     assert fetch.effective_resolution_minutes == 360
     assert fetch.warnings == []
+
+
+# ── Outward cross-domain handoffs ────────────────────────────────────────
+
+
+def _themed_market(*, title: str, category: str, description: str = "", end_offset_days: int = 40):
+    retrieved_at = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    base = _build_market(
+        market_id="polymarket:themed",
+        venue="polymarket",
+        provider_market_id="themed",
+        title=title,
+        event_title=title,
+        category=category,
+        current_probability=0.4,
+        retrieved_at=retrieved_at,
+    )
+    return replace(
+        base,
+        description=description or title,
+        end_time=retrieved_at + timedelta(days=end_offset_days),
+    )
+
+
+def test_cross_domain_handoffs_resolve_commodity_and_chokepoint_targets():
+    market = _themed_market(
+        title="Will Iran close the Strait of Hormuz to oil tankers before September?",
+        category="Geopolitics",
+    )
+
+    handoffs = build_cross_domain_handoffs(market)
+    by_tab = {envelope.intended_target_tab: envelope for envelope in handoffs}
+
+    assert set(by_tab) == {"macro", "commodities", "maritime"}
+    assert by_tab["commodities"].intended_target_mode == "events_cross_domain"
+    assert by_tab["commodities"].selected_entity.normalized_id == "wti"
+    assert by_tab["maritime"].intended_target_mode == "chokepoints"
+    assert by_tab["maritime"].selected_entity.normalized_id == "hormuz"
+    # Every envelope carries the contract's own event window as the lens.
+    for envelope in handoffs:
+        assert envelope.source_tab == "prediction_markets"
+        assert envelope.source_mode == "contract"
+        assert envelope.selected_timeframe is not None
+        assert envelope.selected_timeframe.end == market.end_time
+        assert envelope.normalized_ids["market_id"] == "polymarket:themed"
+        assert envelope.source is not None
+
+
+def test_cross_domain_macro_handoff_carries_region_theme_and_timeframe():
+    market = _themed_market(
+        title="Will the Fed cut rates at the September FOMC meeting?",
+        category="Economy",
+        end_offset_days=20,
+    )
+
+    macro = next(row for row in build_cross_domain_handoffs(market) if row.intended_target_tab == "macro")
+
+    assert macro.intended_target_mode == "events_regimes"
+    assert macro.selected_entity.normalized_id == "US"
+    assert macro.normalized_ids["theme"] == "policy"
+    assert macro.normalized_ids["timeframe"] == "1M"
+    assert macro.selected_entity.metadata["matched_terms"]
+
+
+def test_cross_domain_handoffs_do_not_invent_a_target_for_an_unmatched_contract():
+    market = _themed_market(
+        title="Will the new stadium open before the end of the year?",
+        category="Politics",
+    )
+
+    handoffs = build_cross_domain_handoffs(market)
+
+    # Macro still resolves (Politics is a macro-adjacent category) but there is
+    # no commodity or maritime target to fabricate.
+    assert [row.intended_target_tab for row in handoffs] == ["macro"]
+    assert handoffs[0].selected_entity.normalized_id == "Global"
+    assert any("Global region" in warning for warning in handoffs[0].warnings)
+
+
+def test_cross_domain_handoff_flags_a_body_only_match():
+    market = _themed_market(
+        title="Will the shipping disruption index exceed 40?",
+        category="Geopolitics",
+        description="Resolves based on transits through the Suez Canal reported by the authority.",
+    )
+
+    maritime = next(row for row in build_cross_domain_handoffs(market) if row.intended_target_tab == "maritime")
+
+    assert maritime.selected_entity.normalized_id == "suez"
+    assert any("only in the contract's resolution text" in warning for warning in maritime.warnings)
+
+
+def test_cross_domain_handoff_route_serializes_envelopes(tmp_path):
+    market = _themed_market(
+        title="Will OPEC cut production before December?",
+        category="Geopolitics",
+    )
+
+    class HandoffAdapter(_EventBookAdapter):
+        def list_event_markets(self, market, *, limit: int = 12):
+            return []
+
+    service = PredictionMarketService(adapters={"polymarket": HandoffAdapter([market])})
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/prediction-markets/markets/polymarket:themed/handoffs")
+        assert response.status_code == 200
+        payload = response.json()
+        targets = {row["intended_target_tab"]: row for row in payload["handoffs"]}
+        assert "commodities" in targets
+        assert targets["commodities"]["selected_entity"]["normalized_id"] == "wti"
+        assert targets["commodities"]["source_tab"] == "prediction_markets"
+        assert targets["commodities"]["selected_timeframe"]["end"]
+
+        assert client.get("/prediction-markets/markets/polymarket:nope/handoffs").status_code == 404
+
+
+# ── Order-book depth ─────────────────────────────────────────────────────
+
+
+def test_polymarket_depth_ranks_levels_and_prices_a_reference_clip(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        assert url.endswith("/book")
+        assert params == {"token_id": "yes-token"}
+        return {
+            "bids": [
+                {"price": "0.44", "size": "500"},
+                {"price": "0.46", "size": "1000"},
+                {"price": "0.45", "size": "800"},
+            ],
+            "asks": [
+                {"price": "0.52", "size": "400"},
+                {"price": "0.50", "size": "1200"},
+            ],
+        }
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    depth = adapter.get_order_book(_history_market())
+
+    assert [level.price for level in depth.bids] == [0.46, 0.45, 0.44]
+    assert [level.price for level in depth.asks] == [0.50, 0.52]
+    assert depth.best_bid == 0.46
+    assert depth.best_ask == 0.50
+    assert depth.spread == pytest.approx(0.04)
+    assert depth.mid == pytest.approx(0.48)
+    # Every level sits within 5 probability points of its touch.
+    assert depth.bid_notional_within_band == pytest.approx(460.0 + 360.0 + 220.0)
+    assert depth.ask_notional_within_band == pytest.approx(600.0 + 208.0)
+    # A $1,000 sale clears 460 at 0.46, 360 at 0.45, and 180 at 0.44, averaging
+    # 0.4527 against a 0.46 touch.
+    assert depth.bid_slippage_reference == pytest.approx(0.00732, abs=1e-4)
+    # The ask ladder only holds $808, so the reference clip cannot be filled and
+    # the quoted spread does not describe it.
+    assert depth.ask_slippage_reference is None
+
+
+def test_kalshi_depth_derives_the_yes_ask_side_from_the_no_book(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        assert url.endswith("/orderbook")
+        return {"orderbook": {"yes": [[46, 1000], [45, 500]], "no": [[48, 900], [47, 300]]}}
+
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    depth = adapter.get_order_book(_history_market(venue="kalshi"))
+
+    assert depth.best_bid == pytest.approx(0.46)
+    # A 0.48 bid for NO is a 0.52 offer for YES.
+    assert depth.best_ask == pytest.approx(0.52)
+    assert [level.price for level in depth.asks] == [pytest.approx(0.52), pytest.approx(0.53)]
+    assert "converted as one minus its price" in (depth.transformation_note or "")
+
+
+def test_depth_service_warns_when_the_book_cannot_absorb_the_reference_clip(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        if url.endswith("/book"):
+            return {"bids": [{"price": "0.40", "size": "10"}], "asks": [{"price": "0.60", "size": "10"}]}
+        return {}
+
+    class ThinBookAdapter(PolymarketAdapter):
+        def get_market(self, provider_market_id: str):
+            return _history_market()
+
+    adapter = ThinBookAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    service = PredictionMarketService(adapters={"polymarket": adapter})
+
+    depth = service.get_order_book_depth("polymarket:fed-cut")
+
+    assert depth is not None
+    assert depth.spread == pytest.approx(0.2)
+    assert any("only applies to smaller size" in warning for warning in depth.warnings)
+
+
+def test_depth_service_labels_an_adapter_without_a_book_endpoint():
+    records = [
+        _build_market(
+            market_id="polymarket:fed-cut",
+            venue="polymarket",
+            provider_market_id="fed-cut",
+            title="Will the Fed cut rates?",
+            event_title="Fed decisions",
+            category="Economy",
+            current_probability=0.5,
+            retrieved_at=datetime(2026, 3, 18, 12, tzinfo=timezone.utc),
+        )
+    ]
+    service = PredictionMarketService(adapters={"polymarket": _SeriesAdapter("polymarket", records, {})})
+
+    depth = service.get_order_book_depth("polymarket:fed-cut")
+
+    assert depth is not None
+    assert depth.bids == []
+    assert any("does not expose order-book depth" in warning for warning in depth.warnings)
+
+
+def test_depth_route_returns_ladders(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        if url.endswith("/book"):
+            return {"bids": [{"price": "0.46", "size": "1000"}], "asks": [{"price": "0.50", "size": "1200"}]}
+        return {}
+
+    class BookAdapter(PolymarketAdapter):
+        def get_market(self, provider_market_id: str):
+            return _history_market()
+
+    service = PredictionMarketService(
+        adapters={"polymarket": BookAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)}
+    )
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "runtime-cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/prediction-markets/markets/polymarket:fed-cut/depth")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["best_bid"] == pytest.approx(0.46)
+        assert payload["bids"][0]["notional"] == pytest.approx(460.0)
+        assert payload["total_ask_notional"] == pytest.approx(600.0)
+        assert payload["transformation_note"]
+
+
+# ── Saved research sets ──────────────────────────────────────────────────
+
+
+def test_saved_research_store_round_trips_watchlist_and_named_sets(tmp_path):
+    store = PredictionResearchStore(base_dir=tmp_path / "prediction_markets")
+
+    store.add_watchlist_entry(market_id="polymarket:a", venue="polymarket", title="A", probability=0.4)
+    # Re-adding the same contract updates it instead of duplicating.
+    store.add_watchlist_entry(market_id="polymarket:a", venue="polymarket", title="A revised", probability=0.5)
+    store.add_watchlist_entry(market_id="kalshi:b", venue="kalshi", title="B", probability=0.6)
+    store.save_comparison_set(name="Fed vs Fed", market_ids=["polymarket:a", "kalshi:b"], range_key="1m")
+
+    saved = store.get_saved_research()
+    assert saved.schema_version == 1
+    assert [row.market_id for row in saved.watchlist] == ["kalshi:b", "polymarket:a"]
+    assert next(row for row in saved.watchlist if row.market_id == "polymarket:a").title == "A revised"
+    assert [row.name for row in saved.comparison_sets] == ["Fed vs Fed"]
+    assert saved.comparison_sets[0].market_ids == ["polymarket:a", "kalshi:b"]
+    assert saved.warnings == []
+
+    # A second store over the same directory sees the same records, which is
+    # what "survives a browser change" means.
+    reopened = PredictionResearchStore(base_dir=tmp_path / "prediction_markets").get_saved_research()
+    assert len(reopened.watchlist) == 2
+    assert len(reopened.comparison_sets) == 1
+
+    assert store.remove_watchlist_entry("polymarket:a") is True
+    assert store.remove_watchlist_entry("polymarket:a") is False
+    assert store.delete_comparison_set(saved.comparison_sets[0].id) is True
+
+
+def test_saved_research_store_caps_and_reports_unreadable_records(tmp_path):
+    store = PredictionResearchStore(base_dir=tmp_path / "prediction_markets")
+    for index in range(PREDICTION_WATCHLIST_LIMIT + 5):
+        store.add_watchlist_entry(market_id=f"polymarket:{index}", venue="polymarket", title=f"M{index}")
+
+    saved = store.get_saved_research()
+    assert len(saved.watchlist) == PREDICTION_WATCHLIST_LIMIT
+    assert saved.watchlist_limit == PREDICTION_WATCHLIST_LIMIT
+
+    (store.watchlist_dir / "corrupt.json").write_text("{not json", encoding="utf-8")
+    (store.watchlist_dir / "future.json").write_text(
+        json.dumps({"schema_version": 99, "id": "future", "market_id": "polymarket:future"}),
+        encoding="utf-8",
+    )
+    degraded = store.get_saved_research()
+    assert any("unreadable watchlist record" in warning for warning in degraded.warnings)
+    assert any("newer than" in warning for warning in degraded.warnings)
+    assert all(row.market_id != "polymarket:future" for row in degraded.watchlist)
+
+
+def test_saved_research_routes_migrate_legacy_local_records(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    with TestClient(create_app(runtime)) as client:
+        empty = client.get("/prediction-markets/saved")
+        assert empty.status_code == 200
+        assert empty.json()["watchlist"] == []
+
+        migrated = client.post(
+            "/prediction-markets/saved/import",
+            json={
+                "watchlist": [
+                    {"market_id": "polymarket:a", "venue": "polymarket", "title": "A", "probability": 0.4},
+                    {"market_id": "kalshi:b", "venue": "kalshi", "title": "B", "probability": 0.6},
+                ],
+                "comparison_basket": ["polymarket:a", "kalshi:b"],
+                "basket_name": "Migrated basket",
+            },
+        )
+        assert migrated.status_code == 200
+        payload = migrated.json()
+        assert {row["market_id"] for row in payload["watchlist"]} == {"polymarket:a", "kalshi:b"}
+        assert payload["comparison_sets"][0]["name"] == "Migrated basket"
+
+        # Re-running the migration is idempotent per market.
+        again = client.post(
+            "/prediction-markets/saved/import",
+            json={
+                "watchlist": [{"market_id": "polymarket:a", "venue": "polymarket", "title": "A"}],
+                "comparison_basket": ["polymarket:a", "kalshi:b"],
+                "basket_name": "Migrated basket",
+            },
+        )
+        assert len(again.json()["watchlist"]) == 2
+        assert len(again.json()["comparison_sets"]) == 1
+
+        set_id = again.json()["comparison_sets"][0]["id"]
+        deleted = client.delete(f"/prediction-markets/saved/comparison-sets/{set_id}")
+        assert deleted.status_code == 200
+        assert deleted.json()["comparison_sets"] == []
+        assert client.delete(f"/prediction-markets/saved/comparison-sets/{set_id}").status_code == 404
+
+        removed = client.delete("/prediction-markets/saved/watchlist/kalshi:b")
+        assert removed.status_code == 200
+        assert {row["market_id"] for row in removed.json()["watchlist"]} == {"polymarket:a"}
+        assert client.delete("/prediction-markets/saved/watchlist/kalshi:b").status_code == 404
+
+
+# ── Event book ───────────────────────────────────────────────────────────
+
+
+class _EventBookAdapter:
+    provider = "polymarket"
+
+    def __init__(self, records: list[PredictionMarketRecord]) -> None:
+        self.records = records
+        self.requested_limits: list[int] = []
+
+    def list_markets(self, *, status="open", limit=50, force_refresh=False, query="", category=None):
+        return self.records[:limit]
+
+    def get_market(self, provider_market_id: str):
+        return next((row for row in self.records if row.provider_market_id == provider_market_id), None)
+
+    def get_history(self, market: PredictionMarketRecord):
+        return []
+
+    def get_wallet_summary(self, market: PredictionMarketRecord):
+        return WalletSummary(market_id=market.market_id, venue=self.provider, concentration_hhi=None, top_participant_share=None, total_trades=0, total_notional=0.0)
+
+    def list_event_markets(self, market: PredictionMarketRecord, *, limit: int = 12):
+        self.requested_limits.append(limit)
+        return [row for row in self.records if row.market_id != market.market_id][:limit]
+
+    def build_calibration_summary(self, *, sample_size: int = 30):
+        return CalibrationSummary(venue=self.provider, sample_size=0)
+
+
+def _candidate_market(
+    *,
+    index: int,
+    probability: float,
+    subtitle: str,
+    end_time: datetime,
+    resolution_source: str = "Resolves to the candidate certified as the winner by the national election board.",
+) -> PredictionMarketRecord:
+    base = _build_market(
+        market_id=f"polymarket:race-{index}",
+        venue="polymarket",
+        provider_market_id=f"race-{index}",
+        title=f"Will {subtitle} win the election?",
+        event_title="Presidential election winner",
+        category="Politics",
+        current_probability=probability,
+        retrieved_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    return replace(
+        base,
+        subtitle=subtitle,
+        end_time=end_time,
+        resolution_source=resolution_source,
+        description=resolution_source,
+    )
+
+
+def _event_book_service(records: list[PredictionMarketRecord]) -> tuple[PredictionMarketService, _EventBookAdapter]:
+    adapter = _EventBookAdapter(records)
+    return PredictionMarketService(adapters={"polymarket": adapter}), adapter
+
+
+def test_event_book_sums_a_complete_venue_grouped_race():
+    end_time = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    records = [
+        _candidate_market(index=0, probability=0.55, subtitle="Alvarez", end_time=end_time),
+        _candidate_market(index=1, probability=0.3, subtitle="Baker", end_time=end_time),
+        _candidate_market(index=2, probability=0.18, subtitle="Chen", end_time=end_time),
+    ]
+    service, adapter = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0")
+
+    assert book is not None
+    assert [leg.market_id for leg in book.legs] == ["polymarket:race-0", "polymarket:race-1", "polymarket:race-2"]
+    assert book.legs[0].is_anchor is True
+    assert book.probability_sum == pytest.approx(1.03)
+    assert book.implied_overround == pytest.approx(0.03)
+    assert book.exclusivity_signal == "venue_grouped_candidates"
+    assert book.overround_is_meaningful is True
+    assert book.completeness.status == "complete"
+    assert book.completeness.legs_returned == 3
+    assert book.favorite_market_id == "polymarket:race-0"
+    assert book.warnings == []
+    # Asking one past the cap is how truncation stays detectable.
+    assert adapter.requested_limits[0] == MAX_EVENT_BOOK_LEGS + 1
+
+
+def test_event_book_refuses_the_overround_claim_when_the_book_is_truncated():
+    end_time = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    records = [
+        _candidate_market(index=index, probability=0.02, subtitle=f"Candidate {index}", end_time=end_time)
+        for index in range(6)
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0", limit=4)
+
+    assert book is not None
+    assert book.completeness.status == "truncated"
+    assert book.completeness.truncated is True
+    assert len(book.legs) == 4
+    assert book.overround_is_meaningful is False
+    assert any("descriptive here, not an overround" in warning for warning in book.warnings)
+
+
+def test_event_book_flags_a_sibling_that_resolves_on_different_terms():
+    end_time = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    records = [
+        _candidate_market(index=0, probability=0.5, subtitle="Alvarez", end_time=end_time),
+        _candidate_market(index=1, probability=0.3, subtitle="Baker", end_time=end_time),
+        _candidate_market(index=2, probability=0.2, subtitle="Chen", end_time=end_time),
+        _candidate_market(
+            index=3,
+            probability=0.2,
+            subtitle="Chen concedes",
+            end_time=end_time + timedelta(days=30),
+            resolution_source="Resolves yes if a formal concession statement is published by the campaign press office.",
+        ),
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0")
+
+    divergent = next(leg for leg in book.legs if leg.market_id == "polymarket:race-3")
+    assert divergent.divergence_flags
+    assert any("Resolves 30.0 days later" in flag for flag in divergent.divergence_flags)
+    assert any("materially different terms" in warning for warning in book.warnings)
+
+
+def test_event_book_reports_a_standalone_contract_instead_of_an_empty_sum():
+    base = _build_market(
+        market_id="polymarket:solo",
+        venue="polymarket",
+        provider_market_id="solo",
+        title="Standalone contract",
+        event_title="Standalone",
+        category="Economy",
+        current_probability=0.4,
+        retrieved_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    records = [replace(base, provider_event_id=None, event_id=None)]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:solo")
+
+    assert book is not None
+    assert book.completeness.status == "unavailable"
+    assert book.probability_sum is None
+    assert book.overround_is_meaningful is False
+    assert any("standalone" in warning for warning in book.warnings)
+
+
+def test_event_book_route_returns_completeness(tmp_path):
+    end_time = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    records = [
+        _candidate_market(index=0, probability=0.6, subtitle="Alvarez", end_time=end_time),
+        _candidate_market(index=1, probability=0.25, subtitle="Baker", end_time=end_time),
+        _candidate_market(index=2, probability=0.1, subtitle="Chen", end_time=end_time),
+    ]
+    service, _ = _event_book_service(records)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/prediction-markets/markets/polymarket:race-0/event-book")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["completeness"]["status"] == "complete"
+        assert payload["overround_is_meaningful"] is True
+        assert payload["probability_sum"] == pytest.approx(0.95)
+        assert payload["implied_overround"] == pytest.approx(-0.05)
+        assert len(payload["legs"]) == 3
+
+        missing = client.get("/prediction-markets/markets/polymarket:nope/event-book")
+        assert missing.status_code == 404
+
+
+# ── Calibration ──────────────────────────────────────────────────────────
+
+
+CALIBRATION_BASE_TIME = datetime(2026, 6, 1, 12, tzinfo=timezone.utc)
+
+
+def _resolved_market(
+    *,
+    index: int,
+    outcome: bool,
+    settlement_probability: float,
+    resolved_at: datetime,
+    life_days: float = 30.0,
+    venue: str = "polymarket",
+) -> PredictionMarketRecord:
+    base = _build_market(
+        market_id=f"{venue}:settled-{index}",
+        venue=venue,
+        provider_market_id=f"settled-{index}",
+        title=f"Settled contract {index}",
+        event_title="Settled event",
+        category="Economy",
+        current_probability=settlement_probability,
+        retrieved_at=resolved_at,
+    )
+    return replace(
+        base,
+        status="resolved",
+        open_time=resolved_at - timedelta(days=life_days),
+        end_time=resolved_at,
+        close_time=resolved_at,
+        resolved_probability=1.0 if outcome else 0.0,
+        resolution_outcome=outcome,
+    )
+
+
+def _converged_series(
+    *,
+    resolved_at: datetime,
+    lead_probability: float,
+    settlement_probability: float,
+    life_days: float = 30.0,
+) -> list[tuple[datetime, float]]:
+    """Hourly quotes that sit at `lead_probability` until the last 12 hours.
+
+    This is the shape that makes the old measurement look flawless: the final
+    print already knows the answer while every earlier quote does not.
+    """
+    points: list[tuple[datetime, float]] = []
+    hours = int(life_days * 24)
+    for offset in range(hours, -1, -1):
+        stamp = resolved_at - timedelta(hours=offset)
+        points.append((stamp, settlement_probability if offset <= 12 else lead_probability))
+    return points
+
+
+class _CalibrationAdapter:
+    """Resolved-market adapter without the optional windowing capability."""
+
+    provider = "polymarket"
+
+    def __init__(self, records, series_by_market):
+        self.records = records
+        self.series_by_market = series_by_market
+        self.history_calls: list[str] = []
+
+    def list_markets(self, *, status="open", limit=50, force_refresh=False, query="", category=None):
+        if status == "closed":
+            return [row for row in self.records if row.status in {"closed", "resolved"}][:limit]
+        return self.records[:limit]
+
+    def get_market(self, provider_market_id: str):
+        return next((row for row in self.records if row.provider_market_id == provider_market_id), None)
+
+    def get_history(self, market: PredictionMarketRecord):
+        self.history_calls.append(market.market_id)
+        return [
+            PredictionProbabilityPoint(
+                timestamp=stamp,
+                probability=value,
+                source_provider=self.provider,
+                retrieved_at=stamp,
+                origin=f"{self.provider}.history",
+            )
+            for stamp, value in self.series_by_market.get(market.market_id, [])
+        ]
+
+    def get_wallet_summary(self, market: PredictionMarketRecord):
+        return WalletSummary(market_id=market.market_id, venue=self.provider, concentration_hhi=None, top_participant_share=None, total_trades=0, total_notional=0.0)
+
+    def list_event_markets(self, market: PredictionMarketRecord, *, limit: int = 12):
+        return []
+
+    def build_calibration_summary(self, *, sample_size: int = 30):
+        return CalibrationSummary(
+            venue=self.provider,
+            sample_size=len(self.records),
+            warnings=["settlement fallback"],
+            source_provider=self.provider,
+            origin="polymarket.gamma.settlement_convergence",
+            transformation_note="Non-predictive settlement print.",
+        )
+
+
+def _calibration_service(*, count: int, lead_probability: float, hit_rate: float, life_days: float = 30.0):
+    records = []
+    series: dict[str, list[tuple[datetime, float]]] = {}
+    hits = round(count * hit_rate)
+    for index in range(count):
+        outcome = index < hits
+        resolved_at = CALIBRATION_BASE_TIME - timedelta(days=index + 1)
+        settlement = 0.99 if outcome else 0.01
+        record = _resolved_market(
+            index=index,
+            outcome=outcome,
+            settlement_probability=settlement,
+            resolved_at=resolved_at,
+            life_days=life_days,
+        )
+        records.append(record)
+        series[record.market_id] = _converged_series(
+            resolved_at=resolved_at,
+            lead_probability=lead_probability,
+            settlement_probability=settlement,
+            life_days=life_days,
+        )
+    adapter = _CalibrationAdapter(records, series)
+    return PredictionMarketService(adapters={"polymarket": adapter}), adapter
+
+
+def test_calibration_buckets_the_lead_time_price_not_the_settlement_print():
+    """The regression this rebuild exists for.
+
+    Every contract settles at 0.99/0.01 but was quoted at 0.60 a day earlier.
+    Bucketing the settlement print would report perfect calibration; bucketing
+    the lead-time quote reports the 60% band against its real 70% hit rate.
+    """
+    service, _ = _calibration_service(count=24, lead_probability=0.6, hit_rate=0.75)
+
+    summary = service.get_calibration_summary("polymarket:settled-0", lead_times_hours=[24])
+
+    assert summary is not None
+    assert summary.method == "lead_time_history"
+    assert summary.lead_times_hours == [24]
+    curve = summary.curves[0]
+    assert curve.label == "T-1d"
+    assert curve.sample_size == 24
+    assert [bucket.label for bucket in curve.buckets] == ["50-75%"]
+    assert curve.buckets[0].average_probability == pytest.approx(0.6)
+    assert curve.buckets[0].realized_frequency == pytest.approx(0.75)
+    assert curve.buckets[0].lead_time_hours == 24
+    assert curve.buckets[0].meets_minimum is True
+    # No settlement price reached a bucket.
+    assert all(bucket.average_probability < 0.9 for bucket in curve.buckets)
+    # The settlement print survives only as the diagnostic that explains why.
+    assert summary.convergence is not None
+    assert summary.convergence.share_within_five_points == pytest.approx(1.0)
+    assert summary.observations[0].settlement_probability in {0.99, 0.01}
+    assert summary.observations[0].probability == pytest.approx(0.6)
+
+
+def test_calibration_refuses_to_draw_a_curve_below_the_stated_minimum():
+    service, _ = _calibration_service(count=4, lead_probability=0.6, hit_rate=0.5)
+
+    summary = service.get_calibration_summary("polymarket:settled-0", lead_times_hours=[24])
+
+    assert summary is not None
+    assert summary.sample_size == 4
+    assert summary.minimum_curve_sample == 20
+    assert summary.minimum_bucket_sample == 5
+    assert summary.curves[0].is_plottable is False
+    assert summary.is_validated is False
+    assert any("no curve is drawn" in warning for warning in summary.curves[0].warnings)
+
+
+def test_calibration_withholds_a_curve_built_from_one_settlement_batch():
+    """Forty contracts settling in the same minute are one market state, not a sample."""
+    records = []
+    series: dict[str, list[tuple[datetime, float]]] = {}
+    for index in range(30):
+        outcome = index % 2 == 0
+        settlement = 0.99 if outcome else 0.01
+        # Every contract settles inside the same five minutes.
+        resolved_at = CALIBRATION_BASE_TIME - timedelta(seconds=index * 10)
+        record = _resolved_market(
+            index=index,
+            outcome=outcome,
+            settlement_probability=settlement,
+            resolved_at=resolved_at,
+        )
+        records.append(record)
+        series[record.market_id] = _converged_series(
+            resolved_at=resolved_at,
+            lead_probability=0.3 if index % 3 else 0.7,
+            settlement_probability=settlement,
+        )
+    service = PredictionMarketService(adapters={"polymarket": _CalibrationAdapter(records, series)})
+
+    summary = service.get_calibration_summary("polymarket:settled-0", lead_times_hours=[24])
+
+    assert summary is not None
+    assert summary.curves[0].sample_size == 30
+    assert summary.curves[0].is_plottable is False
+    assert summary.is_validated is False
+    assert any("settlement batch" in warning for warning in summary.warnings)
+    assert any("settlement span" in warning for warning in summary.curves[0].warnings)
+
+
+def test_calibration_reports_both_lead_times_with_separate_samples():
+    service, adapter = _calibration_service(count=22, lead_probability=0.4, hit_rate=0.5)
+
+    summary = service.get_calibration_summary("polymarket:settled-0", lead_times_hours=[168, 24])
+
+    assert summary is not None
+    assert summary.lead_times_hours == [24, 168]
+    assert [curve.label for curve in summary.curves] == ["T-1d", "T-7d"]
+    assert all(curve.sample_size == 22 for curve in summary.curves)
+    # One history request per contract serves every lead time.
+    assert len(adapter.history_calls) == 22
+    assert summary.curves[0].brier_score == pytest.approx(0.5 * (0.4**2) + 0.5 * (0.6**2), abs=1e-6)
+
+
+def test_calibration_skips_contracts_that_were_not_listed_at_the_lead_time():
+    """A contract that only lived six hours has no T-1d probability."""
+    service, _ = _calibration_service(count=6, lead_probability=0.6, hit_rate=0.5, life_days=0.25)
+
+    summary = service.get_calibration_summary("polymarket:settled-0", lead_times_hours=[24])
+
+    assert summary is not None
+    assert summary.method == "settlement_last_trade_deprecated"
+    assert summary.is_validated is False
+    assert summary.curves == []
+    assert any("no calibration could be measured" in warning for warning in summary.warnings)
+
+
+def test_calibration_falls_back_to_a_labeled_settlement_summary_without_history():
+    records = [
+        _resolved_market(
+            index=index,
+            outcome=index % 2 == 0,
+            settlement_probability=0.99 if index % 2 == 0 else 0.01,
+            resolved_at=CALIBRATION_BASE_TIME - timedelta(days=index + 1),
+        )
+        for index in range(5)
+    ]
+    service = PredictionMarketService(adapters={"polymarket": _CalibrationAdapter(records, {})})
+
+    summary = service.get_calibration_summary("polymarket:settled-0")
+
+    assert summary is not None
+    assert summary.method == "settlement_last_trade_deprecated"
+    assert summary.is_validated is False
+    assert summary.curves == []
+    assert summary.markets_without_history == 5
+    assert summary.convergence is not None
+    assert any("not predictive" in warning for warning in summary.warnings)
+
+
+def test_calibration_route_exposes_lead_times_and_rejects_unsupported_ones(tmp_path):
+    service, _ = _calibration_service(count=22, lead_probability=0.6, hit_rate=0.5)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get(
+            "/prediction-markets/markets/polymarket:settled-0/calibration?lead=24&lead=168&sample=25"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["method"] == "lead_time_history"
+        assert payload["lead_times_hours"] == [24, 168]
+        assert payload["minimum_curve_sample"] == 20
+        assert payload["curves"][0]["label"] == "T-1d"
+        assert payload["curves"][0]["buckets"][0]["lead_time_hours"] == 24
+        assert payload["convergence"]["note"]
+        assert payload["transformation_note"]
+
+        rejected = client.get("/prediction-markets/markets/polymarket:settled-0/calibration?lead=999")
+        assert rejected.status_code == 422

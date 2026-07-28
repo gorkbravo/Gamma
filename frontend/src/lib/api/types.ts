@@ -1261,11 +1261,131 @@ export interface RelatedPredictionMarketListResponse {
   related: RelatedPredictionMarket[];
 }
 
+export interface PredictionBookLevel {
+  price: number;
+  size: number;
+  notional: number;
+  cumulative_size: number;
+  cumulative_notional: number;
+}
+
+/** Read-only resting depth. Gamma reads the book; it never routes an order. */
+export interface PredictionOrderBookDepth {
+  market_id: string;
+  venue: string;
+  outcome_id: string | null;
+  outcome_label: string | null;
+  token_id: string | null;
+  best_bid: number | null;
+  best_ask: number | null;
+  mid: number | null;
+  spread: number | null;
+  bids: PredictionBookLevel[];
+  asks: PredictionBookLevel[];
+  depth_band: number;
+  bid_notional_within_band: number | null;
+  ask_notional_within_band: number | null;
+  total_bid_notional: number | null;
+  total_ask_notional: number | null;
+  depth_imbalance: number | null;
+  reference_clip_notional: number;
+  bid_slippage_reference: number | null;
+  ask_slippage_reference: number | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface PredictionSavedWatchlistEntry {
+  id: string;
+  market_id: string;
+  venue: string;
+  title: string;
+  probability: number | null;
+  note: string;
+  saved_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PredictionComparisonSet {
+  id: string;
+  name: string;
+  market_ids: string[];
+  range_key: string;
+  resolution_minutes: number | null;
+  note: string;
+  saved_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PredictionSavedResearch {
+  schema_version: number;
+  watchlist: PredictionSavedWatchlistEntry[];
+  comparison_sets: PredictionComparisonSet[];
+  watchlist_limit: number;
+  comparison_set_limit: number;
+  warnings: string[];
+}
+
+export interface PredictionEventBookLeg {
+  market_id: string;
+  venue: string;
+  title: string;
+  subtitle: string | null;
+  outcome_label: string | null;
+  probability: number | null;
+  best_bid: number | null;
+  best_ask: number | null;
+  spread: number | null;
+  volume: number | null;
+  liquidity: number | null;
+  open_interest: number | null;
+  status: string;
+  end_time: string | null;
+  resolution_source: string | null;
+  is_anchor: boolean;
+  divergence_flags: string[];
+}
+
+export interface PredictionEventBookCompleteness {
+  status: "complete" | "truncated" | "partial_pricing" | "unavailable";
+  legs_returned: number;
+  legs_priced: number;
+  cap: number;
+  truncated: boolean;
+  note: string;
+}
+
+export interface PredictionEventBook {
+  venue: string;
+  anchor_market_id: string;
+  event_id: string | null;
+  event_title: string | null;
+  provider_event_id: string | null;
+  legs: PredictionEventBookLeg[];
+  probability_sum: number | null;
+  implied_overround: number | null;
+  favorite_market_id: string | null;
+  exclusivity_signal: string;
+  /** Only when the book is complete, fully priced, and venue-grouped as candidates. */
+  overround_is_meaningful: boolean;
+  completeness: PredictionEventBookCompleteness | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface PredictionCalibrationBucket {
   label: string;
   sample_size: number;
   average_probability: number | null;
   realized_frequency: number | null;
+  lead_time_hours: number;
+  meets_minimum: boolean;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
@@ -1278,16 +1398,56 @@ export interface PredictionCalibrationObservation {
   probability: number;
   outcome: boolean;
   settled_at: string | null;
+  lead_time_hours: number;
+  observed_at: string | null;
+  observation_lag_hours: number | null;
+  settlement_probability: number | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
 }
 
+export interface PredictionCalibrationCurve {
+  lead_time_hours: number;
+  label: string;
+  sample_size: number;
+  buckets: PredictionCalibrationBucket[];
+  brier_score: number | null;
+  mean_signed_error: number | null;
+  is_plottable: boolean;
+  warnings: string[];
+}
+
+export interface PredictionCalibrationConvergence {
+  sample_size: number;
+  average_settlement_probability: number | null;
+  average_distance_to_outcome: number | null;
+  share_within_five_points: number | null;
+  note: string;
+}
+
+/** `lead_time_history` is the measured method; the settlement variant is a labeled fallback. */
+export type PredictionCalibrationMethod = "lead_time_history" | "settlement_last_trade_deprecated";
+
 export interface PredictionCalibrationSummary {
   venue: string;
   sample_size: number;
-  buckets: PredictionCalibrationBucket[];
+  method: PredictionCalibrationMethod;
+  is_validated: boolean;
+  lead_times_hours: number[];
+  curves: PredictionCalibrationCurve[];
+  minimum_bucket_sample: number;
+  minimum_curve_sample: number;
+  resolved_markets_considered: number;
+  markets_sampled: number;
+  markets_without_history: number;
+  sample_period_start: string | null;
+  sample_period_end: string | null;
+  /** Research-category composition of the measured sample. */
+  sample_categories: Record<string, number>;
+  research_share: number | null;
+  convergence: PredictionCalibrationConvergence | null;
   observations: PredictionCalibrationObservation[];
   warnings: string[];
   source_provider: string;

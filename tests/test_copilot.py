@@ -2186,6 +2186,93 @@ def test_prediction_market_copilot_route_uses_prediction_tool_context(tmp_path):
         runtime.shutdown()
 
 
+def test_prediction_market_tools_expose_windowed_history_and_comparison(tmp_path):
+    """Checkpoint-5 re-check: the second-pass contracts must reach the model."""
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        screener = client.post("/prediction-markets/screener", json={})
+        assert screener.status_code == 200
+        markets = screener.json()["markets"]
+        market_id = markets[0]["market_id"]
+
+        service = runtime.copilot_service
+        registry = service._tools
+        for name in (
+            "get_prediction_market_history_summary",
+            "get_prediction_market_outcome_series",
+            "compare_prediction_markets",
+            "get_prediction_market_calibration",
+        ):
+            assert name in registry, name
+            assert registry[name].read_only is True
+            assert registry[name].action_type == "read_context"
+
+        context = service._build_prediction_market_context(
+            CopilotResearchCardRequest(
+                domain="prediction_markets",
+                prompt="Frame the window.",
+                context=CopilotRequestContext(
+                    current_tab="prediction_markets",
+                    prediction_market_id=market_id,
+                ),
+            )
+        )
+
+        history = service._execute_tool(
+            "get_prediction_market_history_summary",
+            {"range": "1w", "resolution_minutes": 60, "outcome_id": None},
+            context,
+        )
+        assert history.output["window"]["requested_range"] == "1w"
+        assert history.output["window"]["requested_resolution_minutes"] == 60
+        assert "windowing" in history.output["window"]
+        assert "observations" in history.output["stats"]
+        assert isinstance(history.output["warnings"], list)
+        assert history.trace.arguments["range"] == "1w"
+
+        # An out-of-range request is clamped rather than passed through.
+        clamped = service._execute_tool(
+            "get_prediction_market_history_summary",
+            {"range": "decade", "resolution_minutes": 0, "outcome_id": None},
+            context,
+        )
+        assert clamped.output["window"]["requested_range"] == "max"
+        assert clamped.output["window"]["requested_resolution_minutes"] is None
+
+        outcomes = service._execute_tool(
+            "get_prediction_market_outcome_series",
+            {"range": "1w", "resolution_minutes": None},
+            context,
+        )
+        assert outcomes.output["market_id"] == market_id
+        assert isinstance(outcomes.output["series"], list)
+
+        comparison = service._execute_tool(
+            "compare_prediction_markets",
+            {
+                "market_ids": [row["market_id"] for row in markets[:3]],
+                "range": "1w",
+                "resolution_minutes": None,
+            },
+            context,
+        )
+        assert comparison.output["method_note"]
+        assert "not executable prices" in comparison.output["method_note"]
+        assert isinstance(comparison.output["legs"], list)
+        assert isinstance(comparison.output["pairs"], list)
+
+        calibration = service._execute_tool(
+            "get_prediction_market_calibration",
+            {"lead_times_hours": [24], "sample_size": 6},
+            context,
+        )
+        assert calibration.output["method"] in {"lead_time_history", "settlement_last_trade_deprecated"}
+        assert "is_validated" in calibration.output
+        assert isinstance(calibration.output["warnings"], list)
+    finally:
+        runtime.shutdown()
+
+
 def test_prediction_market_copilot_requires_selection(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

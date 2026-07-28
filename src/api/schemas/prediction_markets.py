@@ -13,11 +13,22 @@ from src.application.request_limits import (
 )
 from src.application.prediction_market_service import PredictionMarketScreenerRequest
 from src.models.prediction_markets import (
+    CALIBRATION_METHOD_SETTLEMENT,
     CalibrationBucket,
+    CalibrationConvergence,
+    CalibrationCurve,
     CalibrationObservation,
     CalibrationSummary,
     PredictionBasketSummary,
+    PredictionBookLevel,
     PredictionComparisonLeg,
+    PredictionComparisonSet,
+    PredictionOrderBookDepth,
+    PredictionSavedResearch,
+    PredictionWatchlistEntry,
+    PredictionEventBook,
+    PredictionEventBookCompleteness,
+    PredictionEventBookLeg,
     PredictionHistoryStats,
     PredictionMarketComparison,
     PredictionMarketFreshness,
@@ -390,6 +401,214 @@ class PredictionMarketComparisonResponseModel(BaseModel):
         return cls(**payload)
 
 
+class PredictionWatchlistEntryModel(BaseModel):
+    id: str
+    market_id: str
+    venue: str
+    title: str
+    probability: float | None = None
+    note: str = ""
+    saved_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, entry: PredictionWatchlistEntry) -> "PredictionWatchlistEntryModel":
+        return cls(**entry.__dict__)
+
+
+class PredictionComparisonSetModel(BaseModel):
+    id: str
+    name: str
+    market_ids: list[str] = Field(default_factory=list)
+    range_key: str = "max"
+    resolution_minutes: int | None = None
+    note: str = ""
+    saved_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, record: PredictionComparisonSet) -> "PredictionComparisonSetModel":
+        return cls(**record.__dict__)
+
+
+class PredictionSavedResearchResponseModel(BaseModel):
+    schema_version: int
+    watchlist: list[PredictionWatchlistEntryModel] = Field(default_factory=list)
+    comparison_sets: list[PredictionComparisonSetModel] = Field(default_factory=list)
+    watchlist_limit: int = 0
+    comparison_set_limit: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, saved: PredictionSavedResearch) -> "PredictionSavedResearchResponseModel":
+        payload = dict(saved.__dict__)
+        payload["watchlist"] = [PredictionWatchlistEntryModel.from_domain(row) for row in saved.watchlist]
+        payload["comparison_sets"] = [
+            PredictionComparisonSetModel.from_domain(row) for row in saved.comparison_sets
+        ]
+        return cls(**payload)
+
+
+class PredictionWatchlistRequestModel(BaseModel):
+    market_id: str = Field(min_length=1, max_length=256)
+    venue: str = Field(default="", max_length=64)
+    title: str = Field(default="", max_length=MAX_REQUEST_TEXT_CHARS)
+    probability: float | None = Field(default=None, ge=0, le=1)
+    note: str = Field(default="", max_length=MAX_REQUEST_TEXT_CHARS)
+
+
+class PredictionComparisonSetRequestModel(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    market_ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        min_length=1,
+        max_length=MAX_PREDICTION_COMPARISON_LEGS,
+    )
+    set_id: str | None = Field(default=None, max_length=64)
+    range_key: str = Field(default="max", min_length=1, max_length=8)
+    resolution_minutes: int | None = Field(default=None, ge=1, le=1440)
+    note: str = Field(default="", max_length=MAX_REQUEST_TEXT_CHARS)
+
+
+class PredictionLegacyWatchlistEntryModel(BaseModel):
+    market_id: str = Field(min_length=1, max_length=256)
+    venue: str = Field(default="", max_length=64)
+    title: str = Field(default="", max_length=MAX_REQUEST_TEXT_CHARS)
+    probability: float | None = None
+
+
+class PredictionResearchImportRequestModel(BaseModel):
+    """One-time import of the browser-local records this store replaces."""
+
+    watchlist: list[PredictionLegacyWatchlistEntryModel] = Field(default_factory=list, max_length=200)
+    comparison_basket: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        default_factory=list,
+        max_length=MAX_PREDICTION_COMPARISON_LEGS,
+    )
+    basket_name: str = Field(default="Imported basket", min_length=1, max_length=120)
+
+
+class PredictionCrossDomainHandoffListResponseModel(BaseModel):
+    """Outward handoffs, serialized through the shared CrossTabHandoffEnvelope."""
+
+    market_id: str
+    handoffs: list[dict] = Field(default_factory=list)
+
+
+class PredictionEventBookLegModel(BaseModel):
+    market_id: str
+    venue: str
+    title: str
+    subtitle: str | None = None
+    outcome_label: str | None = None
+    probability: float | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
+    spread: float | None = None
+    volume: float | None = None
+    liquidity: float | None = None
+    open_interest: float | None = None
+    status: str
+    end_time: datetime | None = None
+    resolution_source: str | None = None
+    is_anchor: bool = False
+    divergence_flags: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, leg: PredictionEventBookLeg) -> "PredictionEventBookLegModel":
+        return cls(**leg.__dict__)
+
+
+class PredictionEventBookCompletenessModel(BaseModel):
+    status: str
+    legs_returned: int
+    legs_priced: int
+    cap: int
+    truncated: bool
+    note: str = ""
+
+    @classmethod
+    def from_domain(cls, completeness: PredictionEventBookCompleteness) -> "PredictionEventBookCompletenessModel":
+        return cls(**completeness.__dict__)
+
+
+class PredictionEventBookResponseModel(BaseModel):
+    venue: str
+    anchor_market_id: str
+    event_id: str | None = None
+    event_title: str | None = None
+    provider_event_id: str | None = None
+    legs: list[PredictionEventBookLegModel] = Field(default_factory=list)
+    probability_sum: float | None = None
+    implied_overround: float | None = None
+    favorite_market_id: str | None = None
+    exclusivity_signal: str = "unverified"
+    overround_is_meaningful: bool = False
+    completeness: PredictionEventBookCompletenessModel | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, book: PredictionEventBook) -> "PredictionEventBookResponseModel":
+        payload = dict(book.__dict__)
+        payload["legs"] = [PredictionEventBookLegModel.from_domain(leg) for leg in book.legs]
+        payload["completeness"] = (
+            PredictionEventBookCompletenessModel.from_domain(book.completeness)
+            if book.completeness is not None
+            else None
+        )
+        return cls(**payload)
+
+
+class PredictionBookLevelModel(BaseModel):
+    price: float
+    size: float
+    notional: float
+    cumulative_size: float
+    cumulative_notional: float
+
+    @classmethod
+    def from_domain(cls, level: PredictionBookLevel) -> "PredictionBookLevelModel":
+        return cls(**level.__dict__)
+
+
+class PredictionOrderBookDepthResponseModel(BaseModel):
+    market_id: str
+    venue: str
+    outcome_id: str | None = None
+    outcome_label: str | None = None
+    token_id: str | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
+    mid: float | None = None
+    spread: float | None = None
+    bids: list[PredictionBookLevelModel] = Field(default_factory=list)
+    asks: list[PredictionBookLevelModel] = Field(default_factory=list)
+    depth_band: float = 0.05
+    bid_notional_within_band: float | None = None
+    ask_notional_within_band: float | None = None
+    total_bid_notional: float | None = None
+    total_ask_notional: float | None = None
+    depth_imbalance: float | None = None
+    reference_clip_notional: float = 1000.0
+    bid_slippage_reference: float | None = None
+    ask_slippage_reference: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, depth: PredictionOrderBookDepth) -> "PredictionOrderBookDepthResponseModel":
+        payload = dict(depth.__dict__)
+        payload["bids"] = [PredictionBookLevelModel.from_domain(level) for level in depth.bids]
+        payload["asks"] = [PredictionBookLevelModel.from_domain(level) for level in depth.asks]
+        return cls(**payload)
+
+
 class WalletActivityModel(BaseModel):
     participant_id: str
     display_name: str
@@ -461,6 +680,8 @@ class CalibrationBucketModel(BaseModel):
     sample_size: int
     average_probability: float | None = None
     realized_frequency: float | None = None
+    lead_time_hours: int = 0
+    meets_minimum: bool = False
     source_provider: str
     retrieved_at: datetime | None = None
     origin: str
@@ -477,6 +698,10 @@ class CalibrationObservationModel(BaseModel):
     probability: float
     outcome: bool
     settled_at: datetime | None = None
+    lead_time_hours: int = 0
+    observed_at: datetime | None = None
+    observation_lag_hours: float | None = None
+    settlement_probability: float | None = None
     source_provider: str
     retrieved_at: datetime | None = None
     origin: str
@@ -487,10 +712,52 @@ class CalibrationObservationModel(BaseModel):
         return cls(**observation.__dict__)
 
 
+class CalibrationCurveModel(BaseModel):
+    lead_time_hours: int
+    label: str
+    sample_size: int
+    buckets: list[CalibrationBucketModel] = Field(default_factory=list)
+    brier_score: float | None = None
+    mean_signed_error: float | None = None
+    is_plottable: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, curve: CalibrationCurve) -> "CalibrationCurveModel":
+        payload = dict(curve.__dict__)
+        payload["buckets"] = [CalibrationBucketModel.from_domain(bucket) for bucket in curve.buckets]
+        return cls(**payload)
+
+
+class CalibrationConvergenceModel(BaseModel):
+    sample_size: int
+    average_settlement_probability: float | None = None
+    average_distance_to_outcome: float | None = None
+    share_within_five_points: float | None = None
+    note: str = ""
+
+    @classmethod
+    def from_domain(cls, convergence: CalibrationConvergence) -> "CalibrationConvergenceModel":
+        return cls(**convergence.__dict__)
+
+
 class CalibrationSummaryResponseModel(BaseModel):
     venue: str
     sample_size: int
-    buckets: list[CalibrationBucketModel] = Field(default_factory=list)
+    method: str = CALIBRATION_METHOD_SETTLEMENT
+    is_validated: bool = False
+    lead_times_hours: list[int] = Field(default_factory=list)
+    curves: list[CalibrationCurveModel] = Field(default_factory=list)
+    minimum_bucket_sample: int = 0
+    minimum_curve_sample: int = 0
+    resolved_markets_considered: int = 0
+    markets_sampled: int = 0
+    markets_without_history: int = 0
+    sample_period_start: datetime | None = None
+    sample_period_end: datetime | None = None
+    sample_categories: dict[str, int] = Field(default_factory=dict)
+    research_share: float | None = None
+    convergence: CalibrationConvergenceModel | None = None
     observations: list[CalibrationObservationModel] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     source_provider: str
@@ -501,7 +768,10 @@ class CalibrationSummaryResponseModel(BaseModel):
     @classmethod
     def from_domain(cls, summary: CalibrationSummary) -> "CalibrationSummaryResponseModel":
         payload = dict(summary.__dict__)
-        payload["buckets"] = [CalibrationBucketModel.from_domain(bucket) for bucket in summary.buckets]
+        payload["curves"] = [CalibrationCurveModel.from_domain(curve) for curve in summary.curves]
+        payload["convergence"] = (
+            CalibrationConvergenceModel.from_domain(summary.convergence) if summary.convergence is not None else None
+        )
         payload["observations"] = [
             CalibrationObservationModel.from_domain(observation) for observation in summary.observations
         ]

@@ -158,6 +158,20 @@
     predictionHistoryRange,
     predictionHistoryResolution,
     predictionHistoryOutcomeId,
+    predictionCalibrationLeadTimes,
+    predictionCalibrationSample,
+    predictionMarketEventBook,
+    predictionMarketDepth,
+    predictionMarketHandoffs,
+    predictionSavedResearch,
+    predictionCompareSelection,
+    deletePredictionComparisonSet,
+    loadPredictionMarketCalibration,
+    loadPredictionMarketEventBook,
+    loadPredictionSavedResearch,
+    savePredictionComparisonSet,
+    setPredictionCompareSelection,
+    togglePredictionWatchlistEntry,
     refreshSystemStatus,
     researchOverview,
     sitrepIndicesOverview,
@@ -307,6 +321,8 @@
   let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
+  // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
+  let maritimeFocusChokepointId: string | null = null;
   let predictionMarketsMode: PredictionMarketsMode = persistedMode(
     restoredWorkspaceState,
     "prediction_markets",
@@ -1734,7 +1750,12 @@
     } else if (nextTab === "commodities") {
       await loadCommoditiesWorkspace({ mode: commoditiesMode });
     } else if (nextTab === "prediction_markets") {
-      await loadPredictionMarketScreener();
+      // Saved research is server-side now, so it has to be fetched (and the
+      // one-time local migration run) before the view can render a watchlist.
+      await Promise.all([
+        $predictionSavedResearch ? Promise.resolve(null) : loadPredictionSavedResearch(),
+        loadPredictionMarketScreener()
+      ]);
     } else if (nextTab === "crypto") {
       await loadCryptoWorkspace();
     } else if (nextTab === "fundamentals") {
@@ -2547,6 +2568,48 @@
     }
   }
 
+  /**
+   * Open a Prediction Markets outward handoff in its target tab.
+   *
+   * The envelope carries the entity, the target mode, and the contract's own
+   * event window; each is applied where the target tab can accept it, and any
+   * part a target cannot honor is reported rather than dropped.
+   */
+  async function openPredictionCrossDomainHandoff(handoff: CrossTabHandoffEnvelope) {
+    const targetTab = normalizeAppTabId(handoff.intended_target_tab as TabId);
+    const ids = handoff.normalized_ids ?? {};
+    const entityLabel = handoff.selected_entity?.label ?? targetTab;
+
+    if (targetTab === "maritime") {
+      maritimeFocusChokepointId = ids.chokepoint_id ?? null;
+    }
+
+    await openSitrepHandoff({
+      targetTab,
+      targetMode: handoff.intended_target_mode ?? undefined,
+      commodityId: ids.commodity_id ?? null,
+      region: ids.region ?? null,
+      theme: ids.theme ?? null,
+      timeframe: ids.timeframe ?? null
+    });
+
+    consoleEntries = [
+      {
+        label: "Handoff",
+        message: `${entityLabel} opened in ${getTabLabel(targetTab)}${
+          handoff.intended_target_mode ? ` / ${handoff.intended_target_mode}` : ""
+        }.`,
+        tone: "action" as const
+      },
+      ...handoff.warnings.map((warning) => ({
+        label: "Handoff",
+        message: warning,
+        tone: "warning" as const
+      })),
+      ...consoleEntries
+    ].slice(0, 12);
+  }
+
   async function handleAppKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) {
       return;
@@ -2884,17 +2947,33 @@
             comparison={$predictionMarketComparison}
             wallet={$predictionMarketWallet}
             related={$predictionMarketRelated}
+            eventBook={$predictionMarketEventBook}
+            depth={$predictionMarketDepth}
+            crossDomainHandoffs={$predictionMarketHandoffs}
+            savedResearch={$predictionSavedResearch}
+            compareSelection={$predictionCompareSelection}
             calibration={$predictionMarketCalibration}
             historyRange={$predictionHistoryRange}
             historyResolution={$predictionHistoryResolution}
             historyOutcomeId={$predictionHistoryOutcomeId}
+            bind:calibrationLeadTimes={$predictionCalibrationLeadTimes}
+            bind:calibrationSample={$predictionCalibrationSample}
             loading={$loading.prediction || $loading.predictionDetail}
             historyLoading={$loading.predictionHistory}
             compareLoading={$loading.predictionCompare}
+            calibrationLoading={$loading.predictionCalibration}
+            savedLoading={$loading.predictionSaved}
+            onToggleWatchlist={togglePredictionWatchlistEntry}
+            onSetCompareSelection={setPredictionCompareSelection}
+            onSaveComparisonSet={savePredictionComparisonSet}
+            onDeleteComparisonSet={deletePredictionComparisonSet}
             onLoadScreener={loadPredictionMarketScreener}
             onSelectMarket={selectPredictionMarket}
             onLoadHistory={loadPredictionMarketHistory}
             onCompare={runPredictionMarketComparison}
+            onLoadEventBook={loadPredictionMarketEventBook}
+            onLoadCalibration={loadPredictionMarketCalibration}
+            onCrossDomainHandoff={openPredictionCrossDomainHandoff}
             onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {:else if $activeTab === "crypto"}
@@ -2949,6 +3028,7 @@
             bind:mode={maritimeMode}
             workspace={$maritimeWorkspace}
             loading={$loading.maritime}
+            focusChokepointId={maritimeFocusChokepointId}
             onLoadWorkspace={loadMaritimeWorkspace}
           />
         {:else if $activeTab === "copilot"}
