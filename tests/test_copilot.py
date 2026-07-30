@@ -18,6 +18,7 @@ from src.application.copilot_context_contracts import (
 )
 from src.application.copilot_model_policy import CopilotModelPolicy
 from src.application.research_action_registry import (
+    ResearchActionArgumentError,
     ResearchActionPermissionError,
     ResearchActionRegistry,
     ResearchActionRegistryError,
@@ -3222,6 +3223,48 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         runtime.shutdown()
 
 
+def test_checkpoint7_registry_rejects_missing_extra_and_wrong_typed_arguments(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        registry = runtime.copilot_service.action_registry
+        valid = _checkpoint7_rate_shock_arguments()
+
+        assert registry.validate_arguments(
+            "run_risk_scenario_analysis",
+            valid,
+        ) == valid
+
+        invalid_payloads = [
+            {key: value for key, value in valid.items() if key != "rate_shift_bps"},
+            {**valid, "unapproved_default": True},
+            {**valid, "rate_shift_bps": "75"},
+            {
+                **valid,
+                "symbol_shocks": [{"symbol": "AAPL", "price_shock_pct": "-0.2"}],
+            },
+        ]
+        for payload in invalid_payloads:
+            with pytest.raises(ResearchActionArgumentError):
+                registry.validate_arguments(
+                    "run_risk_scenario_analysis",
+                    payload,
+                )
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint7_provider_rejects_generic_tool_count_final_card():
+    with pytest.raises(RuntimeError, match="generic tool-count summary"):
+        OpenAIResponsesCopilotProvider._validate_operator_final_card(
+            ResearchCard(
+                title="Operator complete",
+                hypothesis="The requested workflow ran.",
+                rationale="Research Operator executed 2 tools successfully.",
+                proposed_test="Review the returned tool outputs.",
+            )
+        )
+
+
 def test_copilot_operator_plan_returns_ordered_steps_for_rate_shock(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
@@ -3905,15 +3948,576 @@ def test_copilot_risk_shock_proxy_uses_duration_for_rate_scenarios():
     assert impact["position_impacts"][0]["basis"] == "duration_proxy"
 
 
+def _checkpoint7_rate_shock_arguments() -> dict[str, object]:
+    return {
+        "scenario_label": "rate_up_75_equity_down_12",
+        "source_scope": "portfolio",
+        "scenario_type": "rate_shock",
+        "rate_shift_bps": 75.0,
+        "equity_shock_pct": -0.12,
+        "duration_proxy_years": 7.5,
+        "symbol_shocks": [],
+    }
+
+
+def _checkpoint7_final_card(
+    *,
+    rationale: str = "The validated rate-shock observation reports a bounded downside estimate.",
+) -> dict[str, object]:
+    return {
+        "title": "Portfolio rate-shock conclusion",
+        "hypothesis": "The active portfolio is exposed to the requested rate and equity shocks.",
+        "rationale": rationale,
+        "required_data": ["Validated Gamma risk-scenario observation"],
+        "proposed_test": "Compare the shocked proxy result with the baseline snapshot.",
+        "confounders": ["Duration is a transparent proxy rather than full curve repricing."],
+        "next_steps": ["Inspect the largest position-level shock contributions."],
+        "caveats": ["This is read-only scenario research, not investment advice."],
+        "source_backed_claims": [],
+        "inferred_claims": [
+            "The requested +75 bps and -12% shocks should be evaluated together."
+        ],
+        "stop_reason": "final_answer",
+    }
+
+
+def test_checkpoint7_responses_operator_closes_the_model_tool_model_loop(
+    tmp_path,
+    monkeypatch,
+):
+    class _ScriptedResponsesOperator(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test-operator",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payloads: list[dict[str, object]] = []
+
+        def _post_json_stream(self, payload, emit, should_cancel):
+            assert should_cancel() is False
+            self.payloads.append(deepcopy(payload))
+            if len(self.payloads) == 1:
+                tools = {item["name"]: item for item in payload["tools"]}
+                assert "run_risk_scenario_analysis" in tools, sorted(tools)
+                risk_tool = tools["run_risk_scenario_analysis"]
+                assert risk_tool["strict"] is True
+                assert risk_tool["parameters"]["additionalProperties"] is False
+                return (
+                    {
+                        "id": "resp_checkpoint7_tool",
+                        "model": self.model,
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "fc_checkpoint7",
+                                "call_id": "call_checkpoint7",
+                                "name": "run_risk_scenario_analysis",
+                                "arguments": json.dumps(
+                                    _checkpoint7_rate_shock_arguments()
+                                ),
+                            }
+                        ],
+                    },
+                    "completed",
+                )
+
+            observation_items = [
+                item
+                for item in payload["input"]
+                if item.get("type") == "function_call_output"
+            ]
+            assert len(observation_items) == 1
+            observation = json.loads(observation_items[0]["output"])
+            assert observation["status"] == "completed"
+            assert observation["arguments"] == _checkpoint7_rate_shock_arguments()
+            assert observation["output"]["shock_parameters"]["scenario_type"] == "rate_shock"
+            rationale = (
+                "The returned Gamma observation preserved +75 bps, -12%, and "
+                "7.5 years in the executed scenario."
+            )
+            emit("text.delta", {"delta": rationale})
+            return (
+                {
+                    "id": "resp_checkpoint7_final",
+                    "model": self.model,
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": json.dumps(
+                                        _checkpoint7_final_card(
+                                            rationale=rationale,
+                                        )
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "completed",
+            )
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    provider = _ScriptedResponsesOperator()
+    runtime.copilot_service.provider = provider
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": (
+                    "Is my portfolio exposed to a +75 bps rate shock and a -12% "
+                    "equity shock? Duration proxy: 7.5 years."
+                ),
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "openai_responses_operator"
+        assert payload["model"] == "gpt-test-operator"
+        assert len(provider.payloads) == 2
+        assert payload["card"]["rationale"].endswith(
+            "7.5 years in the executed scenario."
+        )
+        assert len(payload["tool_traces"]) == 1
+        assert (
+            payload["tool_traces"][0]["arguments"]
+            == _checkpoint7_rate_shock_arguments()
+        )
+        final_payload = payload["operator_events"][-1]["payload"]
+        assert final_payload["operator_contract"] == "copilot.operator.loop.v1"
+        assert final_payload["synthesis_source"] == "model_final_output"
+        assert final_payload["stop_reason"] == "final_answer"
+        assert final_payload["tool_calls_used"] == 1
+        assert final_payload["outputs"]
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint7_responses_operator_observes_validation_error_and_corrects(
+    tmp_path,
+    monkeypatch,
+):
+    class _CorrectingResponsesOperator(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test-operator",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.turn = 0
+
+        def _post_json_stream(self, payload, emit, should_cancel):
+            assert should_cancel() is False
+            self.turn += 1
+            if self.turn == 1:
+                arguments = {}
+                call_id = "call_invalid"
+            elif self.turn == 2:
+                observations = [
+                    json.loads(item["output"])
+                    for item in payload["input"]
+                    if item.get("type") == "function_call_output"
+                ]
+                assert [item["status"] for item in observations] == [
+                    "failed"
+                ]
+                assert observations[0]["output"]["status"] == "invalid_arguments"
+                assert (
+                    observations[0]["output"]["stop_reason"]
+                    == "argument_validation_failed"
+                )
+                arguments = _checkpoint7_rate_shock_arguments()
+                call_id = "call_corrected"
+            else:
+                observations = [
+                    json.loads(item["output"])
+                    for item in payload["input"]
+                    if item.get("type") == "function_call_output"
+                ]
+                assert [item["status"] for item in observations] == [
+                    "failed",
+                    "completed",
+                ]
+                assert (
+                    observations[-1]["arguments"]
+                    == _checkpoint7_rate_shock_arguments()
+                )
+                return (
+                    {
+                        "id": "resp_checkpoint7_corrected_final",
+                        "model": self.model,
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": json.dumps(
+                                            _checkpoint7_final_card(
+                                                rationale=(
+                                                    "The corrected strict call returned "
+                                                    "the requested bounded shock observation."
+                                                )
+                                            )
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    "completed",
+                )
+            return (
+                {
+                    "id": f"resp_{call_id}",
+                    "model": self.model,
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "id": f"fc_{call_id}",
+                            "call_id": call_id,
+                            "name": "run_risk_scenario_analysis",
+                            "arguments": json.dumps(arguments),
+                        }
+                    ],
+                },
+                "completed",
+            )
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = _CorrectingResponsesOperator()
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": (
+                    "Is my portfolio exposed to a +75 bps rate shock and a -12% "
+                    "equity shock? Duration proxy: 7.5 years."
+                ),
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert len(payload["tool_traces"]) == 2
+        tool_results = [
+            event
+            for event in payload["operator_events"]
+            if event["event_type"] == "tool-result"
+        ]
+        assert any(
+            event["payload"].get("status") == "invalid_arguments"
+            for event in tool_results
+        )
+        assert any(
+            event["payload"].get("status") == "completed"
+            for event in tool_results
+        )
+        final_payload = payload["operator_events"][-1]["payload"]
+        assert final_payload["tool_calls_used"] == 2
+        assert final_payload["synthesis_source"] == "model_final_output"
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint7_responses_operator_cannot_call_unapproved_action(
+    tmp_path,
+    monkeypatch,
+):
+    class _UnauthorizedResponsesOperator(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test-operator",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.turn = 0
+
+        def _post_json_stream(self, payload, emit, should_cancel):
+            assert should_cancel() is False
+            self.turn += 1
+            if self.turn == 1:
+                assert all(
+                    tool["name"] != "fundamentals.apply_dcf_update"
+                    for tool in payload["tools"]
+                )
+                return (
+                    {
+                        "id": "resp_unauthorized_tool",
+                        "model": self.model,
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "fc_unauthorized",
+                                "call_id": "call_unauthorized",
+                                "name": "fundamentals.apply_dcf_update",
+                                "arguments": "{}",
+                            }
+                        ],
+                    },
+                    "completed",
+                )
+            observation = next(
+                json.loads(item["output"])
+                for item in payload["input"]
+                if item.get("type") == "function_call_output"
+            )
+            assert observation["output"]["status"] == "rejected"
+            assert observation["output"]["stop_reason"] == "unauthorized_tool"
+            return (
+                {
+                    "id": "resp_unauthorized_final",
+                    "model": self.model,
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": json.dumps(_checkpoint7_final_card()),
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "completed",
+            )
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = _UnauthorizedResponsesOperator()
+    original_execute = runtime.copilot_service._execute_tool
+
+    def reject_dangerous_execution(tool_id, arguments, context):
+        assert tool_id != "fundamentals.apply_dcf_update"
+        return original_execute(tool_id, arguments, context)
+
+    runtime.copilot_service._execute_tool = reject_dangerous_execution
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "incomplete"
+        assert payload["card"] is None
+        final_payload = payload["operator_events"][-1]["payload"]
+        assert final_payload["stop_reason"] == "insufficient_evidence"
+        assert final_payload["synthesis_source"] == "typed_non_success"
+        assert any(
+            "outside the authorized Operator surface" in warning
+            for warning in payload["warnings"]
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint7_responses_operator_never_falls_back_on_incompatible_model(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    monkeypatch.setenv("GAMMA_COPILOT_MODEL", "gpt-5.5")
+    client, runtime = _build_test_client(tmp_path)
+    provider = OpenAIResponsesCopilotProvider(
+        api_key="test-key",
+        model="gpt-5.5",
+        reasoning_effort="low",
+        store_responses=False,
+    )
+
+    def unexpected_operator_call(**_kwargs):
+        raise AssertionError("Incompatible model must stop before orchestration.")
+
+    provider.stream_research_operator = unexpected_operator_call
+    runtime.copilot_service.provider = provider
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "requested_model": "not-a-supported-model",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "unavailable"
+        assert payload["tool_traces"] == []
+        assert payload["safe_provider_error"]["category"] == "incompatible_model"
+        assert payload["model_resolution"]["status"] == "incompatible_model"
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint7_responses_operator_enforces_tool_budget(
+    tmp_path,
+    monkeypatch,
+):
+    class _BudgetResponsesOperator(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test-operator",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.turn = 0
+
+        def _post_json_stream(self, payload, emit, should_cancel):
+            assert should_cancel() is False
+            self.turn += 1
+            observations = [
+                json.loads(item["output"])
+                for item in payload["input"]
+                if item.get("type") == "function_call_output"
+            ]
+            if self.turn == 3:
+                assert observations[-1]["output"]["status"] == "budget_exhausted"
+                return (
+                    {
+                        "id": "resp_budget_final",
+                        "model": self.model,
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": json.dumps(_checkpoint7_final_card()),
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    "completed",
+                )
+            return (
+                {
+                    "id": f"resp_budget_tool_{self.turn}",
+                    "model": self.model,
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "id": f"fc_budget_{self.turn}",
+                            "call_id": f"call_budget_{self.turn}",
+                            "name": "run_risk_scenario_analysis",
+                            "arguments": json.dumps(
+                                _checkpoint7_rate_shock_arguments()
+                            ),
+                        }
+                    ],
+                },
+                "completed",
+            )
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    service = runtime.copilot_service
+    service.provider = _BudgetResponsesOperator()
+    original_plan = service.plan_research_operator
+    service.plan_research_operator = lambda request: replace(
+        original_plan(request),
+        max_tool_calls=1,
+    )
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert len(payload["tool_traces"]) == 2
+        final_payload = payload["operator_events"][-1]["payload"]
+        assert final_payload["stop_reason"] == "tool_budget_exhausted"
+        assert final_payload["tool_calls_used"] == 1
+        assert final_payload["tool_calls_remaining"] == 0
+        assert any(
+            "tool-call budget of 1 is exhausted" in warning
+            for warning in payload["warnings"]
+        )
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, monkeypatch):
     from src.application import copilot_agents_operator as agents_operator
 
+    class _FakeFunctionTool:
+        def __init__(
+            self,
+            *,
+            name,
+            description,
+            params_json_schema,
+            on_invoke_tool,
+            strict_json_schema,
+            timeout_seconds,
+        ):
+            self.name = name
+            self.description = description
+            self.params_json_schema = params_json_schema
+            self.on_invoke_tool = on_invoke_tool
+            self.strict_json_schema = strict_json_schema
+            self.timeout_seconds = timeout_seconds
+
     class _FakeAgent:
-        def __init__(self, *, name, model, instructions, tools):
+        def __init__(self, *, name, model, instructions, tools, output_type):
             self.name = name
             self.model = model
             self.instructions = instructions
             self.tools = tools
+            self.output_type = output_type
 
     class _FakeRunner:
         @staticmethod
@@ -3921,8 +4525,31 @@ def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, mo
             assert agent.name == "Gamma Research Operator"
             assert max_turns >= 1
             assert "run_risk_scenario_analysis" in prompt
-            agent.tools[0]("run_risk_scenario_analysis", "{}")
-            return type("_FakeRunResult", (), {"final_output": "ok"})()
+            assert agent.output_type.__name__ == "_OperatorFinalOutput"
+            risk_tool = next(
+                tool
+                for tool in agent.tools
+                if tool.name == "run_risk_scenario_analysis"
+            )
+            assert risk_tool.strict_json_schema is True
+            assert risk_tool.params_json_schema["required"] == [
+                "scenario_label",
+                "source_scope",
+                "scenario_type",
+                "rate_shift_bps",
+                "equity_shock_pct",
+                "duration_proxy_years",
+                "symbol_shocks",
+            ]
+            await risk_tool.on_invoke_tool(
+                None,
+                json.dumps(_checkpoint7_rate_shock_arguments()),
+            )
+            return type(
+                "_FakeRunResult",
+                (),
+                {"final_output": _checkpoint7_final_card()},
+            )()
 
     monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
     monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", "gpt-test-operator")
@@ -3933,7 +4560,10 @@ def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, mo
         lambda: agents_operator._AgentsSdkModule(
             Agent=_FakeAgent,
             Runner=_FakeRunner,
-            function_tool=lambda func: func,
+            function_tool=lambda _func: pytest.fail(
+                "Production SDK path must use strict per-action FunctionTool objects."
+            ),
+            FunctionTool=_FakeFunctionTool,
         ),
     )
 
@@ -3959,10 +4589,20 @@ def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, mo
         assert payload["status"] == "ready"
         assert payload["provider"] == "openai_agents_sdk_operator"
         assert payload["model"] == "gpt-test-operator"
+        assert payload["card"]["title"] == "Portfolio rate-shock conclusion"
         assert any(trace["tool_name"] == "run_risk_scenario_analysis" for trace in payload["tool_traces"])
+        risk_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_risk_scenario_analysis"
+        )
+        assert risk_trace["arguments"] == _checkpoint7_rate_shock_arguments()
         assert payload["operator_events"][0]["payload"]["orchestrator"] == "openai_agents_sdk_operator"
         final_payload = payload["operator_events"][-1]["payload"]
         assert final_payload["orchestrator"] == "openai_agents_sdk_operator"
+        assert final_payload["operator_contract"] == "copilot.operator.loop.v1"
+        assert final_payload["synthesis_source"] == "model_final_output"
+        assert final_payload["stop_reason"] == "final_answer"
         assert final_payload["failed_steps"] == []
         assert "output_summaries" in final_payload
         assert any(
@@ -4005,10 +4645,14 @@ def test_agents_sdk_operator_streams_provider_and_tool_progress_live(tmp_path, m
         def __init__(self, agent):
             self.agent = agent
             self.cancel_mode = None
+            self.final_output = _checkpoint7_final_card()
 
         async def stream_events(self):
             yield _FakeSdkEvent("agent_updated_stream_event")
-            self.agent.tools[0]("run_risk_scenario_analysis", "{}")
+            self.agent.tools[0](
+                "run_risk_scenario_analysis",
+                json.dumps(_checkpoint7_rate_shock_arguments()),
+            )
             yield _FakeSdkEvent("run_item_stream_event")
 
         def cancel(self, mode="immediate"):
@@ -4091,7 +4735,10 @@ def test_agents_sdk_operator_cancels_after_current_safe_turn(tmp_path, monkeypat
             streams.append(self)
 
         async def stream_events(self):
-            self.agent.tools[0]("run_risk_scenario_analysis", "{}")
+            self.agent.tools[0](
+                "run_risk_scenario_analysis",
+                json.dumps(_checkpoint7_rate_shock_arguments()),
+            )
             yield _FakeSdkEvent()
 
         def cancel(self, mode="immediate"):
@@ -7448,7 +8095,7 @@ def test_checkpoint5_representative_plans_select_domains_and_explain_omissions(
         runtime.shutdown()
 
 
-def test_checkpoint6_model_policy_resolves_profiles_and_retains_custom_operator_default():
+def test_checkpoint7_model_policy_resolves_profiles_and_uses_adaptive_custom_operator():
     provider = OpenAIResponsesCopilotProvider(
         api_key="test-key",
         model="gpt-5.5",
@@ -7484,8 +8131,9 @@ def test_checkpoint6_model_policy_resolves_profiles_and_retains_custom_operator_
         role="research_operator",
     )
     assert operator.orchestration_path == "gamma_custom_loop"
-    assert operator.provider == "gamma_operator_executor"
-    assert operator.provider_storage.effective == "not_applicable"
+    assert operator.provider == "openai_responses_operator"
+    assert operator.model == "gpt-5.5"
+    assert operator.provider_storage.effective == "disabled"
 
 
 def test_checkpoint6_diagnostics_observability_and_unsupported_model_are_replayable(tmp_path):

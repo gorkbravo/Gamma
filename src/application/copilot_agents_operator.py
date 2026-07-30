@@ -8,9 +8,15 @@ from datetime import date, datetime, time
 from time import perf_counter
 from typing import Any, Callable
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from src.application.copilot_context_helpers import dedupe_warnings
 from src.application.copilot_model_policy import OPENAI_BASELINE_MODEL
-from src.application.research_action_registry import ResearchActionRegistry
+from src.application.research_action_registry import (
+    ResearchActionArgumentError,
+    ResearchActionPermissionError,
+    ResearchActionRegistry,
+)
 from src.models.copilot import (
     CopilotContextBundle,
     CopilotOperatorPlan,
@@ -23,6 +29,7 @@ from src.models.copilot import (
     CopilotToolTrace,
     CopilotUsageRecord,
     ResearchCard,
+    ResearchClaim,
     new_copilot_id,
 )
 from src.utils.time import now_utc
@@ -48,12 +55,42 @@ class _AgentsSdkModule:
     Runner: Any
     function_tool: Any
     ModelSettings: Any | None = None
+    FunctionTool: Any | None = None
 
 
 def _load_agents_sdk() -> _AgentsSdkModule:
-    from agents import Agent, ModelSettings, Runner, function_tool
+    from agents import Agent, FunctionTool, ModelSettings, Runner, function_tool
 
-    return _AgentsSdkModule(Agent=Agent, Runner=Runner, function_tool=function_tool, ModelSettings=ModelSettings)
+    return _AgentsSdkModule(
+        Agent=Agent,
+        Runner=Runner,
+        function_tool=function_tool,
+        ModelSettings=ModelSettings,
+        FunctionTool=FunctionTool,
+    )
+
+
+class _OperatorClaimOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim: str
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class _OperatorFinalOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    hypothesis: str
+    rationale: str
+    required_data: list[str] = Field(default_factory=list)
+    proposed_test: str = ""
+    confounders: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    source_backed_claims: list[_OperatorClaimOutput] = Field(default_factory=list)
+    inferred_claims: list[str] = Field(default_factory=list)
+    stop_reason: str = "final_answer"
 
 
 def _parse_positive_int_env(name: str, default: int) -> int:
@@ -144,10 +181,16 @@ class CopilotAgentsOperatorService:
         output_summaries: dict[str, Any] = {}
         remaining_tool_calls = plan.max_tool_calls
         provider_calls_used = 0
+        tool_call_counts: dict[str, int] = {}
+        operator_started_at = perf_counter()
+        boundary_stop_reason: str | None = None
         sdk_duration_ms: int | None = None
         model_usage: dict[str, Any] = {}
         cancelled_at_boundary = False
         provider_progress_count = 0
+        final_card: ResearchCard | None = None
+        final_stop_reason: str | None = None
+        synthesis_error: str | None = None
 
         def record_event(
             event_type: str,
@@ -204,6 +247,10 @@ class CopilotAgentsOperatorService:
             if request.model_resolution is not None and request.model_resolution.model
             else self.config.model
         )
+        max_model_turns = min(
+            self.config.max_turns,
+            max(2, plan.max_tool_calls + 2),
+        )
 
         record_event(
             "plan",
@@ -218,7 +265,9 @@ class CopilotAgentsOperatorService:
                 "max_tool_calls": plan.max_tool_calls,
                 "max_provider_calls": plan.max_provider_calls,
                 "max_elapsed_ms": plan.max_elapsed_ms,
+                "max_model_turns": max_model_turns,
                 "orchestrator": self.provider_name,
+                "operator_contract": "copilot.operator.loop.v1",
                 "model": resolved_model,
                 "reasoning_effort": reasoning_effort,
                 "allowed_tool_ids": list(allowed_tool_ids),
@@ -269,9 +318,13 @@ class CopilotAgentsOperatorService:
                 emit_event=emit_event,
             )
 
-        def execute_registered_action(tool_id: str, arguments_json: str = "{}") -> str:
-            """Execute one approved Gamma Research Action Registry tool by id."""
+        def execute_registered_action(
+            tool_id: str,
+            arguments: dict[str, Any],
+        ) -> str:
+            """Execute one strict, approved Gamma registry action."""
             nonlocal cancelled_at_boundary
+            nonlocal boundary_stop_reason
             nonlocal provider_calls_used
             nonlocal remaining_tool_calls
             normalized_tool_id = str(tool_id or "").strip()
@@ -284,6 +337,31 @@ class CopilotAgentsOperatorService:
                 )
                 record_warning(message, step=step)
                 return self._json_dumps({"status": "cancelled", "warning": message})
+            elapsed_ms = int((perf_counter() - operator_started_at) * 1000)
+            if elapsed_ms >= plan.max_elapsed_ms:
+                boundary_stop_reason = "elapsed_budget_exhausted"
+                message = (
+                    "Research Operator elapsed-time budget of "
+                    f"{plan.max_elapsed_ms}ms is exhausted."
+                )
+                record_warning(message, step=step)
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message=message,
+                    payload={
+                        "status": "elapsed_budget_exhausted",
+                        "stop_reason": boundary_stop_reason,
+                    },
+                    event_warnings=[message],
+                )
+                return self._json_dumps(
+                    {
+                        "status": "elapsed_budget_exhausted",
+                        "warning": message,
+                        "stop_reason": boundary_stop_reason,
+                    }
+                )
             if step is None:
                 message = f"Agents SDK requested an action outside the operator plan: `{normalized_tool_id}`."
                 record_warning(message)
@@ -314,24 +392,81 @@ class CopilotAgentsOperatorService:
                 record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
                 return self._json_dumps({"status": "skipped", "warning": message})
             if remaining_tool_calls <= 0:
+                boundary_stop_reason = "tool_budget_exhausted"
                 skipped_steps.append(step.step_id)
                 message = f"Stopped operator execution after {plan.max_tool_calls} tools."
                 record_warning(message, step=step)
-                record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
-                return self._json_dumps({"status": "skipped", "warning": message})
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message=message,
+                    payload={
+                        "status": "budget_exhausted",
+                        "stop_reason": boundary_stop_reason,
+                    },
+                )
+                return self._json_dumps(
+                    {
+                        "status": "budget_exhausted",
+                        "warning": message,
+                        "stop_reason": boundary_stop_reason,
+                    }
+                )
+            remaining_tool_calls -= 1
+            call_count = tool_call_counts.get(normalized_tool_id, 0) + 1
+            tool_call_counts[normalized_tool_id] = call_count
+            if call_count > definition.request_limit:
+                boundary_stop_reason = "tool_request_limit_exhausted"
+                skipped_steps.append(step.step_id)
+                message = (
+                    f"`{normalized_tool_id}` exceeded its per-run request limit "
+                    f"of {definition.request_limit}."
+                )
+                record_warning(message, step=step)
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message=message,
+                    payload={
+                        "status": "budget_exhausted",
+                        "stop_reason": boundary_stop_reason,
+                    },
+                    event_warnings=[message],
+                )
+                return self._json_dumps(
+                    {
+                        "status": "budget_exhausted",
+                        "warning": message,
+                        "stop_reason": boundary_stop_reason,
+                    }
+                )
             if definition.external_provider:
                 if provider_calls_used + 1 > plan.max_provider_calls:
+                    boundary_stop_reason = "external_provider_budget_exhausted"
                     skipped_steps.append(step.step_id)
                     message = (
                         f"Skipped `{normalized_tool_id}` because provider calls would exceed the "
                         f"{plan.max_provider_calls} call guard."
                     )
                     record_warning(message, step=step)
-                    record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
-                    return self._json_dumps({"status": "skipped", "warning": message})
+                    record_event(
+                        "tool-result",
+                        step=step,
+                        message=message,
+                        payload={
+                            "status": "budget_exhausted",
+                            "stop_reason": boundary_stop_reason,
+                        },
+                    )
+                    return self._json_dumps(
+                        {
+                            "status": "budget_exhausted",
+                            "warning": message,
+                            "stop_reason": boundary_stop_reason,
+                        }
+                    )
                 provider_calls_used += 1
 
-            parsed_arguments = self._parse_json_object(arguments_json)
             try:
                 context = build_context(step.domain)
             except ValueError as exc:
@@ -345,26 +480,43 @@ class CopilotAgentsOperatorService:
             for warning in context.warnings:
                 record_warning(warning, step=step)
 
-            arguments = parsed_arguments or default_arguments(normalized_tool_id, context)
-            if arguments is None:
-                skipped_steps.append(step.step_id)
-                trace = CopilotToolTrace(
-                    tool_name=normalized_tool_id,
-                    summary="Skipped because operator execution could not infer required arguments.",
-                    arguments={},
-                    source_ids=[],
+            try:
+                validated_arguments = action_registry.validate_arguments(
+                    normalized_tool_id,
+                    arguments,
                 )
-                tool_traces.append(trace)
+            except (
+                ResearchActionArgumentError,
+                ResearchActionPermissionError,
+            ) as exc:
+                skipped_steps.append(step.step_id)
+                failed_steps.append(step.step_id)
+                message = str(exc)
+                record_warning(message, step=step)
                 record_event(
                     "tool-result",
                     step=step,
-                    message=trace.summary,
-                    payload={"status": "skipped", "arguments": {}},
+                    message=message,
+                    payload={
+                        "status": "invalid_arguments",
+                        "arguments": arguments,
+                        "stop_reason": "argument_validation_failed",
+                    },
+                    event_warnings=[message],
                 )
-                return self._json_dumps({"status": "skipped", "warning": trace.summary})
+                return self._json_dumps(
+                    {
+                        "status": "invalid_arguments",
+                        "warning": message,
+                        "arguments": arguments,
+                    }
+                )
 
-            execution = execute_action(normalized_tool_id, arguments, context)
-            remaining_tool_calls -= 1
+            execution = execute_action(
+                normalized_tool_id,
+                validated_arguments,
+                context,
+            )
             tool_traces.append(execution.trace)
             outputs[step.step_id] = execution.output
             output_summaries[step.step_id] = self._compact_output(execution.output)
@@ -406,19 +558,63 @@ class CopilotAgentsOperatorService:
                 {
                     "status": "completed",
                     "tool_id": normalized_tool_id,
+                    "arguments": execution.trace.arguments,
                     "trace_summary": execution.trace.summary,
                     "source_ids": list(execution.trace.source_ids),
-                    "output": self._compact_output(execution.output),
+                    "output": self._bounded_observation(execution.output),
                 }
             )
 
-        execute_gamma_action = sdk.function_tool(execute_registered_action)
+        sdk_tools: list[Any] = []
+        if sdk.FunctionTool is not None:
+            for tool_id in allowed_tool_ids:
+                definition = action_registry.require(tool_id)
+
+                async def invoke_strict_action(
+                    _context: Any,
+                    arguments_json: str,
+                    *,
+                    resolved_tool_id: str = tool_id,
+                ) -> str:
+                    parsed = self._parse_json_object(arguments_json)
+                    return execute_registered_action(
+                        resolved_tool_id,
+                        parsed,
+                    )
+
+                sdk_tools.append(
+                    sdk.FunctionTool(
+                        name=definition.tool_id,
+                        description=definition.description,
+                        params_json_schema=definition.input_schema,
+                        on_invoke_tool=invoke_strict_action,
+                        strict_json_schema=True,
+                        timeout_seconds=definition.timeout_seconds,
+                    )
+                )
+        else:
+            # Compatibility for injected test doubles that predate manual
+            # FunctionTool support. Production SDK execution always uses the
+            # per-action strict tools above.
+            def execute_gamma_action(
+                tool_id: str,
+                arguments_json: str = "{}",
+            ) -> str:
+                return execute_registered_action(
+                    tool_id,
+                    self._parse_json_object(arguments_json),
+                )
+
+            sdk_tools = [sdk.function_tool(execute_gamma_action)]
+
         agent_kwargs = {
             "name": "Gamma Research Operator",
             "model": resolved_model,
             "instructions": self._instructions(),
-            "tools": [execute_gamma_action],
+            "tools": sdk_tools,
         }
+        if sdk.FunctionTool is not None:
+            agent_kwargs["output_type"] = _OperatorFinalOutput
         if sdk.ModelSettings is not None:
             agent_kwargs["model_settings"] = sdk.ModelSettings(
                 **self._model_settings_kwargs(reasoning_effort=reasoning_effort)
@@ -434,12 +630,12 @@ class CopilotAgentsOperatorService:
                 return await sdk.Runner.run(
                     agent,
                     prompt,
-                    max_turns=self.config.max_turns,
+                    max_turns=max_model_turns,
                 )
             streamed = run_streamed(
                 agent,
                 prompt,
-                max_turns=self.config.max_turns,
+                max_turns=max_model_turns,
             )
             if asyncio.iscoroutine(streamed):
                 streamed = await streamed
@@ -488,8 +684,16 @@ class CopilotAgentsOperatorService:
             sdk_duration_ms = int((perf_counter() - started_at) * 1000)
             if run_result is not None:
                 model_usage = self._extract_run_usage(run_result)
+                final_card, final_stop_reason, synthesis_error = (
+                    self._parse_final_output(
+                        getattr(run_result, "final_output", None)
+                    )
+                )
         except Exception as exc:
-            record_warning(f"Agents SDK operator run failed: {exc.__class__.__name__}: {exc}")
+            synthesis_error = (
+                f"Agents SDK operator run failed: {exc.__class__.__name__}: {exc}"
+            )
+            record_warning(synthesis_error)
 
         if plan.confirmation_checkpoints and not cancelled_at_boundary:
             message = "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
@@ -524,6 +728,8 @@ class CopilotAgentsOperatorService:
                 "cancelled"
                 if cancelled_at_boundary
                 else "ready"
+                if executed_steps and final_card is not None
+                else "incomplete"
                 if executed_steps
                 else "error"
             ),
@@ -533,6 +739,22 @@ class CopilotAgentsOperatorService:
             model_usage=model_usage,
             reasoning_effort=reasoning_effort,
             emit_event=emit_event,
+            final_card=final_card,
+            stop_reason=(
+                "user_cancelled"
+                if cancelled_at_boundary
+                else boundary_stop_reason
+                if boundary_stop_reason is not None
+                else final_stop_reason
+                if final_card is not None
+                else "invalid_final_synthesis"
+                if synthesis_error
+                else "insufficient_evidence"
+            ),
+            synthesis_error=synthesis_error,
+            tool_calls_used=plan.max_tool_calls - remaining_tool_calls,
+            external_provider_calls_used=provider_calls_used,
+            max_model_turns=max_model_turns,
         )
 
     def _finalize_result(
@@ -556,6 +778,12 @@ class CopilotAgentsOperatorService:
         model_usage: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
         emit_event: OperatorEventEmitter | None = None,
+        final_card: ResearchCard | None = None,
+        stop_reason: str | None = None,
+        synthesis_error: str | None = None,
+        tool_calls_used: int = 0,
+        external_provider_calls_used: int = 0,
+        max_model_turns: int | None = None,
     ) -> CopilotResearchCardResult:
         warnings = dedupe_warnings(warnings)
         run_id = events[0].run_id if events else new_copilot_id("oprun")
@@ -564,7 +792,13 @@ class CopilotAgentsOperatorService:
         final_message = (
             "Research Operator stopped at the current Agents SDK turn boundary."
             if status == "cancelled"
-            else f"Executed {len(executed_steps)} Agents SDK-selected operator step(s)."
+            else (
+                "Research Operator synthesized the requested conclusion from "
+                f"{len(executed_steps)} validated tool observation(s)."
+            )
+            if status == "ready" and final_card is not None
+            else synthesis_error
+            or "Research Operator did not produce a schema-valid final synthesis."
         )
         final_events = [
             CopilotOperatorProgressEvent(
@@ -597,7 +831,14 @@ class CopilotAgentsOperatorService:
                 message=final_message,
                 payload={
                     "status": status,
+                    "stop_reason": stop_reason or status,
                     "orchestrator": self.provider_name,
+                    "operator_contract": "copilot.operator.loop.v1",
+                    "synthesis_source": (
+                        "model_final_output"
+                        if final_card is not None
+                        else "typed_non_success"
+                    ),
                     "executed_steps": list(executed_steps),
                     "skipped_steps": list(skipped_steps),
                     "failed_steps": list(failed_steps),
@@ -614,6 +855,15 @@ class CopilotAgentsOperatorService:
                     "verbosity": self.config.verbosity,
                     "sdk_duration_ms": sdk_duration_ms,
                     "model_usage": model_usage or {},
+                    "tool_calls_used": tool_calls_used,
+                    "tool_calls_remaining": max(
+                        0,
+                        plan.max_tool_calls - tool_calls_used,
+                    ),
+                    "external_provider_calls_used": (
+                        external_provider_calls_used
+                    ),
+                    "max_model_turns": max_model_turns,
                     "output_summaries": output_summaries or {},
                     "output_retention": output_retention,
                     "outputs": final_outputs,
@@ -642,7 +892,19 @@ class CopilotAgentsOperatorService:
             ),
             response_id=response_id,
             message=final_message,
-            card=build_card(plan, executed_steps, skipped_steps, list(sources.values()), warnings),
+            card=(
+                final_card
+                if final_card is not None
+                else build_card(
+                    plan,
+                    executed_steps,
+                    skipped_steps,
+                    list(sources.values()),
+                    warnings,
+                )
+                if status == "ready"
+                else None
+            ),
             sources=list(sources.values()),
             tool_traces=tool_traces,
             operator_events=events,
@@ -654,14 +916,22 @@ class CopilotAgentsOperatorService:
     def _instructions() -> str:
         return (
             "You are Gamma's Research Operator orchestrator. "
-            "Your outcome is a traceable, read-only Gamma research run with the right tools selected, "
-            "explicit confirmation stops, compact evidence-backed trace output, and no durable side effects. "
-            "Call only the provided Gamma action-registry tool and only action ids listed in the user payload "
-            "under allowed_tool_ids. "
+            "Your outcome is a traceable, read-only Gamma research run followed "
+            "by a schema-valid analytical answer grounded in the actual tool "
+            "observations. Call only the provided strict Gamma action tools and "
+            "only action ids listed in the user payload under allowed_tool_ids. "
+            "Preserve every explicit user entity, portfolio leg, weight, scenario "
+            "shock, date, horizon, assumption, and comparison target in the tool "
+            "arguments. Do not replace them with unrelated defaults. "
+            "After each tool result, inspect the observation and decide whether to "
+            "adapt, call another authorized tool, stop for insufficient evidence, "
+            "or produce the final answer. "
             "Do not apply local state changes, place trades, modify accounts, sign wallet messages, "
             "rebalance portfolios, or run arbitrary strategy code. "
             "Stop at confirmation checkpoints and leave durable research-state changes to Gamma's confirmation flow. "
-            "Prefer the smallest set of relevant allowed actions that satisfies the user's requested research task."
+            "Prefer the smallest set of relevant allowed actions that satisfies "
+            "the user's requested research task. A generic count of executed "
+            "steps is not a successful final answer."
         )
 
     @classmethod
@@ -693,7 +963,8 @@ class CopilotAgentsOperatorService:
                 "Select only Gamma registry actions that directly support the user request and operator plan.",
                 "Run automatic read-only analysis tools when they are relevant and bounded.",
                 "Never run tools that require confirmation; leave those for Gamma's confirmation checkpoints.",
-                "Produce enough tool results for Gamma to build a useful trace and final report.",
+                "Preserve explicit user parameters in the strict tool inputs.",
+                "Synthesize the requested conclusion from the returned tool observations.",
             ],
             "stopping_rules": [
                 "Stop after the relevant allowed read-only plan actions have completed or been skipped with warnings.",
@@ -701,9 +972,11 @@ class CopilotAgentsOperatorService:
                 "Stop if Gamma returns a confirmation checkpoint, permission warning, or tool-call budget guard.",
             ],
             "required_behavior": (
-                "Call execute_registered_action for each relevant allowed read-only action needed for the request. "
-                "Pass an empty JSON object for arguments when Gamma should infer defaults. "
-                "Do not call tools that are missing from allowed_tool_ids."
+                "Call the relevant named Gamma action tools with schema-valid "
+                "arguments derived from the request. Do not call tools that are "
+                "missing from allowed_tool_ids. Return a final structured answer "
+                "that directly addresses user_prompt and cites only source ids "
+                "returned by the tools."
             ),
         }
         return cls._json_dumps(payload)
@@ -727,18 +1000,99 @@ class CopilotAgentsOperatorService:
         configured = str(self.config.reasoning_effort or "").strip().lower()
         return configured if configured in SUPPORTED_REASONING_EFFORTS else None
 
+    @classmethod
+    def _parse_final_output(
+        cls,
+        value: Any,
+    ) -> tuple[ResearchCard | None, str | None, str | None]:
+        if value is None:
+            return None, None, "Agents SDK returned no final analytical output."
+        if isinstance(value, _OperatorFinalOutput):
+            payload = value.model_dump()
+        elif isinstance(value, dict):
+            payload = dict(value)
+        else:
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                dumped = model_dump()
+                payload = dumped if isinstance(dumped, dict) else {}
+            else:
+                text = str(value or "").strip()
+                if not text:
+                    return None, None, "Agents SDK returned an empty final analytical output."
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    return (
+                        None,
+                        None,
+                        "Agents SDK final analytical output was not schema-valid JSON.",
+                    )
+                payload = parsed if isinstance(parsed, dict) else {}
+        try:
+            validated = _OperatorFinalOutput.model_validate(payload)
+        except Exception as exc:
+            return (
+                None,
+                None,
+                f"Agents SDK final analytical output failed validation: {exc}",
+            )
+        return (
+            ResearchCard(
+                title=validated.title,
+                hypothesis=validated.hypothesis,
+                rationale=validated.rationale,
+                required_data=list(validated.required_data),
+                proposed_test=validated.proposed_test,
+                confounders=list(validated.confounders),
+                next_steps=list(validated.next_steps),
+                caveats=list(validated.caveats),
+                source_backed_claims=[
+                    ResearchClaim(
+                        claim=claim.claim,
+                        evidence_refs=list(claim.evidence_refs),
+                    )
+                    for claim in validated.source_backed_claims
+                ],
+                inferred_claims=list(validated.inferred_claims),
+            ),
+            validated.stop_reason,
+            None,
+        )
+
     @staticmethod
     def _parse_json_object(value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
             return dict(value)
         text = str(value or "").strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+        if text:
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                return parsed
+        return {
+            "__gamma_invalid_tool_arguments_json__": (
+                text[:1_000] if text else "<empty>"
+            )
+        }
+
+    @classmethod
+    def _bounded_observation(cls, output: Any) -> Any:
+        """Keep analytical rows available to the model within a hard bound."""
+
+        rendered = cls._json_dumps(output)
+        if len(rendered.encode("utf-8")) <= MAX_OPERATOR_FINAL_OUTPUT_BYTES:
+            return output
+        return {
+            "truncated": True,
+            "summary": cls._compact_output(output),
+            "warning": (
+                "Gamma bounded this observation before returning it to the "
+                "Operator model; the complete output remains in the local trace."
+            ),
+        }
 
     @classmethod
     def _json_dumps(cls, value: Any) -> str:

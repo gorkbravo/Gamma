@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from functools import cached_property
@@ -11,6 +12,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotOperatorPlan,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotSourceRef,
@@ -23,6 +25,7 @@ from src.services.copilot_provider import (
     CancelCheck,
     CopilotProvider,
     CopilotRunCancelled,
+    OperatorToolExecutor,
     RunEventEmitter,
     ToolExecutor,
 )
@@ -69,6 +72,7 @@ RESEARCH_CARD_SCHEMA: dict[str, Any] = {
 }
 
 SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+MAX_OPERATOR_OBSERVATION_BYTES = 50_000
 STRUCTURED_CARD_PARSE_ERRORS = {
     "OpenAI returned no structured research card.",
     "OpenAI returned a non-JSON research card payload.",
@@ -418,6 +422,273 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             message="Copilot exceeded the allowed number of tool rounds.",
         )
 
+    def stream_research_operator(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        plan: CopilotOperatorPlan,
+        tool_specs: list[dict[str, object]],
+        execute_tool: OperatorToolExecutor,
+        emit: RunEventEmitter,
+        should_cancel: CancelCheck,
+    ) -> CopilotResearchCardResult:
+        """Run the custom Responses-based closed-loop Research Operator.
+
+        The model selects one strict Gamma action at a time, receives the
+        validated execution result as an observation, and owns the final
+        schema-valid synthesis. Gamma still owns authorization, validation,
+        execution, budgets, persistence, and cancellation.
+        """
+
+        context = CopilotContextBundle(
+            domain="synthesis",
+            current_tab=request.context.current_tab or "copilot",
+            summary_data={
+                "operator_intent": plan.intent,
+                "depth_profile": plan.depth_profile,
+                "target_entities": [
+                    {
+                        "kind": entity.kind,
+                        "id": entity.id,
+                        "label": entity.label,
+                        "confidence": entity.confidence,
+                    }
+                    for entity in plan.target_entities
+                ],
+                "allowed_actions": [
+                    {
+                        "step_id": step.step_id,
+                        "tool_id": step.tool_id,
+                        "domain": step.domain,
+                        "action_type": step.action_type,
+                        "rationale": step.rationale,
+                        "stop_conditions": list(step.stop_conditions),
+                    }
+                    for step in plan.steps
+                    if step.tool_id
+                    and step.action_type
+                    in {"read_context", "run_analysis", "fetch_external_context"}
+                    and not step.requires_confirmation
+                ],
+                "budgets": {
+                    "max_tool_calls": plan.max_tool_calls,
+                    "max_provider_calls": plan.max_provider_calls,
+                    "max_elapsed_ms": plan.max_elapsed_ms,
+                },
+                "confirmation_checkpoints": [
+                    {
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "after_step_id": checkpoint.after_step_id,
+                        "reason": checkpoint.reason,
+                        "required_for_tool_ids": list(
+                            checkpoint.required_for_tool_ids
+                        ),
+                    }
+                    for checkpoint in plan.confirmation_checkpoints
+                ],
+            },
+            warnings=list(plan.warnings),
+        )
+        input_items: list[dict[str, Any]] = [
+            self._build_operator_user_message(request, plan)
+        ]
+        tool_traces: list[CopilotToolTrace] = []
+        tool_sources: dict[str, CopilotSourceRef] = {}
+        warnings = list(plan.warnings)
+        reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
+        usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
+        max_model_turns = min(10, max(2, plan.max_tool_calls + 2))
+        instructions = self._build_operator_instructions(plan)
+
+        def build_result(
+            *,
+            status: str,
+            message: str | None = None,
+            card: ResearchCard | None = None,
+            model: str | None = None,
+            response_id: str | None = None,
+        ) -> CopilotResearchCardResult:
+            return CopilotResearchCardResult(
+                domain="synthesis",
+                current_tab=context.current_tab,
+                status=status,
+                provider=f"{self.provider_name}_operator",
+                model=model or self.model,
+                response_id=response_id,
+                message=message,
+                card=card,
+                sources=list(tool_sources.values()),
+                tool_traces=tool_traces,
+                warnings=warnings,
+                usage=replace(usage, tool_calls=len(tool_traces)),
+            )
+
+        for turn in range(max_model_turns):
+            if should_cancel():
+                raise CopilotRunCancelled()
+            payload = self._build_response_payload(
+                request=request,
+                context=context,
+                input_items=input_items,
+                reasoning_effort=reasoning_effort,
+                tool_specs=tool_specs,
+                tool_choice="auto",
+                max_output_tokens=1600,
+                prompt_cache_key="gamma-copilot:operator:closed-loop:v1",
+                instructions_override=instructions,
+                metadata_override={
+                    "role": "research_operator",
+                    "operator_contract": "copilot.operator.loop.v1",
+                },
+            )
+            payload["stream"] = True
+
+            try:
+                usage = replace(
+                    usage,
+                    provider_calls=(usage.provider_calls or 0) + 1,
+                )
+                response, terminal = self._post_json_stream(
+                    payload,
+                    emit,
+                    should_cancel,
+                )
+            except CopilotRunCancelled:
+                raise
+            except RuntimeError as exc:
+                emit(
+                    "provider.error",
+                    {"message": str(exc), "provider": self.provider_name},
+                )
+                return build_result(status="error", message=str(exc))
+
+            self._emit_usage(emit, response)
+            usage = self._merge_usage_records(
+                usage,
+                self._usage_from_response(response),
+            )
+
+            if terminal == "incomplete":
+                reason = str(
+                    (response.get("incomplete_details") or {}).get("reason")
+                    or "incomplete"
+                )
+                emit("incomplete", {"reason": reason})
+                return build_result(
+                    status="incomplete",
+                    message=f"OpenAI ended the Operator response early: {reason}.",
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                )
+
+            tool_calls = [
+                item
+                for item in response.get("output", [])
+                if item.get("type") == "function_call"
+            ]
+            if tool_calls:
+                input_items.extend(self._continuation_output_items(response))
+                for item in tool_calls:
+                    if should_cancel():
+                        raise CopilotRunCancelled()
+                    tool_name = str(item.get("name") or "").strip()
+                    arguments = self._parse_operator_tool_arguments(
+                        item.get("arguments")
+                    )
+                    emit(
+                        "tool.call",
+                        {
+                            "tool_name": tool_name,
+                            "arguments": arguments,
+                            "decision_index": turn + 1,
+                        },
+                    )
+                    execution = execute_tool(tool_name, arguments)
+                    tool_traces.append(execution.trace)
+                    for source in execution.sources:
+                        tool_sources[source.source_id] = source
+                    observation = {
+                        "status": (
+                            "failed"
+                            if isinstance(execution.output, dict)
+                            and execution.output.get("error")
+                            else "completed"
+                        ),
+                        "tool_id": tool_name,
+                        "arguments": execution.trace.arguments,
+                        "trace_summary": execution.trace.summary,
+                        "source_ids": list(execution.trace.source_ids),
+                        "output": self._bounded_operator_observation(
+                            execution.output
+                        ),
+                    }
+                    emit(
+                        "tool.result",
+                        {
+                            "tool_name": tool_name,
+                            "summary": execution.trace.summary,
+                            "source_ids": list(execution.trace.source_ids),
+                            "decision_index": turn + 1,
+                            "observation_status": observation["status"],
+                        },
+                    )
+                    input_items.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": item.get("call_id"),
+                            "output": self._format_tool_output(observation),
+                        }
+                    )
+                continue
+
+            refusal = self._extract_refusal(response)
+            if refusal:
+                emit("refusal", {"message": refusal})
+                return build_result(
+                    status="refused",
+                    message=refusal,
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                )
+
+            try:
+                card = self._parse_research_card(response)
+                self._validate_operator_final_card(card)
+            except RuntimeError as exc:
+                emit(
+                    "warning",
+                    {
+                        "message": (
+                            "Operator final synthesis was not schema-valid: "
+                            f"{exc}"
+                        )
+                    },
+                )
+                return build_result(
+                    status="ready",
+                    message=str(exc),
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                )
+
+            return build_result(
+                status="ready",
+                message=(
+                    "Research Operator synthesized the requested conclusion from "
+                    f"{len(tool_traces)} validated tool observation(s)."
+                ),
+                card=card,
+                model=str(response.get("model") or self.model),
+                response_id=str(response.get("id") or "") or None,
+            )
+
+        message = (
+            "Research Operator exhausted its model-turn budget before producing "
+            "a final synthesis."
+        )
+        emit("incomplete", {"reason": "model_turn_budget_exhausted"})
+        return build_result(status="incomplete", message=message)
+
     @staticmethod
     def _emit_usage(emit: RunEventEmitter, response: dict[str, Any]) -> None:
         usage = OpenAIResponsesCopilotProvider._usage_from_response(response)
@@ -622,6 +893,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         tool_choice: str | None,
         max_output_tokens: int,
         prompt_cache_key: str,
+        instructions_override: str | None = None,
+        metadata_override: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": (
@@ -629,7 +902,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 if request.model_resolution is not None and request.model_resolution.model
                 else self.model
             ),
-            "instructions": self._build_instructions(context),
+            "instructions": instructions_override or self._build_instructions(context),
             "input": input_items,
             "parallel_tool_calls": False,
             "max_output_tokens": max_output_tokens,
@@ -650,12 +923,98 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 "app": "gamma",
                 "domain": request.domain,
                 "current_tab": context.current_tab,
+                **(metadata_override or {}),
             },
         }
         if tool_specs:
             payload["tools"] = tool_specs
             payload["tool_choice"] = tool_choice or "auto"
         return payload
+
+    def _build_operator_user_message(
+        self,
+        request: CopilotResearchCardRequest,
+        plan: CopilotOperatorPlan,
+    ) -> dict[str, Any]:
+        body = {
+            "task": (request.prompt or "").strip(),
+            "operator_plan": {
+                "intent": plan.intent,
+                "depth_profile": plan.depth_profile,
+                "target_entities": [
+                    {
+                        "kind": entity.kind,
+                        "id": entity.id,
+                        "label": entity.label,
+                    }
+                    for entity in plan.target_entities
+                ],
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "tool_id": step.tool_id,
+                        "domain": step.domain,
+                        "rationale": step.rationale,
+                        "stop_conditions": list(step.stop_conditions),
+                    }
+                    for step in plan.steps
+                    if step.tool_id
+                ],
+                "budgets": {
+                    "max_tool_calls": plan.max_tool_calls,
+                    "max_provider_calls": plan.max_provider_calls,
+                    "max_elapsed_ms": plan.max_elapsed_ms,
+                },
+            },
+            "parameter_contract": (
+                "Preserve every explicit user entity, leg, weight, shock, date, "
+                "horizon, assumption, and comparison target in strict tool "
+                "arguments. If a required value is missing, stop or ask for it; "
+                "do not substitute an unrelated default."
+            ),
+            "completion_contract": (
+                "After inspecting tool observations, return one research card "
+                "that directly answers the task from those outputs. A tool-count "
+                "summary is not a successful answer."
+            ),
+        }
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": self._json_dumps(body),
+                }
+            ],
+        }
+
+    @staticmethod
+    def _build_operator_instructions(plan: CopilotOperatorPlan) -> str:
+        allowed = ", ".join(
+            step.tool_id
+            for step in plan.steps
+            if step.tool_id
+            and step.action_type
+            in {"read_context", "run_analysis", "fetch_external_context"}
+            and not step.requires_confirmation
+        ) or "none"
+        return (
+            "You are Gamma's Research Operator inside a read-only research "
+            "application. Use only the supplied strict Gamma function tools. "
+            f"Allowed actions for this run: {allowed}. "
+            "Treat every tool result as an observation: inspect it before choosing "
+            "the next action, revising parameters, stopping for insufficient "
+            "evidence, or finishing. Preserve explicit user parameters exactly "
+            "through the tool schemas; never replace them with unrelated defaults. "
+            "Gamma validates permissions and arguments and may return a validation "
+            "or budget error as an observation. Do not bypass it or invent a tool. "
+            "Never place trades, rebalance, mutate accounts or wallets, execute "
+            "arbitrary code, or apply durable local changes. "
+            "Your final schema-valid research card must directly answer the user's "
+            "goal from actual tool outputs, distinguish evidence from inference, "
+            "cite only source_id values returned by tools, retain warnings and "
+            "missing-data limits, and never end with only a generic count of steps."
+        )
 
     def _store_responses(self, request: CopilotResearchCardRequest) -> bool:
         if request.model_resolution is not None:
@@ -899,6 +1258,111 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _parse_operator_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+        """Preserve malformed model arguments as a validation failure.
+
+        The general research-card path historically treated malformed JSON as an
+        empty object. The Operator must not silently convert malformed output
+        into plausible defaults, including for actions whose valid schema is an
+        empty object, so it sends an impossible marker to Gamma's authoritative
+        registry boundary instead.
+        """
+
+        if isinstance(raw_arguments, dict):
+            return dict(raw_arguments)
+        text = str(raw_arguments or "").strip()
+        if text:
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                return parsed
+        return {
+            "__gamma_invalid_tool_arguments_json__": (
+                text[:1_000] if text else "<empty>"
+            )
+        }
+
+    @classmethod
+    def _bounded_operator_observation(cls, output: Any) -> Any:
+        rendered = cls._json_dumps(output)
+        if len(rendered.encode("utf-8")) <= MAX_OPERATOR_OBSERVATION_BYTES:
+            return output
+        return {
+            "truncated": True,
+            "summary": cls._compact_operator_value(output),
+            "warning": (
+                "Gamma bounded this observation before returning it to the "
+                "Operator model; the complete output remains in the local trace."
+            ),
+        }
+
+    @classmethod
+    def _compact_operator_value(
+        cls,
+        value: Any,
+        *,
+        depth: int = 0,
+    ) -> Any:
+        if depth >= 3:
+            return f"<{type(value).__name__}>"
+        if isinstance(value, dict):
+            items = list(value.items())
+            compact = {
+                str(key): cls._compact_operator_value(
+                    nested,
+                    depth=depth + 1,
+                )
+                for key, nested in items[:24]
+            }
+            if len(items) > 24:
+                compact["_omitted_key_count"] = len(items) - 24
+            return compact
+        if isinstance(value, list):
+            compact_rows = [
+                cls._compact_operator_value(item, depth=depth + 1)
+                for item in value[:12]
+            ]
+            if len(value) > 12:
+                compact_rows.append(
+                    {"_omitted_item_count": len(value) - 12}
+                )
+            return compact_rows
+        if isinstance(value, str) and len(value) > 1_000:
+            return f"{value[:1_000]}…"
+        return value
+
+    @staticmethod
+    def _validate_operator_final_card(card: ResearchCard) -> None:
+        required_text = {
+            "title": card.title,
+            "hypothesis": card.hypothesis,
+            "rationale": card.rationale,
+            "proposed_test": card.proposed_test,
+        }
+        missing = [
+            field_name
+            for field_name, value in required_text.items()
+            if not str(value or "").strip()
+        ]
+        if missing:
+            raise RuntimeError(
+                "OpenAI Operator final synthesis is missing substantive field(s): "
+                f"{', '.join(missing)}."
+            )
+        rationale = str(card.rationale or "").strip()
+        if re.fullmatch(
+            r"(?:the\s+)?(?:research\s+)?operator\s+executed\s+\d+\s+"
+            r"(?:validated\s+)?tools?(?:\s+successfully)?\.?",
+            rationale,
+            flags=re.IGNORECASE,
+        ):
+            raise RuntimeError(
+                "OpenAI Operator final synthesis was only a generic tool-count summary."
+            )
 
     @staticmethod
     def _format_tool_output(output: dict[str, Any] | list[Any] | str) -> str:

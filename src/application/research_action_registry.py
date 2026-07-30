@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
+from typing import Any
 
 from src.models.copilot import CopilotResearchActionDefinition
 
@@ -10,6 +12,10 @@ class ResearchActionRegistryError(ValueError):
 
 
 class ResearchActionPermissionError(ResearchActionRegistryError):
+    pass
+
+
+class ResearchActionArgumentError(ResearchActionRegistryError):
     pass
 
 
@@ -108,6 +114,32 @@ class ResearchActionRegistry:
             )
         return definition
 
+    def validate_arguments(
+        self,
+        tool_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate model-produced arguments at Gamma's execution boundary.
+
+        Provider-side strict schemas improve tool-call quality, but the server
+        registry remains authoritative. This validator intentionally covers the
+        bounded JSON-schema subset used by Gamma's registered research tools.
+        It never fills hidden defaults or coerces unrelated values.
+        """
+
+        definition = self.require(tool_id)
+        if not isinstance(arguments, dict):
+            raise ResearchActionArgumentError(
+                f"Invalid arguments for `{tool_id}` at `$`: expected object."
+            )
+        self._validate_schema_value(
+            definition.input_schema,
+            arguments,
+            path="$",
+            tool_id=tool_id,
+        )
+        return dict(arguments)
+
     @classmethod
     def _validate_definition(cls, definition: CopilotResearchActionDefinition) -> None:
         normalized_id = str(definition.tool_id or "").strip().lower()
@@ -130,3 +162,157 @@ class ResearchActionRegistry:
             raise ResearchActionRegistryError(
                 f"Action cannot be read-only and mutating: {definition.tool_id}"
             )
+
+    @classmethod
+    def _validate_schema_value(
+        cls,
+        schema: dict[str, Any],
+        value: Any,
+        *,
+        path: str,
+        tool_id: str,
+    ) -> None:
+        if not isinstance(schema, dict):
+            return
+
+        for keyword in ("oneOf", "anyOf"):
+            variants = schema.get(keyword)
+            if isinstance(variants, list) and variants:
+                failures: list[str] = []
+                for variant in variants:
+                    try:
+                        cls._validate_schema_value(
+                            variant,
+                            value,
+                            path=path,
+                            tool_id=tool_id,
+                        )
+                        return
+                    except ResearchActionArgumentError as exc:
+                        failures.append(str(exc))
+                raise ResearchActionArgumentError(
+                    f"Invalid arguments for `{tool_id}` at `{path}`: value did not "
+                    f"match any allowed {keyword} schema."
+                )
+
+        raw_types = schema.get("type")
+        allowed_types = (
+            list(raw_types)
+            if isinstance(raw_types, list)
+            else [raw_types]
+            if isinstance(raw_types, str)
+            else []
+        )
+        if allowed_types and not any(
+            cls._matches_json_type(value, expected)
+            for expected in allowed_types
+        ):
+            expected = " or ".join(str(item) for item in allowed_types)
+            raise ResearchActionArgumentError(
+                f"Invalid arguments for `{tool_id}` at `{path}`: expected {expected}, "
+                f"received {cls._json_type_name(value)}."
+            )
+
+        if "enum" in schema and value not in list(schema.get("enum") or []):
+            raise ResearchActionArgumentError(
+                f"Invalid arguments for `{tool_id}` at `{path}`: value is not in "
+                f"the allowed enum."
+            )
+
+        if value is None:
+            return
+
+        if isinstance(value, dict):
+            properties = schema.get("properties")
+            properties = properties if isinstance(properties, dict) else {}
+            required = {
+                str(item)
+                for item in list(schema.get("required") or [])
+            }
+            missing = sorted(required.difference(value))
+            if missing:
+                raise ResearchActionArgumentError(
+                    f"Invalid arguments for `{tool_id}` at `{path}`: missing required "
+                    f"field(s): {', '.join(missing)}."
+                )
+            if schema.get("additionalProperties") is False:
+                extras = sorted(str(key) for key in value if key not in properties)
+                if extras:
+                    raise ResearchActionArgumentError(
+                        f"Invalid arguments for `{tool_id}` at `{path}`: unexpected "
+                        f"field(s): {', '.join(extras)}."
+                    )
+            for key, nested in value.items():
+                child_schema = properties.get(key)
+                if isinstance(child_schema, dict):
+                    cls._validate_schema_value(
+                        child_schema,
+                        nested,
+                        path=f"{path}.{key}",
+                        tool_id=tool_id,
+                    )
+            return
+
+        if isinstance(value, list):
+            item_schema = schema.get("items")
+            if isinstance(item_schema, dict):
+                for index, item in enumerate(value):
+                    cls._validate_schema_value(
+                        item_schema,
+                        item,
+                        path=f"{path}[{index}]",
+                        tool_id=tool_id,
+                    )
+            return
+
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            minimum = schema.get("minimum")
+            maximum = schema.get("maximum")
+            if minimum is not None and value < minimum:
+                raise ResearchActionArgumentError(
+                    f"Invalid arguments for `{tool_id}` at `{path}`: value is below "
+                    f"the minimum {minimum}."
+                )
+            if maximum is not None and value > maximum:
+                raise ResearchActionArgumentError(
+                    f"Invalid arguments for `{tool_id}` at `{path}`: value is above "
+                    f"the maximum {maximum}."
+                )
+
+        if isinstance(value, str) and schema.get("pattern"):
+            pattern = str(schema["pattern"])
+            if re.search(pattern, value) is None:
+                raise ResearchActionArgumentError(
+                    f"Invalid arguments for `{tool_id}` at `{path}`: value does not "
+                    "match the required pattern."
+                )
+
+    @staticmethod
+    def _matches_json_type(value: Any, expected: str) -> bool:
+        return {
+            "null": value is None,
+            "object": isinstance(value, dict),
+            "array": isinstance(value, list),
+            "string": isinstance(value, str),
+            "boolean": isinstance(value, bool),
+            "integer": isinstance(value, int) and not isinstance(value, bool),
+            "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        }.get(str(expected), True)
+
+    @staticmethod
+    def _json_type_name(value: Any) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, dict):
+            return "object"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, int):
+            return "integer"
+        if isinstance(value, float):
+            return "number"
+        return type(value).__name__

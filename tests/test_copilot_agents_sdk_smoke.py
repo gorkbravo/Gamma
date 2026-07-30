@@ -24,27 +24,44 @@ def test_agents_sdk_operator_env_defaults_are_feature_flagged_gpt55(monkeypatch)
 def test_openai_agents_sdk_contract_smoke_without_live_api(monkeypatch):
     agents = pytest.importorskip("agents")
 
-    def execute_registered_action(tool_id: str, arguments_json: str = "{}") -> str:
-        del tool_id
+    async def execute_risk_scenario(_context, arguments_json: str) -> str:
+        del _context
         del arguments_json
         return "{}"
 
-    wrapped = agents.function_tool(execute_registered_action)
-    schema = getattr(wrapped, "params_json_schema", {})
+    schema = {
+        "type": "object",
+        "properties": {
+            "rate_shift_bps": {"type": "number"},
+            "duration_proxy_years": {"type": "number"},
+        },
+        "required": ["rate_shift_bps", "duration_proxy_years"],
+        "additionalProperties": False,
+    }
+    wrapped = agents.FunctionTool(
+        name="run_risk_scenario_analysis",
+        description="Run one bounded read-only risk scenario.",
+        params_json_schema=schema,
+        on_invoke_tool=execute_risk_scenario,
+        strict_json_schema=True,
+        timeout_seconds=45.0,
+    )
     runner_run_params = inspect.signature(agents.Runner.run).parameters
+    runner_streamed_params = inspect.signature(agents.Runner.run_streamed).parameters
     model_settings_params = inspect.signature(agents.ModelSettings).parameters
 
-    assert getattr(wrapped, "name", None) == "execute_registered_action"
-    assert schema["properties"]["tool_id"]["type"] == "string"
-    assert schema["properties"]["arguments_json"]["type"] == "string"
+    assert getattr(wrapped, "name", None) == "run_risk_scenario_analysis"
+    assert wrapped.params_json_schema == schema
+    assert wrapped.strict_json_schema is True
     assert "max_turns" in runner_run_params
+    assert "max_turns" in runner_streamed_params
     assert "parallel_tool_calls" in model_settings_params
 
     settings = agents.ModelSettings(parallel_tool_calls=False)
     agent = agents.Agent(
         name="Gamma Research Operator",
         model="gpt-test",
-        instructions="Use only the Gamma action registry tool.",
+        instructions="Use only the strict Gamma action tools.",
         tools=[wrapped],
         model_settings=settings,
     )

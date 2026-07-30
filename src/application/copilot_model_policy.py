@@ -213,11 +213,23 @@ class CopilotModelPolicy:
         resolved_profile = self._resolved_profile(selected_profile, request, role=role)
         orchestration_path = self._orchestration_path(role or request.role)
         custom_operator = orchestration_path == CUSTOM_OPERATOR_PATH
-        provider_state = "configured" if custom_operator else self.provider_state
-        provider = "gamma_operator_executor" if custom_operator else self.provider_name
+        adaptive_custom_operator = custom_operator and callable(
+            getattr(self.provider, "stream_research_operator", None)
+        )
+        deterministic_custom_operator = custom_operator and not adaptive_custom_operator
+        provider_state = (
+            "configured" if deterministic_custom_operator else self.provider_state
+        )
+        provider = (
+            "gamma_operator_executor"
+            if deterministic_custom_operator
+            else f"{self.provider_name}_operator"
+            if adaptive_custom_operator
+            else self.provider_name
+        )
         model = (
             "gamma-operator-executor-v1"
-            if custom_operator
+            if deterministic_custom_operator
             else self._resolved_model(
                 request,
                 orchestration_path=orchestration_path,
@@ -225,12 +237,12 @@ class CopilotModelPolicy:
         )
         capabilities = (
             _CUSTOM_OPERATOR_CAPABILITIES
-            if custom_operator
+            if deterministic_custom_operator
             else self._capabilities(model)
         )
         effort = (
             None
-            if custom_operator
+            if deterministic_custom_operator
             else self._reasoning_effort(resolved_profile, request)
         )
         storage = (
@@ -243,7 +255,7 @@ class CopilotModelPolicy:
                     "storage request; local session persistence remains active."
                 ),
             )
-            if custom_operator
+            if deterministic_custom_operator
             else self._storage_for_capabilities(capabilities)
         )
         status = "ready"

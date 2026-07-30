@@ -27,6 +27,7 @@ from src.application.copilot_context_helpers import (
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.application.copilot_model_policy import (
     AGENTS_SDK_PATH,
+    CUSTOM_OPERATOR_PATH,
     CopilotModelPolicy,
 )
 from src.application.copilot_confirmation_service import CopilotConfirmationService
@@ -53,6 +54,7 @@ from src.application.prediction_market_service import (
 )
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
 from src.application.research_action_registry import (
+    ResearchActionArgumentError,
     ResearchActionPermissionError,
     ResearchActionRegistry,
 )
@@ -3195,6 +3197,78 @@ class CopilotService:
             step.action_type == "draft_change"
             for step in plan.steps
         )
+        adaptive_operator = getattr(
+            self.provider,
+            "stream_research_operator",
+            None,
+        )
+        adaptive_custom_requested = (
+            resolution.orchestration_path == CUSTOM_OPERATOR_PATH
+            and not has_draft_change
+            and callable(adaptive_operator)
+        )
+        if (
+            adaptive_custom_requested
+            and resolution.status not in {"ready", "degraded"}
+        ):
+            safe_error = self.model_policy.safe_error(
+                category=(
+                    resolution.status
+                    if resolution.status
+                    in {
+                        "disabled",
+                        "unconfigured",
+                        "unavailable",
+                        "incompatible_model",
+                    }
+                    else "incompatible_model"
+                ),
+                run_id=run_id,
+                model=resolution.model,
+            )
+            result = CopilotResearchCardResult(
+                domain="synthesis",
+                current_tab=request.context.current_tab or "copilot",
+                status="unavailable",
+                provider=resolution.provider,
+                model=resolution.model,
+                message=safe_error.message,
+                warnings=[safe_error.guidance],
+                safe_provider_error=safe_error,
+                research_plan=plan.research_plan,
+            )
+            result = self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=None,
+                known_provider_calls=0,
+                known_tool_calls=0,
+            )
+            return self._persist_operator_execution_result(
+                request,
+                plan,
+                result,
+            )
+        if (
+            adaptive_custom_requested
+            and resolution.status in {"ready", "degraded"}
+        ):
+            result = self._execute_responses_operator_loop(
+                request=request,
+                plan=plan,
+                resolution=resolution,
+                started_at=started_at,
+                run_id=run_id,
+                emit_event=emit_event,
+                should_cancel=should_cancel,
+                adaptive_operator=adaptive_operator,
+            )
+            return self._persist_agents_operator_execution_result(
+                request,
+                plan,
+                result,
+            )
         if resolution.orchestration_path == AGENTS_SDK_PATH and not has_draft_change:
             if should_cancel is not None and should_cancel():
                 result = CopilotResearchCardResult(
@@ -3895,6 +3969,707 @@ class CopilotService:
                         ]
                     ),
                 )
+        return result
+
+    def _execute_responses_operator_loop(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        plan: CopilotOperatorPlan,
+        resolution: CopilotModelPolicyResolution,
+        started_at: float,
+        run_id: str | None,
+        emit_event: Callable[[CopilotOperatorProgressEvent], None] | None,
+        should_cancel: Callable[[], bool] | None,
+        adaptive_operator: Callable[..., CopilotResearchCardResult],
+    ) -> CopilotResearchCardResult:
+        """Execute the Gamma-owned custom Responses Operator loop.
+
+        The provider owns only model turns. This gateway owns the allowed tool
+        surface, schema validation, lazy context acquisition, budgets, canonical
+        observations, events, and final persistence payload.
+        """
+
+        resolved_run_id = (run_id or "").strip() or new_copilot_id("oprun")
+        events: list[CopilotOperatorProgressEvent] = []
+        sources: dict[str, CopilotSourceRef] = {}
+        warnings = [
+            warning
+            for warning in plan.warnings
+            if not warning.startswith("Planner-only prototype")
+        ]
+        executed_steps: list[str] = []
+        skipped_steps: list[str] = []
+        failed_steps: list[str] = []
+        outputs: dict[str, Any] = {}
+        output_summaries: dict[str, Any] = {}
+        context_by_domain: dict[str, CopilotContextBundle] = {}
+        built_contexts: list[CopilotContextBundle] = []
+        context_budget_omitted_domains: list[str] = []
+        context_bytes_used = 0
+        tool_call_counts: dict[str, int] = {}
+        attempted_tool_calls = 0
+        external_provider_calls = 0
+        stop_reason: str | None = None
+
+        allowed_steps: dict[str, CopilotOperatorPlanStep] = {}
+        tool_specs: list[dict[str, object]] = []
+        for step in plan.steps:
+            if (
+                not step.tool_id
+                or step.action_type
+                not in {"read_context", "run_analysis", "fetch_external_context"}
+                or step.requires_confirmation
+                or step.permission_policy == "confirmation_required"
+            ):
+                continue
+            try:
+                definition = self.action_registry.authorize_automatic(step.tool_id)
+            except ResearchActionPermissionError as exc:
+                warnings.append(str(exc))
+                continue
+            allowed_steps[step.tool_id] = step
+            tool_specs.append(
+                {
+                    "type": "function",
+                    "name": definition.tool_id,
+                    "description": definition.description,
+                    "parameters": definition.input_schema,
+                    "strict": True,
+                }
+            )
+
+        def append_once(rows: list[str], value: str) -> None:
+            if value not in rows:
+                rows.append(value)
+
+        def record_event(
+            event_type: str,
+            *,
+            step: CopilotOperatorPlanStep | None = None,
+            title: str | None = None,
+            message: str | None = None,
+            payload: dict[str, Any] | None = None,
+            source_ids: list[str] | None = None,
+            event_warnings: list[str] | None = None,
+        ) -> CopilotOperatorProgressEvent:
+            event = CopilotOperatorProgressEvent(
+                run_id=resolved_run_id,
+                event_id=new_copilot_id("opevent"),
+                sequence=len(events) + 1,
+                event_type=event_type,
+                timestamp=now_utc(),
+                step_id=step.step_id if step else None,
+                tool_id=step.tool_id if step else None,
+                title=title or (step.title if step else None),
+                message=message,
+                payload=payload or {},
+                source_ids=source_ids or [],
+                warnings=event_warnings or [],
+            )
+            events.append(event)
+            if emit_event is not None:
+                try:
+                    emit_event(event)
+                except Exception:
+                    logger.exception("Copilot adaptive Operator event delivery failed")
+            return event
+
+        def record_warning(
+            message: str,
+            *,
+            step: CopilotOperatorPlanStep | None = None,
+            payload: dict[str, Any] | None = None,
+        ) -> None:
+            warnings.append(message)
+            record_event(
+                "warning",
+                step=step,
+                title="Operator warning",
+                message=message,
+                payload=payload,
+                event_warnings=[message],
+            )
+
+        record_event(
+            "plan",
+            title="Closed-loop Operator plan",
+            message=(
+                f"Authorized {len(tool_specs)} strict Gamma action(s) for "
+                "observation-driven execution."
+            ),
+            payload={
+                "intent": plan.intent,
+                "role": plan.role,
+                "depth_profile": plan.depth_profile,
+                "step_count": len(plan.steps),
+                "allowed_tool_ids": list(allowed_steps),
+                "max_tool_calls": plan.max_tool_calls,
+                "max_external_provider_calls": plan.max_provider_calls,
+                "max_elapsed_ms": plan.max_elapsed_ms,
+                "orchestrator": resolution.orchestration_path,
+                "operator_contract": "copilot.operator.loop.v1",
+            },
+        )
+        for warning in list(warnings):
+            record_event(
+                "warning",
+                title="Plan warning",
+                message=warning,
+                event_warnings=[warning],
+            )
+
+        def blocked_execution(
+            *,
+            tool_id: str,
+            arguments: dict[str, Any],
+            summary: str,
+            step: CopilotOperatorPlanStep | None,
+            status: str,
+            reason: str,
+        ) -> CopilotToolExecution:
+            nonlocal stop_reason
+            if status in {"budget_exhausted", "elapsed_budget_exhausted"}:
+                stop_reason = reason
+            if step is not None:
+                append_once(skipped_steps, step.step_id)
+                if status in {"invalid_arguments", "failed"}:
+                    append_once(failed_steps, step.step_id)
+            record_warning(
+                summary,
+                step=step,
+                payload={"status": status, "stop_reason": reason},
+            )
+            record_event(
+                "tool-result",
+                step=step,
+                message=summary,
+                payload={
+                    "status": status,
+                    "stop_reason": reason,
+                    "arguments": arguments,
+                },
+                event_warnings=[summary],
+            )
+            return CopilotToolExecution(
+                output={
+                    "error": summary,
+                    "status": status,
+                    "stop_reason": reason,
+                },
+                trace=CopilotToolTrace(
+                    tool_name=tool_id,
+                    summary=summary,
+                    arguments=arguments,
+                    source_ids=[],
+                ),
+            )
+
+        def execute_model_tool(
+            tool_id: str,
+            arguments: dict[str, object],
+        ) -> CopilotToolExecution:
+            nonlocal attempted_tool_calls
+            nonlocal context_bytes_used
+            nonlocal external_provider_calls
+            nonlocal stop_reason
+
+            normalized_tool_id = str(tool_id or "").strip()
+            normalized_arguments = (
+                dict(arguments) if isinstance(arguments, dict) else {}
+            )
+            step = allowed_steps.get(normalized_tool_id)
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            if should_cancel is not None and should_cancel():
+                stop_reason = "user_cancelled"
+                return blocked_execution(
+                    tool_id=normalized_tool_id,
+                    arguments=normalized_arguments,
+                    summary=(
+                        "Research Operator cancellation took effect before the "
+                        "next validated tool call."
+                    ),
+                    step=step,
+                    status="cancelled",
+                    reason="user_cancelled",
+                )
+            if elapsed_ms >= plan.max_elapsed_ms:
+                return blocked_execution(
+                    tool_id=normalized_tool_id,
+                    arguments=normalized_arguments,
+                    summary=(
+                        f"Research Operator elapsed-time budget of "
+                        f"{plan.max_elapsed_ms}ms is exhausted."
+                    ),
+                    step=step,
+                    status="elapsed_budget_exhausted",
+                    reason="elapsed_budget_exhausted",
+                )
+            if attempted_tool_calls >= plan.max_tool_calls:
+                return blocked_execution(
+                    tool_id=normalized_tool_id,
+                    arguments=normalized_arguments,
+                    summary=(
+                        f"Research Operator tool-call budget of "
+                        f"{plan.max_tool_calls} is exhausted."
+                    ),
+                    step=step,
+                    status="budget_exhausted",
+                    reason="tool_budget_exhausted",
+                )
+            attempted_tool_calls += 1
+
+            if step is None:
+                return blocked_execution(
+                    tool_id=normalized_tool_id,
+                    arguments=normalized_arguments,
+                    summary=(
+                        "Gamma rejected an action outside the authorized Operator "
+                        f"surface: `{normalized_tool_id}`."
+                    ),
+                    step=None,
+                    status="rejected",
+                    reason="unauthorized_tool",
+                )
+            try:
+                definition = self.action_registry.authorize_automatic(
+                    normalized_tool_id
+                )
+                validated_arguments = self.action_registry.validate_arguments(
+                    normalized_tool_id,
+                    normalized_arguments,
+                )
+            except (ResearchActionPermissionError, ResearchActionArgumentError) as exc:
+                return blocked_execution(
+                    tool_id=normalized_tool_id,
+                    arguments=normalized_arguments,
+                    summary=str(exc),
+                    step=step,
+                    status="invalid_arguments",
+                    reason="argument_validation_failed",
+                )
+
+            call_count = tool_call_counts.get(normalized_tool_id, 0) + 1
+            tool_call_counts[normalized_tool_id] = call_count
+            if call_count > definition.request_limit:
+                return blocked_execution(
+                    tool_id=normalized_tool_id,
+                    arguments=validated_arguments,
+                    summary=(
+                        f"`{normalized_tool_id}` exceeded its per-run request "
+                        f"limit of {definition.request_limit}."
+                    ),
+                    step=step,
+                    status="budget_exhausted",
+                    reason="tool_request_limit_exhausted",
+                )
+            if definition.external_provider:
+                if external_provider_calls >= plan.max_provider_calls:
+                    return blocked_execution(
+                        tool_id=normalized_tool_id,
+                        arguments=validated_arguments,
+                        summary=(
+                            "Research Operator external-provider call budget is "
+                            "exhausted."
+                        ),
+                        step=step,
+                        status="budget_exhausted",
+                        reason="external_provider_budget_exhausted",
+                    )
+                external_provider_calls += 1
+
+            context = context_by_domain.get(step.domain)
+            if context is None:
+                if step.domain in context_budget_omitted_domains:
+                    return blocked_execution(
+                        tool_id=normalized_tool_id,
+                        arguments=validated_arguments,
+                        summary=(
+                            f"{step.domain} context was omitted by the aggregate "
+                            "context budget."
+                        ),
+                        step=step,
+                        status="budget_exhausted",
+                        reason="context_budget_exhausted",
+                    )
+                try:
+                    context = self._build_plan_execution_context(
+                        request,
+                        step.domain,
+                    )
+                except ValueError as exc:
+                    return blocked_execution(
+                        tool_id=normalized_tool_id,
+                        arguments=validated_arguments,
+                        summary=str(exc),
+                        step=step,
+                        status="failed",
+                        reason="context_unavailable",
+                    )
+                context_bytes = (
+                    context.context_contract.budget.final_bytes
+                    if context.context_contract is not None
+                    else 0
+                )
+                if (
+                    context_bytes_used + context_bytes
+                    > COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+                ):
+                    context_budget_omitted_domains.append(step.domain)
+                    return blocked_execution(
+                        tool_id=normalized_tool_id,
+                        arguments=validated_arguments,
+                        summary=(
+                            f"Compacted {step.domain} context would exceed the "
+                            f"{COPILOT_TOTAL_CONTEXT_BUDGET_BYTES}-byte aggregate "
+                            "context budget."
+                        ),
+                        step=step,
+                        status="budget_exhausted",
+                        reason="context_budget_exhausted",
+                    )
+                context_bytes_used += context_bytes
+                context_by_domain[step.domain] = context
+                built_contexts.append(context)
+                for source in context.sources:
+                    sources[source.source_id] = source
+                for warning in context.warnings:
+                    record_warning(warning, step=step)
+
+            invocation_id = (
+                f"observation_{attempted_tool_calls:02d}_"
+                f"{self._safe_source_id(normalized_tool_id).lower()}"
+            )
+            execution = self._execute_registered_operator_action(
+                normalized_tool_id,
+                validated_arguments,
+                context,
+            )
+            outputs[invocation_id] = execution.output
+            output_summaries[invocation_id] = self._compact_operator_output(
+                execution.output
+            )
+            for source in execution.sources:
+                sources[source.source_id] = source
+            failed = (
+                isinstance(execution.output, dict)
+                and bool(execution.output.get("error"))
+            )
+            if failed:
+                append_once(skipped_steps, step.step_id)
+                append_once(failed_steps, step.step_id)
+                message = (
+                    f"{normalized_tool_id} failed: "
+                    f"{execution.output.get('error')}"
+                )
+                record_warning(message, step=step)
+                status = "failed"
+            else:
+                append_once(executed_steps, step.step_id)
+                status = "completed"
+            observation_event = record_event(
+                "tool-result",
+                step=step,
+                message=execution.trace.summary,
+                payload={
+                    "status": status,
+                    "invocation_id": invocation_id,
+                    "arguments": execution.trace.arguments,
+                    "output_summary": output_summaries[invocation_id],
+                    "tool_calls_used": attempted_tool_calls,
+                    "tool_calls_remaining": max(
+                        0,
+                        plan.max_tool_calls - attempted_tool_calls,
+                    ),
+                },
+                source_ids=list(execution.trace.source_ids),
+                event_warnings=[message] if failed else [],
+            )
+            outputs[invocation_id] = {
+                "observation_id": observation_event.event_id,
+                "result": execution.output,
+            }
+            return execution
+
+        def emit_provider_event(
+            event_type: str,
+            data: dict[str, object],
+        ) -> None:
+            if event_type == "tool.call":
+                tool_id = str(data.get("tool_name") or "")
+                step = allowed_steps.get(tool_id)
+                record_event(
+                    "step-start",
+                    step=step,
+                    title=step.title if step else "Operator tool request",
+                    message=f"Model selected `{tool_id}`.",
+                    payload={
+                        "arguments": dict(data.get("arguments") or {}),
+                        "decision_index": data.get("decision_index"),
+                        "orchestrator": resolution.orchestration_path,
+                    },
+                )
+                return
+            if event_type == "tool.result":
+                return
+            if event_type in {"warning", "provider.error", "refusal", "incomplete"}:
+                message = str(
+                    data.get("message")
+                    or data.get("reason")
+                    or event_type
+                )
+                record_warning(
+                    message,
+                    payload={
+                        "provider_event_type": event_type,
+                        **dict(data),
+                    },
+                )
+                return
+            if event_type in {"text.delta", "usage", "provider.progress"}:
+                payload = {
+                    "provider_event_type": event_type,
+                    **(
+                        {
+                            key: value
+                            for key, value in dict(data).items()
+                            if key != "delta"
+                        }
+                    ),
+                }
+                record_event(
+                    "provider-progress",
+                    title="Operator model progress",
+                    message=(
+                        "Operator model is synthesizing the final answer."
+                        if event_type == "text.delta"
+                        else "Operator model emitted provider progress."
+                    ),
+                    payload=payload,
+                )
+
+        try:
+            provider_result = adaptive_operator(
+                request=request,
+                plan=plan,
+                tool_specs=tool_specs,
+                execute_tool=execute_model_tool,
+                emit=emit_provider_event,
+                should_cancel=should_cancel or (lambda: False),
+            )
+        except CopilotRunCancelled:
+            stop_reason = "user_cancelled"
+            provider_result = CopilotResearchCardResult(
+                domain="synthesis",
+                current_tab=request.context.current_tab or "copilot",
+                status="cancelled",
+                provider=resolution.provider,
+                model=resolution.model,
+                message="Research Operator stopped at the next safe boundary.",
+                sources=list(sources.values()),
+                warnings=list(warnings),
+            )
+        except Exception as exc:
+            logger.exception("Copilot adaptive Responses Operator failed")
+            stop_reason = "provider_error"
+            safe_error = self.model_policy.classify_error(
+                exc,
+                run_id=resolved_run_id,
+                model=resolution.model,
+            )
+            provider_result = CopilotResearchCardResult(
+                domain="synthesis",
+                current_tab=request.context.current_tab or "copilot",
+                status="error",
+                provider=resolution.provider,
+                model=resolution.model,
+                message=safe_error.message,
+                sources=list(sources.values()),
+                warnings=dedupe_warnings(
+                    [*warnings, safe_error.guidance]
+                ),
+                safe_provider_error=safe_error,
+            )
+
+        for source in provider_result.sources:
+            sources[source.source_id] = source
+        warnings = dedupe_warnings([*warnings, *provider_result.warnings])
+        if (
+            provider_result.status == "ready"
+            and allowed_steps
+            and not executed_steps
+        ):
+            provider_result = replace(
+                provider_result,
+                status="incomplete",
+                message=(
+                    "Research Operator produced no validated Gamma tool "
+                    "observation for a workflow that required one."
+                ),
+                card=None,
+            )
+            stop_reason = "insufficient_evidence"
+        elif provider_result.status == "ready" and provider_result.card is None:
+            provider_result = replace(
+                provider_result,
+                status="incomplete",
+                message="Research Operator returned no schema-valid final synthesis.",
+            )
+            stop_reason = "invalid_final_synthesis"
+        elif stop_reason is None:
+            stop_reason = {
+                "ready": "final_answer",
+                "cancelled": "user_cancelled",
+                "timeout": "elapsed_budget_exhausted",
+                "refused": "refused",
+                "incomplete": "incomplete",
+                "unavailable": "provider_unavailable",
+                "error": "provider_error",
+            }.get(provider_result.status, provider_result.status)
+
+        record_event(
+            "artifact-created",
+            title="Operator trace",
+            message="Created an observation-linked Operator trace.",
+            payload={
+                "artifact_type": "operator_trace",
+                "artifact_id": resolved_run_id,
+                "event_count": len(events) + 3,
+            },
+        )
+        record_event(
+            "artifact-created",
+            title="Operator report",
+            message="Created the final Research Operator synthesis.",
+            payload={
+                "artifact_type": "operator_report",
+                "artifact_id": provider_result.response_id
+                or new_copilot_id("opexec"),
+            },
+        )
+        final_outputs, output_retention = self._bounded_operator_outputs(
+            outputs,
+            output_summaries,
+        )
+        record_event(
+            "final-report",
+            title="Final operator report",
+            message=provider_result.message,
+            payload={
+                "status": provider_result.status,
+                "stop_reason": stop_reason,
+                "orchestrator": resolution.orchestration_path,
+                "operator_contract": "copilot.operator.loop.v1",
+                "synthesis_source": (
+                    "model_final_output"
+                    if provider_result.card is not None
+                    else "typed_non_success"
+                ),
+                "executed_steps": list(executed_steps),
+                "skipped_steps": list(skipped_steps),
+                "failed_steps": list(failed_steps),
+                "warning_count": len(warnings),
+                "source_count": len(sources),
+                "tool_trace_count": len(provider_result.tool_traces),
+                "tool_calls_used": attempted_tool_calls,
+                "tool_calls_remaining": max(
+                    0,
+                    plan.max_tool_calls - attempted_tool_calls,
+                ),
+                "external_provider_calls_used": external_provider_calls,
+                "output_summaries": output_summaries,
+                "output_retention": output_retention,
+                "outputs": final_outputs,
+            },
+            source_ids=[
+                source.source_id
+                for source in list(sources.values())[:10]
+            ],
+            event_warnings=warnings,
+        )
+
+        context_budget = {
+            "contract_version": "copilot.context.total.v1",
+            "total_budget_bytes": COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
+            "used_bytes": context_bytes_used,
+            "within_total_budget": (
+                context_bytes_used <= COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+            ),
+            "included_domains": [
+                context.domain for context in built_contexts
+            ],
+            "omitted_domains": [
+                {"domain": domain, "reason": "budget_omission"}
+                for domain in context_budget_omitted_domains
+            ],
+        }
+        resolved_research_plan = plan.research_plan
+        if resolved_research_plan is not None:
+            step_by_id = {step.step_id: step for step in plan.steps}
+            executed_domains = list(
+                dict.fromkeys(
+                    step_by_id[step_id].domain
+                    for step_id in executed_steps
+                    if step_id in step_by_id
+                )
+            )
+            skipped_domains = list(
+                dict.fromkeys(
+                    step_by_id[step_id].domain
+                    for step_id in skipped_steps
+                    if step_id in step_by_id
+                    and step_by_id[step_id].domain not in executed_domains
+                )
+            )
+            resolved_research_plan = replace(
+                resolved_research_plan,
+                domain_decisions=self._execution_domain_decisions(
+                    plan=resolved_research_plan,
+                    executed_domains=executed_domains,
+                    skipped_domains=skipped_domains,
+                    budget_omitted_domains=context_budget_omitted_domains,
+                    tool_outputs={},
+                ),
+                transformation_note=(
+                    "Closed-loop Research Operator routing outcomes from "
+                    "validated Gamma tool observations."
+                ),
+            )
+
+        result = replace(
+            provider_result,
+            sources=list(sources.values()),
+            operator_events=events,
+            warnings=warnings,
+            research_plan=resolved_research_plan,
+            context_contracts=[
+                context.context_contract
+                for context in built_contexts
+                if context.context_contract is not None
+            ],
+            context_budget=context_budget,
+        )
+        result = self._normalize_result_sources(result)
+        result = self._with_run_metadata(
+            result,
+            resolution=resolution,
+            started_at=started_at,
+            provider_latency_ms=int(
+                (time.perf_counter() - started_at) * 1000
+            ),
+            cancellation_outcome=(
+                "user_cancelled"
+                if result.status == "cancelled"
+                else None
+            ),
+            cancellation_boundary=(
+                "before_next_model_or_tool_turn"
+                if result.status == "cancelled"
+                else None
+            ),
+            known_provider_calls=result.usage.provider_calls,
+            known_tool_calls=len(result.tool_traces),
+        )
         return result
 
     def _execute_registered_operator_action(

@@ -3,7 +3,11 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-from evals.copilot_operator_eval import default_operator_eval_cases, run_operator_eval_suite
+from evals.copilot_operator_eval import (
+    _has_useful_model_final_card,
+    default_operator_eval_cases,
+    run_operator_eval_suite,
+)
 
 
 def _load_copilot_fixtures():
@@ -147,6 +151,12 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(
             for item in result.outcomes
             if item.orchestrator == "agents_sdk_stub"
         )
+        assert all(
+            item.checks["closed_loop_synthesis"]
+            for item in result.outcomes
+            if item.orchestrator == "agents_sdk_stub"
+            and item.status == "ready"
+        )
         rendered = result.to_json()
         assert len(rendered["variant_summaries"]) == 5
         assert rendered["routing_decision"]["default_changed"] is False
@@ -156,3 +166,18 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(
         )
     finally:
         runtime.shutdown()
+
+
+def test_checkpoint7_eval_rejects_generic_tool_count_as_final_synthesis():
+    assert (
+        _has_useful_model_final_card(
+            {
+                "card": {
+                    "title": "Operator complete",
+                    "rationale": "Executed 2 tools.",
+                    "proposed_test": "Review the output.",
+                }
+            }
+        )
+        is False
+    )

@@ -5,6 +5,7 @@ from typing import Callable, Protocol
 
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotOperatorPlan,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotToolExecution,
@@ -12,6 +13,7 @@ from src.models.copilot import (
 
 
 ToolExecutor = Callable[[str, dict[str, object], CopilotContextBundle], CopilotToolExecution]
+OperatorToolExecutor = Callable[[str, dict[str, object]], CopilotToolExecution]
 
 # Streaming providers call this with (event_type, data) for each semantic
 # provider event: text deltas, tool activity, warnings, refusals, usage.
@@ -39,6 +41,22 @@ class CopilotProvider(Protocol):
         context: CopilotContextBundle,
         tool_specs: list[dict[str, object]],
         execute_tool: ToolExecutor,
+    ) -> CopilotResearchCardResult:
+        ...
+
+
+class CopilotOperatorLoopProvider(Protocol):
+    provider_name: str
+
+    def stream_research_operator(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        plan: CopilotOperatorPlan,
+        tool_specs: list[dict[str, object]],
+        execute_tool: OperatorToolExecutor,
+        emit: RunEventEmitter,
+        should_cancel: CancelCheck,
     ) -> CopilotResearchCardResult:
         ...
 

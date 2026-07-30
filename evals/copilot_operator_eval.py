@@ -152,8 +152,8 @@ class CopilotOperatorEvalSuiteResult:
                 "default_changed": False,
                 "selected_default": "gamma_custom_loop",
                 "reason": (
-                    "Retain the deterministic Gamma custom loop: this run contains "
-                    "deterministic/mock comparison evidence only and no intentionally "
+                    "Retain the Gamma-owned custom loop: this run contains "
+                    "deterministic/mock contract evidence only and no intentionally "
                     "authorized live-provider evidence."
                 ),
             }
@@ -161,7 +161,7 @@ class CopilotOperatorEvalSuiteResult:
             "default_changed": False,
             "selected_default": "gamma_custom_loop",
             "reason": (
-                "Retain the deterministic Gamma custom loop unless a separately reviewed "
+                "Retain the Gamma-owned custom loop unless a separately reviewed "
                 "live comparison demonstrates a material quality, latency, reliability, "
                 "or cost advantage across the complete retained case set."
             ),
@@ -434,6 +434,14 @@ def _run_eval_case(
                 for domain in case.expected_omitted_domains
             )
         ),
+        "closed_loop_synthesis": (
+            final_payload.get("operator_contract") != "copilot.operator.loop.v1"
+            or payload.get("status") != "ready"
+            or (
+                final_payload.get("synthesis_source") == "model_final_output"
+                and _has_useful_model_final_card(payload)
+            )
+        ),
     }
     if case.current_gap:
         checks["expected_tools"] = True
@@ -650,6 +658,16 @@ def _final_usefulness_quality(
     event_types: list[str],
 ) -> float:
     card = payload.get("card") if isinstance(payload.get("card"), dict) else {}
+    if final_payload.get("operator_contract") == "copilot.operator.loop.v1":
+        indicators = [
+            payload.get("status") == "ready",
+            "final-report" in event_types,
+            final_payload.get("synthesis_source") == "model_final_output",
+            bool(final_payload.get("output_summaries")),
+            _has_useful_model_final_card(payload),
+            bool(str(final_payload.get("stop_reason") or "").strip()),
+        ]
+        return sum(bool(item) for item in indicators) / len(indicators)
     indicators = [
         payload.get("status") == "ready",
         "final-report" in event_types,
@@ -660,6 +678,39 @@ def _final_usefulness_quality(
         or bool(final_payload.get("warnings")),
     ]
     return sum(bool(item) for item in indicators) / len(indicators)
+
+
+def _has_useful_model_final_card(payload: dict[str, Any]) -> bool:
+    card = payload.get("card") if isinstance(payload.get("card"), dict) else {}
+    title = str(card.get("title") or "").strip()
+    rationale = str(card.get("rationale") or "").strip()
+    proposed_test = str(card.get("proposed_test") or "").strip()
+    normalized = f"{title} {rationale}".lower()
+    generic_only = (
+        "executed " in normalized
+        and " tool" in normalized
+        and not any(
+            term in normalized
+            for term in (
+                "risk",
+                "rate",
+                "valuation",
+                "portfolio",
+                "macro",
+                "commodity",
+                "equity",
+                "options",
+                "evidence",
+                "observation",
+            )
+        )
+    )
+    return (
+        len(title) >= 8
+        and len(rationale) >= 40
+        and len(proposed_test) >= 12
+        and not generic_only
+    )
 
 
 def _tool_selection_quality(case: CopilotOperatorEvalCase, tool_traces: list[str]) -> float:
@@ -739,7 +790,9 @@ class _operator_orchestrator:
             from src.application import copilot_agents_operator
 
             self.previous_loader = copilot_agents_operator._load_agents_sdk
-            copilot_agents_operator._load_agents_sdk = _load_stub_agents_sdk
+            copilot_agents_operator._load_agents_sdk = lambda: _load_stub_agents_sdk(
+                self.runtime.copilot_service.action_registry
+            )
             os.environ["OPENAI_API_KEY"] = "test-key"
             self.runtime.copilot_service.model_policy.operator_orchestrator = "agents_sdk"
             self.runtime.copilot_service.agents_operator_service.config = CopilotAgentsOperatorConfig(
@@ -787,7 +840,7 @@ class _operator_orchestrator:
             copilot_agents_operator._load_agents_sdk = self.previous_loader
 
 
-def _load_stub_agents_sdk() -> Any:
+def _load_stub_agents_sdk(action_registry: Any | None = None) -> Any:
     from src.application.copilot_agents_operator import _AgentsSdkModule
 
     class _StubModelSettings:
@@ -817,9 +870,72 @@ def _load_stub_agents_sdk() -> Any:
         async def run(agent, prompt, max_turns):
             del max_turns
             payload = json.loads(prompt)
+            observations: list[dict[str, Any]] = []
             for tool_id in payload.get("allowed_tool_ids", []):
-                agent.tools[0](tool_id, "{}")
-            return type("_StubRunResult", (), {"final_output": "ok"})()
+                arguments = _stub_operator_arguments(
+                    tool_id,
+                    action_registry=action_registry,
+                )
+                raw_observation = agent.tools[0](
+                    tool_id,
+                    json.dumps(arguments),
+                )
+                try:
+                    observation = json.loads(raw_observation)
+                except (TypeError, json.JSONDecodeError):
+                    observation = {"status": "invalid_stub_observation"}
+                observations.append(
+                    {
+                        "tool_id": tool_id,
+                        "status": observation.get("status"),
+                        "trace_summary": observation.get("trace_summary"),
+                    }
+                )
+            completed = [
+                item
+                for item in observations
+                if item.get("status") == "completed"
+            ]
+            tool_labels = ", ".join(
+                item["tool_id"] for item in completed[:4]
+            ) or "the authorized Gamma observations"
+            final_output = {
+                "title": "Gamma Operator evidence synthesis",
+                "hypothesis": (
+                    "The requested research question can be assessed from the "
+                    "returned read-only Gamma observations."
+                ),
+                "rationale": (
+                    f"The deterministic SDK fixture inspected the returned "
+                    f"observations from {tool_labels} and retained their warnings "
+                    "and evidence boundaries in this final analytical card."
+                ),
+                "required_data": [
+                    "Returned Gamma action observations",
+                    "Canonical Operator trace",
+                ],
+                "proposed_test": (
+                    "Review the observation-linked output summaries and compare "
+                    "the strongest evidence against the stated caveats."
+                ),
+                "confounders": [
+                    "Deterministic fixtures do not measure live-provider quality."
+                ],
+                "next_steps": [
+                    "Inspect the retained tool observations and source references."
+                ],
+                "caveats": [
+                    "This eval fixture validates orchestration, not investment conclusions."
+                ],
+                "source_backed_claims": [],
+                "inferred_claims": [],
+                "stop_reason": "final_answer",
+            }
+            return type(
+                "_StubRunResult",
+                (),
+                {"final_output": final_output},
+            )()
 
     return _AgentsSdkModule(
         Agent=_StubAgent,
@@ -827,6 +943,99 @@ def _load_stub_agents_sdk() -> Any:
         function_tool=lambda func: func,
         ModelSettings=_StubModelSettings,
     )
+
+
+def _stub_operator_arguments(
+    tool_id: str,
+    *,
+    action_registry: Any | None,
+) -> dict[str, Any]:
+    special = {
+        "run_risk_contribution_analysis": {
+            "source_scope": "portfolio",
+            "top_n": 10,
+            "include_monte_carlo": True,
+        },
+        "run_risk_scenario_analysis": {
+            "scenario_label": "rate_shock_plus_100bps",
+            "source_scope": "portfolio",
+            "scenario_type": "rate_shock",
+            "rate_shift_bps": 100.0,
+            "equity_shock_pct": None,
+            "duration_proxy_years": None,
+            "symbol_shocks": [],
+        },
+        "run_fundamentals_reverse_valuation": {"ticker": None},
+        "inspect_equity_research_context": {"symbol": None, "max_rows": 8},
+        "inspect_options_structure": {
+            "symbol": None,
+            "expiry": None,
+            "max_expiries": 6,
+        },
+        "run_options_realized_implied_comparison": {
+            "symbol": None,
+            "max_expiries": 6,
+            "depth_preset": "compact",
+            "market_data_mode": None,
+        },
+        "get_news_items_context": {"limit": 8},
+        "get_macro_series_history_summary": {
+            "series_id": "us-cpi-yoy",
+            "region": None,
+        },
+        "get_prediction_market_history_summary": {
+            "range": None,
+            "resolution_minutes": None,
+            "outcome_id": None,
+        },
+        "inspect_commodity_curve_fundamentals": {
+            "instrument_id": None,
+            "max_curve_nodes": 8,
+            "max_inventory_points": 6,
+        },
+        "get_maritime_chokepoint_context": {
+            "chokepoint_id": None,
+            "max_rows": 8,
+        },
+        "get_maritime_route_context": {"route_id": None, "max_rows": 8},
+    }
+    if tool_id in special:
+        return dict(special[tool_id])
+    if action_registry is None:
+        return {}
+    definition = action_registry.require(tool_id)
+    return _stub_value_for_schema(definition.input_schema)
+
+
+def _stub_value_for_schema(schema: dict[str, Any]) -> Any:
+    raw_type = schema.get("type")
+    allowed_types = raw_type if isinstance(raw_type, list) else [raw_type]
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        for value in enum:
+            if value is not None:
+                return value
+        return None
+    if "null" in allowed_types:
+        return None
+    if "object" in allowed_types:
+        properties = schema.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+        return {
+            key: _stub_value_for_schema(properties.get(key) or {})
+            for key in list(schema.get("required") or [])
+        }
+    if "array" in allowed_types:
+        return []
+    if "boolean" in allowed_types:
+        return False
+    if "integer" in allowed_types:
+        return int(schema.get("minimum") or 1)
+    if "number" in allowed_types:
+        return float(schema.get("minimum") or 0.0)
+    if "string" in allowed_types:
+        return "fixture"
+    return None
 
 
 def _install_deterministic_eval_services(runtime: Any) -> None:
