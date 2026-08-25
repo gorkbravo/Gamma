@@ -5,12 +5,20 @@
     CopilotRunObservability,
     CopilotSafeProviderError,
     CopilotTurnRecord,
-    CopilotUsageRecord
+    CopilotUsageRecord,
+    CopilotWorkingAnalysis
   } from "../lib/api/types";
 
   export let turn: CopilotTurnRecord | null = null;
   export let result: CopilotResearchCardResult | null = null;
   export let diagnostics: CopilotDiagnostics | null = null;
+  export let workingAnalyses: CopilotWorkingAnalysis[] = [];
+  export let onOpenWorkingAnalysis: (
+    analysis: CopilotWorkingAnalysis
+  ) => Promise<unknown> | void = () => {};
+  export let onDiscardWorkingAnalysis: (
+    analysis: CopilotWorkingAnalysis
+  ) => Promise<unknown> | void = () => {};
   export let onClose: () => void = () => {};
 
   const unavailableUsage: CopilotUsageRecord = {
@@ -45,6 +53,7 @@
   let observability = unavailableObservability;
   let safeError: CopilotSafeProviderError | null = null;
   let copyState: "idle" | "copied" | "error" = "idle";
+  let visibleWorkingAnalyses: CopilotWorkingAnalysis[] = [];
 
   $: usage = turn?.usage ?? result?.usage ?? unavailableUsage;
   $: observability =
@@ -54,6 +63,9 @@
     ?? result?.safe_provider_error
     ?? diagnostics?.last_error
     ?? null;
+  $: visibleWorkingAnalyses = [...workingAnalyses].sort((left, right) =>
+    right.updated_at.localeCompare(left.updated_at)
+  );
 
   function metric(value: number | null | undefined, suffix = "") {
     return value == null ? "Unavailable" : `${value.toLocaleString()}${suffix}`;
@@ -61,6 +73,17 @@
 
   function label(value: string | null | undefined) {
     return value?.trim() ? value.replaceAll("_", " ") : "Unavailable";
+  }
+
+  function compactDate(value: string | null | undefined) {
+    return value
+      ? new Date(value).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit"
+        })
+      : "No expiry";
   }
 
   async function copyDiagnosticId() {
@@ -114,6 +137,40 @@
       <div><dt>Tool calls</dt><dd>{metric(usage.tool_calls)}</dd></div>
     </dl>
   </section>
+
+  {#if visibleWorkingAnalyses.length}
+    <section aria-label="Session working analyses">
+      <h3>Working analyses</h3>
+      <div class="working-list">
+        {#each visibleWorkingAnalyses as analysis}
+          <article class:inactive={analysis.status !== "active"} class="working-analysis">
+            <div class="working-heading">
+              <span class="temporary-label">Temporary</span>
+              <span class="working-status">{label(analysis.status)}</span>
+            </div>
+            <strong>{analysis.title}</strong>
+            <p>
+              {label(analysis.owning_tab)} / {label(analysis.owning_mode)} · expires
+              {compactDate(analysis.expires_at)}
+            </p>
+            <small>Session scoped. Opening does not save a DCF model.</small>
+            <div class="working-actions">
+              <button
+                type="button"
+                disabled={analysis.status !== "active"}
+                on:click={() => onOpenWorkingAnalysis(analysis)}
+              >Open in Fundamentals</button>
+              <button
+                type="button"
+                disabled={analysis.status === "discarded"}
+                on:click={() => onDiscardWorkingAnalysis(analysis)}
+              >Discard</button>
+            </div>
+          </article>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <section>
     <h3>Retention & cancellation</h3>
@@ -210,6 +267,11 @@
     color: var(--accent);
   }
 
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
   section {
     padding: var(--space-4);
     border-bottom: 1px solid var(--divider);
@@ -265,6 +327,53 @@
   .diagnostic-id {
     display: grid;
     gap: var(--space-2);
+  }
+
+  .working-list,
+  .working-analysis {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .working-analysis {
+    padding: var(--space-3);
+    border: 1px solid var(--panel-strong);
+    background: transparent;
+  }
+
+  .working-analysis.inactive {
+    opacity: 0.62;
+  }
+
+  .working-heading,
+  .working-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .working-actions {
+    justify-content: flex-start;
+  }
+
+  .working-analysis > strong {
+    color: var(--text-0);
+    font-size: var(--text-sm);
+  }
+
+  .working-analysis small,
+  .working-status {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+  }
+
+  .temporary-label {
+    color: var(--accent);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   code {

@@ -1,6 +1,6 @@
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
-import type { FundamentalsDcfModel } from "../lib/api/types";
+import type { CopilotWorkingAnalysis, FundamentalsDcfModel } from "../lib/api/types";
 import FundamentalsView from "./FundamentalsView.svelte";
 
 describe("FundamentalsView", () => {
@@ -131,6 +131,64 @@ describe("FundamentalsView", () => {
 
     expect(body).toContain("XLE has no matching SEC company profile");
     expect(body).toContain("ETFs, funds, and unsupported non-US issuers");
+  });
+
+  it("labels materialized Copilot valuation state as temporary and unsaved", () => {
+    const workingAnalysis: CopilotWorkingAnalysis = {
+      analysis_id: "work_lmt",
+      session_id: "session_lmt",
+      run_id: "oprun_lmt",
+      tool_id: "run_fundamentals_reverse_valuation",
+      domain: "fundamentals",
+      analysis_type: "reverse_valuation",
+      title: "Lockheed Martin Corporation reverse valuation",
+      status: "active",
+      state_scope: "session_ephemeral",
+      entity: { ticker: "LMT" },
+      inputs: { ticker: "LMT" },
+      outputs: {
+        ticker: "LMT",
+        current_price: 412.35,
+        target_equity_value: 120_000_000_000
+      },
+      source_ids: [],
+      warnings: [],
+      context_fingerprint: "fp_lmt",
+      owning_tab: "fundamentals",
+      owning_mode: "reverse_valuation",
+      materialization: { durable: false },
+      created_at: "2026-08-25T10:00:00Z",
+      updated_at: "2026-08-25T10:00:00Z",
+      expires_at: "2026-09-01T10:00:00Z",
+      materialized_at: "2026-08-25T10:01:00Z",
+      discarded_at: null,
+      read_only_safety: {},
+      source_provider: "gamma",
+      origin: "tests",
+      transformation_note: null,
+      contract_version: "copilot.working-analysis.v1"
+    };
+    const { body } = render(FundamentalsView, {
+      props: {
+        mode: "reverse_valuation",
+        workingAnalysis,
+        onSearch: vi.fn(),
+        onSelectCompany: vi.fn(),
+        onSavePeerBasket: vi.fn(),
+        onSaveDcfModel: vi.fn(),
+        onSaveDcfSnapshot: vi.fn(),
+        onLoadDcfSnapshot: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Temporary working analysis");
+    expect(body).toContain("Lockheed Martin Corporation reverse valuation");
+    expect(body).toContain("Captured result");
+    expect(body).toContain("$412.35 price");
+    expect(body).toContain("$120.0B equity value");
+    expect(body).toContain("opened from Copilot");
+    expect(body).toContain("has not saved or changed a Fundamentals DCF model");
+    expect(body).toContain("copilot.working-analysis.v1");
   });
 });
 

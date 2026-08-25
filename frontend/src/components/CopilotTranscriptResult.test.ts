@@ -59,6 +59,31 @@ function result(): CopilotResearchCardResult {
 const typedPlan: CopilotResearchPlan = {
   intent: "rates_review",
   target_entities: [{ kind: "ticker", id: "AAPL", label: "Apple", confidence: 1 }],
+  entity_resolution: {
+    status: "resolved",
+    query: "Apple",
+    kind: "ticker",
+    resolved: {
+      kind: "ticker",
+      id: "AAPL",
+      label: "Apple Inc.",
+      provider_id: "0000320193",
+      exchange: "NASDAQ",
+      source_provider: "sec",
+      origin: "fundamentals.sec.reference_tickers",
+      confidence: 0.99,
+      match_reason: "model_proposed_ticker"
+    },
+    candidates: [],
+    method: "model_proposal_sec_validation",
+    source_provider: "gamma_entity_resolver",
+    origin: "copilot.entity_resolution",
+    model_proposal: "AAPL",
+    proposal_provider: "openai_responses",
+    proposal_model: "gpt-5.5",
+    proposal_confidence: 0.99,
+    warnings: []
+  },
   depth_profile: "standard",
   domain_plan: [
     {
@@ -353,6 +378,8 @@ describe("CopilotTranscriptResult", () => {
 
     for (const text of [
       "Research plan",
+      "Company resolved",
+      "Apple Inc.",
       "Operator review",
       "Review the exact watchlist diff.",
       "Rates loaded",
@@ -369,5 +396,51 @@ describe("CopilotTranscriptResult", () => {
     ]) {
       expect(body.toLowerCase()).toContain(text.toLowerCase());
     }
+  });
+
+  it("renders authoritative ticker choices when company identity is ambiguous", () => {
+    const ambiguousPlan: CopilotResearchPlan = {
+      ...typedPlan,
+      intent: "entity_disambiguation",
+      target_entities: [],
+      entity_resolution: {
+        ...typedPlan.entity_resolution!,
+        status: "ambiguous",
+        query: "Alphabet",
+        resolved: null,
+        candidates: [
+          {
+            kind: "ticker",
+            id: "GOOG",
+            label: "Alphabet Inc.",
+            provider_id: "0001652044",
+            exchange: "NASDAQ",
+            source_provider: "sec",
+            origin: "fundamentals.sec.reference_tickers",
+            confidence: 0.96,
+            match_reason: "same_sec_issuer"
+          },
+          {
+            kind: "ticker",
+            id: "GOOGL",
+            label: "Alphabet Inc.",
+            provider_id: "0001652044",
+            exchange: "NASDAQ",
+            source_provider: "sec",
+            origin: "fundamentals.sec.reference_tickers",
+            confidence: 0.96,
+            match_reason: "model_proposed_ticker"
+          }
+        ]
+      }
+    };
+
+    const { body } = render(CopilotTranscriptResult, {
+      props: { researchPlan: ambiguousPlan }
+    });
+
+    expect(body).toContain("Choose a ticker");
+    expect(body).toContain("GOOG · Alphabet Inc. · NASDAQ");
+    expect(body).toContain("GOOGL · Alphabet Inc. · NASDAQ");
   });
 });

@@ -1,12 +1,76 @@
 import { describe, expect, it } from "vitest";
-import type { CopilotSessionSummary, CopilotStorageStatus } from "./api/types";
+import type {
+  CopilotSessionSummary,
+  CopilotStorageStatus,
+  CopilotWorkingAnalysis
+} from "./api/types";
 import {
   describeCopilotSession,
   resolveComposerDraft,
   resolveInFlightPrompt,
+  resolveWorkingAnalysisTarget,
   summarizeCopilotStorageRecovery,
   type CopilotComposerSubmission
 } from "./copilot-workspace";
+
+function workingAnalysis(
+  overrides: Partial<CopilotWorkingAnalysis> = {}
+): CopilotWorkingAnalysis {
+  return {
+    analysis_id: "work-lmt",
+    session_id: "session-lmt",
+    run_id: "oprun-lmt",
+    tool_id: "run_fundamentals_reverse_valuation",
+    domain: "fundamentals",
+    analysis_type: "reverse_valuation",
+    title: "LMT reverse valuation",
+    status: "active",
+    state_scope: "session_ephemeral",
+    entity: { ticker: "lmt", label: "Lockheed Martin Corporation" },
+    inputs: { ticker: "LMT" },
+    outputs: { ticker: "LMT" },
+    source_ids: ["fundamentals.reverse_valuation.analysis"],
+    warnings: [],
+    context_fingerprint: "fp-lmt",
+    owning_tab: "fundamentals",
+    owning_mode: "reverse_valuation",
+    materialization: { durable: false },
+    created_at: "2026-08-25T10:00:00Z",
+    updated_at: "2026-08-25T10:00:00Z",
+    expires_at: "2026-09-01T10:00:00Z",
+    materialized_at: null,
+    discarded_at: null,
+    read_only_safety: { execution_enabled: false },
+    source_provider: "gamma",
+    origin: "tests",
+    transformation_note: null,
+    contract_version: "copilot.working-analysis.v1",
+    ...overrides
+  };
+}
+
+describe("Copilot working-analysis materialization", () => {
+  it("resolves the typed Fundamentals target and normalizes the ticker", () => {
+    expect(resolveWorkingAnalysisTarget(workingAnalysis())).toEqual({
+      analysisId: "work-lmt",
+      ticker: "LMT",
+      tab: "fundamentals",
+      mode: "reverse_valuation"
+    });
+  });
+
+  it("rejects inactive or unsupported materialization contracts", () => {
+    expect(
+      resolveWorkingAnalysisTarget(workingAnalysis({ status: "discarded" }))
+    ).toBeNull();
+    expect(
+      resolveWorkingAnalysisTarget(workingAnalysis({ owning_tab: "risk" }))
+    ).toBeNull();
+    expect(
+      resolveWorkingAnalysisTarget(workingAnalysis({ state_scope: "durable" }))
+    ).toBeNull();
+  });
+});
 
 function submission(overrides: Partial<CopilotComposerSubmission> = {}): CopilotComposerSubmission {
   return {

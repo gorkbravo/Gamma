@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 import json
 import logging
@@ -36,6 +36,11 @@ from src.application.copilot_context_contracts import (
     aggregate_context_fingerprint,
     finalize_context_bundle,
 )
+from src.application.copilot_entity_resolution import (
+    extract_explicit_equity_tickers,
+    resolve_equity_entity,
+    should_attempt_equity_resolution,
+)
 from src.application.copilot_report_service import CopilotReportService
 from src.application.commodities_service import CommoditiesService, CommodityWorkspaceRequest
 from src.application.crypto_service import CryptoService
@@ -68,6 +73,8 @@ from src.models.copilot import (
     CopilotDeleteResult,
     CopilotDiagnostics,
     CopilotDraftMutation,
+    CopilotEntityResolution,
+    CopilotEquityEntityProposal,
     CopilotMemo,
     CopilotLocalContinuationTurn,
     CopilotModelPolicyResolution,
@@ -99,6 +106,8 @@ from src.models.copilot import (
     CopilotToolExecution,
     CopilotToolTrace,
     CopilotUsageRecord,
+    CopilotWorkingAnalysis,
+    COPILOT_WORKING_ANALYSIS_VERSION,
     MacroCopilotContext,
     ResearchCard,
     ResearchClaim,
@@ -225,6 +234,13 @@ class _CopilotExecutionBudget:
     max_tool_calls: int
     max_provider_calls: int
     max_elapsed_ms: int
+
+
+@dataclass(frozen=True)
+class _CopilotEntityPreflight:
+    request: CopilotResearchCardRequest
+    resolution: CopilotEntityResolution | None = None
+    usage: CopilotUsageRecord = field(default_factory=CopilotUsageRecord)
 
 
 class CopilotService:
@@ -2549,10 +2565,146 @@ class CopilotService:
         else:
             self._append_run_event(handle, "completed", {"status": result.status}, result=result)
 
+    def _prepare_operator_entity_preflight(
+        self,
+        request: CopilotResearchCardRequest,
+        *,
+        allow_model_proposal: bool,
+    ) -> _CopilotEntityPreflight:
+        prompt = str(request.prompt or "").strip()
+        proposal: CopilotEquityEntityProposal | None = None
+        warnings: list[str] = []
+        usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
+        has_explicit_ticker = bool(extract_explicit_equity_tickers(prompt))
+        should_propose = (
+            allow_model_proposal
+            and not request.context.fundamentals_ticker
+            and not has_explicit_ticker
+            and should_attempt_equity_resolution(prompt)
+        )
+        proposer = getattr(self.provider, "propose_equity_entity", None)
+        if should_propose and callable(proposer):
+            try:
+                candidate = proposer(request=request)
+                if isinstance(candidate, CopilotEquityEntityProposal):
+                    proposal = candidate
+                    usage = candidate.usage
+                else:
+                    warnings.append(
+                        "The model entity proposal had an unsupported shape; Gamma ignored it."
+                    )
+            except RuntimeError:
+                warnings.append(
+                    "Model-assisted company-name resolution was unavailable; Gamma used SEC name search only."
+                )
+            except Exception:  # pragma: no cover - defensive provider boundary
+                logger.exception("Copilot entity proposal failed")
+                warnings.append(
+                    "Model-assisted company-name resolution failed; Gamma used SEC name search only."
+                )
+
+        entity_resolution = resolve_equity_entity(
+            prompt=prompt,
+            context_ticker=request.context.fundamentals_ticker,
+            search_companies=self.fundamentals_service.search_companies,
+            proposal=proposal,
+            extra_warnings=warnings,
+        )
+        if entity_resolution is not None and entity_resolution.status == "resolved":
+            resolved = entity_resolution.resolved
+            if resolved is not None and resolved.kind == "ticker":
+                request = replace(
+                    request,
+                    context=replace(
+                        request.context,
+                        fundamentals_ticker=resolved.id,
+                    ),
+                )
+        request = replace(request, entity_resolution=entity_resolution)
+        return _CopilotEntityPreflight(
+            request=request,
+            resolution=entity_resolution,
+            usage=usage,
+        )
+
+    @staticmethod
+    def _merge_usage_records(
+        first: CopilotUsageRecord,
+        second: CopilotUsageRecord,
+    ) -> CopilotUsageRecord:
+        def merged(field_name: str) -> int | None:
+            left = getattr(first, field_name)
+            right = getattr(second, field_name)
+            if left is None and right is None:
+                return None
+            return int(left or 0) + int(right or 0)
+
+        return CopilotUsageRecord(
+            input_tokens=merged("input_tokens"),
+            output_tokens=merged("output_tokens"),
+            reasoning_tokens=merged("reasoning_tokens"),
+            total_tokens=merged("total_tokens"),
+            cache_read_tokens=merged("cache_read_tokens"),
+            cache_write_tokens=merged("cache_write_tokens"),
+            provider_calls=merged("provider_calls"),
+            tool_calls=merged("tool_calls"),
+        )
+
     def plan_research(self, request: CopilotResearchCardRequest) -> CopilotResearchPlan:
+        if request.entity_resolution is None:
+            preflight = self._prepare_operator_entity_preflight(
+                request,
+                allow_model_proposal=False,
+            )
+            request = preflight.request
+        entity_resolution = request.entity_resolution
         prompt = str(request.prompt or "").strip()
         normalized_prompt = prompt.lower()
+        if entity_resolution is not None and entity_resolution.status in {"ambiguous", "not_found"}:
+            candidate_entities = [
+                CopilotResearchPlanEntity(
+                    kind="ticker_candidate",
+                    id=candidate.id,
+                    label=candidate.label,
+                    confidence=candidate.confidence,
+                )
+                for candidate in entity_resolution.candidates
+            ]
+            return CopilotResearchPlan(
+                intent="entity_disambiguation",
+                target_entities=candidate_entities,
+                entity_resolution=entity_resolution,
+                depth_profile=self._infer_depth_profile(normalized_prompt),
+                domain_plan=[],
+                domain_decisions=[],
+                max_tool_calls=0,
+                max_provider_calls=0,
+                max_elapsed_ms=0,
+                requires_confirmation=True,
+                expected_artifacts=["entity_resolution"],
+                warnings=dedupe_warnings(entity_resolution.warnings),
+                transformation_note=(
+                    "Company identity preflight stopped before tool execution because "
+                    "Gamma could not validate one canonical SEC ticker."
+                ),
+            )
         target_entities = self._extract_plan_entities(prompt, request.context)
+        if entity_resolution is not None and entity_resolution.resolved is not None:
+            resolved = entity_resolution.resolved
+            target_entities = [
+                entity
+                for entity in target_entities
+                if not (entity.kind == "ticker" and entity.id == resolved.id)
+            ]
+            target_entities.insert(
+                0,
+                CopilotResearchPlanEntity(
+                    kind="ticker",
+                    id=resolved.id,
+                    label=resolved.label,
+                    confidence=resolved.confidence,
+                ),
+            )
         depth_profile = self._infer_depth_profile(normalized_prompt)
         intent = self._infer_plan_intent(normalized_prompt, target_entities, request.context)
         domain_plan = self._build_domain_plan(
@@ -2569,6 +2721,8 @@ class CopilotService:
             request=request,
         )
         warnings = self._plan_warnings(prompt, domain_plan)
+        if entity_resolution is not None:
+            warnings = dedupe_warnings([*warnings, *entity_resolution.warnings])
         expected_artifacts = ["session_trace"]
         if depth_profile in {"standard", "deep"} or intent != "active_context_research":
             expected_artifacts.append("research_memo")
@@ -2578,6 +2732,7 @@ class CopilotService:
         return CopilotResearchPlan(
             intent=intent,
             target_entities=target_entities,
+            entity_resolution=entity_resolution,
             depth_profile=depth_profile,
             domain_plan=domain_plan,
             domain_decisions=domain_decisions,
@@ -2587,6 +2742,11 @@ class CopilotService:
             requires_confirmation=False,
             expected_artifacts=expected_artifacts,
             warnings=warnings,
+            transformation_note=(
+                "Gamma planner with typed company identity preflight; no analytical tools were executed."
+                if entity_resolution is not None
+                else "Deterministic planner-only Copilot V2 prototype; no tools were executed."
+            ),
         )
 
     def plan_research_operator(self, request: CopilotResearchCardRequest) -> CopilotOperatorPlan:
@@ -2688,7 +2848,6 @@ class CopilotService:
         expected_artifacts = ["operator_trace", "operator_report", *research_plan.expected_artifacts]
         if checkpoints:
             expected_artifacts.append("confirmation_checkpoint")
-        budget = self._execution_budget_for_depth(research_plan.depth_profile)
         return CopilotOperatorPlan(
             intent=research_plan.intent,
             target_entities=research_plan.target_entities,
@@ -2696,10 +2855,10 @@ class CopilotService:
             research_plan=research_plan,
             steps=steps,
             confirmation_checkpoints=checkpoints,
-            max_tool_calls=budget.max_tool_calls,
-            max_provider_calls=budget.max_provider_calls,
-            max_elapsed_ms=budget.max_elapsed_ms,
-            requires_confirmation=bool(checkpoints),
+            max_tool_calls=research_plan.max_tool_calls,
+            max_provider_calls=research_plan.max_provider_calls,
+            max_elapsed_ms=research_plan.max_elapsed_ms,
+            requires_confirmation=bool(checkpoints) or research_plan.requires_confirmation,
             expected_artifacts=dedupe_warnings(expected_artifacts),
             warnings=dedupe_warnings(warnings),
         )
@@ -3192,7 +3351,65 @@ class CopilotService:
             )
         else:
             resolution = request.model_resolution
+        entity_preflight = self._prepare_operator_entity_preflight(
+            request,
+            allow_model_proposal=resolution.status in {"ready", "degraded"},
+        )
+        request = entity_preflight.request
         plan = self.plan_research_operator(request)
+        entity_resolution = entity_preflight.resolution
+        if entity_resolution is not None and entity_resolution.status in {"ambiguous", "not_found"}:
+            resolved_run_id = (run_id or "").strip() or new_copilot_id("oprun")
+            message = (
+                "Gamma found multiple SEC-listed matches. Specify one ticker to continue."
+                if entity_resolution.status == "ambiguous"
+                else "Gamma could not validate one SEC-listed company. Specify the ticker to continue."
+            )
+            event = CopilotOperatorProgressEvent(
+                run_id=resolved_run_id,
+                event_id=new_copilot_id("opevent"),
+                sequence=1,
+                event_type="confirmation-needed",
+                timestamp=now_utc(),
+                title="Choose a company ticker",
+                message=message,
+                payload={
+                    "status": entity_resolution.status,
+                    "query": entity_resolution.query,
+                    "candidates": [
+                        {
+                            "ticker": candidate.id,
+                            "name": candidate.label,
+                            "cik": candidate.provider_id,
+                            "exchange": candidate.exchange,
+                        }
+                        for candidate in entity_resolution.candidates
+                    ],
+                    "required_input": "ticker",
+                },
+                warnings=list(entity_resolution.warnings),
+            )
+            result = CopilotResearchCardResult(
+                domain="synthesis",
+                current_tab=request.context.current_tab or "copilot",
+                status="incomplete",
+                provider="gamma_entity_resolver",
+                model=entity_resolution.proposal_model or resolution.model,
+                message=message,
+                operator_events=[event],
+                warnings=list(entity_resolution.warnings),
+                research_plan=plan.research_plan,
+                usage=entity_preflight.usage,
+            )
+            result = self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=None,
+                known_provider_calls=entity_preflight.usage.provider_calls,
+                known_tool_calls=0,
+            )
+            return self._persist_operator_execution_result(request, plan, result)
         has_draft_change = any(
             step.action_type == "draft_change"
             for step in plan.steps
@@ -3245,6 +3462,10 @@ class CopilotService:
                 known_provider_calls=0,
                 known_tool_calls=0,
             )
+            result = replace(
+                result,
+                usage=self._merge_usage_records(entity_preflight.usage, result.usage),
+            )
             return self._persist_operator_execution_result(
                 request,
                 plan,
@@ -3263,6 +3484,10 @@ class CopilotService:
                 emit_event=emit_event,
                 should_cancel=should_cancel,
                 adaptive_operator=adaptive_operator,
+            )
+            result = replace(
+                result,
+                usage=self._merge_usage_records(entity_preflight.usage, result.usage),
             )
             return self._persist_agents_operator_execution_result(
                 request,
@@ -3289,6 +3514,10 @@ class CopilotService:
                     known_provider_calls=0,
                     known_tool_calls=0,
                 )
+                result = replace(
+                    result,
+                    usage=self._merge_usage_records(entity_preflight.usage, result.usage),
+                )
                 return self._persist_operator_execution_result(request, plan, result)
             provider_started_at = time.perf_counter()
             result = self.agents_operator_service.execute(
@@ -3297,7 +3526,20 @@ class CopilotService:
                 action_registry=self.action_registry,
                 build_context=lambda domain: self._build_plan_execution_context(request, domain),
                 default_arguments=self._default_plan_execution_arguments,
-                execute_action=self._execute_registered_operator_action,
+                execute_action=lambda tool_id, arguments, context: (
+                    self._attach_operator_working_analysis(
+                        self._execute_registered_operator_action(
+                            tool_id,
+                            arguments,
+                            context,
+                        ),
+                        tool_id=tool_id,
+                        arguments=arguments,
+                        context=context,
+                        request=request,
+                        run_id=run_id,
+                    )
+                ),
                 build_card=self._build_operator_execution_card,
                 run_id=run_id,
                 emit_event=emit_event,
@@ -3320,6 +3562,10 @@ class CopilotService:
                     else 1
                 ),
                 known_tool_calls=len(result.tool_traces),
+            )
+            result = replace(
+                result,
+                usage=self._merge_usage_records(entity_preflight.usage, result.usage),
             )
             result = self._persist_agents_operator_execution_result(request, plan, result)
             return result
@@ -3345,7 +3591,6 @@ class CopilotService:
         context_budget_omitted_domains: list[str] = []
         remaining_tools = plan.max_tool_calls
         provider_calls_used = 0
-        started_at = time.perf_counter()
         cancelled_at_boundary = False
         pending_mutation: CopilotDraftMutation | None = None
         emitted_checkpoint_ids: set[str] = set()
@@ -3685,7 +3930,14 @@ class CopilotService:
                     payload={"status": "skipped", "arguments": {}},
                 )
                 continue
-            execution = self._execute_tool(step.tool_id, arguments, context)
+            execution = self._attach_operator_working_analysis(
+                self._execute_tool(step.tool_id, arguments, context),
+                tool_id=step.tool_id,
+                arguments=arguments,
+                context=context,
+                request=request,
+                run_id=resolved_run_id,
+            )
             remaining_tools -= 1
             tool_traces.append(execution.trace)
             outputs[step.step_id] = execution.output
@@ -3890,6 +4142,10 @@ class CopilotService:
             ),
             known_provider_calls=0,
             known_tool_calls=len(tool_traces),
+        )
+        result = replace(
+            result,
+            usage=self._merge_usage_records(entity_preflight.usage, result.usage),
         )
 
         if self.store is not None:
@@ -4345,6 +4601,14 @@ class CopilotService:
                 validated_arguments,
                 context,
             )
+            execution = self._attach_operator_working_analysis(
+                execution,
+                tool_id=normalized_tool_id,
+                arguments=validated_arguments,
+                context=context,
+                request=request,
+                run_id=resolved_run_id,
+            )
             outputs[invocation_id] = execution.output
             output_summaries[invocation_id] = self._compact_operator_output(
                 execution.output
@@ -4691,6 +4955,129 @@ class CopilotService:
                 ),
             )
         return self._execute_tool(tool_id, arguments, context)
+
+    def _attach_operator_working_analysis(
+        self,
+        execution: CopilotToolExecution,
+        *,
+        tool_id: str,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+        request: CopilotResearchCardRequest,
+        run_id: str | None,
+    ) -> CopilotToolExecution:
+        """Persist an authorized Operator result as explicit temporary state."""
+        if (
+            self.store is None
+            or tool_id != "run_fundamentals_reverse_valuation"
+            or not request.user_session_id
+            or not isinstance(execution.output, dict)
+            or execution.output.get("error")
+        ):
+            return execution
+
+        ticker = str(execution.output.get("ticker") or arguments.get("ticker") or "").strip().upper()
+        if not ticker:
+            return execution
+        session_id = str(request.user_session_id).strip()
+        resolved_run_id = str(run_id or "").strip() or new_copilot_id("oprun")
+        seed = "|".join(
+            (
+                COPILOT_WORKING_ANALYSIS_VERSION,
+                session_id,
+                resolved_run_id,
+                tool_id,
+                ticker,
+            )
+        )
+        analysis_id = f"work_{sha256(seed.encode('utf-8')).hexdigest()[:24]}"
+        now = now_utc()
+        existing = self.store.get_working_analysis(analysis_id)
+        materialization = {
+            "target_tab": "fundamentals",
+            "target_mode": "reverse_valuation",
+            "navigation_context": {"ticker": ticker},
+            "durable": False,
+            "persistence_policy": "explicit_confirmation_required",
+            "save_target": "fundamentals_dcf_model",
+        }
+        if existing is not None and existing.status != "active":
+            # Provider retries and terminal replays must not resurrect an analysis
+            # that the user discarded or that Gamma already expired.
+            saved = existing
+        else:
+            analysis = CopilotWorkingAnalysis(
+                analysis_id=analysis_id,
+                session_id=session_id,
+                run_id=resolved_run_id,
+                tool_id=tool_id,
+                domain="fundamentals",
+                analysis_type="reverse_valuation",
+                title=(
+                    f"{ticker} reverse valuation"
+                    if not execution.output.get("company_name")
+                    else f"{execution.output['company_name']} reverse valuation"
+                ),
+                status="active",
+                entity={
+                    "entity_type": "equity",
+                    "normalized_id": ticker,
+                    "ticker": ticker,
+                    "label": str(execution.output.get("company_name") or ticker),
+                },
+                inputs=deepcopy(arguments),
+                outputs=deepcopy(execution.output),
+                source_ids=list(execution.trace.source_ids),
+                warnings=list(execution.output.get("warnings") or []),
+                context_fingerprint=request.context_fingerprint,
+                owning_tab="fundamentals",
+                owning_mode="reverse_valuation",
+                materialization=materialization,
+                created_at=existing.created_at if existing is not None else now,
+                updated_at=now,
+                expires_at=(
+                    existing.expires_at
+                    if existing is not None and existing.expires_at is not None
+                    else now + timedelta(days=7)
+                ),
+                materialized_at=existing.materialized_at if existing is not None else None,
+                discarded_at=None,
+                read_only_safety=deepcopy(context.read_only_safety),
+                source_provider=str(execution.output.get("source_provider") or "gamma"),
+                origin=str(execution.output.get("origin") or "gamma.fundamentals.reverse_valuation"),
+                transformation_note=(
+                    "Created from an authorized read-only Research Operator action. "
+                    "Opening this analysis does not save or mutate a Fundamentals DCF model."
+                ),
+            )
+            try:
+                saved = self.store.save_working_analysis(analysis)
+            except Exception:
+                logger.exception("Copilot working-analysis persistence failed")
+                return execution
+
+        reference = {
+            "analysis_id": saved.analysis_id,
+            "contract_version": saved.contract_version,
+            "status": saved.status,
+            "state_scope": saved.state_scope,
+            "owning_tab": saved.owning_tab,
+            "owning_mode": saved.owning_mode,
+            "entity": saved.entity,
+            "expires_at": saved.expires_at.isoformat() if saved.expires_at else None,
+            "materialization": saved.materialization,
+        }
+        return replace(
+            execution,
+            output={**execution.output, "working_analysis": reference},
+            trace=replace(
+                execution.trace,
+                summary=(
+                    f"{execution.trace.summary} Created temporary working analysis "
+                    f"`{saved.analysis_id}` for Fundamentals."
+                ),
+            ),
+        )
 
     def _persist_operator_execution_result(
         self,
@@ -5498,6 +5885,32 @@ class CopilotService:
     def list_artifacts(self, session_id: str | None = None) -> list[CopilotArtifact]:
         return self.store.list_artifacts(session_id) if self.store is not None else []
 
+    def list_working_analyses(
+        self,
+        session_id: str | None = None,
+        *,
+        include_inactive: bool = True,
+    ) -> list[CopilotWorkingAnalysis]:
+        if self.store is None:
+            return []
+        return self.store.list_working_analyses(
+            session_id,
+            include_inactive=include_inactive,
+        )
+
+    def get_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis | None:
+        return self.store.get_working_analysis(analysis_id) if self.store is not None else None
+
+    def materialize_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.materialize_working_analysis(analysis_id)
+
+    def discard_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.discard_working_analysis(analysis_id)
+
     def storage_status(self) -> CopilotStorageStatus:
         if self.store is None:
             return CopilotStorageStatus(current_schema_version=0)
@@ -5692,9 +6105,7 @@ class CopilotService:
                 )
             )
 
-        for match in re.findall(r"\b[A-Z]{1,5}(?:\.[A-Z])?\b", prompt):
-            if match.lower() in {"cpi", "fed", "iv", "oil", "rate", "rates", "var"}:
-                continue
+        for match in extract_explicit_equity_tickers(prompt):
             add_entity("ticker", match, confidence=0.72)
 
         if context.fundamentals_ticker:

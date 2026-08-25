@@ -12,6 +12,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotEquityEntityProposal,
     CopilotOperatorPlan,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
@@ -99,6 +100,117 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
     @classmethod
     def _json_dumps(cls, value: Any) -> str:
         return json.dumps(value, ensure_ascii=True, default=cls._json_default)
+
+    def propose_equity_entity(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+    ) -> CopilotEquityEntityProposal:
+        """Let the model propose one issuer, without granting identity authority.
+
+        Gamma validates the returned ticker and issuer name against its SEC
+        reference adapter before the proposal can enter an Operator context.
+        """
+
+        tool_name = "propose_equity_entity"
+        payload: dict[str, Any] = {
+            "model": (
+                request.model_resolution.model
+                if request.model_resolution is not None and request.model_resolution.model
+                else self.model
+            ),
+            "instructions": (
+                "Identify the one primary publicly listed company, if any, that "
+                "the user wants Gamma to research. Use ordinary language knowledge "
+                "to map company names or brands to a likely listed issuer and ticker. "
+                "This is only a proposal: Gamma will validate it against SEC identity "
+                "data. If there is no company, more than one intended company, or the "
+                "request is genuinely ambiguous, return null identity fields. Return "
+                "the legal issuer name rather than only a brand name when known."
+            ),
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": self._json_dumps({"task": (request.prompt or "").strip()}),
+                        }
+                    ],
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": tool_name,
+                    "description": "Propose one public-company identity for authoritative Gamma validation.",
+                    "parameters": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "mention": {"type": ["string", "null"]},
+                            "ticker": {"type": ["string", "null"]},
+                            "issuer_name": {"type": ["string", "null"]},
+                            "exchange": {"type": ["string", "null"]},
+                            "confidence": {
+                                "type": ["number", "null"],
+                                "minimum": 0,
+                                "maximum": 1,
+                            },
+                            "reason": {"type": "string"},
+                        },
+                        "required": [
+                            "mention",
+                            "ticker",
+                            "issuer_name",
+                            "exchange",
+                            "confidence",
+                            "reason",
+                        ],
+                    },
+                    "strict": True,
+                }
+            ],
+            "tool_choice": {"type": "function", "name": tool_name},
+            "parallel_tool_calls": False,
+            "max_output_tokens": 260,
+            "reasoning": {"effort": self._resolve_reasoning_effort(request.reasoning_effort)},
+            "store": self._store_responses(request),
+            "safety_identifier": self._safety_identifier(request),
+            "prompt_cache_key": "gamma-copilot:entity-resolution:v1",
+            "metadata": {
+                "app": "gamma",
+                "role": "entity_resolution",
+                "operator_contract": "copilot.entity-resolution.v1",
+            },
+        }
+        response = self._post_json(payload)
+        usage = replace(self._usage_from_response(response), provider_calls=1, tool_calls=0)
+        call = next(
+            (
+                item
+                for item in response.get("output", [])
+                if item.get("type") == "function_call" and item.get("name") == tool_name
+            ),
+            None,
+        )
+        arguments = self._parse_tool_arguments(call.get("arguments") if call else None)
+        confidence = arguments.get("confidence")
+        return CopilotEquityEntityProposal(
+            mention=self._optional_text(arguments.get("mention")),
+            ticker=self._optional_text(arguments.get("ticker")),
+            issuer_name=self._optional_text(arguments.get("issuer_name")),
+            exchange=self._optional_text(arguments.get("exchange")),
+            confidence=(
+                max(0.0, min(1.0, float(confidence)))
+                if isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+                else None
+            ),
+            reason=self._optional_text(arguments.get("reason")),
+            provider=self.provider_name,
+            model=str(response.get("model") or self.model),
+            usage=usage,
+        )
 
     def generate_research_card(
         self,
@@ -1258,6 +1370,13 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _optional_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @staticmethod
     def _parse_operator_tool_arguments(raw_arguments: Any) -> dict[str, Any]:

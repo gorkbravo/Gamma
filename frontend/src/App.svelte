@@ -23,6 +23,7 @@
     buildCopilotSourceHandoff,
     validatedExternalSourceUrl,
   } from "./lib/copilot-source-navigation";
+  import { resolveWorkingAnalysisTarget } from "./lib/copilot-workspace";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
   import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
   import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
@@ -86,6 +87,7 @@
     clearCryptoSyntheticPortfolio,
     computeRisk,
     confirmCopilotMutation,
+    discardCopilotWorkingAnalysis,
     forceAccountSubscribe,
     ivSurface,
     ivError,
@@ -98,6 +100,7 @@
     loadIvSurface,
     stopIvSession,
     loadFundamentalsSearch,
+    materializeCopilotWorkingAnalysis,
     loadResearchOverview,
     loadSitrepIndicesOverview,
     loadSitrepWorkspace,
@@ -236,6 +239,7 @@
     CopilotProfile,
     CopilotSourceRef,
     CopilotThreadState,
+    CopilotWorkingAnalysis,
     CrossTabHandoffEnvelope,
     CommodityMode,
     CommodityWorkspaceResponse,
@@ -319,6 +323,7 @@
   let strategyLabMode: StrategyLabMode = persistedMode(restoredWorkspaceState, "strategy_lab", "composer");
   let cryptoMode: CryptoMode = persistedMode(restoredWorkspaceState, "crypto", "overview");
   let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
+  let fundamentalsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
   // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
@@ -1799,6 +1804,36 @@
     await selectFundamentalsCompany(ticker, options);
   }
 
+  async function handleOpenCopilotWorkingAnalysis(analysis: CopilotWorkingAnalysis) {
+    const target = resolveWorkingAnalysisTarget(analysis);
+    if (!target) {
+      return;
+    }
+    const materialized = await materializeCopilotWorkingAnalysis(target.analysisId);
+    if (!materialized) {
+      return;
+    }
+    fundamentalsWorkingAnalysis = materialized;
+    fundamentalsMode = target.mode;
+    workspaceMode = "research";
+    selectSharedEquity(
+      target.ticker,
+      String(analysis.entity.label ?? target.ticker),
+      "copilot"
+    );
+    await selectTab(target.tab);
+  }
+
+  async function handleDiscardCopilotWorkingAnalysis(analysis: CopilotWorkingAnalysis) {
+    const discarded = await discardCopilotWorkingAnalysis(analysis.analysis_id);
+    if (
+      discarded &&
+      fundamentalsWorkingAnalysis?.analysis_id === discarded.analysis_id
+    ) {
+      fundamentalsWorkingAnalysis = null;
+    }
+  }
+
   async function openIvFromResearch() {
     activeTab.set("iv");
     const autoLoaded = await loadResearchIvContext();
@@ -3006,6 +3041,7 @@
             dcfModel={$fundamentalsDcfModel}
             peers={$fundamentalsPeers}
             reverseValuation={$fundamentalsReverseValuation}
+            workingAnalysis={fundamentalsWorkingAnalysis}
             reference={$fundamentalsReference}
             dcfSnapshots={$fundamentalsDcfSnapshots}
             loading={$loading.fundamentals}
@@ -3067,6 +3103,8 @@
             onSearchSessions={handleLoadCopilotSessionsFiltered}
             onToggleScope={handleToggleSynthesisScope}
             onOpenSource={handleOpenCopilotSource}
+            onOpenWorkingAnalysis={handleOpenCopilotWorkingAnalysis}
+            onDiscardWorkingAnalysis={handleDiscardCopilotWorkingAnalysis}
             onConfirmMutation={handleConfirmCopilotMutation}
             onRejectMutation={handleRejectCopilotMutation}
             onSelectArtifact={selectCopilotArtifact}

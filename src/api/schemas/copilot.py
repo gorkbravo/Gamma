@@ -20,6 +20,8 @@ from src.models.copilot import (
     CopilotContextSnapshot,
     CopilotDeleteResult,
     CopilotDraftMutation,
+    CopilotEntityResolution,
+    CopilotEntityResolutionCandidate,
     CopilotMemo,
     CopilotDiagnostics,
     CopilotModelCapabilities,
@@ -60,6 +62,7 @@ from src.models.copilot import (
     ResearchCard,
     ResearchClaim,
     CopilotUsageRecord,
+    CopilotWorkingAnalysis,
     CopilotProviderStoragePolicy,
     CopilotProfileCapabilityState,
 )
@@ -633,6 +636,66 @@ class CopilotResearchPlanEntityModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class CopilotEntityResolutionCandidateModel(BaseModel):
+    kind: str
+    id: str
+    label: str
+    provider_id: str | None = None
+    exchange: str | None = None
+    source_provider: str
+    origin: str
+    confidence: float | None = None
+    match_reason: str | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotEntityResolutionCandidate,
+    ) -> "CopilotEntityResolutionCandidateModel":
+        return cls(**row.__dict__)
+
+
+class CopilotEntityResolutionModel(BaseModel):
+    status: str
+    query: str | None = None
+    kind: str
+    resolved: CopilotEntityResolutionCandidateModel | None = None
+    candidates: list[CopilotEntityResolutionCandidateModel] = Field(default_factory=list)
+    method: str
+    source_provider: str
+    origin: str
+    model_proposal: str | None = None
+    proposal_provider: str | None = None
+    proposal_model: str | None = None
+    proposal_confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotEntityResolution) -> "CopilotEntityResolutionModel":
+        return cls(
+            status=row.status,
+            query=row.query,
+            kind=row.kind,
+            resolved=(
+                CopilotEntityResolutionCandidateModel.from_domain(row.resolved)
+                if row.resolved is not None
+                else None
+            ),
+            candidates=[
+                CopilotEntityResolutionCandidateModel.from_domain(item)
+                for item in row.candidates
+            ],
+            method=row.method,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            model_proposal=row.model_proposal,
+            proposal_provider=row.proposal_provider,
+            proposal_model=row.proposal_model,
+            proposal_confidence=row.proposal_confidence,
+            warnings=list(row.warnings),
+        )
+
+
 class CopilotResearchPlanDomainModel(BaseModel):
     domain: str
     depth: str
@@ -675,6 +738,7 @@ class CopilotResearchPlanDomainDecisionModel(BaseModel):
 class CopilotResearchPlanModel(BaseModel):
     intent: str
     target_entities: list[CopilotResearchPlanEntityModel] = Field(default_factory=list)
+    entity_resolution: CopilotEntityResolutionModel | None = None
     depth_profile: str
     domain_plan: list[CopilotResearchPlanDomainModel] = Field(default_factory=list)
     domain_decisions: list[CopilotResearchPlanDomainDecisionModel] = Field(default_factory=list)
@@ -694,6 +758,11 @@ class CopilotResearchPlanModel(BaseModel):
         return cls(
             intent=row.intent,
             target_entities=[CopilotResearchPlanEntityModel.from_domain(item) for item in row.target_entities],
+            entity_resolution=(
+                CopilotEntityResolutionModel.from_domain(row.entity_resolution)
+                if row.entity_resolution is not None
+                else None
+            ),
             depth_profile=row.depth_profile,
             domain_plan=[CopilotResearchPlanDomainModel.from_domain(item) for item in row.domain_plan],
             domain_decisions=[CopilotResearchPlanDomainDecisionModel.from_domain(item) for item in row.domain_decisions],
@@ -964,6 +1033,7 @@ class CopilotSessionDetailModel(BaseModel):
     context_snapshots: list["CopilotContextSnapshotModel"] = Field(default_factory=list)
     artifacts: list["CopilotArtifactModel"] = Field(default_factory=list)
     mutations: list["CopilotDraftMutationModel"] = Field(default_factory=list)
+    working_analyses: list["CopilotWorkingAnalysisModel"] = Field(default_factory=list)
     storage_warnings: list["CopilotStorageWarningModel"] = Field(default_factory=list)
 
 
@@ -1045,6 +1115,41 @@ class CopilotContextSnapshotModel(BaseModel):
 
     @classmethod
     def from_domain(cls, row: CopilotContextSnapshot) -> "CopilotContextSnapshotModel":
+        return cls(**row.__dict__)
+
+
+class CopilotWorkingAnalysisModel(BaseModel):
+    analysis_id: str
+    session_id: str
+    run_id: str | None = None
+    tool_id: str
+    domain: str
+    analysis_type: str
+    title: str
+    status: str
+    state_scope: str
+    entity: dict[str, object] = Field(default_factory=dict)
+    inputs: dict[str, object] = Field(default_factory=dict)
+    outputs: dict[str, object] = Field(default_factory=dict)
+    source_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    context_fingerprint: str | None = None
+    owning_tab: str
+    owning_mode: str
+    materialization: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None = None
+    materialized_at: datetime | None = None
+    discarded_at: datetime | None = None
+    read_only_safety: dict[str, object] = Field(default_factory=dict)
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+    contract_version: str
+
+    @classmethod
+    def from_domain(cls, row: CopilotWorkingAnalysis) -> "CopilotWorkingAnalysisModel":
         return cls(**row.__dict__)
 
 

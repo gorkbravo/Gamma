@@ -6,6 +6,7 @@
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CrossTabHandoffEnvelope,
+    CopilotWorkingAnalysis,
     FundamentalsDcfModel,
     FundamentalsDcfScenario,
     FundamentalsDcfSnapshotList,
@@ -57,6 +58,7 @@
   export let dcfModel: FundamentalsDcfModel | null = null;
   export let peers: FundamentalsPeers | null = null;
   export let reverseValuation: FundamentalsReverseValuation | null = null;
+  export let workingAnalysis: CopilotWorkingAnalysis | null = null;
   export let reference: FundamentalsReference | null = null;
   export let dcfSnapshots: FundamentalsDcfSnapshotList | null = null;
   export let loading = false;
@@ -140,6 +142,8 @@
 
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
+  const finiteNumber = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A";
 
@@ -795,6 +799,27 @@
       {/if}
     </div>
   </article>
+
+  {#if mode === "reverse_valuation" && workingAnalysis?.status === "active"}
+    <article class="panel working-analysis-banner" aria-label="Temporary Copilot working analysis">
+      <div>
+        <span>Temporary working analysis</span>
+        <strong>{workingAnalysis.title}</strong>
+      </div>
+      <div class="working-analysis-result">
+        <span>Captured result</span>
+        <strong>
+          {currency(finiteNumber(workingAnalysis.outputs.current_price), 2)} price ·
+          {compactCurrency(finiteNumber(workingAnalysis.outputs.target_equity_value))} equity value
+        </strong>
+      </div>
+      <p>
+        Session scoped · {String(workingAnalysis.entity.ticker ?? workingAnalysis.entity.normalized_id ?? "Equity")}
+        · opened from Copilot. This view has not saved or changed a Fundamentals DCF model.
+      </p>
+      <small>{workingAnalysis.contract_version}</small>
+    </article>
+  {/if}
 
   {#if mode === "overview"}
     <div class="workspace-grid">
@@ -2225,6 +2250,44 @@
     gap: var(--space-4);
   }
 
+  .working-analysis-banner {
+    grid-template-columns: minmax(12rem, 0.7fr) minmax(14rem, 0.75fr) minmax(0, 1.5fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
+    border-left: 2px solid var(--accent);
+    background: transparent;
+  }
+
+  .working-analysis-banner > div {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .working-analysis-banner span,
+  .working-analysis-banner small {
+    color: var(--accent);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .working-analysis-banner strong {
+    color: var(--text-0);
+    font-size: var(--text-sm);
+  }
+
+  .working-analysis-result strong {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .working-analysis-banner p {
+    margin: 0;
+    color: var(--text-1);
+    font-size: var(--text-xs);
+    line-height: 1.45;
+  }
+
   /* Panels whose primary content is a single table fill edge-to-edge:
      the panel border is the table's container, no inner frame. */
   .panel.table-panel,
@@ -3279,6 +3342,10 @@
   }
 
   @media (max-width: 760px) {
+    .working-analysis-banner {
+      grid-template-columns: 1fr;
+    }
+
     .header-top,
     .mode-kpi-row,
     .panel-header,

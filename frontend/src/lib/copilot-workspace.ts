@@ -1,4 +1,9 @@
-import type { CopilotSessionSummary, CopilotStorageStatus, CopilotStorageWarning } from "./api/types";
+import type {
+  CopilotSessionSummary,
+  CopilotStorageStatus,
+  CopilotStorageWarning,
+  CopilotWorkingAnalysis
+} from "./api/types";
 
 /**
  * Pure presentation rules for the Copilot workspace shell.
@@ -21,6 +26,37 @@ export type CopilotComposerDraftState = {
   draft: string;
   handledSubmissionId: number;
 };
+
+export type CopilotWorkingAnalysisTarget = {
+  analysisId: string;
+  ticker: string;
+  tab: "fundamentals";
+  mode: "reverse_valuation";
+};
+
+/** Accept only the first typed materialization contract supported by Gamma. */
+export function resolveWorkingAnalysisTarget(
+  analysis: CopilotWorkingAnalysis
+): CopilotWorkingAnalysisTarget | null {
+  const ticker = String(analysis.entity.ticker ?? analysis.entity.normalized_id ?? "")
+    .trim()
+    .toUpperCase();
+  if (
+    analysis.status !== "active" ||
+    analysis.state_scope !== "session_ephemeral" ||
+    analysis.owning_tab !== "fundamentals" ||
+    analysis.owning_mode !== "reverse_valuation" ||
+    !ticker
+  ) {
+    return null;
+  }
+  return {
+    analysisId: analysis.analysis_id,
+    ticker,
+    tab: "fundamentals",
+    mode: "reverse_valuation"
+  };
+}
 
 /**
  * Resolve the composer draft against the latest submission.

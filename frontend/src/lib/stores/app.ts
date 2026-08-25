@@ -84,6 +84,7 @@ import type {
   CopilotStorageStatus,
   CopilotThreadEntry,
   CopilotThreadState,
+  CopilotWorkingAnalysis,
   CryptoComparison,
   CryptoDexLiquiditySummary,
   CryptoFlowSummary,
@@ -4398,6 +4399,18 @@ function normalizeCopilotResearchPlan(plan: CopilotResearchPlan): CopilotResearc
   return {
     ...plan,
     target_entities: Array.isArray(plan.target_entities) ? plan.target_entities : [],
+    entity_resolution: plan.entity_resolution
+      ? {
+          ...plan.entity_resolution,
+          resolved: plan.entity_resolution.resolved ?? null,
+          candidates: Array.isArray(plan.entity_resolution.candidates)
+            ? plan.entity_resolution.candidates
+            : [],
+          warnings: Array.isArray(plan.entity_resolution.warnings)
+            ? plan.entity_resolution.warnings
+            : []
+        }
+      : null,
     domain_plan: domainPlan,
     domain_decisions: Array.isArray(plan.domain_decisions) ? plan.domain_decisions : [],
     expected_artifacts: Array.isArray(plan.expected_artifacts) ? plan.expected_artifacts : [],
@@ -4623,8 +4636,57 @@ function emptyCopilotSessionDetail(session: CopilotSessionSummary): CopilotSessi
     memos: [],
     context_snapshots: [],
     artifacts: [],
+    mutations: [],
+    working_analyses: [],
     storage_warnings: []
   };
+}
+
+function reconcileWorkingAnalysis(analysis: CopilotWorkingAnalysis) {
+  activeCopilotSession.update((detail) => {
+    if (!detail || detail.session.session_id !== analysis.session_id) {
+      return detail;
+    }
+    return {
+      ...detail,
+      working_analyses: [
+        analysis,
+        ...(detail.working_analyses ?? []).filter(
+          (item) => item.analysis_id !== analysis.analysis_id
+        )
+      ]
+    };
+  });
+}
+
+export async function materializeCopilotWorkingAnalysis(analysisId: string) {
+  try {
+    const analysis = await postJson<CopilotWorkingAnalysis>(
+      `/copilot/working-analyses/${encodeURIComponent(analysisId)}/materialize`,
+      {}
+    );
+    reconcileWorkingAnalysis(analysis);
+    lastError.set("");
+    return analysis;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function discardCopilotWorkingAnalysis(analysisId: string) {
+  try {
+    const analysis = await postJson<CopilotWorkingAnalysis>(
+      `/copilot/working-analyses/${encodeURIComponent(analysisId)}/discard`,
+      {}
+    );
+    reconcileWorkingAnalysis(analysis);
+    lastError.set("");
+    return analysis;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
 }
 
 /** Select an authoritative session and reset every per-conversation surface. */

@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-07-26
+Last updated: 2026-08-25
 
 ## Start Here
 
@@ -176,6 +176,26 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-08-25
+
+- [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model): GPT-5.6 is the current documented production baseline family, but model migration still requires Gamma's representative quality, latency, reliability, and cost evals rather than an alias-only change.
+- [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state): Responses supports provider-managed continuation through Conversations or `previous_response_id`; response storage has provider retention consequences, so Gamma-local session, working-analysis, approval, and recovery records remain authoritative and must work with provider storage disabled.
+- [Function calling](https://developers.openai.com/api/docs/guides/function-calling): strict schemas remain recommended; object schemas require `additionalProperties: false` and every property marked required, with nullable types for optional values. Disabling parallel tool calls remains appropriate when each observation can change the next authorized decision.
+
+Checkpoint 8 architectural decision from the 2026-08-25 review:
+
+- Keep the Gamma-owned custom Responses loop as the default and the Agents SDK as a feature-flagged comparison. This checkpoint adds no framework or default-model migration because the working-analysis problem is application authority and state ownership, not provider orchestration novelty.
+- Keep `parallel_tool_calls=false` semantics for the adaptive Operator path. Entity acquisition, analytical output, warnings, and temporary materialization can change the next bounded decision and therefore remain sequential observations.
+- Treat provider conversation/response state as optional transport continuation, never as Gamma's only working-state copy. `copilot.working-analysis.v1` is persisted locally with entity identity, inputs, outputs, sources, context fingerprint, lifecycle timestamps, and typed owning-tab materialization.
+- Opening a working analysis may set temporary visible UI state, but it does not save or mutate a durable DCF. Existing durable Fundamentals changes remain behind the server-owned confirmation contract.
+
+Natural-language entity-resolution addendum from the same 2026-08-25 review:
+
+- [Function calling](https://developers.openai.com/api/docs/guides/function-calling) confirms the application-defined boundary used here: the model may select a strict function and supply schema-valid arguments, while the application executes the lookup and returns the observation. Gamma therefore uses one forced, strict `propose_equity_entity` function call only as a semantic proposal for natural company names.
+- The proposal is not canonical identity. Gamma validates the proposed ticker and legal issuer name against the existing SEC Fundamentals reference adapter, records the proposal and authoritative candidates separately, and injects a ticker into Operator context only after one unique match is established.
+- Explicit user tickers and the active server-owned Fundamentals ticker bypass the model proposal. Deterministic plan previews use SEC name search without spending a model call. Ambiguous issuer/share-class matches produce a typed `entity_disambiguation` plan with zero analytical tool budget and require an explicit ticker before the run can continue.
+- The preflight follows the selected provider-storage policy, uses `parallel_tool_calls=false`, records its provider usage in the terminal run, and grants no new tool, mutation, trading, order, account, wallet, portfolio, or arbitrary-code authority. No framework or default-model change was justified by this addition.
+
 ### Official Guidance Re-Reviewed 2026-07-30
 
 - [Build agents and compare the Responses API with the Agents SDK](https://developers.openai.com/api/docs/guides/agents#compare-the-responses-api-and-agents-sdk): Responses is appropriate when the application owns a custom loop; the Agents SDK provides a built-in lifecycle for bounded workflows, sessions, guardrails, approvals, traces, and orchestration.
@@ -224,14 +244,14 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is now **approximately 82% complete** after Checkpoint 7. This is a scope correction plus a verified capability advance, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, and Checkpoint 7 adds the bounded closed-loop Operator core.
+The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot remains **approximately 82% complete** after Checkpoint 7, with the first Checkpoint 8 vertical slice now implemented. This is a scope correction plus a verified capability advance, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, Checkpoint 7 adds the bounded closed-loop Operator core, and Checkpoint 8A proves the unloaded single-name working-analysis/materialization contract without yet generalizing it to every analytical family.
 
 The material remaining gaps are product behavior, not only release hardening:
 
-- entity and intent acquisition are still shallow outside the now-strict Operator argument boundary;
-- entity acquisition is inconsistent across tools; several workflows still depend on already-active tab context or precomputed results;
-- there is no generalized session-scoped working-analysis state for temporary portfolios, DCFs, scenarios, option sets, assumptions, and cross-tool outputs;
-- tool results do not consistently materialize in the corresponding Gamma tab or working object;
+- public-company names now have a model-assisted, SEC-validated ticker preflight, but entity and intent acquisition remain shallow for other asset classes and multi-entity workflows;
+- entity acquisition remains inconsistent across non-Fundamentals tools; several workflows still depend on already-active tab context or precomputed results;
+- the first versioned session-scoped working-analysis contract exists for unloaded Fundamentals reverse valuation, but hypothetical portfolios, risk scenarios, option sets, strategy inputs, temporary assumptions, and general cross-tool outputs are not yet covered;
+- Fundamentals reverse-valuation results can now materialize temporarily in their owning tab, but other tool results do not yet consistently materialize in the corresponding Gamma tab or working object;
 - the durable approval model is narrow and DCF-specific rather than a general pause/approve-or-reject/resume-the-same-run contract;
 - replayable events preserve history, but do not yet provide generalized workflow recovery, replanning, retries, or approval resumption;
 - role escalation from Agent to Operator is not yet a complete, visible authority transition;
@@ -475,13 +495,32 @@ Implementation note (2026-07-30, checkpoint complete):
 - Verification: 31 focused Operator tests, 8 focused Checkpoint 7 contract tests, 2 Agents SDK smoke tests, the full 542-test backend suite, 368 frontend tests across 50 files, TypeScript typecheck, and the production frontend build passed. The installed `openai 2.38.0` / `agents 0.17.4` contract was exercised without dependency changes.
 - Authorized live smoke reached the real Responses transport on 2026-07-30 with provider storage disabled. The provider returned a streamed quota exhaustion before any tool call; Gamma persisted a safe `quota_exhausted`/`provider_error` `copilot.operator.loop.v1` terminal with zero tools and no fallback card. This validates the live error boundary, not a successful live model-tool-model result.
 
-#### J. Entity-addressable tools and working-analysis state — open
+#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A and 8B complete)
 
-- Give each applicable tool a typed entity/input acquisition path so it does not depend on the relevant tab already being active.
-- Add Gamma-owned session-scoped working objects for hypothetical portfolios, DCFs, risk scenarios, options sets, strategy inputs, temporary assumptions, and cross-tool outputs.
-- Distinguish `ephemeral`, `draft`, and `durable` state in every relevant tool/result contract and show that status in the run inspector and owning tab.
-- Let Operator outputs materialize in the corresponding tab/workspace through typed backend state and navigation handoffs; UI clicking remains non-authoritative.
-- Expire, discard, promote, or persist working state deterministically, with source refs, context fingerprints, and restart behavior defined.
+- [x] Prove unloaded entity acquisition with `LMT` reverse valuation: the planned ticker hydrates Fundamentals context and remains the authoritative tool argument without requiring the tab to be preloaded.
+- [x] Add `copilot.working-analysis.v1` as Gamma-owned session-scoped state for Fundamentals reverse-valuation outputs, including entity, inputs, complete bounded output, provenance, context fingerprint, read-only safety, expiry, restart replay, discard, and recoverable session deletion.
+- [x] Distinguish this slice as `session_ephemeral`, expose `TEMPORARY` state in the run inspector and Fundamentals, and record that typed materialization is non-durable with explicit confirmation required for any later saved-DCF change.
+- [x] Materialize the active result into Fundamentals / Reverse Valuation through a server-recorded typed target plus normal app navigation; UI clicking remains non-authoritative and no DCF draft is silently written.
+- [x] Add the Checkpoint 8B public-company identity preflight: natural names may be proposed by the configured model, but Gamma validates them against SEC reference data, injects only a unique canonical ticker, records resolution provenance/usage, and stops with typed candidates on issuer or share-class ambiguity.
+- [ ] Generalize the same contract to user-specified hypothetical portfolios and Risk, then Options sets, Strategy Lab inputs, temporary assumptions, and other cross-tool outputs.
+- [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
+
+Implementation note (2026-08-25, Checkpoint 8A):
+
+- The Operator decorates successful `run_fundamentals_reverse_valuation` observations in deterministic, custom Responses, and Agents SDK paths with the same stored working-analysis reference. Analysis ids are run/entity/tool-derived, and records live under the Copilot store without changing the store schema version or saved Fundamentals state.
+- The session detail and dedicated lifecycle routes list, inspect, materialize, and discard working analyses. Active records expire after seven days, materialization is idempotent, discarded/expired records cannot be reopened, and session deletion moves them into recoverable local trash with the rest of the session.
+- The run inspector uses the existing compact inspector plane to show temporary status, owning surface, expiry, open, and discard actions. Fundamentals reuses the existing Reverse Valuation mode and displays a temporary-state banner; it loads the named ticker through the normal provider-backed service path and never populates or saves the editable DCF draft.
+- Retained acceptance coverage starts from an unprepared Copilot session, asks for `LMT`, verifies the strict `ticker=LMT` tool call and complete stored output, reopens the exact record through a restarted store, materializes it, discards it, rejects reopening, and verifies recoverable session cleanup. A separate expiry test and frontend typed-target tests cover invalid lifecycle/target states.
+- Verification on 2026-08-25: the two focused Checkpoint 8 backend tests, all 372 frontend tests, TypeScript typecheck, and the production frontend build passed. The broader backend run reached 537 passes with seven unrelated current-clock/data-fixture failures (six expired August commodities-contract cases and one SITREP NaN serialization case). A live `store=false` Responses transport smoke succeeded with the configured `gpt-5.5-2026-04-23` model; this was a provider-boundary check, not a live model-tool-model acceptance run.
+- The in-app browser visual pass was unavailable because the local browser-control kernel could not install its assets. Targeted run-inspector and Fundamentals component tests were added and passed, but a later browser screenshot pass should still verify the final rendered density and interaction states.
+
+Implementation note (2026-08-25, Checkpoint 8B):
+
+- Operator execution now runs entity preflight before plan/context construction. The configured Responses provider can return one strict `copilot.entity-resolution.v1` proposal containing the natural-language mention, likely ticker, legal issuer name, exchange, confidence, and reason. Gamma then searches its SEC-backed Fundamentals company reference and creates typed resolved, ambiguous, or not-found state; the model output alone can never authorize a ticker.
+- Unique resolution replaces only the request's ephemeral `fundamentals_ticker`, so existing Fundamentals, Equity Research, IV, and reverse-valuation plan/tool contracts continue to receive canonical symbols without requiring tab preload. Explicit tickers bypass the proposal, and the shared acronym filter prevents finance terms such as `DCF`, `WACC`, `SEC`, and `EBITDA` from becoming ticker entities.
+- Plan previews remain deterministic and free of model cost. Execution records proposal-provider usage in the ordinary run usage record. Resolved provenance and ambiguous candidates render inline in the existing Copilot plan plane; no tab or secondary surface was added.
+- Issuers with multiple listed share classes remain unresolved until the user names a ticker. The server returns an `incomplete` terminal, a `confirmation-needed` event, a zero-tool `entity_disambiguation` plan, and authoritative candidates instead of allowing the model to choose silently.
+- Verification on 2026-08-25: all 138 Copilot backend tests and all 373 frontend tests passed, along with TypeScript typecheck and the production frontend build. The repository-wide backend run reached 542 passes with the same seven unrelated date/data failures recorded for this worktree (six August futures-expiry commodity fixtures and one SITREP NaN serialization case). Focused coverage includes strict proposal schema/storage policy, model-proposed `Apple` → SEC-validated `AAPL`, deterministic no-model plan resolution, persisted resolution provenance, `Alphabet` share-class ambiguity, and explicit-ticker/acronym handling. A bounded live `store=false` proposal smoke returned `AAPL` / `Apple Inc.` from the configured `gpt-5.5-2026-04-23` model in one provider call; Gamma's separate SEC validation remained the authority-bearing step.
 
 #### K. Generalized interruptions, recovery, and role transition — open
 
@@ -512,7 +551,7 @@ Implementation note (2026-07-30, checkpoint complete):
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
 10. ~~Build the closed-loop Operator and model-assisted, schema-validated argument path.~~ Completed 2026-07-30 at Checkpoint 7 (82%).
-11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization.
+11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization. In progress: the unloaded-LMT Fundamentals vertical slice is complete; hypothetical portfolio/Risk and the remaining owning surfaces are next.
 12. Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.
 13. Pass trace-level deterministic and live acceptance cases against the clarified completion boundary.
 14. Optional external deep research; later voice.
@@ -1055,7 +1094,7 @@ Current Research Operator state (foundation inventory, not the desired end state
 
 What remains for the next agents:
 
-1. Make core tools entity-addressable and add the session-scoped working-analysis model in workstream J. Start with the unloaded-`LMT` DCF case and the user-specified hypothetical portfolio/risk case.
+1. Generalize `copilot.working-analysis.v1` from the completed unloaded-`LMT` Fundamentals slice to the existing `run_hypothetical_portfolio_comparison` and Risk tools, preserving user-specified legs, weights, shocks, provenance, restart/discard/expiry, and typed Risk materialization.
 2. Generalize interruptions and recovery as described in workstream K. Do not broaden durable mutation families until pause/resume state, idempotency, diffs, rollback policy, and permission evals are reusable.
 3. Extend the Checkpoint 7 trace gate with degraded-result cross-domain replanning, unnecessary-tool, stale-context, unloaded-entity, working-state, and same-run approval-resume cases.
 4. Compare the custom Responses loop and Agents SDK as later end-state contracts enter the benchmark. Promote Agents SDK only if sessions, interruptions, traces, maintainability, quality, reliability, latency, or cost show a practical advantage without weakening permissions.

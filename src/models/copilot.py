@@ -12,6 +12,7 @@ from src.utils.time import now_utc
 COPILOT_MODEL_POLICY_VERSION = "copilot.model-policy.v1"
 COPILOT_PROVIDER_STORAGE_POLICY_VERSION = "copilot.provider-storage.v1"
 COPILOT_SHELF_PROMOTION_VERSION = "copilot.shelf-promotion.v1"
+COPILOT_WORKING_ANALYSIS_VERSION = "copilot.working-analysis.v1"
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,7 @@ class CopilotResearchCardRequest:
     local_continuation: list[CopilotLocalContinuationTurn] = field(default_factory=list)
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
     synthesis: CopilotSynthesisRequest | None = None
+    entity_resolution: "CopilotEntityResolution | None" = None
 
 
 @dataclass(frozen=True)
@@ -218,6 +220,49 @@ class CopilotResearchPlanEntity:
     id: str
     label: str | None = None
     confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class CopilotEntityResolutionCandidate:
+    kind: str
+    id: str
+    label: str
+    provider_id: str | None = None
+    exchange: str | None = None
+    source_provider: str = "sec"
+    origin: str = "fundamentals.sec.reference_tickers"
+    confidence: float | None = None
+    match_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotEntityResolution:
+    status: str
+    query: str | None = None
+    kind: str = "ticker"
+    resolved: CopilotEntityResolutionCandidate | None = None
+    candidates: list[CopilotEntityResolutionCandidate] = field(default_factory=list)
+    method: str = "sec_reference"
+    source_provider: str = "gamma_entity_resolver"
+    origin: str = "copilot.entity_resolution"
+    model_proposal: str | None = None
+    proposal_provider: str | None = None
+    proposal_model: str | None = None
+    proposal_confidence: float | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotEquityEntityProposal:
+    mention: str | None = None
+    ticker: str | None = None
+    issuer_name: str | None = None
+    exchange: str | None = None
+    confidence: float | None = None
+    reason: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    usage: "CopilotUsageRecord" = field(default_factory=lambda: CopilotUsageRecord())
 
 
 @dataclass(frozen=True)
@@ -247,6 +292,7 @@ class CopilotResearchPlanDomainDecision:
 class CopilotResearchPlan:
     intent: str
     target_entities: list[CopilotResearchPlanEntity] = field(default_factory=list)
+    entity_resolution: CopilotEntityResolution | None = None
     depth_profile: str = "standard"
     domain_plan: list[CopilotResearchPlanDomain] = field(default_factory=list)
     domain_decisions: list[CopilotResearchPlanDomainDecision] = field(default_factory=list)
@@ -463,6 +509,45 @@ class CopilotToolExecution:
     output: dict[str, Any] | list[Any] | str
     trace: CopilotToolTrace
     sources: list[CopilotSourceRef] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotWorkingAnalysis:
+    """Session-scoped analytical state that can be inspected by an owning tab.
+
+    Working analyses are durable enough to survive an app restart, but remain
+    explicitly ephemeral product state. Materializing one only opens a typed
+    view of the result; it never silently creates or edits a saved Gamma model.
+    """
+
+    analysis_id: str
+    session_id: str
+    run_id: str | None
+    tool_id: str
+    domain: str
+    analysis_type: str
+    title: str
+    status: str = "active"
+    state_scope: str = "session_ephemeral"
+    entity: dict[str, Any] = field(default_factory=dict)
+    inputs: dict[str, Any] = field(default_factory=dict)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    source_ids: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    context_fingerprint: str | None = None
+    owning_tab: str = "fundamentals"
+    owning_mode: str = "reverse_valuation"
+    materialization: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=now_utc)
+    updated_at: datetime = field(default_factory=now_utc)
+    expires_at: datetime | None = None
+    materialized_at: datetime | None = None
+    discarded_at: datetime | None = None
+    read_only_safety: dict[str, Any] = field(default_factory=default_copilot_read_only_safety)
+    source_provider: str = "gamma_copilot"
+    origin: str = "copilot.working_analysis"
+    transformation_note: str | None = None
+    contract_version: str = COPILOT_WORKING_ANALYSIS_VERSION
 
 
 @dataclass(frozen=True)

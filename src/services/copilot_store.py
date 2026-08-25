@@ -21,6 +21,8 @@ from src.models.copilot import (
     CopilotDraftMutation,
     CopilotMemo,
     CopilotMutationDiffEntry,
+    CopilotEntityResolution,
+    CopilotEntityResolutionCandidate,
     CopilotModelCapabilities,
     CopilotModelPolicyResolution,
     CopilotOperatorConfirmationCheckpoint,
@@ -47,7 +49,9 @@ from src.models.copilot import (
     CopilotTraceState,
     CopilotTurn,
     CopilotUsageRecord,
+    CopilotWorkingAnalysis,
     CopilotProviderStoragePolicy,
+    COPILOT_WORKING_ANALYSIS_VERSION,
     COPILOT_SHELF_PROMOTION_VERSION,
     ResearchCard,
     ResearchClaim,
@@ -88,6 +92,7 @@ class CopilotStore:
         self.artifacts_dir = self.base_dir / "artifacts"
         self.mutations_dir = self.base_dir / "mutations"
         self.promotions_dir = self.base_dir / "promotions"
+        self.working_analyses_dir = self.base_dir / "working_analyses"
         self.quarantine_dir = self.base_dir / "quarantine"
         self.trash_dir = self.base_dir / "trash"
         self.recovery_log_path = self.base_dir / "recovery_warnings.json"
@@ -99,6 +104,7 @@ class CopilotStore:
             self.artifacts_dir,
             self.mutations_dir,
             self.promotions_dir,
+            self.working_analyses_dir,
             self.quarantine_dir,
             self.trash_dir,
         ):
@@ -387,6 +393,103 @@ class CopilotStore:
                     if item.session_id == safe_session_id
                 ]
         return sorted(artifacts, key=lambda item: item.updated_at, reverse=True)
+
+    def save_working_analysis(self, analysis: CopilotWorkingAnalysis) -> CopilotWorkingAnalysis:
+        safe_analysis_id = self._safe_id(analysis.analysis_id)
+        safe_session_id = self._safe_id(analysis.session_id)
+        if not safe_analysis_id or not safe_session_id:
+            raise CopilotStoreError("analysis_id and session_id are required.")
+        with self._lock:
+            if self._load_session_path(self.sessions_dir / f"{safe_session_id}.json") is None:
+                raise CopilotStoreNotFoundError(
+                    f"Copilot session not found: {analysis.session_id}"
+                )
+            normalized = replace(
+                analysis,
+                analysis_id=safe_analysis_id,
+                session_id=safe_session_id,
+                contract_version=COPILOT_WORKING_ANALYSIS_VERSION,
+            )
+            self._write_json(
+                self.working_analyses_dir / f"{safe_analysis_id}.json",
+                self._working_analysis_to_json(normalized),
+            )
+        return normalized
+
+    def get_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis | None:
+        safe_id = self._safe_id(analysis_id)
+        if not safe_id:
+            return None
+        with self._lock:
+            analysis = self._load_working_analysis_path(
+                self.working_analyses_dir / f"{safe_id}.json"
+            )
+            return self._refresh_working_analysis_status_unlocked(analysis)
+
+    def list_working_analyses(
+        self,
+        session_id: str | None = None,
+        *,
+        include_inactive: bool = True,
+    ) -> list[CopilotWorkingAnalysis]:
+        safe_session_id = self._safe_id(session_id) if session_id else None
+        with self._lock:
+            analyses = [
+                refreshed
+                for item in self._load_working_analyses_unlocked()
+                if (refreshed := self._refresh_working_analysis_status_unlocked(item))
+                and (safe_session_id is None or refreshed.session_id == safe_session_id)
+            ]
+        if not include_inactive:
+            analyses = [item for item in analyses if item.status == "active"]
+        return sorted(analyses, key=lambda item: item.updated_at, reverse=True)
+
+    def materialize_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis:
+        safe_id = self._safe_id(analysis_id)
+        if not safe_id:
+            raise CopilotStoreError("analysis_id is required.")
+        with self._lock:
+            path = self.working_analyses_dir / f"{safe_id}.json"
+            analysis = self._refresh_working_analysis_status_unlocked(
+                self._load_working_analysis_path(path)
+            )
+            if analysis is None:
+                raise CopilotStoreNotFoundError(
+                    f"Copilot working analysis not found: {analysis_id}"
+                )
+            if analysis.status != "active":
+                raise CopilotStoreConflictError(
+                    f"Copilot working analysis is {analysis.status} and cannot be materialized."
+                )
+            if analysis.materialized_at is not None:
+                return analysis
+            now = now_utc()
+            updated = replace(analysis, materialized_at=now, updated_at=now)
+            self._write_json(path, self._working_analysis_to_json(updated))
+        return updated
+
+    def discard_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis:
+        safe_id = self._safe_id(analysis_id)
+        if not safe_id:
+            raise CopilotStoreError("analysis_id is required.")
+        with self._lock:
+            path = self.working_analyses_dir / f"{safe_id}.json"
+            analysis = self._load_working_analysis_path(path)
+            if analysis is None:
+                raise CopilotStoreNotFoundError(
+                    f"Copilot working analysis not found: {analysis_id}"
+                )
+            if analysis.status == "discarded":
+                return analysis
+            now = now_utc()
+            updated = replace(
+                analysis,
+                status="discarded",
+                discarded_at=now,
+                updated_at=now,
+            )
+            self._write_json(path, self._working_analysis_to_json(updated))
+        return updated
 
     def record_turn(
         self,
@@ -782,6 +885,7 @@ class CopilotStore:
                 "snapshots": 0,
                 "artifacts": 0,
                 "promotions": 0,
+                "working_analyses": 0,
             }
             self._move_to_trash(session_path, trash_root / "sessions" / session_path.name)
             counts["sessions"] = 1
@@ -811,6 +915,16 @@ class CopilotStore:
                     trash_root / "promotions" / promotion_path.name,
                 )
                 counts["promotions"] += 1
+            for analysis in self._load_working_analyses_unlocked():
+                if analysis.session_id != safe_session_id:
+                    continue
+                analysis_path = self.working_analyses_dir / f"{analysis.analysis_id}.json"
+                if analysis_path.exists():
+                    self._move_to_trash(
+                        analysis_path,
+                        trash_root / "working_analyses" / analysis_path.name,
+                    )
+                    counts["working_analyses"] += 1
         return CopilotDeleteResult(
             deleted_id=safe_session_id,
             deleted_type="session",
@@ -1241,6 +1355,13 @@ class CopilotStore:
             if (item := self._load_artifact_path(path))
         ]
 
+    def _load_working_analyses_unlocked(self) -> list[CopilotWorkingAnalysis]:
+        return [
+            item
+            for path in self.working_analyses_dir.glob("*.json")
+            if (item := self._load_working_analysis_path(path))
+        ]
+
     def _load_session_path(self, path: Path) -> CopilotSession | None:
         payload = self._load_json(path, record_type="session")
         if payload is None:
@@ -1464,6 +1585,62 @@ class CopilotStore:
             transformation_note=payload.get("transformation_note"),
         )
 
+    def _load_working_analysis_path(self, path: Path) -> CopilotWorkingAnalysis | None:
+        payload = self._load_json(path, record_type="working_analysis")
+        if payload is None:
+            return None
+        return CopilotWorkingAnalysis(
+            analysis_id=str(payload.get("analysis_id") or path.stem),
+            session_id=str(payload.get("session_id") or ""),
+            run_id=payload.get("run_id"),
+            tool_id=str(payload.get("tool_id") or ""),
+            domain=str(payload.get("domain") or "fundamentals"),
+            analysis_type=str(payload.get("analysis_type") or "reverse_valuation"),
+            title=str(payload.get("title") or "Copilot working analysis"),
+            status=str(payload.get("status") or "active"),
+            state_scope=str(payload.get("state_scope") or "session_ephemeral"),
+            entity=dict(payload.get("entity") or {}),
+            inputs=dict(payload.get("inputs") or {}),
+            outputs=dict(payload.get("outputs") or {}),
+            source_ids=list(payload.get("source_ids") or []),
+            warnings=list(payload.get("warnings") or []),
+            context_fingerprint=payload.get("context_fingerprint"),
+            owning_tab=str(payload.get("owning_tab") or "fundamentals"),
+            owning_mode=str(payload.get("owning_mode") or "reverse_valuation"),
+            materialization=dict(payload.get("materialization") or {}),
+            created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
+            updated_at=self._parse_datetime(payload.get("updated_at")) or now_utc(),
+            expires_at=self._parse_datetime(payload.get("expires_at")),
+            materialized_at=self._parse_datetime(payload.get("materialized_at")),
+            discarded_at=self._parse_datetime(payload.get("discarded_at")),
+            read_only_safety=dict(payload.get("read_only_safety") or {}),
+            source_provider=str(payload.get("source_provider") or "gamma_copilot"),
+            origin=str(payload.get("origin") or "copilot.working_analysis"),
+            transformation_note=payload.get("transformation_note"),
+            contract_version=str(
+                payload.get("contract_version") or COPILOT_WORKING_ANALYSIS_VERSION
+            ),
+        )
+
+    def _refresh_working_analysis_status_unlocked(
+        self,
+        analysis: CopilotWorkingAnalysis | None,
+    ) -> CopilotWorkingAnalysis | None:
+        if (
+            analysis is None
+            or analysis.status != "active"
+            or analysis.expires_at is None
+            or now_utc() < analysis.expires_at
+        ):
+            return analysis
+        now = now_utc()
+        updated = replace(analysis, status="expired", updated_at=now)
+        self._write_json(
+            self.working_analyses_dir / f"{analysis.analysis_id}.json",
+            self._working_analysis_to_json(updated),
+        )
+        return updated
+
     def _load_mutation_path(self, path: Path) -> CopilotDraftMutation | None:
         payload = self._load_json(path, record_type="mutation")
         if payload is None:
@@ -1586,6 +1763,7 @@ class CopilotStore:
             "artifact": ("artifact_id", "session_id", "artifact_type", "body"),
             "mutation": ("mutation_id", "status"),
             "promotion": ("promotion_id", "source_session_id", "status"),
+            "working_analysis": ("analysis_id", "session_id", "tool_id", "status"),
         }.get(record_type, ())
         missing_fields = [
             field
@@ -1989,6 +2167,40 @@ class CopilotStore:
         }
 
     @staticmethod
+    def _working_analysis_to_json(analysis: CopilotWorkingAnalysis) -> dict[str, Any]:
+        return {
+            "schema_version": CURRENT_COPILOT_STORE_SCHEMA_VERSION,
+            "contract_version": analysis.contract_version,
+            "analysis_id": analysis.analysis_id,
+            "session_id": analysis.session_id,
+            "run_id": analysis.run_id,
+            "tool_id": analysis.tool_id,
+            "domain": analysis.domain,
+            "analysis_type": analysis.analysis_type,
+            "title": analysis.title,
+            "status": analysis.status,
+            "state_scope": analysis.state_scope,
+            "entity": CopilotStore._dataclass_to_json(analysis.entity),
+            "inputs": CopilotStore._dataclass_to_json(analysis.inputs),
+            "outputs": CopilotStore._dataclass_to_json(analysis.outputs),
+            "source_ids": list(analysis.source_ids),
+            "warnings": list(analysis.warnings),
+            "context_fingerprint": analysis.context_fingerprint,
+            "owning_tab": analysis.owning_tab,
+            "owning_mode": analysis.owning_mode,
+            "materialization": CopilotStore._dataclass_to_json(analysis.materialization),
+            "created_at": analysis.created_at.isoformat(),
+            "updated_at": analysis.updated_at.isoformat(),
+            "expires_at": CopilotStore._datetime_to_json(analysis.expires_at),
+            "materialized_at": CopilotStore._datetime_to_json(analysis.materialized_at),
+            "discarded_at": CopilotStore._datetime_to_json(analysis.discarded_at),
+            "read_only_safety": CopilotStore._dataclass_to_json(analysis.read_only_safety),
+            "source_provider": analysis.source_provider,
+            "origin": analysis.origin,
+            "transformation_note": analysis.transformation_note,
+        }
+
+    @staticmethod
     def _datetime_to_json(value: Any) -> str | None:
         if isinstance(value, datetime):
             return value.isoformat()
@@ -2106,6 +2318,59 @@ class CopilotStore:
         )
 
     @classmethod
+    def _entity_resolution_from_json(
+        cls,
+        payload: Any,
+    ) -> CopilotEntityResolution | None:
+        if not isinstance(payload, dict) or not payload.get("status"):
+            return None
+
+        def candidate_from_json(item: Any) -> CopilotEntityResolutionCandidate | None:
+            if not isinstance(item, dict) or not item.get("id"):
+                return None
+            return CopilotEntityResolutionCandidate(
+                kind=str(item.get("kind") or "ticker"),
+                id=str(item.get("id") or ""),
+                label=str(item.get("label") or item.get("id") or ""),
+                provider_id=item.get("provider_id"),
+                exchange=item.get("exchange"),
+                source_provider=str(item.get("source_provider") or "sec"),
+                origin=str(item.get("origin") or "fundamentals.sec.reference_tickers"),
+                confidence=(
+                    float(item["confidence"])
+                    if item.get("confidence") is not None
+                    else None
+                ),
+                match_reason=item.get("match_reason"),
+            )
+
+        resolved = candidate_from_json(payload.get("resolved"))
+        candidates = [
+            candidate
+            for item in list(payload.get("candidates") or [])
+            if (candidate := candidate_from_json(item)) is not None
+        ]
+        return CopilotEntityResolution(
+            status=str(payload.get("status") or ""),
+            query=payload.get("query"),
+            kind=str(payload.get("kind") or "ticker"),
+            resolved=resolved,
+            candidates=candidates,
+            method=str(payload.get("method") or "sec_reference"),
+            source_provider=str(payload.get("source_provider") or "gamma_entity_resolver"),
+            origin=str(payload.get("origin") or "copilot.entity_resolution"),
+            model_proposal=payload.get("model_proposal"),
+            proposal_provider=payload.get("proposal_provider"),
+            proposal_model=payload.get("proposal_model"),
+            proposal_confidence=(
+                float(payload["proposal_confidence"])
+                if payload.get("proposal_confidence") is not None
+                else None
+            ),
+            warnings=list(payload.get("warnings") or []),
+        )
+
+    @classmethod
     def _research_plan_from_json(cls, payload: Any) -> CopilotResearchPlan | None:
         if not isinstance(payload, dict) or not payload.get("intent"):
             return None
@@ -2121,6 +2386,9 @@ class CopilotStore:
                 for item in list(payload.get("target_entities") or [])
                 if isinstance(item, dict)
             ],
+            entity_resolution=cls._entity_resolution_from_json(
+                payload.get("entity_resolution")
+            ),
             depth_profile=str(payload.get("depth_profile") or "standard"),
             domain_plan=[
                 CopilotResearchPlanDomain(
@@ -3029,6 +3297,7 @@ class CopilotStore:
             self.artifacts_dir: "artifact",
             self.mutations_dir: "mutation",
             self.promotions_dir: "promotion",
+            self.working_analyses_dir: "working_analysis",
         }
         for directory, record_type in mapping.items():
             if directory == path.parent or directory in path.parents:

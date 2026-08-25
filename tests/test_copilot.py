@@ -16,6 +16,7 @@ from src.application.copilot_context_contracts import (
     COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
     finalize_context_bundle,
 )
+from src.application.copilot_entity_resolution import extract_explicit_equity_tickers
 from src.application.copilot_model_policy import CopilotModelPolicy
 from src.application.research_action_registry import (
     ResearchActionArgumentError,
@@ -28,6 +29,7 @@ from src.application.copilot_service import CopilotService
 from src.application.runtime import build_runtime
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotEquityEntityProposal,
     CopilotArtifactReference,
     CopilotConfirmationState,
     CopilotOperatorPlan,
@@ -48,6 +50,7 @@ from src.models.copilot import (
     CopilotToolExecution,
     CopilotToolTrace,
     CopilotUsageRecord,
+    CopilotWorkingAnalysis,
     ResearchCard,
     ResearchClaim,
 )
@@ -82,6 +85,7 @@ from src.models.fundamentals import (
     FundamentalsReverseValuationResult,
     FundamentalsReverseValuationSensitivityCell,
     FundamentalsReverseValuationSensitivityMatrix,
+    FundamentalsSearchResult,
     FundamentalsSourceTraceRecord,
     FundamentalsStatementCell,
     FundamentalsStatementLine,
@@ -731,12 +735,70 @@ class _StubFundamentalsService:
             transformation_note="Fixture normalized income statement line.",
         )
 
+    def _company_for(self, ticker: str) -> FundamentalsCompanyRecord:
+        if ticker.upper() == "AAPL":
+            return self.company
+        return replace(
+            self.company,
+            ticker="LMT",
+            cik="0000936468",
+            name="Lockheed Martin Corporation",
+            exchange="NYSE",
+        )
+
+    def search_companies(self, query: str, *, limit: int = 12, force_refresh: bool = False):
+        del force_refresh
+        rows = [
+            FundamentalsSearchResult(
+                ticker="AAPL",
+                name="Apple Inc.",
+                cik="0000320193",
+                exchange="NASDAQ",
+                source_provider="sec",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.fundamentals.search",
+            ),
+            FundamentalsSearchResult(
+                ticker="LMT",
+                name="Lockheed Martin Corporation",
+                cik="0000936468",
+                exchange="NYSE",
+                source_provider="sec",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.fundamentals.search",
+            ),
+            FundamentalsSearchResult(
+                ticker="GOOG",
+                name="Alphabet Inc.",
+                cik="0001652044",
+                exchange="NASDAQ",
+                source_provider="sec",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.fundamentals.search",
+            ),
+            FundamentalsSearchResult(
+                ticker="GOOGL",
+                name="Alphabet Inc.",
+                cik="0001652044",
+                exchange="NASDAQ",
+                source_provider="sec",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.fundamentals.search",
+            ),
+        ]
+        normalized = str(query or "").strip().upper()
+        return [
+            row
+            for row in rows
+            if row.ticker == normalized or normalized in row.name.upper()
+        ][:limit]
+
     def get_overview(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         return FundamentalsOverviewResult(
-            company=self.company,
+            company=self._company_for(ticker),
             headline_metrics=[
                 FundamentalsMetricRecord(
                     metric_id="ev_to_sales",
@@ -757,7 +819,7 @@ class _StubFundamentalsService:
 
     def get_financials(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         income = FundamentalsStatementView(
             statement="income",
@@ -790,7 +852,7 @@ class _StubFundamentalsService:
             transformation_note="Fixture ratio statement derived by Gamma.",
         )
         return FundamentalsFinancialsResult(
-            company=self.company,
+            company=self._company_for(ticker),
             annual_income_statement=income,
             annual_balance_sheet=empty,
             annual_cash_flow_statement=empty,
@@ -805,7 +867,7 @@ class _StubFundamentalsService:
 
     def get_peers(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         heatmap = FundamentalsPeerHeatmapView(
             tickers=["AAPL", "MSFT"],
@@ -837,7 +899,7 @@ class _StubFundamentalsService:
             transformation_note="Fixture peer heatmap assembled by Gamma.",
         )
         return FundamentalsPeersResult(
-            company=self.company,
+            company=self._company_for(ticker),
             peer_basket=self._peer_basket(),
             peer_heatmap=heatmap,
             comparisons=[
@@ -884,7 +946,7 @@ class _StubFundamentalsService:
 
     def get_dcf_model(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         if self.saved_payload is not None:
             return self._dcf_model_from_payload(self.saved_payload)
@@ -907,20 +969,20 @@ class _StubFundamentalsService:
 
     def preview_dcf_model(self, ticker: str, payload: dict, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         return self._dcf_model_from_payload(payload)
 
     def save_dcf_model(self, ticker: str, payload: dict, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         self.saved_payload = deepcopy(payload)
         return self._dcf_model_from_payload(self.saved_payload)
 
     def save_dcf_snapshot(self, ticker: str, *, name: str | None = None, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         snapshot = FundamentalsDcfSnapshotRecord(
             snapshot_id=f"fixture-snapshot-{len(self.saved_snapshots) + 1}",
@@ -985,7 +1047,7 @@ class _StubFundamentalsService:
 
     def list_dcf_snapshots(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return []
         return [
             *self.saved_snapshots,
@@ -1006,10 +1068,11 @@ class _StubFundamentalsService:
 
     def get_reverse_valuation(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
+        company = self._company_for(ticker)
         return FundamentalsReverseValuationResult(
-            company=self.company,
+            company=company,
             current_price=190.0,
             shares_outstanding=15_500_000_000.0,
             net_debt=37_000_000_000.0,
@@ -1079,10 +1142,10 @@ class _StubFundamentalsService:
 
     def get_reference(self, ticker: str, *, force_refresh: bool = False):
         del force_refresh
-        if ticker.upper() != "AAPL":
+        if ticker.upper() not in {"AAPL", "LMT"}:
             return None
         inspection = FundamentalsRawNormalizedInspectionResult(
-            company=self.company,
+            company=self._company_for(ticker),
             traces=[
                 FundamentalsSourceTraceRecord(
                     statement="income",
@@ -5033,6 +5096,376 @@ def test_copilot_operator_execution_runs_reverse_valuation_analysis(tmp_path):
         assert not any("confirmation" in warning.lower() for warning in payload["warnings"])
     finally:
         runtime.shutdown()
+
+
+def test_operator_resolves_natural_company_name_through_model_and_sec(tmp_path):
+    class _EntityProposalProvider(_StubCopilotProvider):
+        def __init__(self) -> None:
+            self.proposal_calls = 0
+
+        def propose_equity_entity(self, *, request):
+            self.proposal_calls += 1
+            assert request.prompt == "What is Apple's fair value? Run reverse valuation."
+            return CopilotEquityEntityProposal(
+                mention="Apple",
+                ticker="AAPL",
+                issuer_name="Apple Inc.",
+                exchange="NASDAQ",
+                confidence=0.99,
+                reason="Apple commonly refers to Apple Inc.",
+                provider="stub_entity_model",
+                model="stub-entity-model",
+                usage=CopilotUsageRecord(
+                    input_tokens=18,
+                    output_tokens=12,
+                    total_tokens=30,
+                    provider_calls=1,
+                    tool_calls=0,
+                ),
+            )
+
+    client, runtime = _build_test_client(tmp_path)
+    provider = _EntityProposalProvider()
+    try:
+        runtime.copilot_service.provider = provider
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+        session_id = "session_natural_name_resolution"
+        assert client.post(
+            "/copilot/sessions",
+            json={"session_id": session_id, "title": "Apple fair value"},
+        ).status_code == 200
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "What is Apple's fair value? Run reverse valuation.",
+                "user_session_id": session_id,
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert provider.proposal_calls == 1
+        entity_resolution = payload["research_plan"]["entity_resolution"]
+        assert entity_resolution["status"] == "resolved"
+        assert entity_resolution["resolved"]["id"] == "AAPL"
+        assert entity_resolution["resolved"]["label"] == "Apple Inc."
+        assert entity_resolution["method"] == "model_proposal_sec_validation"
+        assert entity_resolution["proposal_provider"] == "stub_entity_model"
+        reverse_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_fundamentals_reverse_valuation"
+        )
+        assert reverse_trace["arguments"] == {"ticker": "AAPL"}
+        assert payload["usage"]["provider_calls"] == 1
+        detail = client.get(f"/copilot/sessions/{session_id}")
+        assert detail.status_code == 200
+        persisted_resolution = detail.json()["turns"][0]["research_plan"]["entity_resolution"]
+        assert persisted_resolution["resolved"]["id"] == "AAPL"
+        assert persisted_resolution["proposal_provider"] == "stub_entity_model"
+    finally:
+        runtime.shutdown()
+
+
+def test_research_plan_resolves_company_name_with_sec_search_without_model_call(tmp_path):
+    class _PlanProvider(_StubCopilotProvider):
+        def propose_equity_entity(self, *, request):
+            del request
+            raise AssertionError("Deterministic plan previews must not spend a model call.")
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.provider = _PlanProvider()
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run a fair-value analysis for Apple.",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["entity_resolution"]["status"] == "resolved"
+        assert payload["entity_resolution"]["resolved"]["id"] == "AAPL"
+        assert payload["entity_resolution"]["method"] == "sec_name_search"
+        assert payload["target_entities"][0]["label"] == "Apple Inc."
+    finally:
+        runtime.shutdown()
+
+
+def test_operator_stops_for_ambiguous_company_share_classes(tmp_path):
+    class _AlphabetProposalProvider(_StubCopilotProvider):
+        def propose_equity_entity(self, *, request):
+            del request
+            return CopilotEquityEntityProposal(
+                mention="Alphabet",
+                ticker="GOOGL",
+                issuer_name="Alphabet Inc.",
+                exchange="NASDAQ",
+                confidence=0.96,
+                reason="Alphabet is the named public issuer.",
+                provider="stub_entity_model",
+                model="stub-entity-model",
+                usage=CopilotUsageRecord(provider_calls=1, tool_calls=0),
+            )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.provider = _AlphabetProposalProvider()
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run a fair-value analysis for Alphabet.",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "incomplete"
+        assert payload["tool_traces"] == []
+        resolution = payload["research_plan"]["entity_resolution"]
+        assert resolution["status"] == "ambiguous"
+        assert {candidate["id"] for candidate in resolution["candidates"]} == {
+            "GOOG",
+            "GOOGL",
+        }
+        assert payload["research_plan"]["requires_confirmation"] is True
+        assert payload["research_plan"]["max_tool_calls"] == 0
+        assert payload["operator_events"][0]["event_type"] == "confirmation-needed"
+    finally:
+        runtime.shutdown()
+
+
+def test_explicit_ticker_bypasses_model_entity_proposal_and_ignores_dcf_acronym(tmp_path):
+    class _UnexpectedProposalProvider(_StubCopilotProvider):
+        def propose_equity_entity(self, *, request):
+            del request
+            raise AssertionError("Explicit tickers must bypass the model entity proposal.")
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.provider = _UnexpectedProposalProvider()
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run DCF reverse valuation for AAPL.",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        ticker_entities = [
+            entity
+            for entity in payload["research_plan"]["target_entities"]
+            if entity["kind"] == "ticker"
+        ]
+        assert [entity["id"] for entity in ticker_entities] == ["AAPL"]
+        assert payload["research_plan"]["entity_resolution"]["method"] == "explicit_ticker"
+    finally:
+        runtime.shutdown()
+
+
+def test_ticker_parser_requires_a_cue_for_finance_acronym_symbols():
+    assert extract_explicit_equity_tickers("Run DCF for AAPL") == ["AAPL"]
+    assert extract_explicit_equity_tickers("Research $AI and ticker DCF") == ["AI", "DCF"]
+
+
+def test_openai_entity_proposal_uses_one_forced_strict_function_call():
+    class _CaptureEntityProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test-entity",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payload = None
+
+        def _post_json(self, payload):
+            self.payload = deepcopy(payload)
+            return {
+                "id": "resp_entity",
+                "model": self.model,
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "propose_equity_entity",
+                        "call_id": "call_entity",
+                        "arguments": json.dumps(
+                            {
+                                "mention": "Apple",
+                                "ticker": "AAPL",
+                                "issuer_name": "Apple Inc.",
+                                "exchange": "NASDAQ",
+                                "confidence": 0.98,
+                                "reason": "The request names Apple.",
+                            }
+                        ),
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 10,
+                    "total_tokens": 30,
+                },
+            }
+
+    provider = _CaptureEntityProvider()
+    proposal = provider.propose_equity_entity(
+        request=CopilotResearchCardRequest(
+            domain="synthesis",
+            prompt="Research Apple",
+            context=CopilotRequestContext(current_tab="copilot"),
+        )
+    )
+
+    assert proposal.ticker == "AAPL"
+    assert proposal.issuer_name == "Apple Inc."
+    assert proposal.usage.provider_calls == 1
+    assert provider.payload["tool_choice"] == {
+        "type": "function",
+        "name": "propose_equity_entity",
+    }
+    tool = provider.payload["tools"][0]
+    assert tool["strict"] is True
+    assert tool["parameters"]["additionalProperties"] is False
+    assert set(tool["parameters"]["required"]) == set(tool["parameters"]["properties"])
+    assert provider.payload["parallel_tool_calls"] is False
+    assert provider.payload["store"] is False
+
+
+def test_checkpoint8_unloaded_lmt_working_analysis_lifecycle(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+        session_id = "session_checkpoint8_lmt"
+        created = client.post(
+            "/copilot/sessions",
+            json={"session_id": session_id, "title": "LMT fair value"},
+        )
+        assert created.status_code == 200
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "What is the fair value of LMT? Run reverse valuation.",
+                "user_session_id": session_id,
+                "context": {
+                    "current_tab": "copilot",
+                    "workspace_mode": "research",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        reverse_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_fundamentals_reverse_valuation"
+        )
+        assert reverse_trace["arguments"] == {"ticker": "LMT"}
+        assert "temporary working analysis" in reverse_trace["summary"].lower()
+
+        detail_response = client.get(f"/copilot/sessions/{session_id}")
+        assert detail_response.status_code == 200
+        analyses = detail_response.json()["working_analyses"]
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis["contract_version"] == "copilot.working-analysis.v1"
+        assert analysis["status"] == "active"
+        assert analysis["state_scope"] == "session_ephemeral"
+        assert analysis["entity"]["ticker"] == "LMT"
+        assert analysis["outputs"]["ticker"] == "LMT"
+        assert analysis["owning_tab"] == "fundamentals"
+        assert analysis["owning_mode"] == "reverse_valuation"
+        assert analysis["materialization"]["durable"] is False
+        assert (
+            analysis["materialization"]["persistence_policy"]
+            == "explicit_confirmation_required"
+        )
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.get_working_analysis(analysis["analysis_id"])
+        assert restored is not None
+        assert restored.outputs == analysis["outputs"]
+        assert restored.materialized_at is None
+
+        materialized = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert materialized.status_code == 200
+        assert materialized.json()["status"] == "active"
+        assert materialized.json()["materialized_at"] is not None
+        assert materialized.json()["materialization"]["durable"] is False
+
+        discarded = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/discard"
+        )
+        assert discarded.status_code == 200
+        assert discarded.json()["status"] == "discarded"
+        assert discarded.json()["discarded_at"] is not None
+        blocked = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert blocked.status_code == 409
+
+        deleted = client.delete(
+            f"/copilot/sessions/{session_id}",
+            params={"confirm_session_id": session_id},
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted_counts"]["working_analyses"] == 1
+        assert client.get(
+            f"/copilot/working-analyses/{analysis['analysis_id']}"
+        ).status_code == 404
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8_working_analysis_expires_before_materialization(tmp_path):
+    store = CopilotStore(tmp_path / "copilot")
+    session = store.create_session(session_id="session_checkpoint8_expiry")
+    now = datetime.now(timezone.utc)
+    store.save_working_analysis(
+        CopilotWorkingAnalysis(
+            analysis_id="work_checkpoint8_expired",
+            session_id=session.session_id,
+            run_id="oprun_expired",
+            tool_id="run_fundamentals_reverse_valuation",
+            domain="fundamentals",
+            analysis_type="reverse_valuation",
+            title="Expired LMT reverse valuation",
+            entity={"ticker": "LMT"},
+            outputs={"ticker": "LMT"},
+            expires_at=now - timedelta(seconds=1),
+        )
+    )
+
+    expired = store.get_working_analysis("work_checkpoint8_expired")
+    assert expired is not None
+    assert expired.status == "expired"
+    with pytest.raises(CopilotStoreConflictError, match="expired"):
+        store.materialize_working_analysis(expired.analysis_id)
 
 
 def test_copilot_operator_execution_stops_before_confirmed_dcf_apply(tmp_path):

@@ -19,7 +19,8 @@
     CopilotSessionSummary,
     CopilotStorageStatus,
     CopilotThreadEntry,
-    CopilotThreadState
+    CopilotThreadState,
+    CopilotWorkingAnalysis
   } from "../lib/api/types";
   import type { CopilotRunState } from "../lib/copilot-run";
   import {
@@ -104,6 +105,12 @@
     | null = () => null;
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
   export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
+  export let onOpenWorkingAnalysis: (
+    analysis: CopilotWorkingAnalysis
+  ) => Promise<unknown> | void = () => {};
+  export let onDiscardWorkingAnalysis: (
+    analysis: CopilotWorkingAnalysis
+  ) => Promise<unknown> | void = () => {};
   export let onConfirmMutation:
     | ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown)
     | null = null;
@@ -851,6 +858,9 @@
       turn={activeSession?.turns[activeSession.turns.length - 1] ?? null}
       result={lastTurn?.result ?? operatorResult}
       {diagnostics}
+      workingAnalyses={activeSession?.working_analyses ?? []}
+      {onOpenWorkingAnalysis}
+      {onDiscardWorkingAnalysis}
       onClose={() => (runInspectorOpen = false)}
     />
   {/if}

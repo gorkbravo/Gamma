@@ -39,6 +39,7 @@ from src.api.schemas.copilot import (
     CopilotStorageStatusModel,
     CopilotStorageWarningModel,
     CopilotTurnModel,
+    CopilotWorkingAnalysisModel,
 )
 from src.services.copilot_store import CopilotStoreConflictError, CopilotStoreNotFoundError
 
@@ -346,6 +347,10 @@ def get_copilot_session(session_id: str, request: Request) -> CopilotSessionDeta
             CopilotDraftMutationModel.from_domain(item)
             for item in runtime.copilot_service.list_copilot_mutations(session_id)
         ],
+        working_analyses=[
+            CopilotWorkingAnalysisModel.from_domain(item)
+            for item in runtime.copilot_service.list_working_analyses(session_id)
+        ],
         storage_warnings=[
             CopilotStorageWarningModel.from_domain(item)
             for item in storage_status.warnings
@@ -415,6 +420,78 @@ def list_copilot_artifacts(session_id: str, request: Request) -> list[CopilotArt
         CopilotArtifactModel.from_domain(item)
         for item in runtime.copilot_service.list_artifacts(session_id)
     ]
+
+
+@router.get(
+    "/copilot/sessions/{session_id}/working-analyses",
+    response_model=list[CopilotWorkingAnalysisModel],
+)
+def list_copilot_working_analyses(
+    session_id: str,
+    request: Request,
+    include_inactive: bool = True,
+) -> list[CopilotWorkingAnalysisModel]:
+    runtime = request.app.state.runtime
+    if runtime.copilot_store.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail=f"Copilot session not found: {session_id}")
+    return [
+        CopilotWorkingAnalysisModel.from_domain(item)
+        for item in runtime.copilot_service.list_working_analyses(
+            session_id,
+            include_inactive=include_inactive,
+        )
+    ]
+
+
+@router.get(
+    "/copilot/working-analyses/{analysis_id}",
+    response_model=CopilotWorkingAnalysisModel,
+)
+def get_copilot_working_analysis(
+    analysis_id: str,
+    request: Request,
+) -> CopilotWorkingAnalysisModel:
+    analysis = request.app.state.runtime.copilot_service.get_working_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Copilot working analysis not found: {analysis_id}",
+        )
+    return CopilotWorkingAnalysisModel.from_domain(analysis)
+
+
+@router.post(
+    "/copilot/working-analyses/{analysis_id}/materialize",
+    response_model=CopilotWorkingAnalysisModel,
+)
+def materialize_copilot_working_analysis(
+    analysis_id: str,
+    request: Request,
+) -> CopilotWorkingAnalysisModel:
+    try:
+        analysis = request.app.state.runtime.copilot_service.materialize_working_analysis(
+            analysis_id
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotWorkingAnalysisModel.from_domain(analysis)
+
+
+@router.post(
+    "/copilot/working-analyses/{analysis_id}/discard",
+    response_model=CopilotWorkingAnalysisModel,
+)
+def discard_copilot_working_analysis(
+    analysis_id: str,
+    request: Request,
+) -> CopilotWorkingAnalysisModel:
+    try:
+        analysis = request.app.state.runtime.copilot_service.discard_working_analysis(
+            analysis_id
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotWorkingAnalysisModel.from_domain(analysis)
 
 
 @router.post("/copilot/sessions/{session_id}/artifacts", response_model=CopilotArtifactModel)

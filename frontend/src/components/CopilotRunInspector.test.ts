@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
-import type { CopilotDiagnostics, CopilotResearchCardResult } from "../lib/api/types";
+import type {
+  CopilotDiagnostics,
+  CopilotResearchCardResult,
+  CopilotWorkingAnalysis
+} from "../lib/api/types";
 import CopilotRunInspector from "./CopilotRunInspector.svelte";
 
 const capabilities = {
@@ -103,6 +107,37 @@ const result: CopilotResearchCardResult = {
   safe_provider_error: diagnostics.last_error
 };
 
+const workingAnalysis: CopilotWorkingAnalysis = {
+  analysis_id: "work_lmt",
+  session_id: "session_lmt",
+  run_id: "oprun_lmt",
+  tool_id: "run_fundamentals_reverse_valuation",
+  domain: "fundamentals",
+  analysis_type: "reverse_valuation",
+  title: "Lockheed Martin Corporation reverse valuation",
+  status: "active",
+  state_scope: "session_ephemeral",
+  entity: { ticker: "LMT" },
+  inputs: { ticker: "LMT" },
+  outputs: { ticker: "LMT" },
+  source_ids: ["fundamentals.reverse_valuation.analysis"],
+  warnings: [],
+  context_fingerprint: "fp_lmt",
+  owning_tab: "fundamentals",
+  owning_mode: "reverse_valuation",
+  materialization: { durable: false },
+  created_at: "2026-08-25T10:00:00Z",
+  updated_at: "2026-08-25T10:00:00Z",
+  expires_at: "2026-09-01T10:00:00Z",
+  materialized_at: null,
+  discarded_at: null,
+  read_only_safety: { execution_enabled: false },
+  source_provider: "gamma",
+  origin: "tests",
+  transformation_note: null,
+  contract_version: "copilot.working-analysis.v1"
+};
+
 describe("CopilotRunInspector", () => {
   it("renders replayable routing, explicit unavailable metrics, and safe diagnostics", () => {
     const { body } = render(CopilotRunInspector, {
@@ -141,5 +176,26 @@ describe("CopilotRunInspector", () => {
     expect(source).toContain("on:click={copyDiagnosticId}");
     expect(source).toContain("on:click={onClose}");
     expect(source.match(/type="button"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows temporary working state with owning-tab lifecycle controls", () => {
+    const { body } = render(CopilotRunInspector, {
+      props: {
+        result,
+        diagnostics,
+        workingAnalyses: [workingAnalysis],
+        onOpenWorkingAnalysis: vi.fn(),
+        onDiscardWorkingAnalysis: vi.fn(),
+        onClose: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Working analyses");
+    expect(body).toContain("Temporary");
+    expect(body).toContain("Lockheed Martin Corporation reverse valuation");
+    expect(body).toContain("fundamentals / reverse valuation");
+    expect(body).toContain("Opening does not save a DCF model");
+    expect(body).toContain("Open in Fundamentals");
+    expect(body).toContain("Discard");
   });
 });

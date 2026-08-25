@@ -3439,6 +3439,34 @@ export interface CopilotResearchPlanEntity {
   confidence: number | null;
 }
 
+export interface CopilotEntityResolutionCandidate {
+  kind: string;
+  id: string;
+  label: string;
+  provider_id: string | null;
+  exchange: string | null;
+  source_provider: string;
+  origin: string;
+  confidence: number | null;
+  match_reason: string | null;
+}
+
+export interface CopilotEntityResolution {
+  status: "resolved" | "ambiguous" | "not_found" | string;
+  query: string | null;
+  kind: string;
+  resolved: CopilotEntityResolutionCandidate | null;
+  candidates: CopilotEntityResolutionCandidate[];
+  method: string;
+  source_provider: string;
+  origin: string;
+  model_proposal: string | null;
+  proposal_provider: string | null;
+  proposal_model: string | null;
+  proposal_confidence: number | null;
+  warnings: string[];
+}
+
 export interface CopilotResearchPlanDomain {
   domain: string;
   depth: string;
@@ -3471,6 +3499,7 @@ export interface CopilotResearchPlanDomainDecision {
 export interface CopilotResearchPlan {
   intent: string;
   target_entities: CopilotResearchPlanEntity[];
+  entity_resolution?: CopilotEntityResolution | null;
   depth_profile: string;
   domain_plan: CopilotResearchPlanDomain[];
   domain_decisions: CopilotResearchPlanDomainDecision[];
@@ -3807,7 +3836,39 @@ export interface CopilotSessionDetail {
   context_snapshots: CopilotContextSnapshot[];
   artifacts: CopilotArtifact[];
   mutations?: CopilotDraftMutation[];
+  working_analyses?: CopilotWorkingAnalysis[];
   storage_warnings: CopilotStorageWarning[];
+}
+
+export interface CopilotWorkingAnalysis {
+  analysis_id: string;
+  session_id: string;
+  run_id: string | null;
+  tool_id: string;
+  domain: string;
+  analysis_type: string;
+  title: string;
+  status: "active" | "expired" | "discarded" | string;
+  state_scope: "session_ephemeral" | string;
+  entity: Record<string, unknown>;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  source_ids: string[];
+  warnings: string[];
+  context_fingerprint: string | null;
+  owning_tab: string;
+  owning_mode: string;
+  materialization: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  expires_at: string | null;
+  materialized_at: string | null;
+  discarded_at: string | null;
+  read_only_safety: Record<string, unknown>;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  contract_version: string;
 }
 
 export interface CopilotShelfPromotion {

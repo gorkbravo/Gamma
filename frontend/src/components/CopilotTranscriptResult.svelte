@@ -188,6 +188,41 @@
             {/each}
           </div>
         {/if}
+        {#if block.plan.entity_resolution}
+          <div
+            class="notice entity-resolution"
+            class:resolved={block.plan.entity_resolution.status === "resolved"}
+            class:warning={block.plan.entity_resolution.status !== "resolved"}
+          >
+            <strong>
+              {block.plan.entity_resolution.status === "resolved"
+                ? "Company resolved"
+                : block.plan.entity_resolution.status === "ambiguous"
+                  ? "Choose a ticker"
+                  : "Company not resolved"}
+            </strong>
+            {#if block.plan.entity_resolution.resolved}
+              <p>
+                {block.plan.entity_resolution.query ?? "Company"} →
+                {block.plan.entity_resolution.resolved.label}
+                ({block.plan.entity_resolution.resolved.id})
+              </p>
+            {:else if block.plan.entity_resolution.query}
+              <p>{block.plan.entity_resolution.query}</p>
+            {/if}
+            {#if block.plan.entity_resolution.candidates.length > 1}
+              <div class="chip-row" aria-label="Company ticker candidates">
+                {#each block.plan.entity_resolution.candidates as candidate}
+                  <span>{candidate.id} · {candidate.label}{candidate.exchange ? ` · ${candidate.exchange}` : ""}</span>
+                {/each}
+              </div>
+            {/if}
+            <small>
+              {block.plan.entity_resolution.method.replaceAll("_", " ")} ·
+              {block.plan.entity_resolution.source_provider}
+            </small>
+          </div>
+        {/if}
         {#if block.plan.domain_plan.length}
           <div class="table-wrap">
             <table>
@@ -752,6 +787,20 @@
   .notice.warning,
   .confirmation {
     border-left-color: var(--warning);
+  }
+
+  .notice.resolved {
+    border-left-color: var(--positive);
+  }
+
+  .notice.resolved strong {
+    color: var(--positive);
+  }
+
+  .entity-resolution small {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    text-transform: capitalize;
   }
 
   .notice strong {
