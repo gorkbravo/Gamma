@@ -156,7 +156,13 @@ describe("FundamentalsView", () => {
       context_fingerprint: "fp_lmt",
       owning_tab: "fundamentals",
       owning_mode: "reverse_valuation",
-      materialization: { durable: false },
+      materialization: {
+        contract_version: "copilot.materialization.v1",
+        payload_contract: "copilot.fundamentals-working-analysis.v1",
+        target_tab: "fundamentals",
+        target_mode: "reverse_valuation",
+        durable: false
+      },
       created_at: "2026-08-25T10:00:00Z",
       updated_at: "2026-08-25T10:00:00Z",
       expires_at: "2026-09-01T10:00:00Z",

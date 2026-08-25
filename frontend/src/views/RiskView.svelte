@@ -2,6 +2,7 @@
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
   import DistributionChart, { type DistributionMarker } from "../components/DistributionChart.svelte";
   import FanChart from "../components/FanChart.svelte";
+  import CopilotRiskWorkingAnalysis from "../components/CopilotRiskWorkingAnalysis.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import {
     buildRiskWorkspaceModel,
@@ -19,7 +20,7 @@
     type ScenarioImpactRow,
     type ScenarioResult,
   } from "../lib/risk-workspace";
-  import type { IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
+  import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
   export let mode: WorkspaceMode | null = "portfolio";
@@ -28,6 +29,7 @@
   export let researchSnapshot: PortfolioSnapshot | null = null;
   export let strategyLabResearchBook: StrategyLabResearchBook | null = null;
   export let result: RiskResult | null = null;
+  export let workingAnalysis: CopilotWorkingAnalysis | null = null;
   export let loading = false;
   export let onCompute: (options: RiskComputeOptions) => Promise<void> | void;
 
@@ -716,6 +718,10 @@
       </div>
     </div>
   </article>
+
+  {#if workingAnalysis}
+    <CopilotRiskWorkingAnalysis analysis={workingAnalysis} />
+  {/if}
 
   <article class="panel controls-card">
     <div class="controls-bar">

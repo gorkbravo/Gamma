@@ -955,6 +955,7 @@ def _stub_operator_arguments(
             "source_scope": "portfolio",
             "top_n": 10,
             "include_monte_carlo": True,
+            "temporary_portfolio": None,
         },
         "run_risk_scenario_analysis": {
             "scenario_label": "rate_shock_plus_100bps",
@@ -964,6 +965,7 @@ def _stub_operator_arguments(
             "equity_shock_pct": None,
             "duration_proxy_years": None,
             "symbol_shocks": [],
+            "temporary_portfolio": None,
         },
         "run_fundamentals_reverse_valuation": {"ticker": None},
         "inspect_equity_research_context": {"symbol": None, "max_rows": 8},

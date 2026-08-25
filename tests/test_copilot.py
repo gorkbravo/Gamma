@@ -3244,6 +3244,7 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
             "source_scope",
             "top_n",
             "include_monte_carlo",
+            "temporary_portfolio",
         ]
         assert by_id["run_strategy_lab_backtest"]["permission_policy"] == "automatic"
         assert by_id["run_strategy_lab_backtest"]["action_type"] == "run_analysis"
@@ -4020,6 +4021,7 @@ def _checkpoint7_rate_shock_arguments() -> dict[str, object]:
         "equity_shock_pct": -0.12,
         "duration_proxy_years": 7.5,
         "symbol_shocks": [],
+        "temporary_portfolio": None,
     }
 
 
@@ -4603,6 +4605,7 @@ def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, mo
                 "equity_shock_pct",
                 "duration_proxy_years",
                 "symbol_shocks",
+                "temporary_portfolio",
             ]
             await risk_tool.on_invoke_tool(
                 None,
@@ -5466,6 +5469,113 @@ def test_checkpoint8_working_analysis_expires_before_materialization(tmp_path):
     assert expired.status == "expired"
     with pytest.raises(CopilotStoreConflictError, match="expired"):
         store.materialize_working_analysis(expired.analysis_id)
+
+
+def test_checkpoint8c_temporary_portfolio_risk_workflow_materializes_and_replays(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        session_id = "session_checkpoint8c_aapl_tlt"
+        created = client.post(
+            "/copilot/sessions",
+            json={"session_id": session_id, "title": "AAPL TLT temporary risk"},
+        )
+        assert created.status_code == 200
+        before_snapshot = client.get("/portfolio/snapshot").json()
+        request_payload = {
+            "domain": "synthesis",
+            "prompt": (
+                "Create a temporary 60% AAPL / 40% TLT portfolio, apply a +100 bps "
+                "rate shock and \u221210% equity shock, then explain the risk."
+            ),
+            "user_session_id": session_id,
+            "context": {"current_tab": "copilot", "workspace_mode": "research"},
+        }
+        plan_response = client.post("/copilot/operator-plan", json=request_payload)
+        assert plan_response.status_code == 200
+        assert plan_response.json()["max_elapsed_ms"] == 60_000
+        assert [
+            step["tool_id"]
+            for step in plan_response.json()["steps"]
+        ] == [
+            "run_hypothetical_portfolio_comparison",
+            "run_risk_scenario_analysis",
+        ]
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json=request_payload,
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        traces = {trace["tool_name"]: trace for trace in payload["tool_traces"]}
+        assert "run_hypothetical_portfolio_comparison" in traces
+        assert "run_risk_scenario_analysis" in traces
+        expected_legs = [
+            {"symbol": "AAPL", "weight": 0.6, "sec_type": None, "currency": None, "exchange": None},
+            {"symbol": "TLT", "weight": 0.4, "sec_type": None, "currency": None, "exchange": None},
+        ]
+        assert traces["run_hypothetical_portfolio_comparison"]["arguments"]["legs"] == expected_legs
+        scenario_arguments = traces["run_risk_scenario_analysis"]["arguments"]
+        assert scenario_arguments["temporary_portfolio"]["legs"] == expected_legs
+        assert scenario_arguments["scenario_type"] == "rate_shock"
+        assert scenario_arguments["rate_shift_bps"] == 100.0
+        assert scenario_arguments["equity_shock_pct"] == -0.1
+
+        detail = client.get(f"/copilot/sessions/{session_id}")
+        assert detail.status_code == 200
+        analyses = detail.json()["working_analyses"]
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis["contract_version"] == "copilot.working-analysis.v1"
+        assert analysis["analysis_type"] == "hypothetical_portfolio_risk_scenario"
+        assert analysis["status"] == "active"
+        assert analysis["state_scope"] == "session_ephemeral"
+        assert analysis["entity"]["entity_type"] == "hypothetical_portfolio"
+        assert analysis["entity"]["legs"] == expected_legs
+        assert analysis["inputs"]["portfolio"]["legs"] == expected_legs
+        assert analysis["inputs"]["risk_scenario"]["rate_shift_bps"] == 100.0
+        assert analysis["inputs"]["risk_scenario"]["equity_shock_pct"] == -0.1
+        assert "portfolio_comparison" in analysis["outputs"]
+        assert analysis["outputs"]["risk_scenario"]["shock_parameters"]["rate_shift_bps"] == 100.0
+        assert analysis["outputs"]["risk_scenario"]["shock_parameters"]["equity_shock_pct"] == -0.1
+        assert "research.hypothetical_portfolio.operator_comparison" in analysis["source_ids"]
+        assert "risk.scenario.analysis" in analysis["source_ids"]
+        assert analysis["owning_tab"] == "risk"
+        assert analysis["owning_mode"] == "scenarios"
+        assert analysis["materialization"]["payload_contract"] == "copilot.risk-working-analysis.v1"
+        assert analysis["materialization"]["durable"] is False
+        assert analysis["materialization"]["persistence_policy"] == "non_durable_only"
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.get_working_analysis(analysis["analysis_id"])
+        assert restored is not None
+        assert restored.inputs == analysis["inputs"]
+        assert restored.outputs == analysis["outputs"]
+
+        materialized = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert materialized.status_code == 200
+        assert materialized.json()["materialized_at"] is not None
+        assert materialized.json()["owning_tab"] == "risk"
+
+        after_snapshot = client.get("/portfolio/snapshot").json()
+        assert after_snapshot["positions"] == before_snapshot["positions"]
+        assert after_snapshot["net_liquidation"] == before_snapshot["net_liquidation"]
+
+        discarded = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/discard"
+        )
+        assert discarded.status_code == 200
+        assert discarded.json()["status"] == "discarded"
+        blocked = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert blocked.status_code == 409
+    finally:
+        runtime.shutdown()
 
 
 def test_copilot_operator_execution_stops_before_confirmed_dcf_apply(tmp_path):

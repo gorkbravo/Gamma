@@ -75,6 +75,11 @@
     return value?.trim() ? value.replaceAll("_", " ") : "Unavailable";
   }
 
+  function surfaceLabel(value: string) {
+    const normalized = label(value);
+    return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
+  }
+
   function compactDate(value: string | null | undefined) {
     return value
       ? new Date(value).toLocaleString(undefined, {
@@ -153,13 +158,13 @@
               {label(analysis.owning_tab)} / {label(analysis.owning_mode)} · expires
               {compactDate(analysis.expires_at)}
             </p>
-            <small>Session scoped. Opening does not save a DCF model.</small>
+            <small>Session scoped. Opening does not save or alter durable Gamma state.</small>
             <div class="working-actions">
               <button
                 type="button"
                 disabled={analysis.status !== "active"}
                 on:click={() => onOpenWorkingAnalysis(analysis)}
-              >Open in Fundamentals</button>
+              >Open in {surfaceLabel(analysis.owning_tab)}</button>
               <button
                 type="button"
                 disabled={analysis.status === "discarded"}

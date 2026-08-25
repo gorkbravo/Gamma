@@ -324,6 +324,7 @@
   let cryptoMode: CryptoMode = persistedMode(restoredWorkspaceState, "crypto", "overview");
   let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
   let fundamentalsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
+  let riskWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
   // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
@@ -1813,14 +1814,20 @@
     if (!materialized) {
       return;
     }
-    fundamentalsWorkingAnalysis = materialized;
-    fundamentalsMode = target.mode;
-    workspaceMode = "research";
-    selectSharedEquity(
-      target.ticker,
-      String(analysis.entity.label ?? target.ticker),
-      "copilot"
-    );
+    if (target.tab === "fundamentals") {
+      fundamentalsWorkingAnalysis = materialized;
+      fundamentalsMode = target.mode;
+      workspaceMode = "research";
+      selectSharedEquity(
+        target.ticker,
+        String(analysis.entity.label ?? target.ticker),
+        "copilot"
+      );
+    } else {
+      riskWorkingAnalysis = materialized;
+      riskMode = target.mode;
+      workspaceMode = "research";
+    }
     await selectTab(target.tab);
   }
 
@@ -1831,6 +1838,9 @@
       fundamentalsWorkingAnalysis?.analysis_id === discarded.analysis_id
     ) {
       fundamentalsWorkingAnalysis = null;
+    }
+    if (discarded && riskWorkingAnalysis?.analysis_id === discarded.analysis_id) {
+      riskWorkingAnalysis = null;
     }
   }
 
@@ -3123,6 +3133,7 @@
             researchSnapshot={$researchResult?.snapshot ?? null}
             strategyLabResearchBook={$strategyLabResearchBook}
             result={$riskResult}
+            workingAnalysis={riskWorkingAnalysis}
             loading={$loading.risk}
             onCompute={computeRisk}
           />

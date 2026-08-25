@@ -27,35 +27,65 @@ export type CopilotComposerDraftState = {
   handledSubmissionId: number;
 };
 
-export type CopilotWorkingAnalysisTarget = {
+export type CopilotFundamentalsWorkingAnalysisTarget = {
   analysisId: string;
   ticker: string;
   tab: "fundamentals";
   mode: "reverse_valuation";
 };
 
-/** Accept only the first typed materialization contract supported by Gamma. */
+export type CopilotRiskWorkingAnalysisTarget = {
+  analysisId: string;
+  tab: "risk";
+  mode: "overview" | "scenarios";
+};
+
+export type CopilotWorkingAnalysisTarget =
+  | CopilotFundamentalsWorkingAnalysisTarget
+  | CopilotRiskWorkingAnalysisTarget;
+
+/** Accept only explicit non-durable materialization contracts supported by Gamma. */
 export function resolveWorkingAnalysisTarget(
   analysis: CopilotWorkingAnalysis
 ): CopilotWorkingAnalysisTarget | null {
+  const materialization = analysis.materialization;
+  if (
+    analysis.status !== "active" ||
+    analysis.state_scope !== "session_ephemeral" ||
+    materialization.durable !== false ||
+    materialization.target_tab !== analysis.owning_tab ||
+    materialization.target_mode !== analysis.owning_mode
+  ) {
+    return null;
+  }
   const ticker = String(analysis.entity.ticker ?? analysis.entity.normalized_id ?? "")
     .trim()
     .toUpperCase();
   if (
-    analysis.status !== "active" ||
-    analysis.state_scope !== "session_ephemeral" ||
-    analysis.owning_tab !== "fundamentals" ||
-    analysis.owning_mode !== "reverse_valuation" ||
-    !ticker
+    analysis.owning_tab === "fundamentals" &&
+    analysis.owning_mode === "reverse_valuation" &&
+    materialization.payload_contract === "copilot.fundamentals-working-analysis.v1" &&
+    ticker
   ) {
-    return null;
+    return {
+      analysisId: analysis.analysis_id,
+      ticker,
+      tab: "fundamentals",
+      mode: "reverse_valuation"
+    };
   }
-  return {
-    analysisId: analysis.analysis_id,
-    ticker,
-    tab: "fundamentals",
-    mode: "reverse_valuation"
-  };
+  if (
+    analysis.owning_tab === "risk" &&
+    (analysis.owning_mode === "overview" || analysis.owning_mode === "scenarios") &&
+    materialization.payload_contract === "copilot.risk-working-analysis.v1"
+  ) {
+    return {
+      analysisId: analysis.analysis_id,
+      tab: "risk",
+      mode: analysis.owning_mode
+    };
+  }
+  return null;
 }
 
 /**

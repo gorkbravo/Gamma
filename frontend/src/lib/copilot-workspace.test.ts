@@ -34,7 +34,13 @@ function workingAnalysis(
     context_fingerprint: "fp-lmt",
     owning_tab: "fundamentals",
     owning_mode: "reverse_valuation",
-    materialization: { durable: false },
+    materialization: {
+      contract_version: "copilot.materialization.v1",
+      payload_contract: "copilot.fundamentals-working-analysis.v1",
+      target_tab: "fundamentals",
+      target_mode: "reverse_valuation",
+      durable: false
+    },
     created_at: "2026-08-25T10:00:00Z",
     updated_at: "2026-08-25T10:00:00Z",
     expires_at: "2026-09-01T10:00:00Z",
@@ -64,11 +70,44 @@ describe("Copilot working-analysis materialization", () => {
       resolveWorkingAnalysisTarget(workingAnalysis({ status: "discarded" }))
     ).toBeNull();
     expect(
-      resolveWorkingAnalysisTarget(workingAnalysis({ owning_tab: "risk" }))
+      resolveWorkingAnalysisTarget(workingAnalysis({ owning_tab: "options" }))
     ).toBeNull();
     expect(
       resolveWorkingAnalysisTarget(workingAnalysis({ state_scope: "durable" }))
     ).toBeNull();
+  });
+
+  it("resolves the typed temporary Risk scenarios target without requiring a ticker", () => {
+    expect(
+      resolveWorkingAnalysisTarget(
+        workingAnalysis({
+          tool_id: "run_risk_scenario_analysis",
+          domain: "risk",
+          analysis_type: "hypothetical_portfolio_risk_scenario",
+          entity: {
+            entity_type: "hypothetical_portfolio",
+            portfolio_label: "AAPL/TLT",
+            legs: [
+              { symbol: "AAPL", weight: 0.6 },
+              { symbol: "TLT", weight: 0.4 }
+            ]
+          },
+          owning_tab: "risk",
+          owning_mode: "scenarios",
+          materialization: {
+            contract_version: "copilot.materialization.v1",
+            payload_contract: "copilot.risk-working-analysis.v1",
+            target_tab: "risk",
+            target_mode: "scenarios",
+            durable: false
+          }
+        })
+      )
+    ).toEqual({
+      analysisId: "work-lmt",
+      tab: "risk",
+      mode: "scenarios"
+    });
   });
 });
 

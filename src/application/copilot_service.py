@@ -1175,7 +1175,7 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="run_risk_contribution_analysis",
-                    description="Run a bounded read-only risk contribution computation for the active portfolio or research snapshot.",
+                    description="Run a bounded read-only risk contribution computation for the active portfolio/research snapshot or an explicit temporary hypothetical portfolio.",
                     domains=("risk",),
                     parameters_schema={
                         "type": "object",
@@ -1192,8 +1192,14 @@ class CopilotService:
                                 "type": ["boolean", "null"],
                                 "description": "Whether to include the existing bounded Monte Carlo diagnostics.",
                             },
+                            "temporary_portfolio": self._temporary_portfolio_input_schema(),
                         },
-                        "required": ["source_scope", "top_n", "include_monte_carlo"],
+                        "required": [
+                            "source_scope",
+                            "top_n",
+                            "include_monte_carlo",
+                            "temporary_portfolio",
+                        ],
                         "additionalProperties": False,
                     },
                     handler=self._tool_run_risk_contribution_analysis,
@@ -1203,7 +1209,7 @@ class CopilotService:
                     permission_policy="automatic",
                     provenance_behavior=(
                         "Computes Gamma risk contribution, coverage, concentration, VaR, beta/correlation, "
-                        "and optional Monte Carlo diagnostics from the active snapshot without changing portfolio or research state."
+                        "and optional Monte Carlo diagnostics from an active or explicit temporary snapshot without changing portfolio or research state."
                     ),
                     failure_modes=(
                         "Risk contribution requires an active portfolio or research snapshot.",
@@ -1213,7 +1219,7 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="run_risk_scenario_analysis",
-                    description="Run a bounded read-only risk computation for the active portfolio or research snapshot, including VaR, contribution, coverage, typed shock parameters, transparent proxy impact, and scenario warnings.",
+                    description="Run a bounded read-only risk computation for the active portfolio/research snapshot or an explicit temporary hypothetical portfolio, including typed shock parameters and transparent proxy impact.",
                     domains=("risk",),
                     parameters_schema={
                         "type": "object",
@@ -1262,6 +1268,7 @@ class CopilotService:
                                     "additionalProperties": False,
                                 },
                             },
+                            "temporary_portfolio": self._temporary_portfolio_input_schema(),
                         },
                         "required": [
                             "scenario_label",
@@ -1271,6 +1278,7 @@ class CopilotService:
                             "equity_shock_pct",
                             "duration_proxy_years",
                             "symbol_shocks",
+                            "temporary_portfolio",
                         ],
                         "additionalProperties": False,
                     },
@@ -2715,6 +2723,15 @@ class CopilotService:
             request=request,
         )
         budget = self._execution_budget_for_depth(depth_profile)
+        if (
+            intent == "hypothetical_portfolio_comparison"
+            and self._prompt_requests_risk_scenario(normalized_prompt)
+        ):
+            # This representative workflow needs two app-native analytics plus
+            # observation-driven model continuation. Keep it bounded, but do
+            # not let the generic single-surface guard expire between the
+            # portfolio comparison and the Risk scenario.
+            budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 60_000))
         domain_decisions = self._build_domain_decisions(
             intent=intent,
             domain_plan=domain_plan,
@@ -4969,15 +4986,18 @@ class CopilotService:
         """Persist an authorized Operator result as explicit temporary state."""
         if (
             self.store is None
-            or tool_id != "run_fundamentals_reverse_valuation"
             or not request.user_session_id
             or not isinstance(execution.output, dict)
             or execution.output.get("error")
         ):
             return execution
-
-        ticker = str(execution.output.get("ticker") or arguments.get("ticker") or "").strip().upper()
-        if not ticker:
+        spec = self._operator_working_analysis_spec(
+            execution,
+            tool_id=tool_id,
+            arguments=arguments,
+            context=context,
+        )
+        if spec is None:
             return execution
         session_id = str(request.user_session_id).strip()
         resolved_run_id = str(run_id or "").strip() or new_copilot_id("oprun")
@@ -4986,53 +5006,52 @@ class CopilotService:
                 COPILOT_WORKING_ANALYSIS_VERSION,
                 session_id,
                 resolved_run_id,
-                tool_id,
-                ticker,
+                str(spec["family_key"]),
             )
         )
         analysis_id = f"work_{sha256(seed.encode('utf-8')).hexdigest()[:24]}"
         now = now_utc()
         existing = self.store.get_working_analysis(analysis_id)
-        materialization = {
-            "target_tab": "fundamentals",
-            "target_mode": "reverse_valuation",
-            "navigation_context": {"ticker": ticker},
-            "durable": False,
-            "persistence_policy": "explicit_confirmation_required",
-            "save_target": "fundamentals_dcf_model",
-        }
         if existing is not None and existing.status != "active":
             # Provider retries and terminal replays must not resurrect an analysis
             # that the user discarded or that Gamma already expired.
             saved = existing
         else:
+            merge_workflow = bool(spec.get("merge_workflow")) and existing is not None
+            stored_inputs = (
+                {**deepcopy(existing.inputs), **deepcopy(spec["inputs"])}
+                if merge_workflow
+                else deepcopy(spec["inputs"])
+            )
+            stored_outputs = (
+                {**deepcopy(existing.outputs), **deepcopy(spec["outputs"])}
+                if merge_workflow
+                else deepcopy(spec["outputs"])
+            )
             analysis = CopilotWorkingAnalysis(
                 analysis_id=analysis_id,
                 session_id=session_id,
                 run_id=resolved_run_id,
-                tool_id=tool_id,
-                domain="fundamentals",
-                analysis_type="reverse_valuation",
-                title=(
-                    f"{ticker} reverse valuation"
-                    if not execution.output.get("company_name")
-                    else f"{execution.output['company_name']} reverse valuation"
-                ),
+                tool_id=existing.tool_id if merge_workflow else tool_id,
+                domain=str(spec["domain"]),
+                analysis_type=str(spec["analysis_type"]),
+                title=str(spec["title"]),
                 status="active",
-                entity={
-                    "entity_type": "equity",
-                    "normalized_id": ticker,
-                    "ticker": ticker,
-                    "label": str(execution.output.get("company_name") or ticker),
-                },
-                inputs=deepcopy(arguments),
-                outputs=deepcopy(execution.output),
-                source_ids=list(execution.trace.source_ids),
-                warnings=list(execution.output.get("warnings") or []),
+                entity=deepcopy(spec["entity"]),
+                inputs=stored_inputs,
+                outputs=stored_outputs,
+                source_ids=dedupe_warnings(
+                    existing.source_ids if merge_workflow else [],
+                    execution.trace.source_ids,
+                ),
+                warnings=dedupe_warnings(
+                    existing.warnings if merge_workflow else [],
+                    spec.get("warnings", []),
+                ),
                 context_fingerprint=request.context_fingerprint,
-                owning_tab="fundamentals",
-                owning_mode="reverse_valuation",
-                materialization=materialization,
+                owning_tab=str(spec["owning_tab"]),
+                owning_mode=str(spec["owning_mode"]),
+                materialization=deepcopy(spec["materialization"]),
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
                 expires_at=(
@@ -5043,12 +5062,9 @@ class CopilotService:
                 materialized_at=existing.materialized_at if existing is not None else None,
                 discarded_at=None,
                 read_only_safety=deepcopy(context.read_only_safety),
-                source_provider=str(execution.output.get("source_provider") or "gamma"),
-                origin=str(execution.output.get("origin") or "gamma.fundamentals.reverse_valuation"),
-                transformation_note=(
-                    "Created from an authorized read-only Research Operator action. "
-                    "Opening this analysis does not save or mutate a Fundamentals DCF model."
-                ),
+                source_provider=str(spec["source_provider"]),
+                origin=str(spec["origin"]),
+                transformation_note=str(spec["transformation_note"]),
             )
             try:
                 saved = self.store.save_working_analysis(analysis)
@@ -5074,10 +5090,299 @@ class CopilotService:
                 execution.trace,
                 summary=(
                     f"{execution.trace.summary} Created temporary working analysis "
-                    f"`{saved.analysis_id}` for Fundamentals."
+                    f"`{saved.analysis_id}` for {saved.owning_tab.title()}."
                 ),
             ),
         )
+
+    def _operator_working_analysis_spec(
+        self,
+        execution: CopilotToolExecution,
+        *,
+        tool_id: str,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        output = execution.output
+        if not isinstance(output, dict):
+            return None
+        if tool_id == "run_fundamentals_reverse_valuation":
+            ticker = str(output.get("ticker") or arguments.get("ticker") or "").strip().upper()
+            if not ticker:
+                return None
+            label = str(output.get("company_name") or ticker)
+            return {
+                "family_key": f"fundamentals.reverse_valuation:{ticker}",
+                "domain": "fundamentals",
+                "analysis_type": "reverse_valuation",
+                "title": f"{label} reverse valuation",
+                "entity": {
+                    "entity_type": "equity",
+                    "normalized_id": ticker,
+                    "ticker": ticker,
+                    "label": label,
+                },
+                "inputs": deepcopy(arguments),
+                "outputs": deepcopy(output),
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "fundamentals",
+                "owning_mode": "reverse_valuation",
+                "materialization": self._working_analysis_materialization(
+                    tab="fundamentals",
+                    mode="reverse_valuation",
+                    payload_contract="copilot.fundamentals-working-analysis.v1",
+                    navigation_context={"ticker": ticker},
+                    persistence_policy="explicit_confirmation_required",
+                    save_target="fundamentals_dcf_model",
+                ),
+                "source_provider": str(output.get("source_provider") or "gamma"),
+                "origin": str(output.get("origin") or "gamma.fundamentals.reverse_valuation"),
+                "transformation_note": (
+                    "Created from an authorized read-only Research Operator action. Opening this analysis "
+                    "does not save or mutate a Fundamentals DCF model."
+                ),
+            }
+
+        if tool_id == "run_hypothetical_portfolio_comparison":
+            portfolio = self._temporary_portfolio_from_tool_arguments(execution.trace.arguments)
+            if portfolio is None:
+                return None
+            return self._temporary_portfolio_working_analysis_spec(
+                portfolio,
+                analysis_type="hypothetical_portfolio_comparison",
+                title=f"{portfolio['portfolio_label']} comparison",
+                mode="overview",
+                inputs={"portfolio": deepcopy(execution.trace.arguments)},
+                outputs={"portfolio_comparison": deepcopy(output)},
+                warnings=list(output.get("warnings") or []),
+                source_provider=str(
+                    ((output.get("provenance") or {}).get("source_provider")) or "gamma"
+                ),
+                origin=str(((output.get("provenance") or {}).get("origin")) or "gamma.research.compare"),
+            )
+
+        if tool_id in {"run_risk_contribution_analysis", "run_risk_scenario_analysis"}:
+            trace_arguments = deepcopy(execution.trace.arguments)
+            portfolio = self._temporary_portfolio_from_tool_arguments(
+                trace_arguments.get("temporary_portfolio")
+                if isinstance(trace_arguments, dict)
+                else None
+            )
+            if portfolio is not None:
+                scenario = {
+                    key: value
+                    for key, value in trace_arguments.items()
+                    if key != "temporary_portfolio"
+                }
+                is_scenario = tool_id == "run_risk_scenario_analysis"
+                return self._temporary_portfolio_working_analysis_spec(
+                    portfolio,
+                    analysis_type=(
+                        "hypothetical_portfolio_risk_scenario"
+                        if is_scenario
+                        else "hypothetical_portfolio_risk_contribution"
+                    ),
+                    title=(
+                        f"{portfolio['portfolio_label']} risk scenario"
+                        if is_scenario
+                        else f"{portfolio['portfolio_label']} risk contribution"
+                    ),
+                    mode="scenarios" if is_scenario else "overview",
+                    inputs={
+                        "portfolio": portfolio,
+                        "risk_scenario" if is_scenario else "risk_contribution": scenario,
+                    },
+                    outputs={
+                        "risk_scenario" if is_scenario else "risk_contribution": deepcopy(output),
+                    },
+                    warnings=list(output.get("warnings") or []),
+                    source_provider="gamma",
+                    origin="gamma.risk.compute",
+                )
+
+            entity = self._risk_snapshot_working_entity(context, trace_arguments)
+            if entity is None:
+                return None
+            is_scenario = tool_id == "run_risk_scenario_analysis"
+            identity = self._stable_working_identity({"entity": entity, "inputs": trace_arguments})
+            mode = "scenarios" if is_scenario else "overview"
+            return {
+                "family_key": f"risk:{identity}",
+                "domain": "risk",
+                "analysis_type": "risk_scenario" if is_scenario else "risk_contribution",
+                "title": (
+                    f"{trace_arguments.get('scenario_label') or 'Risk'} scenario"
+                    if is_scenario
+                    else "Risk contribution analysis"
+                ),
+                "entity": entity,
+                "inputs": trace_arguments,
+                "outputs": deepcopy(output),
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "risk",
+                "owning_mode": mode,
+                "materialization": self._working_analysis_materialization(
+                    tab="risk",
+                    mode=mode,
+                    payload_contract="copilot.risk-working-analysis.v1",
+                    navigation_context={"source_scope": entity.get("source_scope")},
+                    persistence_policy="non_durable_only",
+                    save_target=None,
+                ),
+                "source_provider": "gamma",
+                "origin": "gamma.risk.compute",
+                "transformation_note": (
+                    "Created from an authorized read-only Risk Operator action. Opening this temporary "
+                    "result does not save, rebalance, trade, or alter the source portfolio."
+                ),
+            }
+        return None
+
+    def _temporary_portfolio_working_analysis_spec(
+        self,
+        portfolio: dict[str, Any],
+        *,
+        analysis_type: str,
+        title: str,
+        mode: str,
+        inputs: dict[str, Any],
+        outputs: dict[str, Any],
+        warnings: list[str],
+        source_provider: str,
+        origin: str,
+    ) -> dict[str, Any]:
+        identity = self._stable_working_identity(
+            {
+                "portfolio_label": portfolio["portfolio_label"],
+                "benchmark_symbol": portfolio["benchmark_symbol"],
+                "legs": portfolio["legs"],
+            }
+        )
+        entity = {
+            "entity_type": "hypothetical_portfolio",
+            "normalized_id": f"temporary_portfolio:{identity}",
+            "label": portfolio["portfolio_label"],
+            "portfolio_label": portfolio["portfolio_label"],
+            "benchmark_symbol": portfolio["benchmark_symbol"],
+            "legs": deepcopy(portfolio["legs"]),
+        }
+        return {
+            "family_key": f"hypothetical_portfolio_risk:{identity}",
+            "merge_workflow": True,
+            "domain": "risk",
+            "analysis_type": analysis_type,
+            "title": title,
+            "entity": entity,
+            "inputs": inputs,
+            "outputs": outputs,
+            "warnings": warnings,
+            "owning_tab": "risk",
+            "owning_mode": mode,
+            "materialization": self._working_analysis_materialization(
+                tab="risk",
+                mode=mode,
+                payload_contract="copilot.risk-working-analysis.v1",
+                navigation_context={
+                    "source_scope": "temporary",
+                    "portfolio_label": portfolio["portfolio_label"],
+                    "benchmark_symbol": portfolio["benchmark_symbol"],
+                },
+                persistence_policy="non_durable_only",
+                save_target=None,
+            ),
+            "source_provider": source_provider,
+            "origin": origin,
+            "transformation_note": (
+                "Gamma combined authorized read-only hypothetical-portfolio and Risk observations into "
+                "one session-ephemeral working analysis. Opening it never saves, rebalances, or trades."
+            ),
+        }
+
+    @staticmethod
+    def _working_analysis_materialization(
+        *,
+        tab: str,
+        mode: str,
+        payload_contract: str,
+        navigation_context: dict[str, Any],
+        persistence_policy: str,
+        save_target: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "contract_version": "copilot.materialization.v1",
+            "payload_contract": payload_contract,
+            "target_tab": tab,
+            "target_mode": mode,
+            "navigation_context": navigation_context,
+            "durable": False,
+            "persistence_policy": persistence_policy,
+            "save_target": save_target,
+        }
+
+    @classmethod
+    def _temporary_portfolio_from_tool_arguments(
+        cls,
+        value: Any,
+    ) -> dict[str, Any] | None:
+        if not isinstance(value, dict) or not isinstance(value.get("legs"), list):
+            return None
+        normalized = cls._normalize_hypothetical_portfolio_arguments(
+            {**value, "include_risk_analysis": False}
+        )
+        return {
+            "portfolio_label": normalized["portfolio_label"],
+            "benchmark_symbol": normalized["benchmark_symbol"],
+            "lookback_days": normalized["lookback_days"],
+            "min_observations": normalized["min_observations"],
+            "legs": list(normalized["legs"]),
+        }
+
+    @classmethod
+    def _risk_snapshot_working_entity(
+        cls,
+        context: CopilotContextBundle,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        snapshot = context.tool_state.get("snapshot")
+        if not isinstance(snapshot, dict):
+            return None
+        positions = []
+        for row in snapshot.get("positions", []):
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("display_symbol") or row.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            positions.append(
+                {
+                    "symbol": symbol,
+                    "weight": cls._optional_float(row.get("weight")),
+                    "sec_type": row.get("sec_type"),
+                    "currency": row.get("currency"),
+                }
+            )
+        source_scope = str(arguments.get("source_scope") or "portfolio")
+        identity = cls._stable_working_identity(
+            {
+                "timestamp": snapshot.get("timestamp"),
+                "source_scope": source_scope,
+                "positions": positions,
+            }
+        )
+        return {
+            "entity_type": "portfolio_snapshot",
+            "normalized_id": f"risk_snapshot:{identity}",
+            "label": f"{source_scope.title()} Risk snapshot",
+            "source_scope": source_scope,
+            "timestamp": snapshot.get("timestamp"),
+            "base_currency": snapshot.get("base_currency"),
+            "legs": positions,
+        }
+
+    @staticmethod
+    def _stable_working_identity(value: Any) -> str:
+        serialized = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        return sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
     def _persist_operator_execution_result(
         self,
@@ -5439,21 +5744,21 @@ class CopilotService:
         if tool_name == "get_news_items_context":
             return {"limit": 8}
         if tool_name == "run_risk_contribution_analysis":
+            temporary_portfolio = self._default_temporary_portfolio_arguments(context)
             return {
-                "source_scope": context.summary_data.get("workspace_mode"),
+                "source_scope": "research" if temporary_portfolio else context.summary_data.get("workspace_mode"),
                 "top_n": 10,
                 "include_monte_carlo": True,
+                "temporary_portfolio": temporary_portfolio,
             }
         if tool_name == "run_risk_scenario_analysis":
-            is_rate_shock = "rate" in str(context.summary_data).lower()
+            prompt = str(context.summary_data.get("prompt") or context.tool_state.get("prompt") or "")
+            scenario = self._extract_risk_scenario_arguments(prompt)
+            temporary_portfolio = self._default_temporary_portfolio_arguments(context)
             return {
-                "scenario_label": "rate_shock_plus_100bps" if is_rate_shock else "baseline_risk",
-                "source_scope": context.summary_data.get("workspace_mode"),
-                "scenario_type": "rate_shock" if is_rate_shock else "baseline",
-                "rate_shift_bps": 100.0 if is_rate_shock else None,
-                "equity_shock_pct": None,
-                "duration_proxy_years": None,
-                "symbol_shocks": [],
+                **scenario,
+                "source_scope": "research" if temporary_portfolio else context.summary_data.get("workspace_mode"),
+                "temporary_portfolio": temporary_portfolio,
             }
         return {}
 
@@ -5904,6 +6209,27 @@ class CopilotService:
     def materialize_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis:
         if self.store is None:
             raise ValueError("Copilot persistence is not configured.")
+        analysis = self.store.get_working_analysis(analysis_id)
+        if analysis is None:
+            return self.store.materialize_working_analysis(analysis_id)
+        supported_targets = {
+            ("fundamentals", "reverse_valuation", "copilot.fundamentals-working-analysis.v1"),
+            ("risk", "overview", "copilot.risk-working-analysis.v1"),
+            ("risk", "scenarios", "copilot.risk-working-analysis.v1"),
+        }
+        materialization = analysis.materialization
+        target = (
+            str(materialization.get("target_tab") or analysis.owning_tab),
+            str(materialization.get("target_mode") or analysis.owning_mode),
+            str(materialization.get("payload_contract") or ""),
+        )
+        if (
+            target not in supported_targets
+            or target[0] != analysis.owning_tab
+            or target[1] != analysis.owning_mode
+            or materialization.get("durable") is not False
+        ):
+            raise ValueError("Copilot working analysis has an unsupported materialization target.")
         return self.store.materialize_working_analysis(analysis_id)
 
     def discard_working_analysis(self, analysis_id: str) -> CopilotWorkingAnalysis:
@@ -6323,6 +6649,15 @@ class CopilotService:
                 planned_tools=["run_hypothetical_portfolio_comparison"],
                 required_context=["symbols", "weights", "benchmark_symbol"],
             )
+            if self._prompt_requests_risk_scenario(prompt):
+                add(
+                    "risk",
+                    "deep",
+                    "The request specifies a Risk scenario for the temporary portfolio, so Gamma must preserve the same legs and weights while applying the typed shocks.",
+                    action_type="run_analysis",
+                    planned_tools=["run_risk_scenario_analysis"],
+                    required_context=["temporary_portfolio", "scenario_shocks"],
+                )
         elif intent == "active_context_research":
             active_domain = self._resolve_domain(request)
             add(active_domain, "medium" if depth_profile != "quick" else "light", "The request is anchored to the active Gamma context.")
@@ -6446,10 +6781,30 @@ class CopilotService:
         normalized = str(prompt or "").lower()
         if "portfolio" not in normalized:
             return False
-        comparison_terms = ("compare", "comparison", "versus", " vs ", "against", "relative to", "to ")
-        hypothetical_terms = ("hypothetical", "research portfolio", "synthetic", "60/40", "70/30", "50/50")
-        return any(term in normalized for term in comparison_terms) and any(
-            term in normalized for term in hypothetical_terms
+        hypothetical_terms = (
+            "hypothetical",
+            "temporary",
+            "research portfolio",
+            "synthetic",
+            "60/40",
+            "70/30",
+            "50/50",
+        )
+        return any(term in normalized for term in hypothetical_terms)
+
+    @staticmethod
+    def _prompt_requests_risk_scenario(prompt: str) -> bool:
+        normalized = str(prompt or "").lower()
+        return any(
+            term in normalized
+            for term in (
+                "shock",
+                "stress",
+                "scenario",
+                "basis point",
+                " bps",
+                "drawdown",
+            )
         )
 
     @staticmethod
@@ -7482,7 +7837,35 @@ class CopilotService:
             if isinstance(portfolio_snapshot, dict):
                 snapshot = portfolio_snapshot
         if not isinstance(result, dict) and snapshot is None:
-            raise ValueError("Risk copilot requires an active risk result or a portfolio snapshot.")
+            if not self._prompt_requests_hypothetical_portfolio(str(request.prompt or "")):
+                raise ValueError("Risk copilot requires an active risk result or a portfolio snapshot.")
+            source = CopilotSourceRef(
+                source_id="risk.hypothetical_request",
+                label="Temporary portfolio Risk request",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.copilot.operator.temporary_risk",
+                description=(
+                    "Prompt-derived temporary portfolio Risk request. Tool execution must supply the "
+                    "typed portfolio legs; no live or saved portfolio is used."
+                ),
+                retrieved_at=now_utc(),
+            )
+            return CopilotContextBundle(
+                domain="risk",
+                current_tab=request.context.current_tab or "risk",
+                summary_data={
+                    "workspace_mode": "research",
+                    "prompt": request.prompt,
+                    "risk": None,
+                    "snapshot": None,
+                },
+                tool_state={"result": None, "snapshot": None, "prompt": request.prompt},
+                sources=[source],
+                warnings=[
+                    "No loaded Risk snapshot was used; execution requires explicit temporary portfolio legs."
+                ],
+            )
         summary_data = {
             "workspace_mode": request.context.workspace_mode or "portfolio",
             "prompt": request.prompt,
@@ -10791,14 +11174,10 @@ class CopilotService:
     ) -> CopilotToolExecution:
         if self.risk_service is None:
             raise ValueError("Risk service is unavailable to Copilot.")
-        snapshot_payload = context.tool_state.get("snapshot")
-        if not isinstance(snapshot_payload, dict):
-            raise ValueError("Risk contribution analysis requires an active portfolio or research snapshot.")
-        snapshot = self._portfolio_snapshot_from_payload(snapshot_payload)
-        source_scope = str(arguments.get("source_scope") or context.summary_data.get("workspace_mode") or "portfolio").strip().lower()
-        if source_scope not in {"portfolio", "research"}:
-            source_scope = "portfolio"
-        data_provider = self.research_provider if source_scope == "research" else self.portfolio_provider
+        snapshot, source_scope, data_provider, temporary_portfolio = self._risk_snapshot_for_operator(
+            arguments,
+            context,
+        )
         normalization_warnings: list[str] = []
         top_n = self._bounded_int(
             arguments.get("top_n"),
@@ -10817,13 +11196,21 @@ class CopilotService:
             RiskComputeRequest(
                 snapshot=snapshot,
                 alpha=0.95,
-                lookback_days=252,
+                lookback_days=(
+                    int(temporary_portfolio["lookback_days"])
+                    if temporary_portfolio is not None
+                    else 252
+                ),
                 horizon_days=1,
                 mc_horizon_days=10,
                 mc_simulation_model="Gaussian",
                 mc_num_simulations=2000,
                 beta_window=126,
-                benchmark_symbol="SPY",
+                benchmark_symbol=(
+                    str(temporary_portfolio["benchmark_symbol"])
+                    if temporary_portfolio is not None
+                    else "SPY"
+                ),
                 base_currency=snapshot.base_currency,
                 include_monte_carlo=include_monte_carlo,
             ),
@@ -10837,6 +11224,7 @@ class CopilotService:
                 "This is read-only and does not rebalance, trade, or modify saved research state."
             ),
             "source_scope": source_scope,
+            "temporary_portfolio": temporary_portfolio,
             "top_n": top_n,
             "include_monte_carlo": include_monte_carlo,
             "metrics": metrics,
@@ -10870,6 +11258,7 @@ class CopilotService:
                     "source_scope": source_scope,
                     "top_n": top_n,
                     "include_monte_carlo": include_monte_carlo,
+                    "temporary_portfolio": temporary_portfolio,
                 },
                 source_ids=[source.source_id],
             ),
@@ -10883,14 +11272,10 @@ class CopilotService:
     ) -> CopilotToolExecution:
         if self.risk_service is None:
             raise ValueError("Risk service is unavailable to Copilot.")
-        snapshot_payload = context.tool_state.get("snapshot")
-        if not isinstance(snapshot_payload, dict):
-            raise ValueError("Risk scenario analysis requires an active portfolio or research snapshot.")
-        snapshot = self._portfolio_snapshot_from_payload(snapshot_payload)
-        source_scope = str(arguments.get("source_scope") or context.summary_data.get("workspace_mode") or "portfolio").strip().lower()
-        if source_scope not in {"portfolio", "research"}:
-            source_scope = "portfolio"
-        data_provider = self.research_provider if source_scope == "research" else self.portfolio_provider
+        snapshot, source_scope, data_provider, temporary_portfolio = self._risk_snapshot_for_operator(
+            arguments,
+            context,
+        )
         scenario_label = str(arguments.get("scenario_label") or "baseline_risk").strip() or "baseline_risk"
         shock_spec, shock_warnings = self._normalize_risk_shock_arguments(
             snapshot,
@@ -10901,13 +11286,21 @@ class CopilotService:
             RiskComputeRequest(
                 snapshot=snapshot,
                 alpha=0.95,
-                lookback_days=252,
+                lookback_days=(
+                    int(temporary_portfolio["lookback_days"])
+                    if temporary_portfolio is not None
+                    else 252
+                ),
                 horizon_days=1,
                 mc_horizon_days=10,
                 mc_simulation_model="Gaussian",
                 mc_num_simulations=2000,
                 beta_window=126,
-                benchmark_symbol="SPY",
+                benchmark_symbol=(
+                    str(temporary_portfolio["benchmark_symbol"])
+                    if temporary_portfolio is not None
+                    else "SPY"
+                ),
                 base_currency=snapshot.base_currency,
                 include_monte_carlo=True,
             ),
@@ -10919,6 +11312,8 @@ class CopilotService:
             shock_spec=shock_spec,
             shock_warnings=shock_warnings,
         )
+        result_summary["source_scope"] = source_scope
+        result_summary["temporary_portfolio"] = temporary_portfolio
         source = CopilotSourceRef(
             source_id="risk.scenario.analysis",
             label="Risk scenario analysis",
@@ -10941,6 +11336,7 @@ class CopilotService:
                     "equity_shock_pct": shock_spec["equity_shock_pct"],
                     "duration_proxy_years": shock_spec["duration_proxy_years"],
                     "symbol_shocks": list(shock_spec["symbol_shocks"]),
+                    "temporary_portfolio": temporary_portfolio,
                 },
                 source_ids=[source.source_id],
             ),
@@ -12026,6 +12422,52 @@ class CopilotService:
             warnings=[str(item) for item in payload.get("warnings", [])],
         )
 
+    def _risk_snapshot_for_operator(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> tuple[PortfolioSnapshot, str, Any, dict[str, Any] | None]:
+        temporary_payload = arguments.get("temporary_portfolio")
+        if isinstance(temporary_payload, dict):
+            normalized = self._normalize_hypothetical_portfolio_arguments(
+                {
+                    **temporary_payload,
+                    "include_risk_analysis": False,
+                }
+            )
+            if self.research_provider is None:
+                raise ValueError(
+                    "Temporary portfolio Risk analysis requires the read-only research data provider."
+                )
+            return (
+                self._hypothetical_portfolio_snapshot(normalized),
+                "research",
+                self.research_provider,
+                {
+                    "portfolio_label": normalized["portfolio_label"],
+                    "benchmark_symbol": normalized["benchmark_symbol"],
+                    "lookback_days": normalized["lookback_days"],
+                    "min_observations": normalized["min_observations"],
+                    "legs": list(normalized["legs"]),
+                },
+            )
+
+        snapshot_payload = context.tool_state.get("snapshot")
+        if not isinstance(snapshot_payload, dict):
+            raise ValueError(
+                "Risk analysis requires an active snapshot or explicit temporary_portfolio legs."
+            )
+        snapshot = self._portfolio_snapshot_from_payload(snapshot_payload)
+        source_scope = str(
+            arguments.get("source_scope")
+            or context.summary_data.get("workspace_mode")
+            or "portfolio"
+        ).strip().lower()
+        if source_scope not in {"portfolio", "research"}:
+            source_scope = "portfolio"
+        data_provider = self.research_provider if source_scope == "research" else self.portfolio_provider
+        return snapshot, source_scope, data_provider, None
+
     @staticmethod
     def _optional_float(value: Any) -> float | None:
         if value is None:
@@ -12226,6 +12668,59 @@ class CopilotService:
                 return result_kind, result
         raise ValueError("Strategy Lab context is missing an active imported, composition, or comparison result.")
 
+    @staticmethod
+    def _temporary_portfolio_input_schema() -> dict[str, Any]:
+        """Strict entity-addressable input shared by the read-only Risk tools."""
+        return {
+            "type": ["object", "null"],
+            "description": (
+                "Optional temporary long-only portfolio used when no Gamma snapshot is loaded. "
+                "It is session-ephemeral research state and never saves, rebalances, or trades."
+            ),
+            "properties": {
+                "portfolio_label": {
+                    "type": ["string", "null"],
+                    "description": "Optional label for the temporary portfolio.",
+                },
+                "benchmark_symbol": {
+                    "type": ["string", "null"],
+                    "description": "Benchmark ticker. Defaults to SPY.",
+                },
+                "lookback_days": {
+                    "type": ["integer", "null"],
+                    "description": "Historical lookback in days, bounded to 20-2520.",
+                },
+                "min_observations": {
+                    "type": ["integer", "null"],
+                    "description": "Minimum aligned observations, bounded to 2-2520.",
+                },
+                "legs": {
+                    "type": "array",
+                    "description": "Exact temporary portfolio legs and user-specified non-negative weights.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string"},
+                            "weight": {"type": "number"},
+                            "sec_type": {"type": ["string", "null"]},
+                            "currency": {"type": ["string", "null"]},
+                            "exchange": {"type": ["string", "null"]},
+                        },
+                        "required": ["symbol", "weight", "sec_type", "currency", "exchange"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": [
+                "portfolio_label",
+                "benchmark_symbol",
+                "lookback_days",
+                "min_observations",
+                "legs",
+            ],
+            "additionalProperties": False,
+        }
+
     @classmethod
     def _normalize_hypothetical_portfolio_arguments(cls, arguments: dict[str, Any]) -> dict[str, Any]:
         raw_legs = arguments.get("legs")
@@ -12330,6 +12825,8 @@ class CopilotService:
             return None
         weights = cls._extract_ratio_weights(prompt, len(leg_symbols))
         if weights is None:
+            weights = cls._extract_labeled_weights(prompt, leg_symbols)
+        if weights is None:
             weights = [1.0 / len(leg_symbols)] * len(leg_symbols)
         include_risk_analysis = any(
             term in prompt.lower()
@@ -12341,6 +12838,7 @@ class CopilotService:
                 "drawdown",
                 "contribution",
                 "stress",
+                "shock",
             )
         )
         return {
@@ -12361,6 +12859,22 @@ class CopilotService:
             ],
         }
 
+    @classmethod
+    def _default_temporary_portfolio_arguments(
+        cls,
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        default = cls._default_hypothetical_portfolio_arguments(context)
+        if default is None:
+            return None
+        return {
+            "portfolio_label": default["portfolio_label"],
+            "benchmark_symbol": default["benchmark_symbol"],
+            "lookback_days": default["lookback_days"],
+            "min_observations": default["min_observations"],
+            "legs": list(default["legs"]),
+        }
+
     @staticmethod
     def _extract_ratio_weights(prompt: str, expected_count: int) -> list[float] | None:
         for match in re.finditer(r"\b\d{1,3}(?:\s*/\s*\d{1,3})+\b", prompt):
@@ -12368,6 +12882,106 @@ class CopilotService:
             if len(parts) == expected_count and sum(parts) > 0:
                 return [value / sum(parts) for value in parts]
         return None
+
+    @staticmethod
+    def _extract_labeled_weights(prompt: str, symbols: list[str]) -> list[float] | None:
+        """Read `60% AAPL / 40% TLT` and `AAPL 60%, TLT 40%` without reordering legs."""
+        captured: dict[str, float] = {}
+        for symbol in symbols:
+            escaped = re.escape(symbol)
+            patterns = (
+                rf"(?<![\w.])(\d{{1,3}}(?:\.\d+)?)\s*%\s*(?:in\s+)?{escaped}(?![\w.])",
+                rf"(?<![\w.]){escaped}(?![\w.])\s*(?:at|=|:)?\s*(\d{{1,3}}(?:\.\d+)?)\s*%",
+            )
+            for pattern in patterns:
+                match = re.search(pattern, prompt, flags=re.IGNORECASE)
+                if match:
+                    captured[symbol] = float(match.group(1))
+                    break
+        if len(captured) != len(symbols):
+            return None
+        total = sum(captured.values())
+        if total <= 0:
+            return None
+        return [captured[symbol] / total for symbol in symbols]
+
+    @classmethod
+    def _extract_risk_scenario_arguments(cls, prompt: str) -> dict[str, Any]:
+        normalized = (
+            str(prompt or "")
+            .replace("\u2212", "-")
+            .replace("\u2013", "-")
+            .replace("\u2014", "-")
+            .strip()
+        )
+        lower = normalized.lower()
+        rate_match = re.search(
+            r"([+-]?\d+(?:\.\d+)?)\s*(?:bps?|basis\s+points?)\b",
+            lower,
+        )
+        rate_shift_bps = float(rate_match.group(1)) if rate_match else None
+
+        equity_shock_pct = None
+        equity_patterns = (
+            r"([+-]?\d+(?:\.\d+)?)\s*%\s*(?:broad\s+)?(?:equity|stock|market)\s*(?:shock|drawdown|selloff)",
+            r"(?:equity|stock|market)\s*(?:shock|drawdown|selloff)(?:\s+of|\s+by|\s+at|\s*=)?\s*([+-]?\d+(?:\.\d+)?)\s*%",
+        )
+        for pattern in equity_patterns:
+            match = re.search(pattern, lower)
+            if match:
+                equity_shock_pct = float(match.group(1)) / 100.0
+                break
+
+        duration_proxy_years = None
+        duration_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*(?:year|yr)s?\s+(?:duration|duration\s+proxy)",
+            lower,
+        )
+        if duration_match:
+            duration_proxy_years = float(duration_match.group(1))
+
+        symbol_shocks: list[dict[str, Any]] = []
+        shock_patterns = (
+            r"\b([A-Z]{1,6}(?:\.[A-Z])?)\s+shock(?:\s+of|\s+by|\s+at|\s*=)?\s*([+-]?\d+(?:\.\d+)?)\s*%",
+            r"\bshock\s+([A-Z]{1,6}(?:\.[A-Z])?)(?:\s+by|\s+at|\s*=)?\s*([+-]?\d+(?:\.\d+)?)\s*%",
+        )
+        seen_symbols: set[str] = set()
+        for pattern in shock_patterns:
+            for match in re.finditer(pattern, normalized):
+                symbol = match.group(1).upper()
+                if symbol in seen_symbols:
+                    continue
+                seen_symbols.add(symbol)
+                symbol_shocks.append(
+                    {"symbol": symbol, "price_shock_pct": float(match.group(2)) / 100.0}
+                )
+
+        has_rate_shock = rate_shift_bps is not None or bool(
+            re.search(r"\b(?:rate|rates|yield|yields)\b", lower)
+        )
+        if has_rate_shock and rate_shift_bps is None:
+            rate_shift_bps = 100.0
+
+        if rate_shift_bps is not None:
+            scenario_type = "rate_shock"
+            scenario_label = f"rate_shock_{rate_shift_bps:+g}bps"
+        elif equity_shock_pct is not None:
+            scenario_type = "equity_drawdown"
+            scenario_label = f"equity_shock_{equity_shock_pct * 100:+g}pct"
+        elif symbol_shocks:
+            scenario_type = "custom"
+            scenario_label = "custom_symbol_shocks"
+        else:
+            scenario_type = "baseline"
+            scenario_label = "baseline_risk"
+        return {
+            "scenario_label": scenario_label,
+            "scenario_type": scenario_type,
+            "rate_shift_bps": rate_shift_bps,
+            "equity_shock_pct": equity_shock_pct,
+            "duration_proxy_years": duration_proxy_years,
+            "symbol_shocks": symbol_shocks,
+        }
 
     @staticmethod
     def _bounded_int(

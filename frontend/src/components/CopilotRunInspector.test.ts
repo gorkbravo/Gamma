@@ -194,7 +194,7 @@ describe("CopilotRunInspector", () => {
     expect(body).toContain("Temporary");
     expect(body).toContain("Lockheed Martin Corporation reverse valuation");
     expect(body).toContain("fundamentals / reverse valuation");
-    expect(body).toContain("Opening does not save a DCF model");
+    expect(body).toContain("Opening does not save or alter durable Gamma state");
     expect(body).toContain("Open in Fundamentals");
     expect(body).toContain("Discard");
   });
