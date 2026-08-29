@@ -40,9 +40,20 @@ export type CopilotRiskWorkingAnalysisTarget = {
   mode: "overview" | "scenarios";
 };
 
+export type CopilotResearchScriptWorkingAnalysisTarget = {
+  analysisId: string;
+  tab: "strategy_lab";
+  mode: "script";
+  scriptId: string;
+  revisionId: string;
+  inputSnapshotId: string;
+  selectedRunId: string | null;
+};
+
 export type CopilotWorkingAnalysisTarget =
   | CopilotFundamentalsWorkingAnalysisTarget
-  | CopilotRiskWorkingAnalysisTarget;
+  | CopilotRiskWorkingAnalysisTarget
+  | CopilotResearchScriptWorkingAnalysisTarget;
 
 /** Accept only explicit non-durable materialization contracts supported by Gamma. */
 export function resolveWorkingAnalysisTarget(
@@ -83,6 +94,28 @@ export function resolveWorkingAnalysisTarget(
       analysisId: analysis.analysis_id,
       tab: "risk",
       mode: analysis.owning_mode
+    };
+  }
+  const scriptId = String(analysis.entity.script_id ?? analysis.entity.normalized_id ?? "").trim();
+  const revisionId = String(analysis.entity.revision_id ?? "").trim();
+  const inputSnapshotId = String(analysis.entity.input_snapshot_id ?? "").trim();
+  const selectedRunId = String(analysis.entity.selected_run_id ?? "").trim() || null;
+  if (
+    analysis.owning_tab === "strategy_lab" &&
+    analysis.owning_mode === "script" &&
+    materialization.payload_contract === "copilot.strategy-lab-script-working-analysis.v1" &&
+    scriptId &&
+    revisionId &&
+    inputSnapshotId
+  ) {
+    return {
+      analysisId: analysis.analysis_id,
+      tab: "strategy_lab",
+      mode: "script",
+      scriptId,
+      revisionId,
+      inputSnapshotId,
+      selectedRunId
     };
   }
   return null;

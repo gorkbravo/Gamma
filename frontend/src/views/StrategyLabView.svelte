@@ -1,5 +1,6 @@
 <script lang="ts">
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import StrategyScriptWorkspace from "../components/StrategyScriptWorkspace.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -64,6 +65,7 @@
 
   const strategyResearchModes: Array<{ id: StrategyLabMode; label: string }> = [
     { id: "composer", label: "Composer" },
+    { id: "script", label: "Script" },
     { id: "backtest_analyze", label: "Backtest" },
     { id: "regime_stress", label: "Regime Stress" },
     { id: "imports", label: "Imports" },
@@ -424,7 +426,8 @@
   }
   $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
   $: activeStrategyResult = strategyComposition ?? strategyResult;
-  $: strategyModeActive = mode !== "saved_runs";
+  $: scriptModeActive = mode === "script";
+  $: strategyModeActive = mode !== "saved_runs" && mode !== "script";
   $: savedModeActive = mode === "saved_runs";
   $: visibleSavedItems = savedResearchList.filter((item) => classifySavedResearchSurface(item) === "strategy");
   $: composerOptions = buildStrategyComposerObjects(result, strategyResult, visibleSavedItems);
@@ -553,7 +556,7 @@
   <article class="panel header-panel">
     <div class="header-top">
       <span class="title">Strategy Lab</span>
-      <span class="subtitle">Composer / backtests / saved runs</span>
+      <span class="subtitle">Composer / scripts / backtests / saved runs</span>
       {#if strategyLoading || savedLoading || handoffLoading}<span class="loading-pill">Refreshing</span>{/if}
     </div>
 
@@ -574,7 +577,9 @@
     </div>
   </article>
 
-  {#if strategyModeActive}
+  {#if scriptModeActive}
+    <StrategyScriptWorkspace />
+  {:else if strategyModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
         {#if mode === "composer"}

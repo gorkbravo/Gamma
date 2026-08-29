@@ -17,7 +17,7 @@ Original 2026-06-12 audit:
 - Backend: FastAPI on `127.0.0.1:8000`
 - Frontend: Vite on `127.0.0.1:5173`
 - Session auth header: `X-Gamma-Session`
-- IBKR: connected to account `U15779203`
+- IBKR: connected to account `U1234567`
 - Market data: delayed mode
 - Commodities provider: IBKR futures curves, with WTI, Brent, Henry Hub, gold, and copper enabled
 

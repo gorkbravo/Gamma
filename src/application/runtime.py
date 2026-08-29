@@ -28,6 +28,7 @@ from src.application.provider_capability_registry import (
     build_default_provider_capability_registry,
 )
 from src.application.research_service import ResearchService
+from src.application.research_script_service import ResearchScriptService
 from src.application.risk_service import RiskService
 from src.application.sitrep_service import SitrepService
 from src.application.system_service import normalize_market_data_mode
@@ -69,6 +70,7 @@ from src.services.maritime_adapters import (
 )
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
+from src.services.openai_research_script_runtime import OpenAICodeInterpreterRuntime
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.news_adapters import NewsEventProvider, RssNewsEventProvider, SampleNewsEventProvider
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
@@ -83,6 +85,9 @@ from src.services.research_market_data import (
     UnavailableListedMarketHistoryProvider,
     YFinanceListedMarketHistoryProvider,
 )
+from src.application.request_limits import MAX_RESEARCH_SCRIPT_RUN_DURATION_SECONDS
+from src.services.research_script_runtime import MockResearchScriptRuntime, ResearchScriptRuntime
+from src.services.research_script_store import ResearchScriptStore
 from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 from src.services.research_cache import ResearchHistoryCache
@@ -120,12 +125,15 @@ class ApplicationRuntime:
     fx_service: FXService
     portfolio_history: PortfolioHistoryStore
     saved_research_store: SavedResearchStore
+    research_script_store: ResearchScriptStore
+    research_script_runtime: ResearchScriptRuntime
     copilot_store: CopilotStore
     risk_free_service: RiskFreeRateService
     portfolio_provider: PortfolioDataProvider
     research_provider: ResearchDataProvider
     portfolio_service: PortfolioService
     research_service: ResearchService
+    research_script_service: ResearchScriptService
     prediction_market_service: PredictionMarketService
     macro_service: MacroService
     commodities_service: CommoditiesService
@@ -260,6 +268,8 @@ def build_runtime(
     )
     portfolio_history = PortfolioHistoryStore(base_dir=resolved_history_dir, mock=bool(mock_mode))
     saved_research_store = SavedResearchStore(base_dir=resolved_history_dir / "research")
+    research_script_store = ResearchScriptStore(base_dir=resolved_history_dir / "research_scripts")
+    research_script_runtime = _build_research_script_runtime()
     copilot_store = CopilotStore(base_dir=resolved_history_dir / "copilot")
     risk_free_service = RiskFreeRateService(cache=cache)
 
@@ -320,6 +330,7 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     research_service = ResearchService(research_provider, saved_store=saved_research_store)
+    research_script_service = ResearchScriptService(research_script_store, research_script_runtime)
     prediction_research_store = PredictionResearchStore(base_dir=resolved_history_dir / "prediction_markets")
     prediction_market_service = PredictionMarketService(
         adapters={
@@ -410,6 +421,7 @@ def build_runtime(
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,
         research_service=research_service,
+        research_script_service=research_script_service,
         commodities_service=commodities_service,
         maritime_service=maritime_service,
         news_service=news_service,
@@ -437,12 +449,15 @@ def build_runtime(
         fx_service=fx_service,
         portfolio_history=portfolio_history,
         saved_research_store=saved_research_store,
+        research_script_store=research_script_store,
+        research_script_runtime=research_script_runtime,
         copilot_store=copilot_store,
         risk_free_service=risk_free_service,
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,
         portfolio_service=portfolio_service,
         research_service=research_service,
+        research_script_service=research_script_service,
         prediction_market_service=prediction_market_service,
         macro_service=macro_service,
         commodities_service=commodities_service,
@@ -532,6 +547,27 @@ def _build_copilot_provider(*, allow_mock: bool = True):
             or "https://api.openai.com/v1/responses"
         ).strip(),
         store_responses=storage_policy.effective == "enabled",
+    )
+
+
+def _build_research_script_runtime() -> ResearchScriptRuntime:
+    configured = (os.getenv("GAMMA_RESEARCH_SCRIPT_RUNTIME", "mock") or "mock").strip().lower()
+    if configured in {"mock", "demo", "offline", "disabled", "none", "off"}:
+        return MockResearchScriptRuntime()
+    if configured != "openai":
+        # Unsupported runtime values never broaden authority; the deterministic
+        # mock remains the safe local development path.
+        return MockResearchScriptRuntime()
+    configured_model = (
+        os.getenv("GAMMA_RESEARCH_SCRIPT_MODEL")
+        or os.getenv("GAMMA_COPILOT_MODEL")
+        or OPENAI_BASELINE_MODEL
+    )
+    return OpenAICodeInterpreterRuntime(
+        api_key=(os.getenv("OPENAI_API_KEY", "") or "").strip() or None,
+        model=str(configured_model).strip(),
+        configured_runtime=configured,
+        max_duration_seconds=MAX_RESEARCH_SCRIPT_RUN_DURATION_SECONDS,
     )
 
 

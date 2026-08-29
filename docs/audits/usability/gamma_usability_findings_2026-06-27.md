@@ -3,12 +3,12 @@
 Date: 2026-06-27
 Audience: future AI agents and contributors improving Gamma
 Mode: full
-Data: live IBKR, account U15779203, market data `auto` (delayed snapshot; weekend session — last trading day Fri 2026-06-26)
+Data: live IBKR, account U1234567, market data `auto` (delayed snapshot; weekend session — last trading day Fri 2026-06-26)
 Context: Live trade-idea audit run on a Saturday evening. Two evidenced theses attempted (a Nikkei single-day dislocation; a precious-metals selloff). Both dead-ended on data-trust problems — and the second uncovered a P0 in how the Commodities tab computes its headline "% CHG". Builds on `gamma_usability_findings_2026-06-15.md`.
 
 ## Audit Setup
 - Backend: FastAPI `127.0.0.1:8000`; Frontend: Vite `127.0.0.1:5173`; session header `X-Gamma-Session`.
-- IBKR: account `U15779203`, connected via TWS on port 7496 (`market_data_mode=auto`), `MOCK_DATA=false`. Live-IBKR precondition check passed (exit 0).
+- IBKR: account `U1234567`, connected via TWS on port 7496 (`market_data_mode=auto`), `MOCK_DATA=false`. Live-IBKR precondition check passed (exit 0).
 - Operator note: the stack was not running at session start and `.env` had no `GAMMA_SESSION_TOKEN`. Pinned a dev token in `.env` (matching the existing `frontend/.env.local` token), started backend + frontend, and toggled the IBKR connection via `POST /system/connection/toggle` before auditing.
 - Tabs exercised: Sitrep, Equity Research, Commodities, Fundamentals, Copilot (inline dock). Touched via provenance/API cross-checks: Macro (FX), Prediction Markets (auto-loaded). **Out of scope this run:** Strategy Lab, Risk, Options, Crypto, Sealanes, Macro UI, Portfolio.
 - Outside tools used: none. All cross-checks were done inside Gamma or against Gamma's own backend payloads. (Weekend timing means several live feeds were stale-by-design; flagged as coverage, not defects, where relevant.)

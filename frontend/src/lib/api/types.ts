@@ -61,7 +61,139 @@ export type EquityResearchMode =
   | "comparables"
   | "scenario_context"
   | "saved_equity_research";
-export type StrategyLabMode = "composer" | "backtest_analyze" | "regime_stress" | "imports" | "saved_runs";
+export type StrategyLabMode = "composer" | "script" | "backtest_analyze" | "regime_stress" | "imports" | "saved_runs";
+
+export type ResearchScriptRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out"
+  | "expired"
+  | "unavailable"
+  | "incomplete";
+
+export type ResearchScriptOutputKind =
+  | "log"
+  | "error"
+  | "metric"
+  | "table"
+  | "image"
+  | "file"
+  | "summary"
+  | "warning";
+
+export interface ResearchScript {
+  script_id: string;
+  session_id: string;
+  title: string;
+  language: "python";
+  status: "draft" | "active" | "archived" | "discarded";
+  canonical_revision_id: string;
+  created_by: "operator" | "user";
+  created_at: string;
+  updated_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  contract_version: string;
+}
+
+export interface ResearchScriptRevision {
+  revision_id: string;
+  script_id: string;
+  revision_number: number;
+  source: string;
+  source_sha256: string;
+  created_by: "operator" | "user";
+  created_at: string;
+  parent_revision_id: string | null;
+  status: "canonical" | "staged" | "superseded" | "rejected";
+  change_summary: string | null;
+  operator_run_id: string | null;
+  expected_parent_sha256: string | null;
+  contract_version: string;
+}
+
+export interface ResearchScriptDetail {
+  script: ResearchScript;
+  revisions: ResearchScriptRevision[];
+}
+
+export interface ResearchScriptOutput {
+  output_id: string;
+  kind: ResearchScriptOutputKind;
+  sequence: number;
+  media_type: string;
+  byte_size: number;
+  created_at: string;
+  artifact_ref: string | null;
+  provider_native_ref: string | null;
+  text: string | null;
+  metric_name: string | null;
+  metric_value: number | string | null;
+  unit: string | null;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  filename: string | null;
+  alt_text: string | null;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  generated: boolean;
+  contract_version: string;
+}
+
+export interface ResearchScriptRun {
+  run_id: string;
+  script_id: string;
+  revision_id: string;
+  source_sha256: string;
+  input_snapshot_id: string;
+  input_manifest_sha256: string;
+  input_file_count: number;
+  input_total_bytes: number;
+  runtime_provider: string;
+  runtime_kind: string;
+  provider_container_id: string | null;
+  provider_response_id: string | null;
+  status: ResearchScriptRunStatus;
+  started_at: string;
+  completed_at: string | null;
+  outputs: ResearchScriptOutput[];
+  source_refs: Array<Record<string, unknown>>;
+  warnings: string[];
+  usage: Record<string, unknown>;
+  limits: Record<string, number>;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  contract_version: string;
+}
+
+export interface ResearchScriptListResponse {
+  items: ResearchScript[];
+}
+
+export interface ResearchScriptRunListResponse {
+  items: ResearchScriptRun[];
+}
+
+export interface ResearchScriptRuntimeCapabilities {
+  configured_runtime: string;
+  provider: string;
+  runtime_kind: string;
+  available: boolean;
+  executes_source: boolean;
+  network_access: boolean;
+  supported_output_types: string[];
+  supports_cancellation: boolean;
+  max_duration_seconds: number;
+  active_limits: Record<string, number>;
+  model: string | null;
+  sanitized_provider_status: string;
+}
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
 export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";

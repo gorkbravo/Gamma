@@ -1107,7 +1107,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             for step in plan.steps
             if step.tool_id
             and step.action_type
-            in {"read_context", "run_analysis", "fetch_external_context"}
+            in {"read_context", "run_analysis", "fetch_external_context", "draft_change"}
             and not step.requires_confirmation
         ) or "none"
         return (
@@ -1120,12 +1120,17 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "through the tool schemas; never replace them with unrelated defaults. "
             "Gamma validates permissions and arguments and may return a validation "
             "or budget error as an observation. Do not bypass it or invent a tool. "
-            "Never place trades, rebalance, mutate accounts or wallets, execute "
-            "arbitrary code, or apply durable local changes. "
+            "Never place trades, rebalance, mutate accounts or wallets, invoke shell, "
+            "install packages, access a runtime network, or apply durable local changes. "
+            "The two strategy_lab Research Script actions are the only authorized code-workflow "
+            "surface: draft only when the current turn explicitly requests Script authoring, and "
+            "run only when it explicitly requests execution with exact immutable ids and hashes. "
             "Your final schema-valid research card must directly answer the user's "
             "goal from actual tool outputs, distinguish evidence from inference, "
             "cite only source_id values returned by tools, retain warnings and "
-            "missing-data limits, and never end with only a generic count of steps."
+            "missing-data limits, cite relevant Script/revision/run identities, never claim a "
+            "failed, timed-out, unavailable, or incomplete Script run succeeded, and never end "
+            "with only a generic count of steps."
         )
 
     def _store_responses(self, request: CopilotResearchCardRequest) -> bool:

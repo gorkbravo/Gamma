@@ -108,6 +108,7 @@ describe("navigation tab ordering", () => {
     expect(getModeShortcutHint("equity_research", "saved_equity_research")).toBe("Shift+5");
     expect(getTabModes("strategy_lab").map((mode) => mode.id)).toEqual([
       "composer",
+      "script",
       "backtest_analyze",
       "regime_stress",
       "imports",
@@ -213,6 +214,7 @@ describe("navigation tab ordering", () => {
     ]);
     expect(snapshot.strategy_lab?.map((mode) => mode.id)).toEqual([
       "composer",
+      "script",
       "backtest_analyze",
       "regime_stress",
       "imports",

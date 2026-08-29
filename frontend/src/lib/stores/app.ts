@@ -13,6 +13,7 @@ export { requestMetrics, resetRequestMetrics } from "../request-metrics";
 export { queryStates } from "../query-cache";
 export function clearFrontendQueryCache() { queryCache.clear(); }
 import { beginLoading, endLoading, lastError, loading, setError, setLoading } from "./runtime";
+import { researchScriptWorkspace } from "./research-script";
 export { lastError, loading } from "./runtime";
 import {
   diagnostics, diagnosticsLog, loadDiagnostics, loadProviderUsage, providerUsage,
@@ -3464,6 +3465,10 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         }
       };
     case "strategy_lab":
+      const scriptWorkspace = get(researchScriptWorkspace);
+      const canonicalScriptRevision = scriptWorkspace.detail?.revisions.find(
+        (item) => item.revision_id === scriptWorkspace.detail?.script.canonical_revision_id
+      ) ?? null;
       return {
         current_tab: "strategy_lab",
         workspace_mode: workspaceMode,
@@ -3471,7 +3476,36 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
           imported_result: get(strategyLabResult),
           composition: get(strategyLabComposition),
           compare_result: get(researchCompareResult),
-          handoff_context: buildStrategyLabHandoffContextForCopilot()
+          handoff_context: buildStrategyLabHandoffContextForCopilot(),
+          script_state: scriptWorkspace.detail && canonicalScriptRevision
+            ? {
+                script_id: scriptWorkspace.detail.script.script_id,
+                canonical_revision_id: canonicalScriptRevision.revision_id,
+                source_sha256: canonicalScriptRevision.source_sha256,
+                canonical_source: canonicalScriptRevision.source,
+                selected_revision_id: scriptWorkspace.selectedRevisionId,
+                selected_run_id: scriptWorkspace.selectedRun?.run_id ?? null,
+                selected_run_status: scriptWorkspace.selectedRun?.status ?? null,
+                input_snapshot_id: scriptWorkspace.selectedRun?.input_snapshot_id ?? null,
+                manifest_sha256: scriptWorkspace.selectedRun?.input_manifest_sha256 ?? null,
+                selected_run_outputs: scriptWorkspace.selectedRun?.outputs.map((item) => ({
+                  output_id: item.output_id,
+                  kind: item.kind,
+                  media_type: item.media_type,
+                  metric_name: item.metric_name,
+                  metric_value: item.metric_value,
+                  columns: item.columns,
+                  rows: item.rows,
+                  text: item.text,
+                  filename: item.filename,
+                  generated: item.generated
+                })) ?? [],
+                selected_run_warnings: scriptWorkspace.selectedRun?.warnings ?? [],
+                staged_revision_ids: scriptWorkspace.detail.revisions
+                  .filter((item) => item.status === "staged")
+                  .map((item) => item.revision_id)
+              }
+            : null
         }
       };
     case "macro":

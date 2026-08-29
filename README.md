@@ -36,7 +36,7 @@ Gamma does not:
 
 - place orders or execute strategies
 - act as a trading bot or portfolio rebalancer
-- run arbitrary user strategy code inside the app
+- run unrestricted or host-integrated user strategy code; the approved future Strategy Lab `Script` mode must use an isolated runtime with no Gamma, host, credential, broker, wallet, network, or execution authority
 - support IB Gateway yet; the live path is Trader Workstation
 - treat heuristic macro interpretation layers as causal models
 - treat commodity curve, roll-yield, spread, or inventory heuristics as execution signals
@@ -384,6 +384,8 @@ This tab owns read-only strategy-object work. Its modes are:
 
 Current Strategy Lab flows can import CSV return streams, analyze normalized performance, compose return-bearing Gamma objects, inspect drawdown and rolling-risk stress windows, and reload saved normalized runs. It does not execute strategy code, connect to broker execution, or persist raw uploaded CSV rows by default.
 
+An isolated `Script` mode is approved as future Workstream 2A scope but is not implemented yet. Its contract is documented in [`docs/research_script_workspace_plan.md`](./docs/research_script_workspace_plan.md): Copilot Operator may draft transparent Python, the user controls the canonical source after materialization, and only an ephemeral no-network sandbox can run the visible revision over copied read-only data.
+
 #### Macro tab
 
 Macro is paused at the roadmap's first-pass checkpoint and is the densest research workspace in the app. It is a multi-mode surface with shared context:
@@ -671,7 +673,7 @@ The main roadmap buckets are:
 
 The likely feature direction is:
 
-- `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, and comparison workflows
+- `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, comparison workflows, and the approved isolated Research Script Workspace
 - `Macro`: finish EU/global depth, official-event breadth, policy-path interpretation, and coherence / lead-lag refinement
 - `IV`: harden the shipped volatility lab around selectable surface models, skew / term views, Gamma-owned Greeks, realized-vs-implied overlays, implied-probability slices, strategy payoff flow, source transparency, history, and cross-tab handoffs
 - `Crypto`: add real wallet analytics, stronger pool / transaction monitoring, richer peer and basket comparisons, and later derivatives overlays
@@ -680,7 +682,7 @@ The likely feature direction is:
 - `Commodities`: treat as a full research tab if it includes futures curves, calendar spreads, inter-commodity spreads, inventories, seasonal overlays, and macro / geopolitical links
 - `Maritime Intelligence`: treat AIS and shipping data as a trade-flow intelligence surface, with live map, chokepoints, route shifts, event replay, commodity-flow links, and possible later shadow-fleet analytics
 
-The important boundary does not change: Gamma can study strategies, market data, vessels, commodities, wallets, options, and companies, but it should remain a read-only research environment.
+The important boundary does not change: Gamma can study strategies, market data, vessels, commodities, wallets, options, and companies, and may run isolated research scripts over copied data, but it remains a read-only research environment with no trading, broker/account/wallet mutation, host-code, credential, or unrestricted execution authority.
 
 ## Practical Limitations
 

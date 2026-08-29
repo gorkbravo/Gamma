@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.api.schemas.research import (
     ResearchAnalyzeRequestModel,
@@ -21,12 +21,38 @@ from src.api.schemas.research import (
     StrategyLabResolvedHandoffModel,
     StrategyLabPortfolioCompositionRequestModel,
 )
+from src.api.schemas.research_script import (
+    ResearchScriptCreateRequestModel,
+    ResearchScriptDetailModel,
+    ResearchScriptListResponseModel,
+    ResearchScriptRevisionCreateRequestModel,
+    ResearchScriptRevisionDecisionRequestModel,
+    ResearchScriptRunCreateRequestModel,
+    ResearchScriptRunListResponseModel,
+    ResearchScriptRunModel,
+    ResearchScriptRuntimeCapabilitiesModel,
+)
+from src.application.research_script_service import (
+    ResearchScriptConflictError,
+    ResearchScriptNotFoundError,
+    ResearchScriptValidationError,
+)
 from src.application.research_service import ResearchAnalysisRequest
 from src.application.research_validation import ResearchValidationError
 from src.models.research_overview import ResearchOverviewRequest
 
 
 router = APIRouter(tags=["research"])
+
+
+def _raise_script_http_error(exc: Exception) -> None:
+    if isinstance(exc, ResearchScriptNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, ResearchScriptConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, ResearchScriptValidationError):
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
+    raise exc
 
 
 @router.get("/research/overview", response_model=ResearchOverviewResponseModel)
@@ -136,6 +162,163 @@ def resolve_strategy_lab_handoff(
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
     return StrategyLabResolvedHandoffModel.from_domain(result)
+
+
+@router.post("/research/strategy-lab/scripts", response_model=ResearchScriptDetailModel, status_code=201)
+def create_research_script(
+    payload: ResearchScriptCreateRequestModel,
+    request: Request,
+) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.create_script(payload.to_domain())
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.get("/research/strategy-lab/scripts", response_model=ResearchScriptListResponseModel)
+def list_research_scripts(request: Request) -> ResearchScriptListResponseModel:
+    rows = request.app.state.runtime.research_script_service.list_scripts()
+    return ResearchScriptListResponseModel.from_domain(rows)
+
+
+@router.get(
+    "/research/strategy-lab/scripts/runtime-capabilities",
+    response_model=ResearchScriptRuntimeCapabilitiesModel,
+)
+def get_research_script_runtime_capabilities(
+    request: Request,
+) -> ResearchScriptRuntimeCapabilitiesModel:
+    return ResearchScriptRuntimeCapabilitiesModel.from_domain(
+        request.app.state.runtime.research_script_service.capabilities()
+    )
+
+
+@router.get("/research/strategy-lab/scripts/{script_id}", response_model=ResearchScriptDetailModel)
+def get_research_script(script_id: str, request: Request) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.get_script(script_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/revisions",
+    response_model=ResearchScriptDetailModel,
+    status_code=201,
+)
+def create_research_script_revision(
+    script_id: str,
+    payload: ResearchScriptRevisionCreateRequestModel,
+    request: Request,
+) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.create_revision(
+            script_id,
+            payload.to_domain(),
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/revisions/{revision_id}/accept",
+    response_model=ResearchScriptDetailModel,
+)
+def accept_research_script_revision(
+    script_id: str,
+    revision_id: str,
+    payload: ResearchScriptRevisionDecisionRequestModel,
+    request: Request,
+) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.accept_staged_revision(
+            script_id,
+            revision_id,
+            expected_parent_sha256=payload.expected_parent_sha256,
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+        raise AssertionError("unreachable")
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/revisions/{revision_id}/reject",
+    response_model=ResearchScriptDetailModel,
+)
+def reject_research_script_revision(
+    script_id: str,
+    revision_id: str,
+    payload: ResearchScriptRevisionDecisionRequestModel,
+    request: Request,
+) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.reject_staged_revision(
+            script_id,
+            revision_id,
+            expected_parent_sha256=payload.expected_parent_sha256,
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+        raise AssertionError("unreachable")
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/runs",
+    response_model=ResearchScriptRunModel,
+    status_code=201,
+)
+def create_research_script_run(
+    script_id: str,
+    payload: ResearchScriptRunCreateRequestModel,
+    request: Request,
+) -> ResearchScriptRunModel:
+    try:
+        run = request.app.state.runtime.research_script_service.create_run(script_id, payload.to_domain())
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptRunModel.from_domain(run)
+
+
+@router.get(
+    "/research/strategy-lab/scripts/{script_id}/runs",
+    response_model=ResearchScriptRunListResponseModel,
+)
+def list_research_script_runs(script_id: str, request: Request) -> ResearchScriptRunListResponseModel:
+    try:
+        runs = request.app.state.runtime.research_script_service.list_runs(script_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptRunListResponseModel.from_domain(runs)
+
+
+@router.get("/research/strategy-lab/script-runs/{run_id}", response_model=ResearchScriptRunModel)
+def get_research_script_run(run_id: str, request: Request) -> ResearchScriptRunModel:
+    try:
+        run = request.app.state.runtime.research_script_service.get_run(run_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptRunModel.from_domain(run)
+
+
+@router.get("/research/strategy-lab/script-runs/{run_id}/outputs/{output_id}")
+def download_research_script_output(run_id: str, output_id: str, request: Request) -> Response:
+    try:
+        filename, media_type, content = (
+            request.app.state.runtime.research_script_service.get_output_artifact(run_id, output_id)
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+        raise AssertionError("unreachable")
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/research/compare-scenario/analyze", response_model=ResearchCompareResponseModel)

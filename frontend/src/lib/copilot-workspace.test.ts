@@ -109,6 +109,41 @@ describe("Copilot working-analysis materialization", () => {
       mode: "scenarios"
     });
   });
+
+  it("resolves a non-durable Strategy Lab Script target with immutable identities", () => {
+    expect(
+      resolveWorkingAnalysisTarget(
+        workingAnalysis({
+          tool_id: "strategy_lab.run_research_script",
+          domain: "strategy_lab",
+          analysis_type: "research_script",
+          entity: {
+            entity_type: "research_script",
+            script_id: "script-1",
+            revision_id: "revision-2",
+            input_snapshot_id: "snapshot-3",
+            selected_run_id: "run-4"
+          },
+          owning_tab: "strategy_lab",
+          owning_mode: "script",
+          materialization: {
+            payload_contract: "copilot.strategy-lab-script-working-analysis.v1",
+            target_tab: "strategy_lab",
+            target_mode: "script",
+            durable: false
+          }
+        })
+      )
+    ).toEqual({
+      analysisId: "work-lmt",
+      tab: "strategy_lab",
+      mode: "script",
+      scriptId: "script-1",
+      revisionId: "revision-2",
+      inputSnapshotId: "snapshot-3",
+      selectedRunId: "run-4"
+    });
+  });
 });
 
 function submission(overrides: Partial<CopilotComposerSubmission> = {}): CopilotComposerSubmission {

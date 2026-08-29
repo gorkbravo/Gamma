@@ -49,10 +49,11 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
   ]),
   strategy_lab: defineTabModes([
     { id: "composer", label: "Composer", defaultIndex: 0 },
-    { id: "backtest_analyze", label: "Backtest / Analyze", defaultIndex: 1 },
-    { id: "regime_stress", label: "Regime / Stress", defaultIndex: 2 },
-    { id: "imports", label: "Imports", defaultIndex: 3 },
-    { id: "saved_runs", label: "Saved Runs", defaultIndex: 4 },
+    { id: "script", label: "Script", defaultIndex: 1 },
+    { id: "backtest_analyze", label: "Backtest / Analyze", defaultIndex: 2 },
+    { id: "regime_stress", label: "Regime / Stress", defaultIndex: 3 },
+    { id: "imports", label: "Imports", defaultIndex: 4 },
+    { id: "saved_runs", label: "Saved Runs", defaultIndex: 5 },
   ]),
   macro: defineTabModes([
     { id: "snapshot", label: "Snapshot", defaultIndex: 0 },

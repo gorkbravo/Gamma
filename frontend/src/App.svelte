@@ -24,6 +24,7 @@
     validatedExternalSourceUrl,
   } from "./lib/copilot-source-navigation";
   import { resolveWorkingAnalysisTarget } from "./lib/copilot-workspace";
+  import { openMaterializedResearchScript } from "./lib/stores/research-script";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
   import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
   import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
@@ -1823,9 +1824,17 @@
         String(analysis.entity.label ?? target.ticker),
         "copilot"
       );
-    } else {
+    } else if (target.tab === "risk") {
       riskWorkingAnalysis = materialized;
       riskMode = target.mode;
+      workspaceMode = "research";
+    } else {
+      await openMaterializedResearchScript({
+        scriptId: target.scriptId,
+        revisionId: target.revisionId,
+        selectedRunId: target.selectedRunId
+      });
+      strategyLabMode = "script";
       workspaceMode = "research";
     }
     await selectTab(target.tab);

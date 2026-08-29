@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-08-25
+Last updated: 2026-08-29
 
 ## Start Here
 
@@ -13,6 +13,7 @@ Before implementing changes, read:
 - [`../roadmap.md`](../roadmap.md) for the core product boundary and current Workstream 1 / Workstream 7 direction.
 - [`provenance_expectations.md`](./provenance_expectations.md) for source, freshness, and transformation expectations.
 - [`design_principles.md`](./design_principles.md) before changing the Copilot UI.
+- [`research_script_workspace_plan.md`](./research_script_workspace_plan.md) before changing Operator script drafting, Script-mode materialization, hosted runtime behavior, source revisions, or script-run permissions.
 
 Relevant current code:
 
@@ -42,7 +43,7 @@ It should not:
 - place, modify, cancel, or route orders;
 - rebalance a portfolio;
 - submit wallet transactions, sign messages, or connect wallets;
-- execute arbitrary user strategy code inside Gamma;
+- execute unrestricted or host-integrated user code; the only approved exception is the isolated Research Script Workspace contract, which grants no Gamma, host, credential, broker, wallet, network, or execution authority;
 - browse the UI visually as its primary mechanism;
 - use unrestricted web browsing as a default substitute for provider adapters;
 - hide unsupported data gaps behind confident prose.
@@ -85,6 +86,7 @@ Examples:
 - run portfolio/risk stress tests for a rate shock, oil shock, or drawdown scenario;
 - build hypothetical or saved research portfolios and compare them to benchmarks;
 - run Strategy Lab backtests over imported return streams or Gamma object compositions;
+- draft a transparent Python research script, materialize it into Strategy Lab, and run it only when the user explicitly invokes the isolated Script workflow;
 - compare options implied moves, realized volatility, macro event context, and fundamentals for a single-name event;
 - save a final memo or report with tool traces, sources, warnings, and generated artifacts.
 
@@ -94,6 +96,7 @@ Expected behavior:
 - call typed Gamma tools rather than visually clicking the UI as the primary mechanism;
 - resolve and load entities or analytical inputs even when they are not already active in the UI;
 - create session-scoped working objects, set temporary assumptions, and run bounded read-only analyses automatically when they fit the request;
+- create an isolated Script draft only for an explicit Operator Script request; after materialization, preserve user-controlled canonical source and stage any later Operator revision as a visible diff;
 - inspect each tool result, revise parameters or choose another authorized tool, and continue until it can answer or reaches a declared stopping condition;
 - draft durable local research-state changes automatically, but apply them only under the active confirmation policy;
 - preserve source refs, warnings, tool traces, and before/after diffs;
@@ -116,7 +119,7 @@ The two roles are differentiated by authority, not by how verbose or capable the
 | Adapt the plan after observing tool output | No | Yes, within budgets and the action registry |
 | Persist a new artifact explicitly requested by the user | Yes | Yes |
 | Change existing durable research state | No | Only through the applicable confirmation policy |
-| Trade, rebalance, route orders, mutate accounts/wallets, or execute arbitrary code | Never | Never |
+| Trade, rebalance, route orders, mutate accounts/wallets, or execute unrestricted/host code | Never | Never; Operator may use only the isolated Script Workspace contract |
 
 An explicit Operator request authorizes app-native research work within the selected scopes and the registry's limits; it does not authorize real-world execution. If the user is in Agent mode and asks for work that requires operating Gamma, Copilot should explain the required workflow and offer a visible transition to Operator. It must not hide the authority change.
 
@@ -133,6 +136,20 @@ When this request is made in Operator mode, `LMT` does not need to be preloaded.
 7. Optionally open/materialize the resulting DCF in Fundamentals. Persisting edits to an existing saved DCF remains confirmation-gated.
 
 The same contract applies to portfolio composition, risk scenarios, options analyses, Strategy Lab runs, and other tab-owned research capabilities. A tool's analytical depth is limited by its owning tab/service, but the Operator must be able to acquire inputs, invoke it, react to its results, and complete the workflow without requiring the user to pre-stage every screen.
+
+### Reference Operator Workflow: “Draft And Run A Moving-Average Strategy”
+
+When this request explicitly invokes the Script workflow in Operator mode, the intended flow is:
+
+1. Resolve the supported instrument and acquire provider-backed historical data through Gamma services.
+2. Create a copied, read-only input snapshot plus provenance manifest.
+3. Create a session-ephemeral Python draft with an immutable source revision and SHA-256 hash.
+4. Materialize the draft into `Strategy Lab / Script`; do not silently save a durable strategy.
+5. If the user requested execution, run that exact revision in the approved isolated runtime and return the outputs as observations.
+6. Persist logs, tables, images, files, warnings, usage, source refs, and provider diagnostics in Gamma-owned storage before the provider container expires.
+7. Synthesize the result from the actual run outputs. Any later Operator code change is a staged revision, while the visible canonical source remains user-controlled.
+
+This workflow grants no local shell, Gamma API, environment, credential, TWS/IBKR, account, wallet, order, host-filesystem, or outbound-network authority. The detailed contract and delivery status live in [`research_script_workspace_plan.md`](./research_script_workspace_plan.md).
 
 ## Core Design Principle
 
@@ -175,6 +192,29 @@ UI navigation can still exist as a convenience action, such as opening the Funda
 Before any material Copilot architecture, orchestration, tool, approval, run-state, model-routing, or related documentation change, the implementing agent must refresh the current official OpenAI guidance. Prefer the OpenAI Developer Docs connector when available; otherwise use only official `developers.openai.com` pages. Record the review date, URLs, and resulting decision in this section or the decision log below. These notes are a dated snapshot, not permanent API truth.
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
+
+### Official Guidance Re-Reviewed 2026-08-29
+
+- [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter): the hosted tool writes and runs Python in a sandboxed container, accepts uploaded files, and can generate files/images. Containers are ephemeral, so Gamma must persist source, manifests, run metadata, and retained outputs independently.
+- [Function calling](https://developers.openai.com/api/docs/guides/function-calling): Script draft/run actions remain strict application-defined tools with `additionalProperties: false` and every property required, using nullable types for optional values.
+- [Responses create](https://developers.openai.com/api/reference/resources/responses/methods/create): the Responses request owns model/tool selection and returns typed output items. Gamma continues to own tool exposure, sequential observations, permissions, validation, persistence, and terminal truth.
+
+Installed SDK review: `openai==2.38.0`. The inspected package supports `responses.create`, `responses.cancel`, `containers.create`, `containers.files.create`, `containers.files.list`, and `containers.files.content.retrieve`, along with Code Interpreter output items and container-file annotations. OpenAI SDK and Responses types remain confined to the provider adapter. Synchronous v1 Research Script execution does not claim provider cancellation support; Gamma records the honest capability and reconciles late results after a local terminal cancellation.
+
+Research Script Workspace architectural decision from the 2026-08-29 review:
+
+- Approve the narrow Workstream 2A exception documented in [`research_script_workspace_plan.md`](./research_script_workspace_plan.md): Operator may draft and explicitly run Python only through the Strategy Lab `Script` workflow.
+- Use a provider-neutral runtime contract. `MockResearchScriptRuntime` lands first; OpenAI Code Interpreter is the preferred first real adapter only if the exact-source/hash spike passes.
+- Keep source revisions, input snapshots, runs, outputs, limits, permissions, and audit state Gamma-owned. Provider container/response state is transport metadata, not the authoritative record.
+- Treat containers as ephemeral and download retained files into Gamma-owned storage immediately. Expired containers are recovered by replaying the same immutable revision and input snapshot in a new container.
+- Keep outbound network disabled and acquire external data through Gamma's provider adapters. Do not expose provider credentials, Gamma APIs, localhost, TWS/IBKR, accounts, wallets, host files, or environment variables to the runtime.
+- Keep the current custom Responses Operator as the default control plane and the Agents SDK as the feature-flagged comparison. No framework or default-model switch is justified by the Script Workspace.
+- Preserve user edit authority after materialization: Operator-created follow-up changes are staged revisions or diffs, never silent canonical-source overwrites.
+- Keep Gamma's configured `gpt-5.4` default. Its published capability supports Code Interpreter; the adapter capability-checks the configured provider/model and keeps the mock runtime when unsupported instead of silently selecting another model.
+- Approve `strategy_lab.draft_research_script` and `strategy_lab.run_research_script` as the only new Script action ids. `run_strategy_lab_backtest` remains unchanged. Draft requires an explicit Script workflow; run requires an explicit current-turn execution request plus exact script, revision, snapshot, source-hash, and manifest-hash arguments.
+- Extend `copilot.working-analysis.v1` with `copilot.strategy-lab-script-working-analysis.v1`, materialized non-durably to Strategy Lab / Script. The visible canonical editor, staged accept/reject controls, and stale-parent conflicts remain Gamma-owned.
+- App-native input acquisition may copy only supported bounded data (v1: configured symbol history) into the immutable snapshot. Unsupported acquisition produces explicit warnings and never grants runtime network, shell, package, broker, account, wallet, order, credential, localhost, or host-filesystem authority.
+- Verification on 2026-08-29: 12 Script Operator tests passed inside the combined `55 passed, 1 skipped` Script/API suite and again in a focused `12 passed in 2.37s` rerun; 14 selected existing action/permission/store/custom-loop regressions passed; the Script-specific eval passed all 12 checks; the retained Operator eval passed all 31 deterministic outcomes with average score `0.9092741935483871`; 384 frontend tests, typecheck, and production build passed. The retained eval harness now forces mock/sample providers unless a live flag is explicit. A broader `tests/test_copilot.py` run retained seven unrelated current-worktree failures in legacy entity/intent, elapsed-budget, and external-context cases (`132 passed, 7 failed`); none exercises the Research Script action/runtime/permission/materialization family, and this scoped implementation did not modify those expectations.
 
 ### Official Guidance Re-Reviewed 2026-08-25
 
@@ -281,7 +321,7 @@ Copilot is complete for the clarified Gamma pass when a user can do all of the f
 12. Get explicit `unavailable`, `degraded`, `refused`, `incomplete`, `cancelled`, and `error` states instead of a neutral empty card.
 13. Use the shelf for quick contextual work and promote that exact thread/context into the full workspace without losing state.
 
-Voice, unrestricted web browsing, arbitrary code execution, trading/account/wallet actions, and automatic durable mutations are not current-pass completion requirements. Explicit long-running external deep research is a later opt-in extension, not the default answer path.
+Voice, unrestricted web browsing, unrestricted code execution, trading/account/wallet actions, and automatic durable mutations are not current-pass completion requirements. The separately approved Research Script Workspace is tracked in Roadmap Workstream 2A and is not a blocker for Copilot V2's current completion gate. Explicit long-running external deep research is a later opt-in extension, not the default answer path.
 
 ### Final In-App Layout
 
@@ -510,6 +550,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Add the Checkpoint 8B public-company identity preflight: natural names may be proposed by the configured model, but Gamma validates them against SEC reference data, injects only a unique canonical ticker, records resolution provenance/usage, and stops with typed candidates on issuer or share-class ambiguity.
 - [x] Generalize the same contract to user-specified hypothetical portfolios and Risk, preserving exact legs, normalized weights, typed shocks, complete bounded outputs, provenance, restart/discard/expiry, and typed non-durable Risk materialization.
 - [ ] Continue the contract through Options sets, Strategy Lab inputs, temporary assumptions, and other cross-tool outputs.
+- [ ] Integrate the separately tracked Research Script Workspace only after its mock contracts, immutable revision store, and Script-mode materialization payload are stable; do not fold arbitrary source execution into `run_strategy_lab_backtest`.
 - [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
 
 Implementation note (2026-08-25, Checkpoint 8A):
@@ -581,7 +622,7 @@ The percentages attached to completed Checkpoints 1 through 7 below are historic
 - Provider-native deltas reach the UI before completion; the fake typewriter path is removed.
 - Every completed live turn ends in one schema-valid final block or a typed non-success state.
 - All source-backed claims resolve to known source ids; unsupported claims are inference or missing data.
-- All operator tools pass the server action registry; forbidden execution/account/wallet actions do not exist in the registry.
+- All operator tools pass the server action registry; forbidden market/account/wallet/host-code actions do not exist in the registry. The separately approved Script actions are limited to their isolated runtime and exact-source/input contracts.
 - An Operator request can acquire an unloaded supported entity, create explicit ephemeral working state, run tools, observe results, adapt, and synthesize the requested conclusion.
 - User-specified analytical parameters survive intent translation into strict tool schemas or fail visibly; hidden unrelated defaults do not count as success.
 - Tool observations feed the same run's next decision and final answer; generic execution summaries do not satisfy analytical requests.
@@ -592,6 +633,7 @@ The percentages attached to completed Checkpoints 1 through 7 below are historic
 - The shelf can promote a thread into the tab without context loss.
 - Model/profile/orchestrator routing is replayable and backed by recorded eval results against the retained GPT-5.5/custom-loop baseline; no default changes without measured evidence.
 - Trace evals and live/frontend/backend suites cover entity acquisition, parameter fidelity, adaptation, stopping behavior, synthesis, approval/resume, and happy, degraded, unavailable, refused, incomplete, cancelled, and provider-error paths.
+- When Workstream 2A is present, Script evals additionally prove role separation, explicit-run intent, staged Operator revisions, immutable source/input hashes, output retention, and the absence of Gamma/host/credential/broker/wallet/network authority.
 
 ## Smart Depth Policy
 
@@ -664,6 +706,7 @@ Examples:
 - `fundamentals.run_reverse_valuation`
 - `commodities.inspect_curve_spreads`
 - `prediction_markets.compare_related_contracts`
+- `strategy_lab.run_research_script` only under the separate isolated Script Workspace contract and an explicit current-turn run request
 
 Default permission: automatic if read-only and bounded by request limits.
 
@@ -690,6 +733,7 @@ Examples:
 - `fundamentals.propose_dcf_update`
 - `research.propose_saved_scope`
 - `strategy_lab.propose_composition`
+- `strategy_lab.draft_research_script`
 - `copilot.propose_memo_edit`
 
 Default permission: automatic. Must return a diff, rationale, expected impact, warnings, and rollback/snapshot path if applicable.
@@ -713,7 +757,7 @@ Confirmation policy can become more permissive later after trust is earned throu
 - automatic for read-only context loading, bounded analytics, simulations, and draft diffs;
 - automatic for passive session traces;
 - confirmation-required for durable local research-state changes such as DCF edits, saved strategy objects, saved scopes, memo overwrites, watchlists, or model snapshots unless the current user turn explicitly requested the exact save/export action;
-- never allowed for market execution, account modification, wallet signing, wallet transactions, rebalancing, or arbitrary in-app strategy code execution.
+- never allowed for market execution, account modification, wallet signing, wallet transactions, rebalancing, local/host code execution, or code execution outside the approved isolated Research Script Workspace.
 
 ### 6. Save Artifact
 
@@ -804,6 +848,9 @@ Initial target domains and likely tools:
 - run backtest/analyze
 - run regime/stress lens
 - save run
+- draft a session-ephemeral research script through the strict Workstream 2A action
+- explicitly run an immutable Script revision in the isolated runtime and return typed outputs
+- stage Operator code revisions without overwriting the user-controlled canonical source
 
 ### Risk
 
@@ -1128,6 +1175,7 @@ Future agents should update this section.
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
 | Copilot roles | Research Agent plus Research Operator, differentiated by authority. | Agent interprets attached context without operating Gamma; Operator acquires inputs and runs app-native research workflows. Authority changes are visible, never silent. |
 | Working analysis | Operator may create and modify explicit session-scoped ephemeral state automatically. | Hypothetical portfolios, DCFs, scenarios, assumptions, and intermediate outputs must not be confused with durable saved objects. |
+| Research Script Workspace | Approved as a narrow Strategy Lab mode behind a provider-neutral isolated runtime; mock first, then Code Interpreter if the exact-source/hash spike passes. | Operator may draft and explicitly run, but has no unrestricted code authority. Canonical post-materialization edits are user-controlled and later Operator changes are staged. See `research_script_workspace_plan.md`. |
 | Local state changes | Allowed only for research state and confirmation-required when an existing durable object will be changed. | Approval pauses and resumes the same run. Never permit market/account/wallet execution. |
 | DCF | Important first confirmed-mutation use case, but not the agent's whole identity. | The agent should be domain-broad. |
 | Official OpenAI guidance | Refresh before material agentic work and record the review. | Current framework/model guidance informs the design but does not override Gamma's evals or product boundary. |
@@ -1144,3 +1192,4 @@ When continuing this work:
 6. Preserve provenance and source refs in every new payload.
 7. Make missing data explicit. Do not let Copilot imply a provider was available when it was not.
 8. Keep the user-facing Copilot experience concise: plan, temporary assumptions, progress, findings, warnings, approvals, and saved artifacts.
+9. Read and update [`research_script_workspace_plan.md`](./research_script_workspace_plan.md) before adding Script actions, materialization, runtime calls, source revisions, or script-run evals. Do not repurpose `run_strategy_lab_backtest` for code execution.

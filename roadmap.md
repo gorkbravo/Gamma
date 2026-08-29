@@ -20,7 +20,7 @@ The core product boundary remains unchanged:
 
 **Gamma is a read-only research environment, not an execution platform.**
 
-Gamma can ingest market data, study portfolios, inspect strategies, analyze commodities, monitor vessels, compare companies, explore wallet behavior, and use AI to structure research. It should not place trades, rebalance portfolios, run execution bots, or provide arbitrary in-app code execution paths that could become execution surfaces.
+Gamma can ingest market data, study portfolios, inspect strategies, analyze commodities, monitor vessels, compare companies, explore wallet behavior, use AI to structure research, and run isolated research scripts over copied read-only data. It should not place trades, rebalance portfolios, run execution bots, or provide unrestricted code paths with access to the Gamma host, broker/account/wallet capabilities, provider credentials, or execution systems.
 
 This roadmap should therefore support four goals:
 
@@ -91,7 +91,7 @@ This table tracks the visible app tabs as of 2026-08-25. Percentages are pragmat
 | Portfolio / Research | `Options` | ~75% | Harden live-provider smoke coverage, add historical IV/skew persistence, improve expiry/strike and moneyness controls, make source/Greeks assumptions more inspectable, make underlying-history sourcing more durable, and deepen Research/Fundamentals/Copilot handoffs. View-scoped adaptive polling, visible-symbol loading, scoped IV errors, and honest empty-surface reasons landed on July 12; SSVI visuals now separate observed option-pair IV points from fitted surface/smile/term geometry. A July 24 live XLE API/browser retest passed with 21 provider-backed points; navigation-away polling remains regression-tested but was not directly instrumented in the browser. |
 | Research | `SITREP` | 100% / Complete for this pass | Closed with backend-persisted triage notes/states and migration, grounded Copilot context, enriched/deduped multi-source news, lens-preserving handoffs, shared provenance/quality badges, per-section age/oldest-section reporting, and verified Bloomberg fallback behavior at the external-embed ceiling. |
 | Research | `Equity Research` | ~80% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, comparables depth, scenario context, explicit provider selection, and a visible warning when synthetic-scope short legs are dropped. Now a self-contained view with latest-day KPIs and price provenance. |
-| Research | `Strategy Lab` | ~78% | Deepen Gamma object composition, saved-run workflows, and read-only sandbox architecture decisions; fix composer state-loss traps (legs reset on tab switch, silent compose no-op before validation). Signed long/short books, all-mode UI polish, the Risk handoff, Copilot grounding, and signed per-leg Risk decomposition with aggregate-metric preservation and legacy-book fallback landed in June/July. |
+| Research | `Strategy Lab` | ~78% | Deepen Gamma object composition and saved-run workflows; implement the approved isolated Research Script Workspace in Workstream 2A; fix composer state-loss traps (legs reset on tab switch, silent compose no-op before validation). Signed long/short books, all-mode UI polish, the Risk handoff, Copilot grounding, and signed per-leg Risk decomposition with aggregate-metric preservation and legacy-book fallback landed in June/July. The Script workspace is approved but not yet implemented. |
 | Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. Individual FRED, comparison, and IBKR FX series failures now degrade explicitly without discarding the remaining snapshot. |
 | Research | `Prediction Markets` | ~95% | All six items of the third pass landed on July 27 and were verified live: lead-time calibration, Copilot windowed-history/outcome/comparison/calibration tools, event-level books, backend-persisted saved research, outward cross-domain handoffs, and read-only order-book depth. What is left is provider-shaped rather than missing code. Polymarket's recent settlement flow is almost entirely sports contracts and its market list pages 100 at a time, so a research-category calibration sample is not reachable from that venue today - the mode correctly withholds a curve and says why, but the number a user wants is only available from Kalshi. Related-market matching was not deepened for commodity and maritime events, and the Sealanes side of the handoff can only open a chokepoint detail shelf because Workstream 9 is paused at a single-map prototype. |
 | Research | `Crypto` | ~74% | Add real wallet/transfer adapters, persistent narrative baskets, deeper pool monitoring, transaction-level DEX context, derivatives overlays, and saved crypto research sessions. |
@@ -115,7 +115,7 @@ The current pass should be considered complete when:
 - README run commands, validation commands, and provider setup notes are accurate;
 - beta-facing diagnostics, empty states, and first-run guidance are good enough for a trusted tester who has not read the code.
 
-Everything beyond that line should be treated as targeted future deepening, not as required to call the current app "complete for now." In particular, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, Copilot voice, and optional external deep research are valuable future work, but they are not blockers for this completion boundary. Copilot V2's own 100% gate below is intentionally stricter than the app-wide first-pass completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done. The same applies to an analytic whose method does not support its label: a number that is wrong is worse than a number that is missing, because a caveat note does not stop a user from acting on it.
+Everything beyond that line should be treated as targeted future deepening, not as required to call the current app "complete for now." In particular, the Research Script Workspace, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, Copilot voice, and optional external deep research are valuable future work, but they are not blockers for this completion boundary. Copilot V2's own 100% gate below is intentionally stricter than the app-wide first-pass completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done. The same applies to an analytic whose method does not support its label: a number that is wrong is worse than a number that is missing, because a caveat note does not stop a user from acting on it.
 
 ---
 
@@ -203,9 +203,9 @@ Every major surface should help answer:
 
 Raw charts are useful, but V2 should focus on research workflows, not quote screens.
 
-### 5. Imported strategy data before arbitrary code
+### 5. Imported strategy data before isolated research scripting
 
-Gamma can support strategy research without becoming an execution or notebook platform.
+Gamma should continue to prefer typed app-native analytics and imported strategy data, but it may also support a narrow research-script workflow without becoming an execution platform or general-purpose local IDE.
 
 The V2 bias should be:
 
@@ -213,9 +213,11 @@ The V2 bias should be:
 - validate and normalize external CSVs,
 - compare imported strategies to benchmarks and factors,
 - support scenario analysis and risk diagnostics,
-- avoid arbitrary code execution inside the app.
+- add code only through the explicit Research Script Workspace described in Workstream 2A,
+- execute scripts in an ephemeral isolated runtime over copied read-only inputs,
+- keep the Gamma host, local filesystem, environment variables, provider credentials, TWS/IBKR, accounts, wallets, and order-routing capabilities structurally unavailable to the runtime.
 
-If code execution is ever reconsidered, it should be a separate sandboxed architecture decision, not a hidden feature inside Research.
+The approved boundary is **isolated research computation, not unrestricted in-app code authority**. The Operator may draft a script and run it when the user's request explicitly invokes the Script workflow; after materialization, canonical source edits are user-controlled, and Operator revisions must appear as staged revisions or diffs. No other tab or Copilot tool may smuggle arbitrary code execution into an existing analysis action.
 
 ### 6. Cross-tab handoffs should become first-class
 
@@ -677,7 +679,7 @@ Implementation note:
 
 #### 3. Strategy Lab mode
 
-This mode should allow the user to analyze strategy return streams without running code inside Gamma.
+This existing data-first mode should continue to let the user analyze strategy return streams without requiring code. The separate `Script` mode approved in Workstream 2A is an optional deeper workflow, not a replacement for imports, Composer, or Gamma-owned analytics.
 
 The first V2 implementation should support imported CSV files containing:
 
@@ -705,10 +707,10 @@ Strategy Lab should compute:
 - regime slices if Macro context is available,
 - downside capture/upside capture where benchmarks exist.
 
-This mode should not run arbitrary Python, call broker execution APIs, send orders, or treat uploaded returns as a live strategy.
+This base mode should not invoke the script runtime implicitly, call broker execution APIs, send orders, or treat uploaded returns as a live strategy. Script execution is allowed only through the explicit Workstream 2A contract and its isolated runtime.
 
 Implementation note:
-- A first-pass `POST /research/strategy-lab/analyze` flow accepts JSON rows parsed from pasted CSV, maps date/value/optional benchmark columns, supports return or NAV/level interpretation, validates duplicate dates, missing values, minimum observations, frequency, outliers, and benchmark alignment, and returns cumulative/annualized return, annualized volatility, Sharpe-style and Sortino-style metrics, max drawdown and duration, rolling statistics, monthly/annual tables, capture ratios when benchmark data is present, warnings, and uploaded-CSV provenance. The frontend exposes this as a dense data-only Strategy Lab mode; no strategy code execution or broker actions are introduced.
+- A first-pass `POST /research/strategy-lab/analyze` flow accepts JSON rows parsed from pasted CSV, maps date/value/optional benchmark columns, supports return or NAV/level interpretation, validates duplicate dates, missing values, minimum observations, frequency, outliers, and benchmark alignment, and returns cumulative/annualized return, annualized volatility, Sharpe-style and Sortino-style metrics, max drawdown and duration, rolling statistics, monthly/annual tables, capture ratios when benchmark data is present, warnings, and uploaded-CSV provenance. The frontend exposes this as a dense data-only Strategy Lab mode; this existing route does not execute strategy code or introduce broker actions.
 - Validation now also warns on likely whole-percent versus decimal mistakes, keeps benchmark overlap failures non-fatal when the strategy stream is otherwise valid, and supports restoring a saved normalized Strategy Lab result into the Strategy Lab result state. Raw uploaded CSV rows are still not persisted by default.
 
 #### 4. Compare / Scenario mode
@@ -785,7 +787,80 @@ Implementation note:
 
 ### Deliverable
 
-At the end of Research V2, Gamma should have a genuine research hub that can inspect market scopes, imported strategies, market overview maps, and comparisons without becoming an execution or arbitrary-code platform.
+At the end of Research V2, Gamma should have a genuine research hub that can inspect market scopes, imported strategies, market overview maps, comparisons, and explicitly isolated research scripts without becoming an execution platform or exposing unrestricted code authority.
+
+---
+
+## Workstream 2A - Research Script Workspace
+
+_Status: Approved / not started (0%)_
+_Dependency marker: Builds on Strategy Lab modes, Copilot Operator working analyses, provider/provenance contracts, and an isolated hosted runtime_
+_Decision date: 2026-08-29_
+_Detailed implementation plan: [`docs/research_script_workspace_plan.md`](./docs/research_script_workspace_plan.md)_
+
+### Why this workstream matters
+
+Gamma's typed analytics should remain the default, but some strategy research is naturally expressed as inspectable code. The user should be able to describe a research strategy in natural language, have Copilot Operator draft the analysis, inspect and edit the exact Python source, run it in a bounded sandbox, and receive logs, tables, images, metrics, and downloadable files inside Gamma.
+
+This is not a generic terminal or local development environment. It is a transparent research-computation workflow whose inputs, source revision, runtime, outputs, warnings, and provenance are all inspectable.
+
+### Product placement
+
+The feature belongs in Strategy Lab as a visible `Script` mode alongside `Composer`, `Backtest / Analyze`, `Regime / Stress`, `Imports`, and `Saved Runs`. It does not justify a new top-level tab because it is a distinct strategy-research task inside an existing durable domain.
+
+The natural-language entry point remains Copilot Operator. Operator may create a session-ephemeral script draft, acquire authorized read-only inputs through Gamma tools, and materialize the draft into Strategy Lab. The Script mode owns editing, running, run history, output inspection, and explicit saving.
+
+### Hard authority boundary
+
+The Script runtime must never receive:
+
+- access to the Gamma process, host filesystem, local shell, environment variables, or desktop APIs;
+- IBKR/TWS sessions, account identifiers, broker SDK authority, order routes, or portfolio-mutation capabilities;
+- wallet connections, signing capabilities, account cookies, or provider credentials;
+- implicit access to Gamma's local API or `localhost`;
+- outbound network access in the first version;
+- a package manager, interactive terminal, debugger, or arbitrary multi-file project surface in the first version.
+
+Gamma supplies copied, read-only data files plus a provenance manifest. The runtime returns bounded output objects. Typed provider adapters remain the preferred path for app and external data.
+
+### First product contract
+
+The first complete workflow should be:
+
+1. The user describes a strategy in Operator mode.
+2. Operator resolves supported entities and gathers authorized Gamma/provider data.
+3. Operator creates a temporary Python draft and a versioned input manifest.
+4. Gamma materializes the draft into `Strategy Lab / Script` without silently saving a durable strategy.
+5. The user can inspect and edit the canonical source.
+6. `Run` executes the visible revision in an ephemeral sandbox and records the source hash and input snapshot used.
+7. Gamma renders stdout/tracebacks, tables, images, metrics, files, warnings, and source references as typed output objects.
+8. Container outputs are copied into Gamma-owned storage before the provider container expires.
+9. Saving, duplicating, exporting, or asking Operator for a revision remains explicit and auditable.
+
+### Implementation slices
+
+1. **Contracts and mock vertical slice**: add script/run/input/output models, local persistence, bounded API routes, a `Script` mode shell, a basic editor, a mock runtime, and tests. No real code executes in this slice.
+2. **Hosted Python runtime**: add a provider adapter for OpenAI Code Interpreter, input-file upload, output parsing/download, cancellation/timeout handling, container-expiry recovery, and exact-source hash verification. Keep network disabled.
+3. **Operator drafting and materialization**: add strict registry actions for drafting and explicitly requested execution, extend `copilot.working-analysis.v1`, stage Operator revisions instead of overwriting user source, and preserve the shared run-event/trace contract.
+4. **Data bridge and output depth**: export selected Gamma objects and provider-backed datasets through normalized read-only bundles; add table/image/file renderers, provenance inspection, run comparison, and explicit save/export flows.
+5. **Hardening and release gate**: add abuse/limit tests, secret/host/network isolation tests, restart recovery, expired-container recovery, accessibility/responsive checks, provider-disabled behavior, cost/usage diagnostics, and representative end-to-end evals.
+
+### Completion gate
+
+This workstream is not complete until:
+
+- the executed source revision and input snapshot are provably associated with every run;
+- a malicious script cannot reach Gamma, TWS/IBKR, accounts, wallets, credentials, the host filesystem, localhost, or outbound network;
+- provider containers are treated as ephemeral and all retained outputs live in Gamma-owned storage;
+- Operator-created and Operator-revised code is visibly staged, while canonical post-materialization edits remain user-controlled;
+- typed outputs survive restart and remain distinguishable as generated, derived, failed, cancelled, expired, or unavailable;
+- the normal non-code Strategy Lab paths continue to work without loading or invoking the runtime;
+- tests cover the happy path, syntax/runtime failure, timeout, cancellation, oversized input/output, provider unavailable, container expiry, stale revision, failed artifact download, and attempted authority escape;
+- no trading, order, rebalance, account, wallet, or host-execution capability exists anywhere in the script or Operator registries.
+
+### Deliverable
+
+At the end of Workstream 2A, Gamma should offer a focused internal research workbench: natural-language strategy intent becomes transparent, user-editable Python; the code runs only in an isolated ephemeral environment over copied read-only data; and the results return as inspectable research objects without creating any execution surface.
 
 ---
 
@@ -1563,7 +1638,7 @@ The dedicated workspace exposes two authority levels:
 - `Research Agent` interprets the surface/context supplied to the turn and returns grounded text or artifacts. It does not load missing entities, run analytical workflows, or change app working state.
 - `Research Operator` operates Gamma's research capabilities. It may resolve an unloaded entity, construct an explicit temporary portfolio/model/scenario, call typed tab-owned tools, observe their results, revise its plan or parameters, and synthesize the final answer. Temporary work may run automatically; changes to existing durable research state pause for confirmation and resume the same run.
 
-The selected role is an authority ceiling. Agent must not silently escalate into Operator. Neither role may trade, rebalance, route orders, mutate accounts/wallets, or execute arbitrary code.
+The selected role is an authority ceiling. Agent must not silently escalate into Operator. Neither role may trade, rebalance, route orders, mutate accounts/wallets, or execute unrestricted code. Operator may draft and explicitly run Python only through the approved Workstream 2A Research Script Workspace, whose isolated runtime has no Gamma, host, credential, broker, wallet, or execution authority.
 
 ### Product structure
 
@@ -1736,7 +1811,7 @@ The following do not block 100%:
 - voice input or spoken output,
 - unrestricted web browsing,
 - default long-running external deep research,
-- arbitrary code execution,
+- unrestricted, host-integrated, or non-Script-Workspace code execution,
 - trading, order routing, account mutation, portfolio rebalancing, wallet connection/signing, or wallet transactions,
 - adding every conceivable domain tool after the representative cross-domain research workflows pass.
 
@@ -1744,7 +1819,7 @@ Optional external deep research may be added later only as an explicit backgroun
 
 ### Deliverable
 
-At 100%, Gamma should have one coherent Copilot research system across the shelf and dedicated workspace. Research Agent should interpret attached/current context without operating the app. Research Operator should resolve supported unloaded entities, create explicit ephemeral working analyses, run bounded app-native tools in a model-tool-model loop, preserve the user's parameters, react to observations, and synthesize the requested conclusion from actual outputs. Relevant work should materialize in owning Gamma surfaces; durable research-state changes should pause for a visible diff and resume the same run after approve/reject. Sessions must preserve context, working state, observations, trace, artifacts, approvals, provider/model/usage metadata, and warnings across recovery, while trading, order, account, wallet, portfolio-rebalancing, and arbitrary-code authority remain structurally absent.
+At 100%, Gamma should have one coherent Copilot research system across the shelf and dedicated workspace. Research Agent should interpret attached/current context without operating the app. Research Operator should resolve supported unloaded entities, create explicit ephemeral working analyses, run bounded app-native tools in a model-tool-model loop, preserve the user's parameters, react to observations, and synthesize the requested conclusion from actual outputs. Relevant work should materialize in owning Gamma surfaces; durable research-state changes should pause for a visible diff and resume the same run after approve/reject. Sessions must preserve context, working state, observations, trace, artifacts, approvals, provider/model/usage metadata, and warnings across recovery. Trading, order, account, wallet, portfolio-rebalancing, host-code, and unrestricted-code authority remain structurally absent; the separately tracked Script Workspace may expose only its isolated, no-authority research-computation contract.
 
 ---
 
@@ -2549,6 +2624,7 @@ After data shapes are proven:
 
 - SITREP news/feed hardening and cross-tab row handoffs,
 - Strategy Lab saved/reuse hardening,
+- Research Script Workspace contracts, isolated hosted-Python vertical slice, and Operator materialization,
 - Market Overview provider breadth,
 - Commodities Energy/Curves hardening and Metals/Events deepening,
 - IV skew/term modules and Realized vs IV,
@@ -2583,6 +2659,10 @@ Keep the Research workspace home as a dense cross-asset situation report with ne
 ### Workstream 2 - Research V2
 
 Turn Research into a multi-mode hub for scope analysis, market overview, imported strategy returns, comparison, and saved research.
+
+### Workstream 2A - Research Script Workspace
+
+Add an optional Strategy Lab `Script` mode where Copilot Operator can draft transparent Python, the user controls the canonical source, and an ephemeral isolated runtime executes only against copied read-only data with typed outputs and no Gamma, host, credential, broker, wallet, network, or execution authority.
 
 ### Workstream 3 - Macro V2
 
@@ -2629,7 +2709,8 @@ If this roadmap is executed well, Gamma becomes a deeper read-only research plat
 - inspect portfolios and risk,
 - start from a cross-asset situation report,
 - build and compare research scopes,
-- import strategy returns without running arbitrary code,
+- import strategy returns without requiring code,
+- optionally inspect, edit, and run isolated research scripts over copied read-only data,
 - study market overview maps,
 - interpret macro regimes,
 - compare prediction markets to traditional market context,

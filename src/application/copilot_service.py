@@ -58,6 +58,12 @@ from src.application.prediction_market_service import (
     PredictionMarketService,
 )
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
+from src.application.research_script_service import (
+    ResearchScriptConflictError,
+    ResearchScriptService,
+    ResearchScriptServiceError,
+    ResearchScriptValidationError,
+)
 from src.application.research_action_registry import (
     ResearchActionArgumentError,
     ResearchActionPermissionError,
@@ -123,6 +129,7 @@ from src.models.prediction_markets import (
     PredictionProbabilityHistory,
     PredictionProbabilityPoint,
 )
+from src.models.research_script import ResearchScriptInputFileCreateRequest
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import ResearchComparisonLeg, ResearchComparisonRequest
 from src.services.copilot_provider import CopilotProvider, CopilotRunCancelled
@@ -256,6 +263,7 @@ class CopilotService:
         portfolio_provider: Any | None = None,
         research_provider: Any | None = None,
         research_service: ResearchService | None = None,
+        research_script_service: ResearchScriptService | None = None,
         commodities_service: CommoditiesService | None = None,
         maritime_service: MaritimeService | None = None,
         news_service: NewsService | None = None,
@@ -273,6 +281,7 @@ class CopilotService:
         self.portfolio_provider = portfolio_provider
         self.research_provider = research_provider
         self.research_service = research_service
+        self.research_script_service = research_script_service
         self.commodities_service = commodities_service
         self.maritime_service = maritime_service
         self.news_service = news_service
@@ -1508,6 +1517,138 @@ class CopilotService:
         }
         self._mutation_action_definitions = [
             CopilotResearchActionDefinition(
+                tool_id="strategy_lab.draft_research_script",
+                domains=["strategy_lab"],
+                action_type="draft_change",
+                description=(
+                    "Create a session-ephemeral Strategy Lab Script draft and initial immutable revision "
+                    "for an explicit current-turn Script workflow. This never runs source or saves a strategy."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "research_intent": {"type": "string"},
+                        "python_source": {"type": "string"},
+                        "language": {"type": "string", "enum": ["python"]},
+                        "authorized_input_references": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "reference_id": {"type": "string"},
+                                    "source_kind": {
+                                        "type": "string",
+                                        "enum": ["gamma_state", "provider", "user_upload"],
+                                    },
+                                    "provider": {"type": ["string", "null"]},
+                                    "dataset_id": {"type": ["string", "null"]},
+                                    "logical_filename": {"type": ["string", "null"]},
+                                    "media_type": {"type": ["string", "null"]},
+                                    "coverage_start": {"type": ["string", "null"]},
+                                    "coverage_end": {"type": ["string", "null"]},
+                                    "symbol": {"type": ["string", "null"]},
+                                    "benchmark_symbol": {"type": ["string", "null"]},
+                                    "timeframe": {"type": ["string", "null"]},
+                                    "lookback_days": {
+                                        "type": ["integer", "null"],
+                                        "minimum": 20,
+                                        "maximum": 3650,
+                                    },
+                                    "frequency": {
+                                        "type": ["string", "null"],
+                                        "enum": ["daily", "weekly", "monthly", None],
+                                    },
+                                },
+                                "required": [
+                                    "reference_id",
+                                    "source_kind",
+                                    "provider",
+                                    "dataset_id",
+                                    "logical_filename",
+                                    "media_type",
+                                    "coverage_start",
+                                    "coverage_end",
+                                    "symbol",
+                                    "benchmark_symbol",
+                                    "timeframe",
+                                    "lookback_days",
+                                    "frequency",
+                                ],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": [
+                        "title",
+                        "research_intent",
+                        "python_source",
+                        "language",
+                        "authorized_input_references",
+                    ],
+                    "additionalProperties": False,
+                },
+                output_schema={"type": "object"},
+                read_only=False,
+                mutates_local_state=False,
+                requires_confirmation=False,
+                request_limit=1,
+                failure_modes=[
+                    "The current user turn does not explicitly request a Script workflow.",
+                    "Source or authorized input references fail Gamma validation.",
+                    "The request asks for forbidden network, shell, package, broker, account, wallet, or order authority.",
+                ],
+                permission_policy="automatic_draft",
+                provenance_behavior=(
+                    "Returns temporary script/revision/input-snapshot identities, warnings, source ids, and a non-durable Strategy Lab/Script materialization target."
+                ),
+                retry_policy="idempotent_within_operator_run",
+                test_coverage_owner="tests/test_research_script_operator.py",
+            ),
+            CopilotResearchActionDefinition(
+                tool_id="strategy_lab.run_research_script",
+                domains=["strategy_lab"],
+                action_type="run_analysis",
+                description=(
+                    "Run one explicitly identified immutable Research Script revision and input snapshot only "
+                    "when the current user turn explicitly requests execution."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "script_id": {"type": "string"},
+                        "revision_id": {"type": "string"},
+                        "input_snapshot_id": {"type": "string"},
+                        "source_sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+                        "manifest_sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+                    },
+                    "required": [
+                        "script_id",
+                        "revision_id",
+                        "input_snapshot_id",
+                        "source_sha256",
+                        "manifest_sha256",
+                    ],
+                    "additionalProperties": False,
+                },
+                output_schema={"type": "object"},
+                read_only=True,
+                mutates_local_state=False,
+                requires_confirmation=False,
+                request_limit=1,
+                failure_modes=[
+                    "The current user turn does not explicitly request execution.",
+                    "Any exact id or hash fails server-side revalidation.",
+                    "The configured Script runtime is unavailable or execution fails, times out, or remains incomplete.",
+                ],
+                permission_policy="automatic",
+                provenance_behavior=(
+                    "Returns the immutable run identity, typed retained-output summaries, warnings, sources, usage, and the non-durable Strategy Lab/Script materialization target."
+                ),
+                retry_policy="terminal_idempotent_by_exact_run_identity",
+                test_coverage_owner="tests/test_research_script_operator.py",
+            ),
+            CopilotResearchActionDefinition(
                 tool_id="fundamentals.propose_dcf_update",
                 domains=["fundamentals"],
                 action_type="draft_change",
@@ -1578,6 +1719,42 @@ class CopilotService:
             replace(request, domain=resolved_domain),
             role=request.role,
         )
+        script_workflow_request = self._prompt_requests_script_workflow(
+            str(request.prompt or "").lower(),
+            request.context,
+        )
+        script_authority_request = self._prompt_requests_script_authority(
+            str(request.prompt or "").lower(),
+            request.context,
+        )
+        if (
+            request.role == "research_agent"
+            and script_workflow_request
+            and script_authority_request
+        ):
+            result = CopilotResearchCardResult(
+                domain="strategy_lab",
+                current_tab=request.context.current_tab or "copilot",
+                status="incomplete",
+                provider=getattr(self.provider, "provider_name", "gamma"),
+                model=resolution.model,
+                message=(
+                    "Research Agent can inspect completed Research Script results, but cannot "
+                    "draft, edit, accept, reject, or run scripts. Switch explicitly to "
+                    "Research Operator to continue this Script workflow."
+                ),
+                warnings=[
+                    "No Research Script action was exposed or executed for Research Agent."
+                ],
+            )
+            return self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=None,
+                known_provider_calls=0,
+                known_tool_calls=0,
+            )
         builder = self._context_builders.get(resolved_domain)
         if builder is None:
             result = CopilotResearchCardResult(
@@ -1616,6 +1793,11 @@ class CopilotService:
             tool.to_openai_spec()
             for tool in self._tools.values()
             if resolved_domain in tool.domains
+            and not (
+                request.role == "research_agent"
+                and script_workflow_request
+                and not script_authority_request
+            )
         ]
         provider_started_at = time.perf_counter()
         provider_call_count = 0
@@ -2583,6 +2765,12 @@ class CopilotService:
         proposal: CopilotEquityEntityProposal | None = None
         warnings: list[str] = []
         usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
+        if self._prompt_requests_script_workflow(prompt.lower(), request.context):
+            return _CopilotEntityPreflight(
+                request=replace(request, entity_resolution=None),
+                resolution=None,
+                usage=usage,
+            )
         has_explicit_ticker = bool(extract_explicit_equity_tickers(prompt))
         should_propose = (
             allow_model_proposal
@@ -2772,9 +2960,20 @@ class CopilotService:
         checkpoints: list[CopilotOperatorConfirmationCheckpoint] = []
         warnings = list(research_plan.warnings)
         prompt = str(request.prompt or "").strip().lower()
+        blocked_script_authority = (
+            research_plan.intent == "research_script_workflow"
+            and self._prompt_requests_forbidden_script_authority(prompt)
+        )
+        if blocked_script_authority:
+            warnings.append(
+                "Gamma refused the Script workflow because the current turn requests forbidden "
+                "broker, order, account, wallet, secret, localhost, shell, package, or network authority."
+            )
 
         step_index = 1
         for domain_item in research_plan.domain_plan:
+            if blocked_script_authority and domain_item.domain == "strategy_lab":
+                continue
             if not domain_item.planned_tools:
                 warnings.append(
                     f"No registered Research Operator tools are available for {domain_item.domain} yet."
@@ -3436,9 +3635,38 @@ class CopilotService:
             "stream_research_operator",
             None,
         )
+        if plan.intent == "research_script_workflow" and not callable(adaptive_operator):
+            result = CopilotResearchCardResult(
+                domain="strategy_lab",
+                current_tab=request.context.current_tab or "copilot",
+                status="unavailable",
+                provider=resolution.provider,
+                model=resolution.model,
+                message=(
+                    "Research Script Operator drafting/execution is unavailable because the "
+                    "configured Copilot provider does not support Gamma's custom Responses loop."
+                ),
+                warnings=[
+                    "No Script action ran and no authority was expanded; direct user Script editing and the mock runtime remain available."
+                ],
+                research_plan=plan.research_plan,
+            )
+            result = self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=None,
+                known_provider_calls=0,
+                known_tool_calls=0,
+            )
+            return self._persist_operator_execution_result(request, plan, result)
+        has_legacy_dcf_draft = any(
+            step.tool_id == "fundamentals.propose_dcf_update"
+            for step in plan.steps
+        )
         adaptive_custom_requested = (
             resolution.orchestration_path == CUSTOM_OPERATOR_PATH
-            and not has_draft_change
+            and not has_legacy_dcf_draft
             and callable(adaptive_operator)
         )
         if (
@@ -4291,13 +4519,17 @@ class CopilotService:
             if (
                 not step.tool_id
                 or step.action_type
-                not in {"read_context", "run_analysis", "fetch_external_context"}
+                not in {"read_context", "run_analysis", "fetch_external_context", "draft_change"}
                 or step.requires_confirmation
                 or step.permission_policy == "confirmation_required"
             ):
                 continue
             try:
-                definition = self.action_registry.authorize_automatic(step.tool_id)
+                definition = (
+                    self.action_registry.authorize_draft(step.tool_id)
+                    if step.action_type == "draft_change"
+                    else self.action_registry.authorize_automatic(step.tool_id)
+                )
             except ResearchActionPermissionError as exc:
                 warnings.append(str(exc))
                 continue
@@ -4505,8 +4737,10 @@ class CopilotService:
                     reason="unauthorized_tool",
                 )
             try:
-                definition = self.action_registry.authorize_automatic(
-                    normalized_tool_id
+                definition = (
+                    self.action_registry.authorize_draft(normalized_tool_id)
+                    if step.action_type == "draft_change"
+                    else self.action_registry.authorize_automatic(normalized_tool_id)
                 )
                 validated_arguments = self.action_registry.validate_arguments(
                     normalized_tool_id,
@@ -4613,10 +4847,24 @@ class CopilotService:
                 f"observation_{attempted_tool_calls:02d}_"
                 f"{self._safe_source_id(normalized_tool_id).lower()}"
             )
+            if normalized_tool_id == "strategy_lab.run_research_script":
+                record_event(
+                    "run-started",
+                    step=step,
+                    title="Research Script run started",
+                    message="Gamma is revalidating and running the exact immutable Script revision and input snapshot.",
+                    payload={
+                        "script_id": validated_arguments.get("script_id"),
+                        "revision_id": validated_arguments.get("revision_id"),
+                        "input_snapshot_id": validated_arguments.get("input_snapshot_id"),
+                    },
+                )
             execution = self._execute_registered_operator_action(
                 normalized_tool_id,
                 validated_arguments,
                 context,
+                request=request,
+                run_id=resolved_run_id,
             )
             execution = self._attach_operator_working_analysis(
                 execution,
@@ -4632,9 +4880,22 @@ class CopilotService:
             )
             for source in execution.sources:
                 sources[source.source_id] = source
+            if isinstance(execution.output, dict):
+                warnings.extend(
+                    str(item)
+                    for item in list(execution.output.get("warnings") or [])
+                    if str(item).strip()
+                )
             failed = (
                 isinstance(execution.output, dict)
-                and bool(execution.output.get("error"))
+                and (
+                    bool(execution.output.get("error"))
+                    or (
+                        normalized_tool_id == "strategy_lab.run_research_script"
+                        and execution.output.get("status")
+                        not in {"completed"}
+                    )
+                )
             )
             if failed:
                 append_once(skipped_steps, step.step_id)
@@ -4648,6 +4909,66 @@ class CopilotService:
             else:
                 append_once(executed_steps, step.step_id)
                 status = "completed"
+            if normalized_tool_id == "strategy_lab.draft_research_script" and not failed:
+                record_event(
+                    "script-draft-created",
+                    step=step,
+                    title="Research Script draft created",
+                    message="Gamma created immutable Script revision state without executing it.",
+                    payload={
+                        key: execution.output.get(key)
+                        for key in ("script_id", "revision_id", "source_sha256", "revision_status")
+                    },
+                    source_ids=list(execution.trace.source_ids),
+                )
+                record_event(
+                    "input-snapshot-created",
+                    step=step,
+                    title="Input snapshot created",
+                    message="Gamma recorded the bounded immutable input manifest for the Script workflow.",
+                    payload={
+                        key: execution.output.get(key)
+                        for key in ("input_snapshot_id", "manifest_sha256")
+                    },
+                    source_ids=list(execution.trace.source_ids),
+                    event_warnings=list(execution.output.get("warnings") or []),
+                )
+            if normalized_tool_id == "strategy_lab.run_research_script":
+                output_rows = list(execution.output.get("outputs") or []) if isinstance(execution.output, dict) else []
+                for output_row in output_rows:
+                    if isinstance(output_row, dict) and output_row.get("output_id"):
+                        record_event(
+                            "output-artifact-created",
+                            step=step,
+                            title="Research Script output retained",
+                            message=f"Gamma retained {output_row.get('kind') or 'output'} `{output_row['output_id']}`.",
+                            payload={
+                                key: output_row.get(key)
+                                for key in ("output_id", "kind", "media_type", "filename", "generated", "derived")
+                            },
+                            source_ids=list(execution.trace.source_ids),
+                        )
+                terminal_event = {
+                    "completed": "run-completed",
+                    "failed": "run-failed",
+                    "cancelled": "run-cancelled",
+                    "timed_out": "run-timed-out",
+                    "incomplete": "run-incomplete",
+                    "unavailable": "run-incomplete",
+                }.get(str(execution.output.get("status") or ""), "run-incomplete")
+                record_event(
+                    terminal_event,
+                    step=step,
+                    title="Research Script run result",
+                    message=f"Research Script run finished with status `{execution.output.get('status')}`.",
+                    payload={
+                        "run_id": execution.output.get("run_id"),
+                        "status": execution.output.get("status"),
+                        "output_count": len(output_rows),
+                    },
+                    source_ids=list(execution.trace.source_ids),
+                    event_warnings=list(execution.output.get("warnings") or []),
+                )
             observation_event = record_event(
                 "tool-result",
                 step=step,
@@ -4775,7 +5096,28 @@ class CopilotService:
         for source in provider_result.sources:
             sources[source.source_id] = source
         warnings = dedupe_warnings([*warnings, *provider_result.warnings])
-        if (
+        script_terminal_failures = [
+            observation.get("result")
+            for observation in outputs.values()
+            if isinstance(observation, dict)
+            and isinstance(observation.get("result"), dict)
+            and observation["result"].get("run_id")
+            and observation["result"].get("status") != "completed"
+        ]
+        if script_terminal_failures:
+            failed_run = script_terminal_failures[-1]
+            provider_result = replace(
+                provider_result,
+                status="incomplete",
+                message=(
+                    f"Research Script run `{failed_run.get('run_id')}` for revision "
+                    f"`{failed_run.get('revision_id')}` finished with status "
+                    f"`{failed_run.get('status')}`. Gamma did not treat it as success."
+                ),
+                card=None,
+            )
+            stop_reason = f"script_run_{failed_run.get('status')}"
+        elif (
             provider_result.status == "ready"
             and allowed_steps
             and not executed_steps
@@ -4958,9 +5300,16 @@ class CopilotService:
         tool_id: str,
         arguments: dict[str, Any],
         context: CopilotContextBundle,
+        *,
+        request: CopilotResearchCardRequest | None = None,
+        run_id: str | None = None,
     ) -> CopilotToolExecution:
         try:
-            self.action_registry.authorize_automatic(tool_id)
+            definition = self.action_registry.require(tool_id)
+            if definition.action_type == "draft_change":
+                self.action_registry.authorize_draft(tool_id)
+            else:
+                self.action_registry.authorize_automatic(tool_id)
         except ResearchActionPermissionError as exc:
             return CopilotToolExecution(
                 output={"error": str(exc)},
@@ -4971,7 +5320,447 @@ class CopilotService:
                     source_ids=[],
                 ),
             )
+        if tool_id == "strategy_lab.draft_research_script":
+            return self._tool_draft_research_script(
+                arguments,
+                context,
+                request=request,
+                run_id=run_id,
+            )
+        if tool_id == "strategy_lab.run_research_script":
+            return self._tool_run_research_script(
+                arguments,
+                context,
+                request=request,
+            )
         return self._execute_tool(tool_id, arguments, context)
+
+    def _tool_draft_research_script(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+        *,
+        request: CopilotResearchCardRequest | None,
+        run_id: str | None,
+    ) -> CopilotToolExecution:
+        prompt = str(request.prompt if request is not None else context.summary_data.get("prompt") or "")
+        source_ids: list[str] = []
+        if request is None or request.role != "research_operator":
+            return self._blocked_script_execution(
+                "strategy_lab.draft_research_script",
+                arguments,
+                "Research Script drafting is available only to Research Operator.",
+            )
+        if not self._prompt_requests_script_workflow(prompt.lower(), request.context):
+            return self._blocked_script_execution(
+                "strategy_lab.draft_research_script",
+                arguments,
+                "The current user turn did not explicitly request a Script workflow.",
+            )
+        if self._prompt_requests_forbidden_script_authority(prompt):
+            return self._blocked_script_execution(
+                "strategy_lab.draft_research_script",
+                arguments,
+                "Gamma refused forbidden Script runtime or financial-account authority.",
+            )
+        if self.research_script_service is None:
+            return self._blocked_script_execution(
+                "strategy_lab.draft_research_script",
+                arguments,
+                "Research Script persistence is unavailable.",
+            )
+
+        session_id = str(request.user_session_id or "").strip()
+        if not session_id:
+            return self._blocked_script_execution(
+                "strategy_lab.draft_research_script",
+                arguments,
+                "Research Script drafting requires a Copilot session id.",
+            )
+        operator_run_id = str(run_id or "").strip() or new_copilot_id("oprun")
+        script_state = context.summary_data.get("script_state")
+        script_state = script_state if isinstance(script_state, dict) else {}
+        authorized_references = list(arguments["authorized_input_references"])
+        acquired_input_files, acquisition_warnings = self._acquire_research_script_inputs(
+            authorized_references
+        )
+        try:
+            if script_state.get("script_id"):
+                script_id = str(script_state["script_id"])
+                expected_hash = str(
+                    script_state.get("source_sha256")
+                    or script_state.get("canonical_source_sha256")
+                ).strip().lower()
+                if not expected_hash:
+                    raise ResearchScriptConflictError(
+                        "The visible canonical source hash is required before staging an Operator candidate."
+                    )
+                detail = self.research_script_service.stage_operator_revision(
+                    script_id,
+                    source=str(arguments["python_source"]),
+                    expected_parent_sha256=expected_hash,
+                    change_summary=f"Operator candidate: {str(arguments['research_intent']).strip()}",
+                    operator_run_id=operator_run_id,
+                )
+                snapshot = self.research_script_service.create_authorized_input_snapshot(
+                    script_id,
+                    authorized_references,
+                    acquired_input_files=acquired_input_files,
+                    acquisition_warnings=acquisition_warnings,
+                )
+                revision = max(
+                    (
+                        item
+                        for item in detail.revisions
+                        if item.status == "staged" and item.operator_run_id == operator_run_id
+                    ),
+                    key=lambda item: item.revision_number,
+                )
+            else:
+                detail, snapshot = self.research_script_service.create_operator_draft(
+                    session_id=session_id,
+                    title=str(arguments["title"]),
+                    research_intent=str(arguments["research_intent"]),
+                    source=str(arguments["python_source"]),
+                    authorized_input_references=authorized_references,
+                    operator_run_id=operator_run_id,
+                    acquired_input_files=acquired_input_files,
+                    acquisition_warnings=acquisition_warnings,
+                )
+                revision = next(
+                    item
+                    for item in detail.revisions
+                    if item.revision_id == detail.script.canonical_revision_id
+                )
+        except (ResearchScriptServiceError, ValueError, KeyError, StopIteration) as exc:
+            return self._blocked_script_execution(
+                "strategy_lab.draft_research_script",
+                arguments,
+                str(exc),
+            )
+
+        revision_source_id = f"research-script.revision.{revision.revision_id}"
+        snapshot_source_id = f"research-script.input-snapshot.{snapshot.snapshot_id}"
+        source_ids.extend([revision_source_id, snapshot_source_id])
+        sources = [
+            CopilotSourceRef(
+                source_id=revision_source_id,
+                label=f"Research Script revision {revision.revision_number}",
+                kind="generated_source",
+                provider="gamma",
+                origin="gamma.strategy_lab.script.revision",
+                description=(
+                    f"Immutable {revision.status} Python source with SHA-256 {revision.source_sha256}."
+                ),
+                retrieved_at=revision.created_at,
+                provider_native_id=revision.revision_id,
+                navigation_supported=True,
+                navigation_tab="strategy_lab",
+                navigation_mode="script",
+                navigation_context={
+                    "script_id": detail.script.script_id,
+                    "revision_id": revision.revision_id,
+                },
+            ),
+            CopilotSourceRef(
+                source_id=snapshot_source_id,
+                label="Research Script input snapshot",
+                kind="input_manifest",
+                provider="gamma",
+                origin="gamma.strategy_lab.script.input_snapshot",
+                description=(
+                    f"Immutable bounded input manifest with SHA-256 {snapshot.manifest_sha256}."
+                ),
+                retrieved_at=snapshot.created_at,
+                provider_native_id=snapshot.snapshot_id,
+                navigation_supported=True,
+                navigation_tab="strategy_lab",
+                navigation_mode="script",
+                navigation_context={"script_id": detail.script.script_id},
+            ),
+        ]
+        output = {
+            "script_id": detail.script.script_id,
+            "revision_id": revision.revision_id,
+            "revision_status": revision.status,
+            "canonical_revision_id": detail.script.canonical_revision_id,
+            "parent_revision_id": revision.parent_revision_id,
+            "source_sha256": revision.source_sha256,
+            "input_snapshot_id": snapshot.snapshot_id,
+            "manifest_sha256": snapshot.manifest_sha256,
+            "input_requirements": list(arguments["authorized_input_references"]),
+            "warnings": list(snapshot.warnings),
+            "sources": source_ids,
+            "materialization": self._script_materialization_target(
+                script_id=detail.script.script_id,
+                revision_id=revision.revision_id,
+                input_snapshot_id=snapshot.snapshot_id,
+                selected_run_id=None,
+            ),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="strategy_lab.draft_research_script",
+                summary=(
+                    f"Created immutable {revision.status} Research Script revision "
+                    f"`{revision.revision_id}` with input snapshot `{snapshot.snapshot_id}`; source was not run."
+                ),
+                arguments=arguments,
+                source_ids=source_ids,
+            ),
+            sources=sources,
+        )
+
+    def _acquire_research_script_inputs(
+        self,
+        references: list[dict[str, Any]],
+    ) -> tuple[list[ResearchScriptInputFileCreateRequest], list[str]]:
+        """Copy supported app-native price history into the bounded Script snapshot.
+
+        This resolver deliberately accepts no URL, tool name, path, credential, or
+        execution destination. Unsupported references remain requirements with an
+        explicit degraded warning rather than widening the runtime boundary.
+        """
+
+        files: list[ResearchScriptInputFileCreateRequest] = []
+        warnings: list[str] = []
+        for reference in references:
+            reference_id = str(reference.get("reference_id") or "input").strip()
+            source_kind = str(reference.get("source_kind") or "").strip()
+            symbol = str(reference.get("symbol") or "").strip().upper()
+            logical_filename = str(reference.get("logical_filename") or "").strip()
+            media_type = str(reference.get("media_type") or "text/csv").strip().lower()
+            if source_kind == "user_upload":
+                warnings.append(
+                    f"Input `{reference_id}` requires user-uploaded bytes before data-dependent execution."
+                )
+                continue
+            if not symbol or not logical_filename or media_type != "text/csv":
+                warnings.append(
+                    f"Input `{reference_id}` could not be acquired: the v1 app-native bridge requires symbol, logical_filename, and text/csv."
+                )
+                continue
+            if self.research_provider is None or not hasattr(
+                self.research_provider,
+                "load_symbol_history",
+            ):
+                warnings.append(
+                    f"Input `{reference_id}` could not be acquired because Gamma historical-price data is unavailable."
+                )
+                continue
+            lookback_days = int(reference.get("lookback_days") or 756)
+            try:
+                series = self.research_provider.load_symbol_history(symbol, lookback_days)
+                if series is None or getattr(series, "empty", True):
+                    raise ValueError("no bounded history was returned")
+                frequency = str(reference.get("frequency") or "daily").strip().lower()
+                if frequency == "weekly":
+                    series = series.resample("W-FRI").last().dropna()
+                elif frequency == "monthly":
+                    series = series.resample("ME").last().dropna()
+                csv_text = series.rename("close").to_csv(index_label="date")
+                files.append(
+                    ResearchScriptInputFileCreateRequest(
+                        logical_filename=logical_filename,
+                        media_type="text/csv",
+                        content=csv_text.encode("utf-8"),
+                        gamma_object_id=(
+                            str(reference.get("dataset_id") or "").strip() or None
+                        ),
+                        provider_id=(
+                            str(reference.get("provider") or "").strip() or None
+                        ),
+                        transformation_note=(
+                            f"Gamma copied bounded {frequency} historical prices for {symbol}; "
+                            "the Script runtime received only this retained CSV snapshot."
+                        ),
+                        source_kind=(
+                            "gamma_state" if source_kind == "gamma_state" else "provider"
+                        ),
+                    )
+                )
+            except Exception:
+                warnings.append(
+                    f"Input `{reference_id}` acquisition degraded: Gamma could not copy the requested bounded historical-price snapshot."
+                )
+        return files, dedupe_warnings(warnings)
+
+    def _tool_run_research_script(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+        *,
+        request: CopilotResearchCardRequest | None,
+    ) -> CopilotToolExecution:
+        prompt = str(request.prompt if request is not None else context.summary_data.get("prompt") or "")
+        if request is None or request.role != "research_operator":
+            return self._blocked_script_execution(
+                "strategy_lab.run_research_script",
+                arguments,
+                "Research Script execution is available only to Research Operator.",
+            )
+        if not self._prompt_requests_script_execution(prompt.lower(), request.context):
+            return self._blocked_script_execution(
+                "strategy_lab.run_research_script",
+                arguments,
+                "The current user turn did not explicitly request Research Script execution.",
+            )
+        if self._prompt_requests_forbidden_script_authority(prompt):
+            return self._blocked_script_execution(
+                "strategy_lab.run_research_script",
+                arguments,
+                "Gamma refused forbidden Script runtime or financial-account authority.",
+            )
+        if self.research_script_service is None:
+            return self._blocked_script_execution(
+                "strategy_lab.run_research_script",
+                arguments,
+                "Research Script runtime is unavailable.",
+            )
+        try:
+            run = self.research_script_service.create_exact_run(
+                str(arguments["script_id"]),
+                revision_id=str(arguments["revision_id"]),
+                input_snapshot_id=str(arguments["input_snapshot_id"]),
+                source_sha256=str(arguments["source_sha256"]),
+                manifest_sha256=str(arguments["manifest_sha256"]),
+            )
+        except (ResearchScriptServiceError, ValueError, KeyError) as exc:
+            return self._blocked_script_execution(
+                "strategy_lab.run_research_script",
+                arguments,
+                str(exc),
+            )
+
+        output_summaries = [
+            {
+                "output_id": item.output_id,
+                "kind": item.kind,
+                "media_type": item.media_type,
+                "byte_size": item.byte_size,
+                "filename": item.filename,
+                "metric_name": item.metric_name,
+                "metric_value": item.metric_value,
+                "columns": list(item.columns),
+                "row_count": len(item.rows),
+                "generated": item.generated,
+                "derived": True,
+            }
+            for item in run.outputs
+        ]
+        source_ids = [
+            f"research-script.revision.{run.revision_id}",
+            f"research-script.input-snapshot.{run.input_snapshot_id}",
+            f"research-script.run.{run.run_id}",
+        ]
+        sources = [
+            CopilotSourceRef(
+                source_id=source_ids[0],
+                label="Executed Research Script revision",
+                kind="generated_source",
+                provider="gamma",
+                origin="gamma.strategy_lab.script.revision",
+                description=f"Immutable executed source SHA-256 {run.source_sha256}.",
+                provider_native_id=run.revision_id,
+                navigation_supported=True,
+                navigation_tab="strategy_lab",
+                navigation_mode="script",
+                navigation_context={"script_id": run.script_id, "revision_id": run.revision_id},
+            ),
+            CopilotSourceRef(
+                source_id=source_ids[1],
+                label="Executed input snapshot",
+                kind="input_manifest",
+                provider="gamma",
+                origin="gamma.strategy_lab.script.input_snapshot",
+                description=f"Immutable input manifest SHA-256 {run.input_manifest_sha256}.",
+                provider_native_id=run.input_snapshot_id,
+            ),
+            CopilotSourceRef(
+                source_id=source_ids[2],
+                label="Research Script run",
+                kind="analysis_run",
+                provider=run.runtime_provider,
+                origin=run.origin,
+                description=f"Retained Research Script run with terminal status {run.status}.",
+                retrieved_at=run.completed_at or run.started_at,
+                provider_native_id=run.run_id,
+                navigation_supported=True,
+                navigation_tab="strategy_lab",
+                navigation_mode="script",
+                navigation_context={"script_id": run.script_id, "run_id": run.run_id},
+            ),
+        ]
+        output = {
+            "script_id": run.script_id,
+            "revision_id": run.revision_id,
+            "input_snapshot_id": run.input_snapshot_id,
+            "source_sha256": run.source_sha256,
+            "manifest_sha256": run.input_manifest_sha256,
+            "run_id": run.run_id,
+            "status": run.status,
+            "outputs": output_summaries,
+            "warnings": list(run.warnings),
+            "sources": source_ids,
+            "usage": dict(run.usage),
+            "materialization": self._script_materialization_target(
+                script_id=run.script_id,
+                revision_id=run.revision_id,
+                input_snapshot_id=run.input_snapshot_id,
+                selected_run_id=run.run_id,
+            ),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="strategy_lab.run_research_script",
+                summary=(
+                    f"Research Script run `{run.run_id}` finished with status `{run.status}` "
+                    f"for revision `{run.revision_id}` and produced {len(run.outputs)} retained output(s)."
+                ),
+                arguments=arguments,
+                source_ids=source_ids,
+            ),
+            sources=sources,
+        )
+
+    @staticmethod
+    def _blocked_script_execution(
+        tool_id: str,
+        arguments: dict[str, Any],
+        message: str,
+    ) -> CopilotToolExecution:
+        return CopilotToolExecution(
+            output={"error": message, "status": "rejected"},
+            trace=CopilotToolTrace(
+                tool_name=tool_id,
+                summary=message,
+                arguments=arguments,
+                source_ids=[],
+            ),
+        )
+
+    @staticmethod
+    def _script_materialization_target(
+        *,
+        script_id: str,
+        revision_id: str,
+        input_snapshot_id: str,
+        selected_run_id: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "target_tab": "strategy_lab",
+            "target_mode": "script",
+            "payload_contract": "copilot.strategy-lab-script-working-analysis.v1",
+            "durable": False,
+            "navigation_context": {
+                "script_id": script_id,
+                "revision_id": revision_id,
+                "input_snapshot_id": input_snapshot_id,
+                "selected_run_id": selected_run_id,
+            },
+        }
 
     def _attach_operator_working_analysis(
         self,
@@ -5106,6 +5895,52 @@ class CopilotService:
         output = execution.output
         if not isinstance(output, dict):
             return None
+        if tool_id in {
+            "strategy_lab.draft_research_script",
+            "strategy_lab.run_research_script",
+        }:
+            script_id = str(output.get("script_id") or "").strip()
+            revision_id = str(output.get("revision_id") or "").strip()
+            input_snapshot_id = str(output.get("input_snapshot_id") or "").strip()
+            if not script_id or not revision_id or not input_snapshot_id:
+                return None
+            selected_run_id = str(output.get("run_id") or "").strip() or None
+            materialization = self._script_materialization_target(
+                script_id=script_id,
+                revision_id=revision_id,
+                input_snapshot_id=input_snapshot_id,
+                selected_run_id=selected_run_id,
+            )
+            return {
+                "family_key": f"strategy_lab.research_script:{script_id}",
+                "merge_workflow": True,
+                "domain": "strategy_lab",
+                "analysis_type": "research_script",
+                "title": str(arguments.get("title") or f"Research Script {script_id[:8]}"),
+                "entity": {
+                    "entity_type": "research_script",
+                    "normalized_id": script_id,
+                    "script_id": script_id,
+                    "revision_id": revision_id,
+                    "input_snapshot_id": input_snapshot_id,
+                    "selected_run_id": selected_run_id,
+                    "revision_status": output.get("revision_status"),
+                    "source_sha256": output.get("source_sha256"),
+                    "manifest_sha256": output.get("manifest_sha256"),
+                },
+                "inputs": {tool_id: deepcopy(arguments)},
+                "outputs": {tool_id: deepcopy(output)},
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "strategy_lab",
+                "owning_mode": "script",
+                "materialization": materialization,
+                "source_provider": "gamma_research_script",
+                "origin": "gamma.strategy_lab.script.working_analysis",
+                "transformation_note": (
+                    "Session-ephemeral Script working analysis backed by immutable Gamma revision, "
+                    "input snapshot, run, and retained-output identities; materialization does not save a strategy."
+                ),
+            }
         if tool_id == "run_fundamentals_reverse_valuation":
             ticker = str(output.get("ticker") or arguments.get("ticker") or "").strip().upper()
             if not ticker:
@@ -6216,6 +7051,11 @@ class CopilotService:
             ("fundamentals", "reverse_valuation", "copilot.fundamentals-working-analysis.v1"),
             ("risk", "overview", "copilot.risk-working-analysis.v1"),
             ("risk", "scenarios", "copilot.risk-working-analysis.v1"),
+            (
+                "strategy_lab",
+                "script",
+                "copilot.strategy-lab-script-working-analysis.v1",
+            ),
         }
         materialization = analysis.materialization
         target = (
@@ -6541,6 +7381,8 @@ class CopilotService:
         has_portfolio_context = "portfolio" in prompt or context.current_tab == "portfolio"
         has_oil_context = any(term in prompt for term in ("oil", "crude", "brent", "wti"))
 
+        if CopilotService._prompt_requests_script_workflow(prompt, context):
+            return "research_script_workflow"
         if CopilotService._prompt_requests_hypothetical_portfolio(prompt):
             return "hypothetical_portfolio_comparison"
         if has_portfolio_context and has_rate_context:
@@ -6581,7 +7423,7 @@ class CopilotService:
             if domain in seen:
                 return
             seen.add(domain)
-            tools = planned_tools or self._default_plan_tools(domain)
+            tools = self._default_plan_tools(domain) if planned_tools is None else planned_tools
             provider_calls = self._estimated_provider_calls(domain, tools)
             domain_plan.append(
                 CopilotResearchPlanDomain(
@@ -6597,7 +7439,28 @@ class CopilotService:
                 )
             )
 
-        if depth_profile == "user_directed":
+        if intent == "research_script_workflow":
+            planned_tools: list[str] = []
+            if self._prompt_requests_script_draft(prompt):
+                planned_tools.append("strategy_lab.draft_research_script")
+            if self._prompt_requests_script_execution(prompt, request.context):
+                planned_tools.append("strategy_lab.run_research_script")
+            add(
+                "strategy_lab",
+                "deep",
+                (
+                    "The current turn explicitly requests a bounded Research Script workflow; "
+                    "Gamma must preserve immutable source, input, and run identities."
+                ),
+                action_type=(
+                    "run_analysis"
+                    if planned_tools == ["strategy_lab.run_research_script"]
+                    else "draft_change"
+                ),
+                planned_tools=planned_tools,
+                required_context=["script_state", "authorized_input_references"],
+            )
+        elif depth_profile == "user_directed":
             directed_domains = self._extract_user_directed_domains(prompt)
             if not directed_domains:
                 directed_domains = [self._resolve_domain(request)]
@@ -6678,6 +7541,88 @@ class CopilotService:
                 for item in domain_plan
             ]
         return domain_plan
+
+    @staticmethod
+    def _prompt_requests_script_workflow(
+        prompt: str,
+        context: CopilotRequestContext | None = None,
+    ) -> bool:
+        normalized = str(prompt or "").strip().lower()
+        if re.search(r"\b(?:research\s+script|python\s+script|script\s+workflow)\b", normalized):
+            return True
+        script_state = (
+            context.strategy_lab_state.get("script_state")
+            if context is not None and isinstance(context.strategy_lab_state, dict)
+            else None
+        )
+        return bool(
+            isinstance(script_state, dict)
+            and script_state.get("script_id")
+            and re.search(r"\b(?:run|execute|edit|change|update|inspect|explain)\s+(?:it|this|the\s+script)\b", normalized)
+        )
+
+    @staticmethod
+    def _prompt_requests_script_draft(prompt: str) -> bool:
+        normalized = str(prompt or "").strip().lower()
+        if not re.search(r"\b(?:research\s+script|python\s+script|script\s+workflow)\b", normalized):
+            return False
+        if (
+            re.search(r"\b(?:summarize|explain|inspect|review)\b", normalized)
+            and re.search(r"\b(?:completed|result|output|run)\b", normalized)
+            and not re.search(r"\b(?:build|create|draft|write|author|edit|change|update|modify)\b", normalized)
+        ):
+            return False
+        return bool(
+            re.search(
+                r"\b(?:build|create|draft|write|author|edit|change|update|modify|show)\b",
+                normalized,
+            )
+        ) or not re.search(r"\b(?:run|execute)\b", normalized)
+
+    @staticmethod
+    def _prompt_requests_script_execution(
+        prompt: str,
+        context: CopilotRequestContext | None = None,
+    ) -> bool:
+        normalized = str(prompt or "").strip().lower()
+        if re.search(
+            r"\b(?:do\s+not|don't|without|never)\b[^.!?]{0,24}\b(?:run|execute)\b",
+            normalized,
+        ):
+            return False
+        if not re.search(r"\b(?:run|execute)\b", normalized):
+            return False
+        return CopilotService._prompt_requests_script_workflow(normalized, context)
+
+    @staticmethod
+    def _prompt_requests_script_authority(
+        prompt: str,
+        context: CopilotRequestContext | None = None,
+    ) -> bool:
+        normalized = str(prompt or "").strip().lower()
+        return bool(
+            CopilotService._prompt_requests_script_draft(normalized)
+            or CopilotService._prompt_requests_script_execution(normalized, context)
+            or re.search(r"\b(?:edit|change|update|modify|accept|reject)\b", normalized)
+        )
+
+    @staticmethod
+    def _prompt_requests_forbidden_script_authority(prompt: str) -> bool:
+        normalized = str(prompt or "").strip().lower()
+        if re.search(r"\b(?:do\s+not|don't|without|never)\b[^.!?]{0,48}\b(?:broker|order|account|wallet|secret|localhost|shell|package|network)\b", normalized):
+            normalized = re.sub(
+                r"\b(?:do\s+not|don't|without|never)\b[^.!?]{0,64}\b(?:broker|order|account|wallet|secret|localhost|shell|package|network)(?:\s+access)?\b",
+                "",
+                normalized,
+            )
+        return bool(
+            re.search(
+                r"\b(?:connect|access|use|place|submit|install|open|expose|escape|call)\b[^.!?]{0,48}"
+                r"\b(?:broker|order|account|wallet|secret|localhost|shell|package|network)\b",
+                normalized,
+            )
+            or re.search(r"\b(?:pip\s+install|subprocess|os\.system|socket|requests\.)\b", normalized)
+        )
 
     @staticmethod
     def _default_plan_tools(domain: str) -> list[str]:
@@ -7611,15 +8556,29 @@ class CopilotService:
         imported_result = state.get("imported_result")
         composition = state.get("composition")
         compare_result = state.get("compare_result")
+        script_state = state.get("script_state")
         handoff_context = self._summarize_strategy_lab_handoff_context(state.get("handoff_context"))
-        if not any(isinstance(item, dict) for item in (imported_result, composition, compare_result)) and not handoff_context.get("current_count"):
+        explicit_script_request = self._prompt_requests_script_workflow(
+            str(request.prompt or "").lower(),
+            request.context,
+        )
+        if (
+            not any(
+                isinstance(item, dict)
+                for item in (imported_result, composition, compare_result, script_state)
+            )
+            and not handoff_context.get("current_count")
+            and not explicit_script_request
+        ):
             raise ValueError("Strategy Lab copilot requires an active import, composition, comparison, or current handoff.")
         summary_data = {
             "workspace_mode": request.context.workspace_mode or "research",
             "imported_result": imported_result if isinstance(imported_result, dict) else None,
             "composition": composition if isinstance(composition, dict) else None,
             "compare_result": compare_result if isinstance(compare_result, dict) else None,
+            "script_state": script_state if isinstance(script_state, dict) else None,
             "handoff_context": handoff_context,
+            "prompt": str(request.prompt or ""),
         }
         warnings = dedupe_warnings(
             (imported_result or {}).get("warnings", []) if isinstance(imported_result, dict) else [],
@@ -7640,6 +8599,21 @@ class CopilotService:
                     retrieved_at=(composition or imported_result or {}).get("retrieved_at")
                     if isinstance(composition or imported_result, dict)
                     else None,
+                )
+            )
+        if isinstance(script_state, dict) and script_state.get("script_id"):
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"research-script.script.{self._safe_source_id(str(script_state['script_id'])).lower()}",
+                    label="Research Script working source",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.strategy_lab.script",
+                    description="Active immutable Research Script identity supplied by Strategy Lab.",
+                    navigation_supported=True,
+                    navigation_tab="strategy_lab",
+                    navigation_mode="script",
+                    navigation_context={"script_id": str(script_state["script_id"])},
                 )
             )
         if handoff_context.get("items"):

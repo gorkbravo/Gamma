@@ -3,7 +3,7 @@
 Date: 2026-07-08
 Audience: future AI agents and contributors improving Gamma
 Mode: full
-Data: live IBKR, account U15779203, market data `auto` (weekday evening session; US cash close Jul 7 fresh, CME Globex overnight)
+Data: live IBKR, account U1234567, market data `auto` (weekday evening session; US cash close Jul 7 fresh, CME Globex overnight)
 Context: First weekday live run since the 2026-06-27 weekend audit. A real geopolitical tape (US strikes on Iran, oil surging) let two evidenced theses run end-to-end. The Commodities `% CHG` P0 fix and the single-day corroboration work were verified live; the run's sharpest new findings are an intermittent app-wide UI freeze on the Strategy Lab → Risk handoff, an unbounded Options polling loop, and a Copilot that completes but never delivers a card. Builds on `gamma_usability_findings_2026-06-27.md`. Note: this run audited the `visual-language-pass` working tree (uncommitted GUA-20260627-3 Sitrep/Research changes included).
 
 ## Audit Setup

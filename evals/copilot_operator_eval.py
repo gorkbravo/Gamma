@@ -1076,9 +1076,14 @@ def main() -> int:
     from src.application.runtime import build_runtime
 
     os.environ.setdefault(GAMMA_SESSION_ENV, "copilot-operator-eval")
-    os.environ.setdefault("COMMODITIES_PROVIDER", "sample")
-    os.environ.setdefault("MARITIME_PROVIDER", "sample")
-    os.environ.setdefault("NEWS_PROVIDER", "sample")
+    os.environ["COMMODITIES_PROVIDER"] = "sample"
+    os.environ["MARITIME_PROVIDER"] = "sample"
+    os.environ["NEWS_PROVIDER"] = "sample"
+    # The retained suite is offline by default even when the repository .env
+    # contains a usable provider key. Live Agents SDK variants are enabled only
+    # by their explicit CLI flags below.
+    os.environ["GAMMA_COPILOT_PROVIDER"] = "mock"
+    os.environ["GAMMA_RESEARCH_SCRIPT_RUNTIME"] = "mock"
     with TemporaryDirectory(prefix="gamma-copilot-operator-eval-") as temp_dir:
         temp_root = Path(temp_dir)
         print("[eval] building deterministic runtime", file=sys.stderr, flush=True)
