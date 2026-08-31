@@ -42,24 +42,45 @@
     | { kind: "event"; id: string }
     | null;
 
-  // Design token values used for map layer styling
-  const BG0 = "#02060c";
-  const TEXT2 = "#8a919a";
+  /* MapLibre paint properties need literal colours, so the tokens are read
+     once from the document rather than copied into this file by hand. The
+     fallbacks only apply outside a browser (SSR, unit tests). */
+  function token(name: string, fallback: string) {
+    if (typeof document === "undefined") return fallback;
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  }
+
+  const BG0 = token("--bg-0", "#070809");
+  const TEXT2 = token("--text-2", "#8a919a");
+  const WATER = token("--bg-0", "#070809");
+  /* Land is the surface, water is the void. --panel-strong separates them a
+     little more than the old navy did (1.62 vs 1.32) while staying neutral. */
+  const LAND = token("--panel-strong", "#2e353e");
+  const BORDER_COUNTRY = token("--accent", "#7aa6c8");
+  const BORDER_INNER = token("--text-2", "#8a919a");
+  const LANE = token("--accent", "#7aa6c8");
+  const ACCENT = token("--accent", "#7aa6c8");
+  const TEXT0 = token("--text-0", "#f0f2f5");
+  const TEXT1 = token("--text-1", "#c2c8d0");
   const AIS_ZOOM_THRESHOLD = 4;
   const VIEWPORT_DEBOUNCE_MS = 1500;
   const MAX_LIVE_POSITIONS = 600;
   const AISSTREAM_COVERAGE_URL = "https://aisstream.io/coverage";
   const VESSEL_GROUPS = ["tanker", "lng_carrier", "cargo", "container", "dry_bulk", "passenger", "fishing", "special", "unknown"];
+  /* Vessel class is an unordered category, so these come from the categorical
+     ramp. Cargo and container both used to be --positive green, which made
+     the two largest classes on the map indistinguishable. */
   const VESSEL_COLORS: Record<string, string> = {
-    tanker: "#e36f5a",
-    lng_carrier: "#7aa6c8",
-    cargo: "#4bb474",
-    container: "#4bb474",
-    dry_bulk: "#c49a5a",
-    passenger: "#a4b0bc",
-    fishing: "#63b3a6",
-    special: "#b58bd8",
-    unknown: "#8a919a",
+    tanker: token("--cat-4", "#d97a70"),
+    lng_carrier: token("--cat-1", "#7aa6c8"),
+    cargo: token("--cat-2", "#4bb474"),
+    container: token("--cat-5", "#5fa89c"),
+    dry_bulk: token("--cat-3", "#c49a5a"),
+    passenger: token("--cat-7", "#8595a8"),
+    fishing: token("--cat-8", "#9aae7a"),
+    special: token("--cat-6", "#9a8ac4"),
+    unknown: token("--text-2", "#8a919a"),
   };
 
   let container: HTMLDivElement;
@@ -308,17 +329,17 @@
       const id = layer.id;
       if (id === "background") {
         // background = land base — everything that isn't explicitly filled by another layer
-        setPaint(id, "background-color", "#0d2540");
+        setPaint(id, "background-color", LAND);
       } else if (id === "water") {
         // water fills ocean, seas, lakes, rivers on top of the land background
-        setPaint(id, "fill-color", "#01040c");
+        setPaint(id, "fill-color", WATER);
         setPaint(id, "fill-opacity", 1);
       } else if (id === "boundary_country_outline" || id === "boundary_country_inner") {
-        setPaint(id, "line-color", "#4f9deb");
+        setPaint(id, "line-color", BORDER_COUNTRY);
         setPaint(id, "line-opacity", 0.82);
         setPaint(id, "line-width", ["interpolate", ["linear"], ["zoom"], 2, 0.85, 5, 1.15, 8, 1.55]);
       } else if (id === "boundary_state" || id === "boundary_county") {
-        setPaint(id, "line-color", "#3d86d6");
+        setPaint(id, "line-color", BORDER_INNER);
         setPaint(id, "line-opacity", 0.42);
         setPaint(id, "line-width", ["interpolate", ["linear"], ["zoom"], 2, 0.35, 6, 0.7]);
       } else {
@@ -749,9 +770,9 @@
   function stressColorExpression() {
     return [
       "match", ["get", "tone"],
-      "high", "#c66b61",
-      "active", "#c49a5a",
-      "#7aa6c8",
+      "high", token("--negative", "#d97a70"),
+      "active", token("--warning", "#c49a5a"),
+      token("--accent", "#7aa6c8"),
     ];
   }
 
@@ -805,7 +826,7 @@
         filter: ["==", ["get", "Type"], "Major"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#76b9ff",
+          "line-color": LANE,
           "line-opacity": ["interpolate", ["linear"], ["zoom"],
             2, 0.16,
             5, 0.25,
@@ -824,7 +845,7 @@
         filter: ["==", ["get", "Type"], "Major"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#2f89d9",
+          "line-color": LANE,
           "line-opacity": ["interpolate", ["linear"], ["zoom"],
             2, 0.30,
             5, 0.42,
@@ -843,7 +864,7 @@
         filter: ["==", ["get", "Type"], "Major"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#2b79bf",
+          "line-color": LANE,
           "line-opacity": ["interpolate", ["linear"], ["zoom"],
             2, 0.36,
             5, 0.50,
@@ -933,7 +954,7 @@
           "text-optional": true,
         },
         paint: {
-          "text-color": "#c2c8d0",
+          "text-color": TEXT1,
           "text-halo-color": BG0,
           "text-halo-width": 1.4,
         },
@@ -1029,7 +1050,7 @@
         source: "replay-line",
         layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
         paint: {
-          "line-color": "#7aa6c8",
+          "line-color": ACCENT,
           "line-opacity": 0.26,
           "line-width": ["interpolate", ["linear"], ["zoom"], 2, 12, 7, 20],
           "line-blur": 14,
@@ -1041,7 +1062,7 @@
         source: "replay-line",
         layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
         paint: {
-          "line-color": "#7aa6c8",
+          "line-color": ACCENT,
           "line-opacity": 0.86,
           "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2, 7, 4],
           "line-blur": 1.2,
@@ -1054,7 +1075,7 @@
         source: "replay-point",
         layout: { visibility: "none" },
         paint: {
-          "circle-color": "#7aa6c8",
+          "circle-color": ACCENT,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 4, 7, 7],
           "circle-stroke-color": BG0,
           "circle-stroke-width": 1.5,
@@ -1069,10 +1090,10 @@
         filter: ["==", ["get", "watchlisted"], true],
         layout: { visibility: "none" },
         paint: {
-          "circle-color": "#f0f2f5",
+          "circle-color": TEXT0,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 10, 8, 22],
           "circle-opacity": 0.08,
-          "circle-stroke-color": "#f0f2f5",
+          "circle-stroke-color": TEXT0,
           "circle-stroke-opacity": 0.62,
           "circle-stroke-width": 1.3,
         },
@@ -1620,7 +1641,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #475569;
+    background: var(--text-2);
     flex-shrink: 0;
   }
 
@@ -1691,7 +1712,7 @@
     flex-shrink: 0;
   }
 
-  .legend-item.tanker::before { background: #e36f5a; }
+  .legend-item.tanker::before { background: var(--cat-4); }
   .legend-item.lng::before    { background: #7aa6c8; }
   .legend-item.cargo::before  { background: #4bb474; }
   .legend-item.bulk::before   { background: #c49a5a; }
@@ -1699,10 +1720,10 @@
     width: 18px;
     height: 5px;
     border-radius: 999px;
-    background: color-mix(in srgb, #2b79bf 72%, transparent);
+    background: color-mix(in srgb, var(--accent) 72%, transparent);
     box-shadow:
-      0 0 4px color-mix(in srgb, #2f89d9 72%, transparent),
-      0 0 10px color-mix(in srgb, #76b9ff 42%, transparent);
+      0 0 4px color-mix(in srgb, var(--accent) 72%, transparent),
+      0 0 10px color-mix(in srgb, var(--accent) 42%, transparent);
   }
   .legend-item.port::before   { background: var(--text-2, #8a919a); }
   .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2, #8a919a); }

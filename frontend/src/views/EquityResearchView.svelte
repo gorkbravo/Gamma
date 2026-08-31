@@ -1123,7 +1123,7 @@
             {
               id: "rolling_vol",
               label: "Rolling Vol",
-              color: "#9bd19f",
+              color: "var(--chart-primary)",
               type: "line",
               data: volSeries
             }
@@ -1136,7 +1136,7 @@
             {
               id: chartMode,
               label: chartMode === "rolling_beta" ? "Rolling Beta" : "Rolling Corr",
-              color: chartMode === "rolling_beta" ? "var(--chart-secondary)" : "#d8c17a",
+              color: "var(--chart-secondary)",
               type: "line",
               data: betaSeries
             }
@@ -1163,7 +1163,7 @@
             {
               id: "relative",
               label: "Relative Return",
-              color: "#ff9f5a",
+              color: "var(--chart-primary)",
               type: "line",
               data: relative
             }

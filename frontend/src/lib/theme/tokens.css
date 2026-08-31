@@ -75,8 +75,20 @@
 
   /* ── Semantic: status ── */
   --positive: #4bb474;
-  --negative: #c66b61;
+  --negative: #d97a70;
   --warning: #c49a5a;
+
+  /* ── Categorical (unordered classes: vessel types, sectors, venues) ──
+     Intensity tokens encode magnitude; these encode identity. Kept in the
+     same muted register and at similar luminance so no class shouts. */
+  --cat-1: #7aa6c8;   /* blue */
+  --cat-2: #4bb474;   /* green */
+  --cat-3: #c49a5a;   /* gold */
+  --cat-4: #d97a70;   /* red */
+  --cat-5: #5fa89c;   /* teal */
+  --cat-6: #9a8ac4;   /* violet */
+  --cat-7: #8595a8;   /* slate */
+  --cat-8: #9aae7a;   /* sage */
 
   /* ── Semantic: data intensity ── */
   --data-hot: #4bb474;
@@ -92,7 +104,7 @@
   /* ── Chart themes ── */
   --chart-primary: #7aa6c8;
   --chart-secondary: #c49a5a;
-  --chart-negative: #b65d54;
+  --chart-negative: #cc6f64;
 
   /* ── Flash animation durations ── */
   --flash-duration: 800ms;
@@ -110,14 +122,14 @@
 :root[data-chart-theme="amber"] {
   --chart-primary: #d4a054;
   --chart-secondary: #8a919a;
-  --chart-negative: #c66b61;
+  --chart-negative: #d97a70;
 }
 
 /* ── Theme: Green phosphor ── */
 :root[data-chart-theme="green"] {
   --chart-primary: #4bb474;
   --chart-secondary: #8a919a;
-  --chart-negative: #c66b61;
+  --chart-negative: #d97a70;
 }
 
 html,
@@ -252,7 +264,7 @@ thead th {
 }
 
 @keyframes flash-down {
-  0%   { background-color: rgba(198, 107, 97, 0.22); }
+  0%   { background-color: rgba(217, 122, 112, 0.22); }
   100% { background-color: transparent; }
 }
 
