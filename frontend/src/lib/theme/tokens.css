@@ -60,9 +60,9 @@
   --panel-bg: var(--bg-0);
 
   /* ── Borders & dividers ── */
-  --panel-border: #1e2228;
-  --panel-strong: #2e353e;
-  --divider: rgba(50, 56, 64, 0.55);
+  --panel-border: #2f3641;
+  --panel-strong: #46505e;
+  --divider: rgba(70, 80, 94, 0.55);
 
   /* ── Text ── */
   --text-0: #f0f2f5;
