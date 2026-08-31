@@ -1283,9 +1283,6 @@
   }
 
   .view,
-  .workspace-grid,
-  .primary-column,
-  .support-column,
   .metric-list,
   .warning-list,
   .slice-list,
@@ -1294,11 +1291,6 @@
   .legs-panel {
     display: grid;
     gap: var(--space-4);
-  }
-
-  .workspace-grid {
-    grid-template-columns: minmax(0, 1.55fr) minmax(20rem, 0.72fr);
-    align-items: start;
   }
 
   .overview-grid {
@@ -1975,19 +1967,16 @@
     color: var(--negative);
   }
 
-  @media (max-width: 1180px) {
-    .workspace-grid,
+  @media (max-width: 1240px) {
     .overview-grid,
     .strategy-layout {
       grid-template-columns: 1fr;
     }
+  }
 
+  @media (max-width: 1180px) {
     .kpi-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .mode-bar {
-      grid-template-columns: repeat(3, auto);
     }
 
     .legs-panel {

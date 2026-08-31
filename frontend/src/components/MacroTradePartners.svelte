@@ -263,18 +263,6 @@
 </div>
 
 <style>
-  .workspace-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.7fr) minmax(18rem, 0.8fr);
-    gap: var(--space-4);
-  }
-
-  .primary-column,
-  .support-column {
-    display: grid;
-    gap: var(--space-4);
-    align-content: start;
-  }
 
   .viz-panel {
     padding: var(--space-5);

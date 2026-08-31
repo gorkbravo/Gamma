@@ -89,7 +89,7 @@
       <p class="annotation">`Ctrl+1` through `Ctrl+N` always follow the live visual order shown here.</p>
     </div>
 
-    <div class="workspace-grid">
+    <div class="binding-columns">
       {#each workspaceSections as workspace}
         <article class="workspace-card">
           <div class="workspace-card-head">
@@ -129,7 +129,7 @@
       <p class="annotation">`Shift+1` through `Shift+N` follow the active tab's mode bar when modes are registered.</p>
     </div>
 
-    <div class="workspace-grid">
+    <div class="binding-columns">
       {#each modeSections as tab}
         <article class="workspace-card">
           <div class="workspace-card-head">
@@ -246,7 +246,7 @@
     font-size: var(--text-xs);
   }
 
-  .workspace-grid {
+  .binding-columns {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
@@ -268,7 +268,7 @@
     .workspace-card-head,
     .row,
     .compact .row,
-    .workspace-grid {
+    .binding-columns {
       grid-template-columns: 1fr;
     }
 

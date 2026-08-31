@@ -1370,9 +1370,6 @@
 <style>
   .view,
   .mode-shell,
-  .workspace-grid,
-  .primary-column,
-  .support-column,
   .two-col,
   .list {
     display: grid;
@@ -1448,9 +1445,7 @@
 
   .controls-card { padding: var(--space-4) var(--space-5); }
 
-  .workspace-grid { grid-template-columns: minmax(0, 1.8fr) minmax(20rem, 0.85fr); align-items: start; }
   .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .primary-column, .support-column { align-content: start; }
 
   /* ── Mode bar ── */
 

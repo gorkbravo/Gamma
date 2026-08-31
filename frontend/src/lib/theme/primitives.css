@@ -113,3 +113,37 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ── Workspace grid ───────────────────────────────────────────────────────
+   The primary/support split that every research tab is built on: evidence
+   on the left, context and provenance in the rail. Eleven views each picked
+   their own ratio — 1.55fr, 1.56fr, 1.58fr, 1.7fr, 1.8fr, 1.85fr, 1.9fr —
+   and their own collapse breakpoint, so the rail landed somewhere different
+   on every tab. One ratio, one breakpoint. */
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(20rem, 0.9fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/* Sitrep's rail carries the news tape, follow-ups and provider status side
+   by side, so it earns more width than a context rail. */
+.workspace-grid.is-wide-rail {
+  grid-template-columns: minmax(0, 1fr) minmax(29rem, 0.48fr);
+}
+
+.primary-column,
+.support-column {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  align-content: start;
+}
+
+@media (max-width: 1240px) {
+  .workspace-grid,
+  .workspace-grid.is-wide-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

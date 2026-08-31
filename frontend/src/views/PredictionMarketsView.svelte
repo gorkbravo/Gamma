@@ -2116,24 +2116,11 @@
   .screener-grid,
   .compare-grid,
   .calibration-grid,
-  .workspace-grid,
-  .primary-column,
-  .support-column,
   .screener-foot,
   .notes-list,
   .tag-list {
     display: grid;
     gap: var(--space-4);
-  }
-
-  .workspace-grid {
-    grid-template-columns: minmax(0, 1.55fr) minmax(22rem, 0.95fr);
-    align-items: start;
-  }
-
-  .primary-column,
-  .support-column {
-    align-content: start;
   }
 
   .screener-foot,
@@ -2904,9 +2891,6 @@
   }
 
   @media (max-width: 1320px) {
-    .workspace-grid {
-      grid-template-columns: 1fr;
-    }
   }
 
   @media (max-width: 1080px) {

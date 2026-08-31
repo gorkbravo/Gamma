@@ -664,8 +664,6 @@
 
 <style>
   .script-workspace,
-  .primary-column,
-  .support-column,
   .output-list,
   .stack,
   .new-script,

@@ -1269,9 +1269,6 @@
 <style>
   /* ── Layout shells ── */
   .view,
-  .workspace-grid,
-  .primary-column,
-  .support-column,
   .kpi-grid,
   .detail-split,
   .stack,
@@ -1343,15 +1340,6 @@
   /* ── Mode bar (Risk pattern) ── */
 
   /* ── Workspace ── */
-  .workspace-grid {
-    grid-template-columns: minmax(0, 1.85fr) minmax(20rem, 0.9fr);
-    align-items: start;
-  }
-
-  .primary-column,
-  .support-column {
-    align-content: start;
-  }
 
   .detail-split {
     grid-template-columns: repeat(2, minmax(0, 1fr));

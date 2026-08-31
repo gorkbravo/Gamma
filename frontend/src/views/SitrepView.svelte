@@ -1571,7 +1571,7 @@
     </div>
   </article>
 
-  <div class="workspace-grid">
+  <div class="workspace-grid is-wide-rail">
     <div class="primary-column">
       <div class="market-grid">
         <article class="panel table-panel">
@@ -2193,20 +2193,6 @@
 
   .tooltip-list.warning-items {
     color: var(--warning);
-  }
-
-  .workspace-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(29rem, 0.48fr);
-    gap: var(--space-4);
-  }
-
-  .primary-column,
-  .support-column {
-    display: grid;
-    gap: var(--space-4);
-    align-content: start;
-    min-width: 0;
   }
 
   .market-grid {

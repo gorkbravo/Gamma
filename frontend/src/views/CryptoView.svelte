@@ -1083,8 +1083,6 @@
 
 <style>
   .view,
-  .primary-column,
-  .support-column,
   .detail-split,
   .notes-list,
   .basket-grid,
@@ -1099,20 +1097,8 @@
     gap: var(--space-4);
   }
 
-  .workspace-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.58fr) minmax(22rem, 0.96fr);
-    gap: var(--space-4);
-    align-items: start;
-  }
-
   .workspace-grid.overview-layout {
     grid-template-columns: 1fr;
-  }
-
-  .primary-column,
-  .support-column {
-    align-content: start;
   }
 
   .detail-split {

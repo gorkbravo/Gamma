@@ -2177,8 +2177,6 @@
 
 <style>
   .view,
-  .primary-column,
-  .support-column,
   .notes-list,
   .focus-list,
   .meta-flat {
@@ -2224,13 +2222,6 @@
   .dcf-diagnostics-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--space-4);
-    align-items: start;
-  }
-
-  .workspace-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.56fr) minmax(21rem, 0.94fr);
     gap: var(--space-4);
     align-items: start;
   }

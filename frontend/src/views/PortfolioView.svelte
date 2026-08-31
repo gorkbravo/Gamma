@@ -1055,30 +1055,9 @@
 
 <style>
   .view,
-  .workspace-grid,
-  .primary-column,
-  .support-column,
   .notice-stack {
     display: grid;
     gap: var(--space-4);
-  }
-
-  .workspace-grid {
-    grid-template-columns: minmax(0, 1.9fr) minmax(19rem, 0.92fr);
-    align-items: start;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .primary-column,
-  .support-column {
-    align-content: start;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .primary-column {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .performance-panel,
