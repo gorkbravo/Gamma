@@ -193,7 +193,7 @@
 
   .eyebrow {
     margin: 0;
-    font-size: 0.66rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.14em;
     color: var(--text-2);
@@ -208,7 +208,7 @@
   .copy,
   .annotation {
     margin: 0;
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     line-height: 1.5;
   }
 
@@ -241,7 +241,7 @@
   .header {
     padding-top: 0;
     border-top: 0;
-    font-size: 0.68rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -251,13 +251,13 @@
   strong {
     display: block;
     color: var(--text-0);
-    font-size: 0.84rem;
+    font-size: var(--text-base);
   }
 
   small {
     display: block;
     margin-top: 0.14rem;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
   }
 
   .workspace-grid {

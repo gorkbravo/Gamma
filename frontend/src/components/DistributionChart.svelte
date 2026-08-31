@@ -198,7 +198,7 @@
   }
 
   .tooltip text {
-    fill: #f4f7fb;
+    fill: var(--text-0);
     font-size: var(--text-xs);
   }
 </style>

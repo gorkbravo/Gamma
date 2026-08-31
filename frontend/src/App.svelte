@@ -1382,7 +1382,7 @@
       domainLabel: selectedScopeOptions.length === 1 ? selectedScopeOptions[0].label : "Copilot Context",
       guidance: supported
         ? "Grounded only in the selected Gamma context tabs. Gamma remains read-only, and Copilot should preserve provenance, warnings, and domain-specific caveats."
-        : selectionMessage,
+        : "Load a Gamma tab, then pick it from the Context selector above.",
       placeholder:
         "Ask for a grounded thesis, contradiction, operator run, or next research test across the selected context tabs.",
       thread: visibleThread,

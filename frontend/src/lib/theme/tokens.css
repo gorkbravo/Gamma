@@ -158,6 +158,11 @@ button {
   border-radius: var(--radius-sm);
 }
 
+/* <small> defaults to 0.83em (11.25px) — pull it back onto the type ramp */
+small {
+  font-size: var(--text-xs);
+}
+
 :focus-visible {
   outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
@@ -189,6 +194,22 @@ h4,
 .panel-header,
 .eyebrow {
   font-family: var(--display-font);
+}
+
+/* Headings land on the ramp even on surfaces that do not restyle them —
+   browser defaults (2em / 1.5em / 1.17em) are relative to the parent and so
+   drift with context. Any scoped component rule still wins over these. */
+h1,
+h2 {
+  font-size: var(--text-lg);
+}
+
+h3 {
+  font-size: var(--text-md);
+}
+
+h4 {
+  font-size: var(--text-base);
 }
 
 /* Column headers are labels (chrome), not data — sans over mono data */
@@ -258,4 +279,24 @@ tbody tr:nth-child(even) {
 /* ── Table row hover (global, subtle) ── */
 tbody tr:hover {
   background: rgba(122, 166, 200, 0.045);
+}
+
+/* ── Reduced motion ──
+   The tape flashes on every tick; honour the OS preference by holding the
+   final state instead of animating to it. Transitions collapse to instant. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --flash-duration: 1ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

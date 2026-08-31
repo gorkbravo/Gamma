@@ -2079,7 +2079,7 @@
     border-radius: 0 !important;
     box-shadow: none !important;
     padding: 0 !important;
-    font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace !important;
+    font-family: var(--app-font), monospace !important;
   }
 
   :global(.maplibregl-popup-tip) {

@@ -308,14 +308,14 @@
 
   .median {
     fill: none;
-    stroke: #8ab8df;
+    stroke: var(--accent);
     stroke-width: 2.55;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
 
   .current-dot {
-    fill: #f4f7fb;
+    fill: var(--text-0);
     stroke: rgba(7, 11, 16, 0.92);
     stroke-width: 1.4;
   }
@@ -326,7 +326,7 @@
   }
 
   .hover-dot {
-    fill: #7aa6c8;
+    fill: var(--accent);
     stroke: rgba(7, 11, 16, 0.92);
     stroke-width: 1.3;
   }
@@ -353,7 +353,7 @@
   }
 
   .tooltip text {
-    fill: #f4f7fb;
+    fill: var(--text-0);
     font-size: var(--text-xs);
   }
 </style>

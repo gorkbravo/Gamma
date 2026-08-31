@@ -491,7 +491,7 @@
   .close-btn,
   select {
     border: 1px solid var(--panel-strong);
-    background: #0d0f12;
+    background: var(--bg-1);
     color: var(--text-0);
     font: inherit;
   }
@@ -601,7 +601,7 @@
     text-transform: none;
     letter-spacing: 0;
     color: var(--text-2);
-    background-color: #0d0f12;
+    background-color: var(--bg-1);
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%237a8a99' stroke-width='1.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
     background-repeat: no-repeat;
     background-position: right 0.45rem center;

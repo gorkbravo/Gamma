@@ -97,7 +97,7 @@
     background: color-mix(in srgb, var(--accent) 12%, var(--surface-0));
     color: var(--accent);
     font-family: var(--display-font);
-    font-size: 1.35rem;
+    font-size: var(--text-xl);
     font-weight: 700;
     line-height: 1;
   }
@@ -125,7 +125,7 @@
   }
 
   h2 {
-    font-size: 1.3rem;
+    font-size: var(--text-xl);
     line-height: 1.1;
     letter-spacing: 0.02em;
   }

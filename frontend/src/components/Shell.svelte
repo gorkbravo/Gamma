@@ -303,6 +303,7 @@
     align-items: baseline;
     gap: var(--space-3);
     margin: 0;
+    font-size: var(--text-base);
     white-space: nowrap;
   }
 

@@ -91,6 +91,12 @@
     commitPointerReorder();
   }
 
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (open && event.key === "Escape") {
+      onClose();
+    }
+  }
+
   function handlePointerCancel(event: PointerEvent) {
     if (dragPointerId !== event.pointerId) {
       return;
@@ -100,13 +106,13 @@
   }
 </script>
 
-<svelte:window on:pointermove={handlePointerMove} on:pointerup={handlePointerEnd} on:pointercancel={handlePointerCancel} />
+<svelte:window on:pointermove={handlePointerMove} on:pointerup={handlePointerEnd} on:pointercancel={handlePointerCancel} on:keydown={handleWindowKeydown} />
 
 {#if open}
-  <div class="backdrop" on:click={onClose} on:keydown={(event) => event.key === "Escape" && onClose()} role="presentation"></div>
+  <div class="backdrop" on:click={onClose} role="presentation"></div>
 {/if}
 
-<nav class="sidebar" data-open={open ? "true" : "false"} aria-label="Workspace navigation">
+<nav class="sidebar" data-open={open ? "true" : "false"} inert={!open} aria-hidden={open ? undefined : "true"} aria-label="Workspace navigation">
   <div class="sidebar-header">
     <div>
       <span class="sidebar-title">Navigation</span>
@@ -200,8 +206,17 @@
     padding: 0;
   }
 
+  .sidebar[data-open="false"] {
+    /* Keep the closed drawer out of the tab order and the accessibility tree,
+       not merely off-screen. `visibility` still allows the slide transition. */
+    visibility: hidden;
+    transition: transform 180ms ease, visibility 0s linear 180ms;
+  }
+
   .sidebar[data-open="true"] {
     transform: translateX(0);
+    visibility: visible;
+    transition: transform 180ms ease, visibility 0s;
   }
 
   .sidebar-header {
@@ -235,12 +250,13 @@
     background: transparent;
     color: var(--text-1);
     font: inherit;
+    font-family: var(--display-font);
   }
 
   .header-btn,
   .close-btn {
     cursor: pointer;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     transition: color 120ms ease, border-color 120ms ease;
   }
 
@@ -295,7 +311,7 @@
     background: transparent;
     color: var(--text-1);
     cursor: grab;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     touch-action: none;
   }
 
@@ -303,7 +319,7 @@
     display: block;
     width: 0.55rem;
     height: 1.5px;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     background: currentColor;
     opacity: 0.45;
   }

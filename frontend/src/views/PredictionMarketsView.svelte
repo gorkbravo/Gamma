@@ -52,6 +52,7 @@
   import type { PredictionMarketScreenerOptions, PredictionMarketSortBy } from "../lib/stores/app";
   import { buildPredictionMarketStrategyHandoff } from "../lib/view-models/research";
 
+  import { activateRowOnKey } from "../lib/row-activation";
   export let mode: PredictionMarketsMode = "screener";
   export let screener: PredictionMarketListResponse | null = null;
   export let detail: PredictionMarket | null = null;
@@ -950,7 +951,7 @@
               </thead>
               <tbody>
                 {#each watchlist as entry (entry.market_id)}
-                  <tr class="clickable-row" on:click={() => openContract(entry.market_id)}>
+                  <tr class="clickable-row" on:click={() => openContract(entry.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => openContract(entry.market_id))}>
                     <td class="wrap-cell"><strong>{truncName(entry.title, 46)}</strong></td>
                     <td class="num">{pct(entry.probability)}</td>
                     <td><span class="venue-label">{entry.venue === "polymarket" ? "PM" : "KL"}</span></td>
@@ -1197,7 +1198,9 @@
                   <tr
                     class="clickable-row"
                     class:selected={history?.outcome_id === row.outcome_id}
+                    tabindex="0"
                     on:click={() => row.hasHistory && selectOutcome(row.outcome_id)}
+                    on:keydown={(event) => activateRowOnKey(event, () => row.hasHistory && selectOutcome(row.outcome_id))}
                   >
                     <td class="wrap-cell"><strong>{row.label}</strong></td>
                     <td class="num">{pct(row.probability)}</td>
@@ -1274,7 +1277,9 @@
                     <tr
                       class="clickable-row"
                       class:selected={leg.is_anchor}
+                      tabindex="0"
                       on:click={() => onSelectMarket(leg.market_id)}
+                      on:keydown={(event) => activateRowOnKey(event, () => onSelectMarket(leg.market_id))}
                     >
                       <td class="wrap-cell">
                         <strong>{truncName(leg.subtitle ?? leg.title, 44)}</strong>
@@ -1425,7 +1430,7 @@
               </thead>
               <tbody>
                 {#each crossDomainHandoffs as handoff (handoff.intended_target_tab + (handoff.selected_entity?.normalized_id ?? ""))}
-                  <tr class="clickable-row" on:click={() => onCrossDomainHandoff?.(handoff)}>
+                  <tr class="clickable-row" on:click={() => onCrossDomainHandoff?.(handoff)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => onCrossDomainHandoff?.(handoff))}>
                     <td>
                       <strong>{handoffTabLabel(handoff.intended_target_tab)}</strong>
                     </td>
@@ -1568,7 +1573,7 @@
               </thead>
               <tbody>
                 {#each related.related as market (market.market_id)}
-                  <tr class="clickable-row" on:click={() => onSelectMarket(market.market_id)}>
+                  <tr class="clickable-row" on:click={() => onSelectMarket(market.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => onSelectMarket(market.market_id))}>
                     <td class="wrap-cell">
                       <strong>{truncName(market.title, 40)}</strong>
                       <small>{market.relationship} | {market.venue}</small>
@@ -1690,7 +1695,7 @@
             </thead>
             <tbody>
               {#each namedSets as record (record.id)}
-                <tr class="clickable-row" on:click={() => openSavedSet(record)}>
+                <tr class="clickable-row" on:click={() => openSavedSet(record)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => openSavedSet(record))}>
                   <td class="wrap-cell"><strong>{truncName(record.name, 40)}</strong></td>
                   <td class="num">{record.market_ids.length}</td>
                   <td>{record.range_key.toUpperCase()}</td>
@@ -2007,7 +2012,9 @@
                 <tr
                   class="clickable-row"
                   class:selected={activeCurve?.lead_time_hours === curve.lead_time_hours}
+                  tabindex="0"
                   on:click={() => (activeLeadTime = curve.lead_time_hours)}
+                  on:keydown={(event) => activateRowOnKey(event, () => (activeLeadTime = curve.lead_time_hours))}
                 >
                   <td><strong>{curve.label}</strong></td>
                   <td class="num">{curve.sample_size}</td>
@@ -2046,7 +2053,7 @@
               <tbody>
                 {#each calibration.observations as observation (observation.market_id + observation.lead_time_hours)}
                   {@const surprise = (observation.outcome ? 1 : 0) - observation.probability}
-                  <tr class="clickable-row" on:click={() => openContract(observation.market_id)}>
+                  <tr class="clickable-row" on:click={() => openContract(observation.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => openContract(observation.market_id))}>
                     <td class="wrap-cell"><strong>{truncName(observation.title, 48)}</strong></td>
                     <td class="num">{pct(observation.probability)}</td>
                     <td class="num muted">{pct(observation.settlement_probability)}</td>

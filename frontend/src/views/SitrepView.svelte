@@ -1140,7 +1140,7 @@
         continue;
       }
       const [, provider, seriesId, reason] = match;
-      const key = ` series:${provider.toLowerCase()}:${reason.toLowerCase()}`;
+      const key = `\u0000series:${provider.toLowerCase()}:${reason.toLowerCase()}`;
       const group = groups.get(key);
       if (group) {
         if (!group.ids.includes(seriesId)) group.ids.push(seriesId);

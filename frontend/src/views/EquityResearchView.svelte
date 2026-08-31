@@ -2519,15 +2519,15 @@
   }
 
   .treemap-tooltip-chip.positive {
-    color: #4bb474;
-    border-color: color-mix(in srgb, #4bb474 40%, transparent);
-    background: color-mix(in srgb, #4bb474 12%, var(--surface-0));
+    color: var(--positive);
+    border-color: color-mix(in srgb, var(--positive) 40%, transparent);
+    background: color-mix(in srgb, var(--positive) 12%, var(--surface-0));
   }
 
   .treemap-tooltip-chip.negative {
-    color: #c66b61;
-    border-color: color-mix(in srgb, #c66b61 40%, transparent);
-    background: color-mix(in srgb, #c66b61 12%, var(--surface-0));
+    color: var(--negative);
+    border-color: color-mix(in srgb, var(--negative) 40%, transparent);
+    background: color-mix(in srgb, var(--negative) 12%, var(--surface-0));
   }
 
   .treemap-tooltip-chip.neutral {

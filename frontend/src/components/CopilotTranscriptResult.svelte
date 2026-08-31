@@ -823,7 +823,7 @@
 
   .sequence {
     color: var(--text-2);
-    font-family: var(--font-mono, ui-monospace, monospace);
+    font-family: var(--app-font), monospace;
     font-size: var(--text-xs);
   }
 
@@ -855,7 +855,7 @@
     border: 1px solid var(--divider);
     background: var(--surface-0);
     color: var(--text-1);
-    font: var(--text-xs)/var(--leading-normal) var(--font-mono, ui-monospace, monospace);
+    font: var(--text-xs)/var(--leading-normal) var(--app-font), monospace;
     white-space: pre-wrap;
   }
 

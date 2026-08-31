@@ -36,6 +36,7 @@
   import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
   import { normalizeSyntheticText, parseSyntheticText } from "../lib/view-models/research";
 
+  import { activateRowOnKey } from "../lib/row-activation";
   export let workspace: CryptoWorkspaceResponse | null = null;
   export let detail: CryptoToken | null = null;
   export let history: CryptoPriceHistoryResponse | null = null;
@@ -433,7 +434,7 @@
                   <tbody>
                     {#if workspace?.tokens?.length}
                       {#each workspace.tokens as token}
-                        <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
+                        <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id))}>
                           <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
                           <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
                           <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
@@ -498,7 +499,7 @@
                   <tbody>
                     {#if flowLeaderboard.length}
                       {#each flowLeaderboard.slice(0, 8) as token}
-                        <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
+                        <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id, "deep_dive"))}>
                           <td>
                             <div class="market-title">
                               <strong>{token.name}</strong>
@@ -913,7 +914,7 @@
                 <tbody>
                   {#if flowLeaderboard.length}
                     {#each flowLeaderboard as token}
-                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
+                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id))}>
                         <td><div class="market-title"><strong>{token.symbol.toUpperCase()}</strong><small>{compactMoney(token.market_cap)}</small></div></td>
                         <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
                         <td>{ratio(token.turnover_ratio_24h)}</td>
@@ -1059,7 +1060,7 @@
               <tbody>
                 {#if workspace?.tokens?.length}
                   {#each workspace.tokens as token}
-                    <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
+                    <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id))}>
                       <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
                       <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
                       <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>

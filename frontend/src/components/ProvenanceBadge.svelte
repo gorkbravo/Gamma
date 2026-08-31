@@ -83,7 +83,7 @@
     width: 7px;
     height: 7px;
     flex-shrink: 0;
-    border-radius: 1px;
+    border-radius: var(--radius-sm);
     background: var(--text-2);
   }
 

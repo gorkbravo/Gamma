@@ -329,6 +329,7 @@
     color: var(--text-0);
     padding: var(--space-2) var(--space-4);
     font: inherit;
+    font-family: var(--display-font);
     font-size: var(--text-sm);
     cursor: pointer;
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;

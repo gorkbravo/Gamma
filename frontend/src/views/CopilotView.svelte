@@ -1459,7 +1459,7 @@
     border: 1px dashed var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-1);
-    font-family: var(--font-mono, ui-monospace, monospace);
+    font-family: var(--app-font), monospace;
     font-size: var(--text-sm);
     white-space: pre-wrap;
     word-break: break-word;
