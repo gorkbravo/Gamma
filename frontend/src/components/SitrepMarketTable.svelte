@@ -96,6 +96,10 @@
   table {
     width: 100%;
     min-width: 33rem;
+    /* Columns here are proportional, so on a page-wide panel the percentages
+       stretch and a value ends up half a panel from its row label. Cap the
+       table at the width the proportions were drawn for. */
+    max-width: 58rem;
     border-collapse: collapse;
     table-layout: fixed;
   }

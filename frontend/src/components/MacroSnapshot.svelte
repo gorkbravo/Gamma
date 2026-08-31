@@ -90,8 +90,7 @@
   <article class="panel">
     <div class="panel-header">
       <div>
-        <p class="eyebrow">What Matters Now</p>
-        <h3>Actionable macro questions</h3>
+        <h3>What matters now</h3>
       </div>
     </div>
     <div class="focus-grid">

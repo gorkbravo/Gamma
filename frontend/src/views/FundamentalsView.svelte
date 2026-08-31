@@ -772,12 +772,12 @@
       </div>
 
       {#if currentCompany}
+        {@const handoffHint = `Preserves ${currentCompany.ticker}, the active Fundamentals mode, scenario context, and warnings.`}
         <div class="handoff-strip" aria-label="Open selected company in another research tab">
           <span class="focus-label">Continue in</span>
-          <button type="button" class="link-button" on:click={() => openRelatedTab("equity_research")}>Equity Research</button>
-          <button type="button" class="link-button" on:click={() => openRelatedTab("risk")}>Risk</button>
-          <button type="button" class="link-button" on:click={() => openRelatedTab("iv")}>Options</button>
-          <small>Preserves {currentCompany.ticker}, the active Fundamentals mode, scenario context, and warnings.</small>
+          <button type="button" class="link-button" title={handoffHint} on:click={() => openRelatedTab("equity_research")}>Equity Research</button>
+          <button type="button" class="link-button" title={handoffHint} on:click={() => openRelatedTab("risk")}>Risk</button>
+          <button type="button" class="link-button" title={handoffHint} on:click={() => openRelatedTab("iv")}>Options</button>
         </div>
       {/if}
 
