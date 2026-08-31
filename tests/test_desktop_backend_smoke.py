@@ -16,6 +16,23 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def test_desktop_backend_entry_defers_application_import_until_main():
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import src.api.desktop_entry; "
+                "raise SystemExit(int('src.api.main' in sys.modules))"
+            ),
+        ],
+        cwd=str(repo_root),
+        check=False,
+    )
+    assert completed.returncode == 0
+
+
 def test_desktop_backend_entry_serves_health(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     port = _free_port()

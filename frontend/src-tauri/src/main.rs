@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder};
 
 const API_HOST: &str = "127.0.0.1";
 const DEFAULT_API_PORT: u16 = 8000;
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 const FRONTEND_LOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const BUNDLED_BACKEND_NAME: &str = "gamma-backend";
 const LOG_TAIL_BYTES: usize = 2048;
@@ -392,25 +392,21 @@ fn spawn_backend(
         command.arg(arg);
     }
 
-    if launch.mode == BackendMode::Development && cfg!(debug_assertions) {
-        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-    } else {
-        let stdout = File::create(&launch.stdout_log).map_err(|error| {
-            format!(
-                "Failed to create backend stdout log {}: {error}",
-                launch.stdout_log.display()
-            )
-        })?;
-        let stderr = File::create(&launch.stderr_log).map_err(|error| {
-            format!(
-                "Failed to create backend stderr log {}: {error}",
-                launch.stderr_log.display()
-            )
-        })?;
-        command
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr));
-    }
+    let stdout = File::create(&launch.stdout_log).map_err(|error| {
+        format!(
+            "Failed to create backend stdout log {}: {error}",
+            launch.stdout_log.display()
+        )
+    })?;
+    let stderr = File::create(&launch.stderr_log).map_err(|error| {
+        format!(
+            "Failed to create backend stderr log {}: {error}",
+            launch.stderr_log.display()
+        )
+    })?;
+    command
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
 
     command.spawn().map_err(|error| {
         format!(
@@ -427,6 +423,7 @@ fn wait_for_health(
     launch: &BackendLaunch,
 ) -> Result<(), String> {
     let client = Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(2))
         .build()
         .map_err(|error| format!("Failed to build health-check client: {error}"))?;
@@ -456,7 +453,8 @@ fn wait_for_health(
     let _ = child.kill();
     let _ = child.wait();
     Err(format!(
-        "Timed out waiting for backend health. Last error: {last_error}\n\n{}",
+        "Timed out after {} seconds waiting for backend health. Last error: {last_error}\n\n{}",
+        HEALTH_TIMEOUT.as_secs(),
         startup_diagnostics(launch)
     ))
 }

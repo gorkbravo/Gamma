@@ -6,9 +6,6 @@ import sys
 import traceback
 from pathlib import Path
 
-import uvicorn
-
-from src.api.main import create_app
 from src.utils.logging_config import setup_logging
 
 API_HOST = "127.0.0.1"
@@ -64,6 +61,11 @@ def main() -> int:
 
     try:
         port = _api_port()
+        LOGGER.info("Initializing Gamma desktop backend runtime")
+        import uvicorn
+
+        from src.api.main import create_app
+
         app = create_app()
         LOGGER.info("Starting Gamma desktop backend on http://%s:%s", API_HOST, port)
         server = uvicorn.Server(
