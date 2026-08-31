@@ -840,7 +840,7 @@
       </article>
 
       <article class="panel table-panel">
-        <div class="table-scroll tall">
+        <div class="table-scroll tall fills-viewport">
           <table class="screener-table">
             <thead>
               <tr>
@@ -1258,7 +1258,7 @@
                 <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
               </article>
             </div>
-            <div class="table-scroll tall">
+            <div class="table-scroll tall fills-viewport">
               <table>
                 <thead>
                   <tr>
@@ -2039,7 +2039,7 @@
           >
         </div>
         {#if calibration?.observations?.length}
-          <div class="table-scroll tall">
+          <div class="table-scroll tall fills-viewport">
             <table>
               <thead>
                 <tr>
@@ -2204,7 +2204,10 @@
   }
 
   .table-scroll.tall {
-    max-height: 34rem;
+    /* The screener is the whole point of this mode, so it takes the height
+       the window can give it. 19rem covers the header, filter bar, watchlist
+       and venue status that share the column. */
+    --fill-reserve: 19rem;
   }
 
   /* ── Headers ─────────────────────────────────────────────── */

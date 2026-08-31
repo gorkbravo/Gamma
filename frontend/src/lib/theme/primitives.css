@@ -147,3 +147,14 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ── Viewport-sized scroll regions ────────────────────────────────────────
+   A table that is a view's main evidence should show as many rows as the
+   display allows. Pinning it to a fixed rem height means a tall monitor
+   shows the same handful of rows and leaves the space below it empty.
+
+   --fill-reserve is the chrome above and below the region; --fill-min keeps
+   it usable on a short window. */
+.fills-viewport {
+  max-height: max(var(--fill-min, 22rem), calc(100vh - var(--fill-reserve, 24rem)));
+}
