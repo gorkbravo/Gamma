@@ -6,7 +6,7 @@ This directory is split into active documentation, audits, and archived project 
 
 - [`../README.md`](../README.md): setup, run commands, validation commands, current product status, current roadmap direction, and provider stance
 - [`../roadmap.md`](../roadmap.md): single active source of truth for product direction, historical phase checkpoints, workstreams, provider strategy, beta readiness, and constraints
-- [`design_principles.md`](./design_principles.md): UI and interaction principles for roadmap-era product work
+- [`design_principles.md`](./design_principles.md): canonical frontend doctrine, token roles, component contracts, interaction/accessibility rules, review tests, and the §14 common-mistakes / §15 quick-reference lookup used as the post-edit check
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
 - [`research_script_workspace_plan.md`](./research_script_workspace_plan.md): approved Strategy Lab `Script` mode architecture, sandbox and authority boundary, domain/API/runtime contracts, delivery slices, tests, and agent handoff status

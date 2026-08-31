@@ -1,531 +1,457 @@
-# Gamma — Design Principles
+# Gamma — Frontend Design Principles
 
-> **This document is the canonical style guide for the Gamma platform.** It is written for AI agents, contributors, and any future pass working on UI/UX. If you are building or modifying a component, a view, or a layout — read this first, follow it precisely, and do not improvise away from it. Every tab is architecturally distinct, but all tabs must be legible as part of the same system. These principles govern that coherence.
+> **Canonical frontend doctrine.** Read this before designing, implementing, or reviewing Gamma UI. It defines the outcomes the interface must preserve. `frontend/src/lib/theme/tokens.css` is the numeric source of truth for implemented tokens; nearby production components are the source of truth for established behavior.
 
----
+Gamma is a professional, read-only market research environment. It should feel like a research instrument: dense enough for comparison, quiet enough for sustained attention, and precise enough that the user can trust what changed, where it came from, and what to do next.
 
-## 1. Philosophy
+The visual lineage is Bloomberg Terminal's information density with Linear's spatial discipline. Gamma is not a terminal imitation, a generic SaaS dashboard, or a data-visualization showcase. Its identity comes from one ruled plane, restrained chrome, deliberate typography, and data that carries most of the visual energy.
 
-Gamma is a professional-grade quantitative research platform. Its users are researchers and analysts who need to process a lot of information quickly and without friction. The interface should feel like a precision instrument — not a consumer app, not a SaaS dashboard, not a data visualization showcase.
+## 1. How To Use This Guide
 
-The primary references are **Bloomberg Terminal** and **linear.app**: the information density and seriousness of the former, the cleanliness and spatial control of the latter. The result is dense but not cluttered, dark but not gloomy, structured but not rigid.
+When sources disagree, use this order:
 
-**The interface serves the data. Never the reverse.**
+1. **Product boundary:** `roadmap.md` defines what Gamma is allowed to become. Gamma supports research, analysis, comparison, and hypothesis formation—not execution.
+2. **Design principles:** this document defines the frontend experience and durable visual rules.
+3. **Tokens:** `frontend/src/lib/theme/tokens.css` owns current reusable values. Do not copy values from this document back into CSS if a token already exists.
+4. **Pattern implementations:** use the mature surface closest to the task. Do not treat one tab as a universal template.
+5. **Local composition:** a view may solve its own information problem as long as it preserves the product boundary and system rules above.
 
-### Provenance In The UI
+If a component needs a value the token system does not express, first try the nearest existing step. Add a token only when the value represents a reusable role, not a one-off preference. Update this guide when a durable principle changes; update `tokens.css` when an implemented value changes.
 
-Gamma should preserve provenance aggressively in the data model, but **must surface it selectively in the UI**.
+Sections 1–13 explain the reasoning. **Section 14 (Common Mistakes) is the fast check to run after every edit**, and Section 15 is the one-screen summary.
 
-The core rule is:
+### Reference Surfaces
 
-- primary analytical surfaces should show the research object first,
-- provenance should appear when it materially helps interpretation, trust, or debugging,
-- provenance should not dominate the main reading path of a chart, KPI strip, or statement table.
+| Need | Best current reference |
+|---|---|
+| Cross-domain context, mode switching, comparison density | Macro / Cross-Asset |
+| Deep entity work and editable local scenarios | Fundamentals |
+| Provider warnings, curves, fundamentals, and handoffs | Commodities |
+| Compact quantitative diagnostics | Risk |
+| Global chrome, navigation, search, drawers | Shell and shared navigation components |
 
-In practice this means:
+Copy a reference's reasoning, not its markup. A new workflow should inherit Gamma's grammar without becoming a visual clone of an unrelated tab.
 
-- show provenance in dedicated provenance panels, filing chronology, drilldowns, tooltips, notes, or explicit source areas,
-- do **not** default to rendering adapter names, internal origins, concept ids, or transformation labels as secondary text inside every cell or row,
-- if provenance text reads like developer text rather than research text, keep it available in the payload but hide it from the primary surface.
+## 2. The Design Thesis: The Research Instrument
 
-Gamma is a research environment, not a schema browser.
+Gamma operates in **Operate** mode: the user is here to inspect, compare, filter, test, and decide what deserves deeper research. Expression serves operation.
 
-### What "Good" Looks Like
-Gamma's mature research surfaces should be used as references for different parts of the product rather than treating one tab as the universal template. Macro remains a useful reference for shared context, mode switching, and cross-asset density; Fundamentals is a better reference for deep entity work and editable local scenarios; Commodities is a better reference for provider warnings, curve/fundamental panels, and cross-domain handoff context; Risk is a better reference for compact quantitative diagnostics. Content is the structure: dense text, numbers, signal badges, thin borders, and minimal visual chrome.
+**The Data-First Rule.** The research object, its state, and its most useful comparison appear before explanation, provenance internals, or decorative chrome.
 
----
+**The One-Plane Rule.** The workspace reads as one instrument panel divided by seams. Regions do not float as independent objects.
 
-## 2. Design Tokens
+**The Earned-Density Rule.** Density means more useful relationships per viewport, not smaller text or indiscriminate compression. Remove repetition before reducing legibility.
 
-All styling must use the token system defined in `frontend/src/lib/theme/tokens.css`. Never use raw hex or rgba values for colors that have a token equivalent. This enables future theming and ensures consistency.
+**The Quiet-Chrome Rule.** Controls become visually prominent only when they are active, focused, dangerous, or carrying time-sensitive state. Data supplies the color and contrast at rest.
 
-### Background Scale (neutral-cool, near-black)
-| Token | Value | Usage |
+### What Good Feels Like
+
+- The primary research question is obvious within a few seconds.
+- Related values can be compared without excessive scrolling or pointer travel.
+- Visual hierarchy remains clear even when color is removed.
+- Loading, empty, stale, partial, and error states preserve the final layout's geometry.
+- Provenance is easy to reach but does not turn the main surface into a schema browser.
+- Each tab has a distinct research purpose while still reading as Gamma.
+
+## 3. Foundations And Tokens
+
+All reusable styling uses tokens from `frontend/src/lib/theme/tokens.css`. Raw CSS values are acceptable only when no semantic token exists and the value is genuinely local, such as a chart-library integration detail. Do not create local color palettes or type scales.
+
+### Color Roles
+
+| Role | Tokens | Intent |
 |---|---|---|
-| `--bg-0` | `#070809` | Root canvas. The base of everything. |
-| `--bg-1` | `#0b0d10` | One step up. Inputs, chrome surfaces. |
-| `--bg-2` | `#0f1114` | Two steps up. Rare — only for deep nesting distinction. |
-| `--bg-3` | `#131618` | Three steps up. Hover states on elevated surfaces. |
+| Canvas | `--bg-0` | Root visual field |
+| Recessed chrome / inputs | `--bg-1`, `--bg-2`, `--bg-3` | Functional layer distinction, used sparingly |
+| Panels | `--panel-bg` | Root-matching solid surface; preserves the plane while masking the canvas texture |
+| Purposeful inset surface | `--surface-0`, `--surface-soft` | Overlays, code, callouts, or a meaningful local subsection—not generic card fill |
+| Borders | `--panel-border`, `--panel-strong`, `--divider` | Region, emphasis, and internal structure |
+| Text | `--text-0`, `--text-1`, `--text-2` | Primary, supporting, and metadata hierarchy |
+| Interaction | `--accent`, `--hover-bg`, `--active-bg`, `--focus-ring` | Focus, selection, active navigation, and primary chart series |
+| Data semantics | `--positive`, `--negative`, `--warning`, `--data-*` | Direction, status, intensity, and thresholds in analytical content |
+| Charts | `--chart-primary`, `--chart-secondary`, `--chart-negative` | Deliberate series hierarchy |
 
-### Surface Tokens
-| Token | Value | Usage |
+`--accent-2` is not a second chrome accent. Treat it as an analytical comparison/warning color consistent with the chart and semantic palette.
+
+### Typography Roles
+
+Gamma uses two type voices:
+
+- `--app-font`: monospace for data, tickers, dates, prices, quantities, tables, formulas, code, and dense body copy where alignment matters.
+- `--display-font`: system sans for navigation, buttons, headings, panel titles, eyebrows, and table headers.
+
+**The Two-Type Rule.** Sans explains the instrument; mono carries the research. Do not use sans for numeric data, and do not force navigation chrome into mono merely because the application is terminal-like.
+
+Every font size resolves to the type scale:
+
+| Token | Size | Typical role |
+|---|---:|---|
+| `--text-2xs` | 10px | Eyebrows, compact category labels, table headers |
+| `--text-xs` | 11px | Metadata, timestamps, secondary labels |
+| `--text-sm` | 12px | Compact controls and dense supporting data |
+| `--text-base` | 13.5px | Body and primary data text |
+| `--text-md` | 15px | Section and panel titles |
+| `--text-lg` | 16px | Tab-level titles |
+| `--text-xl` | 18px | Hero identifiers inside research tabs |
+
+Use `--leading-tight` for single-line labels and values, `--leading-snug` for dense lists, and `--leading-normal` for prose. Build hierarchy with placement, weight, and contrast before increasing size. Research-tab text normally does not exceed `--text-xl`; the welcome surface is the intentional exception.
+
+### Space, Shape, And Motion
+
+| Scale | Values | Contract |
 |---|---|---|
-| `--panel-bg` | `transparent` | **All panel/card backgrounds.** Panels inherit root. |
-| `--surface-0` | `#0a0b0c` | Solid sub-section backgrounds within panels, overlay surfaces. Tint-neutral — matches `--bg-0` temperature. |
-| `--surface-1` | `#0b0d10` | Chrome surfaces (topbar fallback). |
-| `--surface-2` | `#141719` | Rarely used. |
-| `--surface-soft` | `rgba(10, 12, 14, 0.62)` | Subtle section tints within panels (e.g. code blocks, callouts). |
+| Space | `--space-1` through `--space-7` (2, 4, 6, 8, 12, 16, 24px) | Snap gaps, padding, and margins to the ramp whenever possible |
+| Radius | `--radius-sm` (2px), `--radius-md` (4px) | Small controls and top-level surfaces only; nested geometry is square |
+| Motion | `--motion-fast` (120ms), `--motion-base` (180ms), `--ease` | Functional state change, never spectacle |
 
-### Borders & Dividers
-| Token | Value | Usage |
-|---|---|---|
-| `--panel-border` | `#1e2228` | Standard panel/card border. |
-| `--panel-strong` | `#2e353e` | Emphasized borders (topbar actions, active states). |
-| `--divider` | `rgba(50, 56, 64, 0.55)` | Thin internal dividers, table borders, chart shells. |
+The default seam is `--space-4` (8px). Panel padding is usually `--space-5` or `--space-6`. `--space-7` is a real group break, not the default rhythm.
 
-### Text
-| Token | Value | Usage |
-|---|---|---|
-| `--text-0` | `#f0f2f5` | Primary text. Data values, headings, body. |
-| `--text-1` | `#c2c8d0` | Secondary text. Descriptions, less-critical info. |
-| `--text-2` | `#8a919a` | Tertiary text. Labels, captions, metadata, timestamps. |
+## 4. Color, Texture, And Emphasis
 
-### Accent & Semantic Colors
-| Token | Value | Usage |
-|---|---|---|
-| `--accent` | `#7aa6c8` | **The accent.** Active states, interactive borders, highlights, primary chart series. |
-| `--positive` | `#4bb474` | Positive signals in data contexts only (P&L up, bullish). |
-| `--negative` | `#c66b61` | Negative signals in data contexts only (P&L down, bearish). |
-| `--warning` | `#c49a5a` | Warnings, amber signals. Data contexts only. |
+**The Color-Has-A-Job Rule.** Blue communicates interaction or the primary analytical series. Green, red, and amber communicate data meaning. Neutral values carry structure. Color never exists only to give a tab personality.
 
-### Interaction States
-| Token | Value | Usage |
-|---|---|---|
-| `--hover-bg` | `rgba(122, 166, 200, 0.06)` | Hover tint on interactive rows and buttons. |
-| `--active-bg` | `rgba(122, 166, 200, 0.12)` | Active/selected state tint (mode bars, toggles). |
-| `--focus-ring` | `rgba(122, 166, 200, 0.55)` | Global `:focus-visible` outline color. |
+- Use `--accent` for active navigation, focus, selection, interactive emphasis, and the primary chart series.
+- Use semantic colors for directional or categorical data only. Pair color with a sign, label, icon, position, or pattern so meaning survives color-vision differences.
+- Use chart colors in a clear order; do not give every series equal saturation.
+- Keep structural surfaces in the same neutral-cool temperature.
+- Never use warm darks, arbitrary tab palettes, glow text, or gradient text.
 
-### Chart Colors
-| Token | Value | Usage |
-|---|---|---|
-| `--chart-primary` | `#7aa6c8` | Primary series. Matches accent. |
-| `--chart-secondary` | `#c49a5a` | Secondary/comparison series. |
-| `--chart-negative` | `#b65d54` | Negative/short series. |
+### Gradients And Texture
 
-Chart themes (`amber`, `green`) can override `--chart-primary` via `data-chart-theme` on the root element. Components should always reference the token, never hardcode.
+Structural panels, cards, tables, and navigation surfaces are flat. Gradients are allowed only when they encode data, express progress/loading, or implement the established root canvas texture.
 
----
+The dim 24px dot grid in `tokens.css` is Gamma's only ambient texture. Root-matching solid panels mask it, so it appears in seams and unused canvas rather than underneath data. Do not add new decorative textures or repeat the dot grid inside panels.
 
-## 3. Color Rules
+## 5. Elevation And The Plane Model
 
-- **Blue is the accent. Do not introduce other accent colors into UI chrome.** Signal colors (red, green, amber) are permitted in data contexts only — P&L indicators, status badges, heatmap scales. They must not appear on buttons, borders, or backgrounds of UI elements.
-- **No gradients on UI surfaces.** No `linear-gradient`, no `radial-gradient` on panels, cards, the root canvas, or any structural element. Gradients are permitted only in: data visualizations (heatmaps, color scales), accent-colored interactive elements (progress bars, loading indicators).
-- **All surfaces share the same color temperature.** Every background derives from the neutral-cool base (`--bg-0` through `--bg-3`). Never mix warm-tinted darks (brown-blacks like `rgba(18, 17, 12, ...)`) with the cool base. A warm panel on a cool root reads as a separate object even when luminance is identical.
-- **No opacity-based background layering on panels.** Backgrounds at fractional opacity (`0.6`, `0.82`, `0.98`) create ambiguous depth — the brain reads translucent sheets as stacked. Use `transparent` or a solid token. Exception: navigation chrome (sidebar, tab bar) and transient overlays (modals, drawers) may use translucent backgrounds where the translucency is functional.
+Gamma uses a plane model, not an object model. Most SaaS dashboards create hierarchy with filled cards, large gutters, radius, and shadow. Gamma creates hierarchy with reading order, alignment, thin borders, shared baselines, and controlled tonal changes.
 
-### On Themes (Future)
-User-selectable themes (lighter mode, alternative accent) are a valid future feature. Every color must be expressed as a CSS variable so themes can be applied at the token level without rewriting components. Never hardcode a hex color that has a token equivalent.
+### Surface Contracts
 
----
+| Surface | Background | Boundary | Shape |
+|---|---|---|---|
+| Top-level panel / self-contained card | `var(--panel-bg)` | `1px solid var(--panel-border)` | `var(--radius-md)` on the outer edge |
+| Chart shell nested in a panel | `var(--bg-0)` | `1px solid var(--divider)` | Square |
+| Table that owns a panel | `var(--panel-bg)` | The panel border is the table container | Square internally |
+| Input / select | `var(--bg-1)` | `1px solid var(--panel-strong)` | `var(--radius-sm)` |
+| Local inset / callout | `var(--surface-soft)` when distinction is meaningful | Optional divider | Square when nested |
+| Drawer / modal / transient overlay | Solid or functional translucency | Strong boundary | May use shadow to separate transient layers |
 
-## 4. Elevation and Depth — The Plane Model
+- Do not put `box-shadow` on panels, cards, tables, or chart shells.
+- Do not nest bordered cards when a divider, row, or shared grid can express the relationship.
+- Do not use opacity-layered panel fills to simulate glass.
+- Keep adjacent surface gaps at `--space-4` unless a real hierarchy break warrants more.
+- Pills are reserved for compact, non-container tags or status chips. Controls, mode buttons, panels, and data containers use the radius scale.
 
-**This is the most important principle for Gamma.**
+**Audit test:** blur your eyes. The screen should read as a single structured field, not a collection of floating tiles.
 
-Gamma uses a **plane model**, not an **object model**.
+## 6. Information Architecture And Layout
 
-In an object model (the wrong approach), cards are raised boxes sitting on top of a darker background. The background shows through as strips of negative space, reinforcing the sense that each card is a separate floating element. This is how most SaaS dashboards work. **It is not how Gamma works.**
+Start composition with the research question, not a card inventory.
 
-In a plane model (the right approach), the entire interface is one flat surface. Regions are defined by borders and lines — not by color contrast between a card and its background. A panel's background is the same as the root. What makes a panel a panel is its border, not its fill. The result reads like a spreadsheet or terminal — one coherent plane with internal geometry.
+1. Identify the primary object or comparison.
+2. Put the most decision-relevant evidence in the first reading path.
+3. Group supporting context by relationship, not by visual symmetry.
+4. Keep controls close to the data they affect.
+5. Move provenance detail, diagnostics, notes, and secondary rankings into support regions or progressive disclosure.
 
-**Bloomberg Terminal is a plane. Most SaaS dashboards are object stacks. Gamma is a plane.**
+### Workspace Grammar
 
-### Rules
-- **Panel backgrounds: `var(--panel-bg)` (transparent).** The panel's background is the root's background. What makes a panel a panel is its `1px solid var(--panel-border)` border. Never its fill.
-- **Chart containers: `var(--bg-0)`.** Charts match root exactly.
-- **No `box-shadow` on cards or panels.** None. Shadows imply elevation, which contradicts the plane model.
-- **Radius belongs to outer surface edges only.** Top-level panels and cards use `var(--radius-md)` (`4px`); buttons, inputs, and segmented controls use `var(--radius-sm)` (`2px`). Anything nested inside a bordered surface — chart shells, inner tables, sub-boxes — is square (`border-radius: 0`, enforced globally in tokens.css). Nothing uses large radii (no pills, no fully rounded cards).
-- **No nested cards.** If content can be separated by a divider line, a card was not necessary.
-- **Gaps between panels: `0.5rem` (8px).** This is tight enough that the gap reads as a seam, not as empty space between objects. Larger gaps (>10px) between adjacent panels are not permitted — they create visible "channels" of background that undermine the plane model.
-
-### Token Usage Summary
-| Surface | Background | Border |
-|---|---|---|
-| Panel / card | `var(--panel-bg)` | `1px solid var(--panel-border)` |
-| Chart shell | `var(--bg-0)` | `1px solid var(--divider)` |
-| Sub-section within panel | `var(--surface-soft)` | none or `var(--divider)` |
-| Input / select | `var(--bg-1)` | `1px solid var(--panel-strong)` |
-| Navigation chrome (sidebar, tab bar) | `rgba(8, 13, 18, 0.98)` | contextual |
-| Topbar | `var(--bg-0)` | `border-bottom: 1px solid var(--panel-border)` |
-
----
-
-## 5. Typography
-
-### Font
-The app uses two font stacks:
-- `--app-font` (monospace: `"Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas", monospace`) — the default, set globally on `body`. Use for anything numeric or tabular: prices, tickers, deltas, tables, data cells. Alignment depends on it; do not switch these to the display font.
-- `--display-font` (system sans: `"Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif`) — for chrome and labels, not data. Applied globally to `button`, headings (`h1`–`h4`), `.brand` (app branding), and `.panel-header` (panel titles), and explicitly to `.mode-bar button` in each view (their `font: inherit` reset would otherwise revert it). Use it for any new nav/label/heading element so the split stays consistent; never apply it to a data value or table cell.
-
-### Size Hierarchy
-The base font size is `13.5px` on the body. **Every `font-size` must resolve to a step in the type scale** — never a raw `px`/`rem` value. The scale lives in `tokens.css`:
-
-| Token | Size | Role |
-|---|---|---|
-| `--text-2xs` | `10px` | Category labels, eyebrows, table column headers |
-| `--text-xs` | `11px` | Secondary labels, metadata, timestamps, sidebar title |
-| `--text-sm` | `12px` | Compact data, dense controls, sub-labels, app branding (`GAMMA`) |
-| `--text-base` | `13.5px` | Body / data text — matches the global body size |
-| `--text-md` | `15px` | Section headers (H3), panel titles |
-| `--text-lg` | `16px` | Tab-level hero titles (H2) |
-| `--text-xl` | `18px` | Hero identifiers — the ceiling inside tab content |
-
-Pair each with a `--leading-*` step (`--leading-tight` 1.2 for single-line labels/values/cells, `--leading-snug` 1.4 for dense lists, `--leading-normal` 1.5 for prose). The landing page (§12) is the one exemption — its hero may exceed `--text-xl`.
-
-### Rules
-- **`font-size` uses a scale token. Always.** Do not introduce a new raw size — if a role isn't covered, extend the scale in `tokens.css`, don't hand-pick a one-off value. This is what keeps unrelated views legible as one product.
-- **Hierarchy by weight first, size second.** A `600` weight label next to `400` weight data creates hierarchy without changing size. Use size jumps sparingly.
-- **No text larger than ~20px inside tab content.** Gamma is not a marketing page. If a heading needs to be bigger than the data around it, `700` weight at `15–16px` is sufficient.
-- **No italic in data contexts.** Reserve italic for footnotes, tooltips, or explicitly editorial text.
-- **No text shadows, glow effects, or gradient text fills.**
-- Letter-spacing: `0.01em` on body text (set globally). Category labels use wider spacing (`0.08–0.1em`) for small-caps effect.
-
-### Spacing
-- Line height for dense data: `1.4–1.5`. The global default is `normal` (browser ~1.2 for monospace); dense data lists may override.
-- Padding inside buttons, inputs, and cells: see Component specifications below.
-
----
-
-## 6. Layout and Information Density
-
-Gamma sits closer to Bloomberg than to Koyfin in density preference. The layout should make full use of available screen space without feeling accidental or overwhelming.
-
-### Grid Structure
-Every view follows a consistent layout pattern:
-
-```
-┌────────────────────────────────────────────────┐
-│ Topbar (fixed, full width)                     │
-├──────┬─────────────────────────────────────────┤
-│ Side │  Workspace Shell                         │
-│ bar  │  ┌─────────────────────┬──────────────┐ │
-│      │  │ primary-column      │ support-col  │ │
-│      │  │  ┌─────────────┐   │ ┌──────────┐ │ │
-│      │  │  │ panel       │   │ │ panel    │ │ │
-│      │  │  ├─────────────┤   │ ├──────────┤ │ │
-│      │  │  │ panel       │   │ │ panel    │ │ │
-│      │  │  └─────────────┘   │ └──────────┘ │ │
-│      │  └─────────────────────┴──────────────┘ │
-└──────┴─────────────────────────────────────────┘
+```text
+Tab
+  shared context / title / key metrics
+  mode bar (when the domain has multiple research tasks)
+  compact lens or filter controls
+  workspace grid
+    primary path
+    support path
 ```
 
-- **Workspace shell gap**: `0.5rem` (8px) — the space between the sidebar/tab-bar and the view content.
-- **View-level gap**: `0.5rem` (8px) — between all adjacent panels, both vertically and in the `workspace-grid` columns.
-- **Panel internal padding**: `~0.85–1.05rem` (13–17px). Compact. Content should feel close to its border.
-- **Panel internal gap** (between elements within a panel): `0.5rem` (8px) for sections, tighter for rows.
+The familiar `primary-column + support-column` layout is a useful default, not a mandatory template. A wide table, curve explorer, matrix, or comparison canvas may legitimately own the full width.
 
-### The Space Scale
-Every `padding`, `gap`, and `margin` snaps to the space ramp in `tokens.css` — no off-ramp values. Map the measurements above to tokens:
+**The Primary-Path Rule.** At every supported width, the main analysis appears before support content in visual and DOM order.
 
-| Token | Value | Typical use |
-|---|---|---|
-| `--space-1` | `2px` | Hairline insets, tight inline gaps |
-| `--space-2` | `4px` | Cell vertical padding, icon gaps |
-| `--space-3` | `6px` | Dense control padding (buttons, mode bars, compact inputs) |
-| `--space-4` | `8px` | **Panel gaps, workspace gaps, internal section gaps** — the default seam |
-| `--space-5` | `12px` | Panel padding (compact), cell horizontal padding |
-| `--space-6` | `16px` | Panel padding (roomy), KPI horizontal padding |
-| `--space-7` | `24px` | Rare — only where a genuine group break is earned |
+### Density
 
-### Rules
-- **Space is a scale, not a guess.** Use a `--space-*` token for every gap/padding/margin. If a spacing need isn't covered, it almost certainly should snap to the nearest step rather than justify a new value.
-- **No gratuitous whitespace.** Padding separates logical groups, not decorates. Space is earned by what it separates.
-- **Columns over cards.** Where data can be arranged in a grid or column layout with dividers, prefer that over wrapping in card containers.
-- **Visual grouping through proximity and line, not box.** Related items should be spatially close. A `1px var(--divider)` rule is a perfectly sufficient separator.
-- Charts should fill their allocated space — no excessive internal padding within a chart's bounding box.
-- Scrolling within a section (not the whole page) is acceptable and preferred over hiding or collapsing data.
+- Prefer columns, aligned rows, shared axes, and dividers over independent cards.
+- Remove repeated headings, helper prose, redundant units, and decorative whitespace before shrinking controls or type.
+- Let charts use their allocation; avoid padded chart islands.
+- Use local section scrolling when it preserves context better than an extremely long page.
+- Keep a stable alignment system. Numeric columns are right-aligned or decimal-aligned; labels are left-aligned; units and precision remain consistent within a comparison.
 
 ### Responsive Behavior
-Views use CSS grid with `minmax()` columns. At narrow widths (~980–1320px depending on tab), `workspace-grid` collapses to single column. The primary column always comes first.
 
----
+Responsive design is prioritization, not uniform shrinking.
 
-## 7. Tab Architecture and Modes
+- Use intrinsic layouts (`minmax()`, flexible tracks, content-aware wrapping) before breakpoint-specific patchwork.
+- Collapse support content below the primary path when two columns no longer preserve legibility.
+- Keep mode switching, the active context, and primary actions visible.
+- Allow deliberate horizontal scrolling for genuinely wide tables; preserve the row label and make overflow discoverable.
+- Do not hide evidence merely to make a narrow screenshot look tidy. Summarize or progressively disclose support material instead.
+- Test desktop and narrow widths plus a stressful intermediate width where labels and controls begin to wrap.
 
-Every tab represents a **research domain**. Tabs are not single-purpose views — they are containers for multiple related modes of inquiry.
+## 7. Tabs, Modes, Lenses, And Modules
 
-### Mode Pattern
-Each tab should support **modes**: distinct but related views that share the tab's data context. Modes are accessed via a segmented control / mode bar at the top of the tab content.
+Each top-level tab is a durable research domain.
 
-**Current implementation — Macro tab:**
-- Snapshot | Cross-Asset | Rates & Policy | Events / Regimes | Trade Partners | Country Compare
+- **Tab:** a research domain.
+- **Mode:** a distinct task within that domain.
+- **Lens:** shared state such as region, asset, venue, timeframe, benchmark, or comparison target.
+- **Module:** a chart, table, KPI strip, ranking, or detail surface inside a mode.
 
-Modes share state where it makes sense (selected region, timeframe, theme) and diverge in presentation. They are depth within a domain, not separate tabs.
+Prefer a mode or lens over a new top-level tab when the work shares a domain and context. Mode labels answer “what kind of research am I doing?” Lens controls answer “which slice am I studying?”
 
-**Mode bar styling:**
-- Font: `~12.5px`, same family
-- Padding: `~6px 14px`
-- Height: `~27px`
-- Active state: `rgba(--accent, 0.12)` background tint
-- Inactive: transparent, text only
-- No border-radius on individual buttons; the bar itself carries `1px solid var(--panel-strong)` plus `border-radius: var(--radius-sm)` with `overflow: hidden` (applied globally via tokens.css)
-- Mode labels use `var(--display-font)`, weight 500 — they are navigation chrome, not data
+Mode bars are visible, compact segmented controls—not hidden navigation or pill groups. Preserve relevant lens state across modes, deep links, keyboard navigation, and overview-to-detail handoffs. A new analytical state should also update Copilot grounding where useful.
 
-### Navigation
-- The **sidebar** (hideable, left) is the primary tab navigation. Tabs are listed vertically, can be reordered via drag-and-drop, and pinned.
-- **Keyboard bindings** for tab switching and common actions are first-class. Every meaningful navigation action should be bindable. A dedicated key-bindings window exists.
-- The **Copilot shelf** (hideable, left overlay) provides AI-assisted context. It should never overlap or displace primary content when open — it slides over as a drawer.
+## 8. Component Contracts
 
-### Tab Header Pattern
-Each tab's first panel typically contains:
-1. A **category label** (uppercase, small, muted — e.g. `PREDICTION MARKETS`, `RESEARCH WORKSPACE`)
-2. A **title** (H2, bold — e.g. the active asset name, the market question)
-3. **Context controls** (timeframe selector, view mode, benchmark input) aligned to the right or below
-4. A **KPI strip** — a row of key metrics with values, inline, using the `kpi-grid` pattern (no gaps, metrics separated by vertical padding)
+### Panels And Section Headers
 
----
+Use panels for distinct analytical regions, not every conceptual group. A panel usually uses `var(--panel-bg)`, a 1px panel border, `--space-5` or `--space-6` padding, and `--space-4` internal gap.
 
-## 8. Components
-
-### Panels (Articles)
-The primary structural container. Every distinct content region in a view is a `<article class="panel">`.
-
-```css
-.panel {
-  background: var(--panel-bg);        /* transparent */
-  border: 1px solid var(--panel-border);
-  padding: 0.85rem–1.05rem;           /* 13–17px */
-  display: grid;
-  gap: 0.5rem;                        /* 8px internal */
-}
-```
+Use a compact panel title or category label when it improves navigation. Do not stack an eyebrow, title, subtitle, and helper sentence by habit. If the surrounding mode and table headers already identify a region, omit the panel header.
 
 ### KPI Strips
-Horizontal row of key metrics. Used in tab headers and summary sections.
 
-```css
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(...));
-  gap: 0;  /* KPIs share borders, no gap */
-}
-.metric {
-  padding: 0.2rem 1rem;
-  border-right: 1px solid var(--divider);  /* or left, depending on position */
-}
-```
-
-- Metric label: `--text-2`, small, uppercase or sentence case
-- Metric value: `--text-0`, bold
-- Sub-label: `--text-2`, smaller
-
-### Buttons
-
-**Topbar / chrome buttons** (Change View, Refresh, Settings):
-- Font: `~12px`
-- Padding: `~4.5px 9px`
-- Height: `~25px`
-- Border: `1px solid var(--panel-strong)`
-- Background: transparent or `var(--bg-1)` for emphasis
-- Border-radius: `var(--radius-sm)` (2px)
-
-**Sidebar tab buttons**:
-- Font: `~13px`
-- Padding: `~9px 11px`
-- Height: `~35px`
-- Border-radius: `var(--radius-sm)` (2px)
-- Active: `rgba(--accent, 0.08)` background, `1px solid rgba(--accent, 0.36)` border
-
-**In-panel action buttons** (Run Analysis, Compute, etc.):
-- Match input height of their context
-- Background: `var(--bg-1)` or `rgba(--accent, 0.08)` for emphasis
-- Border: `1px solid var(--panel-strong)` or `rgba(--accent, 0.24)`
-
-**General rules:**
-- No large buttons in data-dense areas. Icon buttons or compact text buttons preferred.
-- Primary actions: filled or accent-tinted background.
-- Secondary / ghost: border only, accent border on hover.
-- Destructive: `--negative` border/text, no fill.
-
-### Inputs and Controls
-
-Current state across most tabs:
-- Height: `48px` (this is on the tall side — `28–32px` is the target for dense contexts)
-- Font: `13.5px`
-- Padding: `~9px 12px`
-- Background: `var(--bg-1)` (`#0b0d10`)
-- Border: `1px solid var(--panel-strong)`
-- Border-radius: `var(--radius-sm)` (2px)
-
-For dense data contexts (screeners, filter bars, parameter inputs), inputs should be more compact:
-- Target height: `28–32px`
-- Reduced padding: `4–6px vertical`, `8–10px horizontal`
-
-Dropdowns and selects: same styling as text inputs. Compact, dark, minimal chrome.
+- Use one shared grid with `gap: 0` and internal dividers.
+- Keep labels muted and values visually strong.
+- Use signal color only when the metric has directional or status meaning.
+- When relevant history is already available, add compact trend context instead of treating a lone number as complete analysis.
+- Never turn each KPI into its own floating card.
 
 ### Tables
-Preferred layout for structured multi-column data.
 
-- Column headers: `~11px`, `--text-2`, uppercase optional, wide letter-spacing
-- Row height: `28–32px` in dense mode
-- Cell padding: `0.5rem` (8px) horizontal, minimal vertical
-- Borders: `1px solid var(--divider)` between rows
-- Alternating row backgrounds: `var(--table-stripe)` — nearly invisible (`rgba(122, 166, 200, 0.018)`)
-- Sortable columns: small directional icon only
-- Interactive rows (clickable): cursor pointer, hover background `rgba(--accent, 0.06)`
+Tables are the default for structured, multi-column comparison.
 
-#### Table-Fills-Panel Rule
+- Keep headers compact and use the display font; keep data cells mono with tabular numerals.
+- Use row heights around 28–32px and minimal vertical padding in dense contexts.
+- Align quantities consistently and make units/precision explicit.
+- Use subtle dividers, restrained striping, and a quiet interactive-row hover.
+- Keep selection, sort, stale, missing, and exceptional states legible without relying on color alone.
 
-When a panel's primary content is a table, the **panel padding is zero**. The panel border is the table's visual container — the table fills edge-to-edge.
+**The Table-Owns-The-Panel Rule.** When a table is a panel's primary content, set panel padding to zero and let the panel border contain the table. Do not add a bordered `.table-wrap` inside it.
 
-```css
-.panel.table-panel {
-  padding: 0;
-  overflow: hidden;
-}
-```
+### Charts
 
-If a section label is needed above the table, use a single compact header row — not an eyebrow + title stack:
+- Prefer shared chart components such as `TimeSeriesChart` when the contract fits.
+- Match the root background, use muted grid lines, and establish a clear primary series.
+- Titles, legends, units, time ranges, and tooltip precision should make the comparison interpretable without nearby prose.
+- Use gradients only when they encode scale or uncertainty.
+- Do not imply continuity, precision, or freshness the source data does not support.
+- Keep loading, unavailable, empty, and error messages inside the final chart geometry.
 
-```css
-.table-panel-header {
-  padding: 0.3rem 0.75rem;
-  border-bottom: 1px solid var(--divider);
-  min-height: 26px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-2);
-}
-```
+### Controls
 
-**When to omit the header entirely:** If the mode bar, tab context, or the table's own column headers make the section identity unambiguous, remove the panel header completely. Column header cells receive `padding: 0.3rem 0.75rem` to align with the card edge.
+- Chrome buttons are usually about 25px high; data-context inputs and buttons are usually 28–32px.
+- Use compact text or icon buttons. Give icon-only controls an accessible name and, when the meaning is not obvious, a tooltip.
+- Primary emphasis is relative: one action may be accent-tinted, while peers remain quiet.
+- Destructive actions use semantic styling and explicit copy; Gamma's research flows should rarely need them.
+- Disabled controls explain why when the reason is not obvious from the current state.
 
-**Never** introduce a `.table-wrap` div with its own border inside an already-bordered panel — this double-borders the table and defeats the edge-to-edge effect.
+### Tags, Badges, And Status
 
-### Dividers
-- `1px solid var(--divider)` — the primary tool for separating content groups
-- Muted, low contrast. They guide the eye, not call attention to themselves.
-- Prefer dividers over cards when the content doesn't need a full border box.
+Use a tag when compact grouping or status meaning is useful. Tags may use a fully rounded silhouette because they are inline annotations, not structural containers. Use semantic color only when the badge carries corresponding data meaning. Avoid badge clouds and never turn every metadata value into a chip.
 
-### Cards (Use Sparingly)
-Only when content is genuinely self-contained (a watchlist item, a single-asset snapshot, a signal card).
-- Background: `var(--panel-bg)` (transparent) — same as panels
-- Border: `1px solid var(--panel-border)`
-- No nested cards. Ever.
-- No shadow. No fill.
-- If it requires visual weight beyond a border to read as a card, reconsider the component choice.
+### Cards
+
+Cards are appropriate for genuinely self-contained repeated objects such as saved research items, watchlist entries, or generated research artifacts. They still follow the plane model: root-matching surface, thin border, no shadow, restrained outer radius, and no nested cards.
+
+## 9. Data Presentation And Research Integrity
+
+Visual polish must not imply certainty the data does not have.
+
+### Numbers
+
+- Use tabular numerals and stable alignment.
+- Keep precision intentional and consistent within a comparison.
+- Show units at the column, axis, group, or value level—wherever ambiguity is lowest without repetition.
+- Distinguish zero, missing, not applicable, stale, and unavailable. Do not collapse them all into `—` without context.
+- Pair directional color with a sign, arrow, label, or position.
+
+### Provenance
+
+Preserve provenance aggressively in models and surface it selectively in UI.
+
+**The Provenance-On-Demand Rule.** Show source, timestamp, methodology, and caveats where they materially affect trust or interpretation. Keep adapter names, concept IDs, transformation labels, and other developer-facing details in tooltips, drilldowns, provenance panels, or diagnostics unless the user is explicitly inspecting them.
+
+### Writing
+
+Interface copy is compact, factual, and operational.
+
+- Prefer specific labels and verbs over explanatory paragraphs.
+- Remove text that merely restates a heading, chart, or visible control.
+- Keep caveats, units, freshness, and interpretation boundaries that the data cannot communicate alone.
+- Put open-ended interpretation in Copilot or a dedicated research note, not as unqualified static copy beside a live metric.
+- Empty and error states say what happened and the next useful action when one exists.
+
+## 10. Interaction, State, And Accessibility
+
+**The Stable-Geometry Rule.** Loading, empty, stale, partial, error, hover, selected, and focused states occupy the same layout contract as loaded content. State changes should not cause avoidable jumps.
+
+- Use stable text such as `LOADING...`, `N/A`, `No data`, or `CHART UNAVAILABLE` in the final content position. Avoid shimmer and spinner overlays on analytical surfaces.
+- Data appears without decorative entrance animation. Value flashes may briefly show update direction using `--flash-duration`.
+- Use `--motion-fast` and `--motion-base` for state, drawer, collapse, and focus transitions. Respect `prefers-reduced-motion` for nonessential motion.
+- Every action is keyboard reachable and has a visible `:focus-visible` state.
+- Prefer native elements and semantics; add ARIA only when native HTML cannot express the interaction.
+- Maintain a logical focus order after mode changes, drawer operations, and conditional rendering.
+- Do not use hover as the only way to reveal critical content or actions.
+- Touch targets may be larger than their visible terminal-style control through padding or hit-area techniques, especially at narrow widths.
+
+Copilot is a transient research layer, not a competing dashboard. Its shelf may use functional translucency and shadow because it is an overlay. Generated research artifacts should inherit the density and component grammar of their owning tab.
+
+## 11. Intentional Exceptions
+
+- **Welcome / connection surface:** may use a centered gateway card and larger type because it is a doorway, not a research workspace.
+- **Drawers, dialogs, tooltips, and menus:** may use functional elevation or translucency to separate a transient interaction layer.
+- **Data visualization:** may use gradients, broader color ramps, or denser labels when they encode analytical meaning and remain accessible.
+- **Status tags:** may use pill geometry because their shape communicates a bounded inline annotation.
+- **Full-width analytical tools:** may depart from the two-column workspace when the research object needs width.
+
+An exception must have a functional reason. “It looks more modern” is not one.
+
+## 12. Review Tests
+
+Use these tests before handoff. They are outcome checks, not a substitute for visual inspection.
+
+### Research Test
+
+- What question does this surface answer?
+- Is the main evidence in the first reading path?
+- Can the user compare the important values without unnecessary scrolling or context switching?
+
+### Plane Test
+
+- Do panels merge into one ruled field?
+- Are shadows, fills, large gutters, or radius making analytical regions look like floating cards?
+- Are nested borders doing work a divider could do more quietly?
+
+### Hierarchy Test
+
+- Does the screen still make sense in grayscale?
+- Is sans used for chrome and mono for data?
+- Are the loudest elements the most important, current, or actionable ones?
+
+### State Test
+
+- Are loading, empty, error, stale, and partial data states covered?
+- Does state change preserve geometry and focus?
+- Is missing data distinguishable from zero and not applicable?
+
+### Access Test
+
+- Can the workflow be completed with a keyboard?
+- Are focus, selection, and data semantics expressed without color alone?
+- Do icon-only actions have accessible names?
+- Does the primary path survive narrow widths and text wrapping?
+
+### Drift Scan
+
+Look for:
+
+- raw colors or off-scale type/spacing where a token exists,
+- structural gradients, glass surfaces, or non-overlay shadows,
+- panel backgrounds that do not use `--panel-bg`,
+- container radius above `--radius-md` or pill-shaped controls,
+- signal colors used as decorative chrome,
+- duplicated headings, helper prose, or provenance internals in the primary path,
+- card layouts for data that should be a table or shared grid,
+- oversized controls, unstable loading states, or hidden keyboard focus.
+
+## 13. New Surface Checklist
+
+Before shipping a new tab, mode, or major module:
+
+1. Name the research question and the primary evidence.
+2. Confirm the scope fits `roadmap.md` and the read-only product boundary.
+3. Choose the closest mature reference surface.
+4. Define tab, mode, lens, and module responsibilities before composing panels.
+5. Use existing tokens and shared components; add reusable primitives only when the role recurs.
+6. Place filters and actions near the data they affect.
+7. Define loading, empty, stale, partial, error, selected, and focused states.
+8. Preserve provenance in the model and choose its appropriate disclosure level.
+9. Register navigation, keyboard actions, persistence/deep-link state, and Copilot context where relevant.
+10. Validate desktop, intermediate, and narrow layouts; inspect the result, not only the CSS.
 
 ---
 
-## 9. Data Visualization
+## 14. Common Mistakes
 
-### Chart Containers
-```css
-.chart-shell {
-  background: var(--bg-0);
-  border: 1px solid var(--divider);
-  border-radius: 0; /* nested inside a panel — square */
-  overflow: hidden;
-}
-```
+The fast check after every edit. Left column is what shows up in review; right column is the correction.
 
-### Rules
-- Chart backgrounds match root. Never white, never lighter.
-- Axis labels: `~11px`, `--text-2`.
-- Grid lines: very low opacity (`0.05–0.1`), hairline.
-- Primary series: `var(--chart-primary)` (blue). Secondary: `var(--chart-secondary)`. Negative: `var(--chart-negative)`.
-- Never use saturated random colors for multiple series. Stay within the token palette.
-- Tooltips: compact, `var(--surface-0)` background, `1px solid var(--divider)`, sharp corners. No rounded, glassy, or drop-shadowed tooltips.
-- Loading states: the text `LOADING...` or `CHART UNAVAILABLE` centered in the shell area. No spinners overlaying content. No shimmer animations.
-- The TradingView watermark (TV logo) appears in chart shells — this is expected.
+### Surface And Depth
 
-### Value Flash Animations
-When data values update in real-time, a brief color flash indicates direction:
-- Up: green flash (`rgba(75, 180, 116, 0.22)`)
-- Down: red flash (`rgba(198, 107, 97, 0.22)`)
-- Changed: amber flash (`rgba(196, 154, 90, 0.18)`)
-
-Duration: `var(--flash-duration)` (800ms), ease-out. These are the only permitted "decorative" animations on data elements.
-
----
-
-## 10. Motion and Interaction
-
-Gamma is a research tool, not a marketing site. Animation should be functional, not decorative.
-
-- **Transitions**: shelf show/hide, panel collapse/expand — `150–200ms`, `ease-out`.
-- **No entrance animations on data.** Data appearing in a chart or table just appears. No fade-in, no slide-in.
-- **Hover states**: subtle. `rgba(--accent, 0.06)` background tint or border color shift on interactive rows/buttons.
-- **Loading indicators**: non-intrusive and positionally stable. Data loads into its space; it doesn't push other content around.
-- **No skeleton loaders.** Use static placeholder text (`N/A`, `LOADING...`, `No data`) in the same layout the real data will occupy.
-
----
-
-## 11. Copilot Integration
-
-The Copilot is an AI-assisted research companion accessible from every tab.
-
-### Shelf Behavior
-- Opens as a left-side drawer overlay with translucent background (`rgba(8, 13, 18, 0.984)`)
-- Box shadow is permitted on the drawer (it's a transient overlay, not a panel)
-- Header shows the current tab context (e.g. `RESEARCH`, `CRYPTO`)
-- Contains a chat-style input at the bottom with a tab-context dropdown and "Generate" button
-
-### Styling
-- Copilot message cards use `var(--surface-soft)` backgrounds with `1px solid rgba(--accent, 0.18)` borders
-- The copilot is grounded in the active tab's data — it reads and references the current analysis state
-- Generated content (research cards) should match the density and styling of the tab it will appear in
-
----
-
-## 12. The Welcome / Landing Page
-
-The landing page (connection screen) is the one exception to the plane model. It is a centered card on a dark background — an intentionally simple gateway before the user enters the workspace. It should remain minimal:
-
-- Centered card with border, moderate padding
-- Connection status, action buttons
-- "Portfolio View" and "Research View" as entry points
-- No complex layout, no data density — this is a doorway, not a workspace
-
----
-
-## 13. Adding a New Tab — Checklist
-
-When building a new tab, follow this exact checklist:
-
-1. **Use the standard view structure**: `<section class="view">` > `<div class="workspace-grid">` > `primary-column` + `support-column`
-2. **Panel backgrounds**: `var(--panel-bg)` (transparent). Borders: `1px solid var(--panel-border)`.
-3. **Layout gaps**: `0.5rem` (8px) everywhere — between panels, between columns, within grids.
-4. **Panel padding**: `0.85–1.05rem`. Internal gap: `0.5rem`.
-5. **First panel**: category label (uppercase, small, muted) + H2/H3 title + optional KPI strip + controls.
-6. **Charts**: use `TimeSeriesChart` component. Background `var(--bg-0)`, border `1px solid var(--divider)`.
-7. **Colors**: only `--accent` for interactive elements. Signal colors only in data values.
-8. **No gradients, no shadows, no opacity layering on panels.**
-9. **Mode bar**: if the tab supports multiple modes, add a segmented control matching the registered tab-mode pattern.
-10. **Copilot**: ensure the tab can provide grounding context to the Copilot via `copilot_context_helpers`.
-11. **Keyboard bindings**: register tab-specific actions in the keybindings system.
-12. **Responsive**: `workspace-grid` should collapse to single column at narrow widths.
-13. **Test against mature surfaces**: does the tab feel as flat, dense, and data-led as Gamma's strongest current views? If not, reduce spacing, remove fills, simplify chrome, and compare against the closest reference surface for that workflow.
-
----
-
-## 14. Common Mistakes to Avoid
-
-| Mistake | Why it's wrong | What to do instead |
+| Mistake | Why it is wrong | Correction |
 |---|---|---|
-| Adding a `background` to a panel that isn't `var(--panel-bg)` | Creates depth, breaks plane model | Use `transparent` or `var(--panel-bg)` |
-| Using `box-shadow` on any non-overlay element | Implies floating, breaks plane model | Remove it. Use a border. |
-| Using warm-tinted colors (`rgba(18, 17, 12, ...)`) | Color temperature mismatch with cool root | Use tokens from `--bg-*` scale |
-| Gaps > 10px between adjacent panels | Creates visible channels, feels like separate objects | Use `0.5rem` (8px) |
-| Introducing a new accent color for a tab's "identity" | Breaks system coherence | Blue is the accent. Signal colors for data only. |
-| `border-radius` > 4px on containers, hand-picked radii, or radius on nested containers | Consumer-app aesthetic, not terminal | `var(--radius-md)` (4px) on top-level panels/cards, `var(--radius-sm)` (2px) on buttons/inputs, `0` on anything inside a bordered surface |
-| Large headings (>20px) inside tab content | Marketing-page feel | Keep titles `15–20px`, use weight for emphasis |
-| Spinner or shimmer loading states | Over-engineered, distracting | Static placeholder text in final layout position |
-| Opacity-based panel backgrounds | Ambiguous depth, glassy feel | Solid token or transparent |
-| `linear-gradient` on panel background | Implies lighting/elevation | Flat solid only |
-| Rendering provenance metadata in every table cell or KPI by default | Turns the UI into a developer/debug surface | Keep provenance in the model, but surface it only where the user is explicitly asking for source context |
-| Panel padding around a table | Creates wasted margin — the user sees card-inside-card instead of data-as-boundary | Set `padding: 0` on the panel; table fills edge-to-edge |
-| Eyebrow + title stack above a table | Burns ~40–55px of chrome before first data row | One 26px compact header row (or none if column headers suffice) |
-| `.table-wrap` with its own border inside a bordered panel | Double border defeats the edge-to-edge effect | Remove inner border; panel border is the table's container |
+| A hand-picked panel background such as `#0f1114` or `transparent` | Breaks the plane. `--panel-bg` resolves to `--bg-0`, a *solid* root-matching fill that masks the canvas dot grid without floating | `background: var(--panel-bg)` |
+| `box-shadow` on a panel, card, table, or chart shell | Implies a floating object in a plane-model interface | Remove it; a 1px border carries the boundary |
+| `linear-gradient` on a structural surface | Implies lighting and elevation | Flat token fill |
+| Opacity-layered panel fills to fake glass | Ambiguous depth, unreadable stacking | Solid token, or `--surface-soft` when an inset is genuinely meaningful |
+| A bordered card nested inside a bordered panel | Double borders where a divider would do the same work more quietly | Divider, shared grid, or row |
+| `.table-wrap` with its own border inside an already-bordered panel | Defeats the edge-to-edge table contract | Remove the inner border; the panel border contains the table |
+| Warm-tinted darks (`rgba(18, 17, 12, …)`) | Temperature mismatch with the cool neutral system | `--bg-*` scale |
+| Radius above `--radius-md`, or radius on a nested container | Consumer-app silhouette; nested geometry is square by contract | `--radius-md` top-level, `--radius-sm` controls, `0` nested |
+| Pill geometry on a button, mode control, or data container | Pills are reserved for inline tags and status chips | Radius scale |
+
+### Density And Layout
+
+| Mistake | Why it is wrong | Correction |
+|---|---|---|
+| Panel padding around a table that owns its panel | Burns margin and reads as card-inside-card | `padding: 0`; the table fills edge to edge |
+| Eyebrow + title + subtitle stacked above a table | ~40–55px of chrome before the first data row | One compact header row (~26px), or none when column headers suffice |
+| Gaps above `--space-4` between adjacent panels | Opens channels; regions stop reading as one instrument | `--space-4` (8px) unless a real hierarchy break earns more |
+| `height: 48px` inputs and buttons | Consumer sizing in a research-density surface | 28–32px data controls, ~25px chrome buttons |
+| Each KPI wrapped in its own card | Fragments a comparison that should share one baseline | One grid, `gap: 0`, internal dividers |
+| Card list for structured multi-column data | Less scannable and less dense than the alternative | `<table>` |
+| Shrinking type or controls to buy space | Trades legibility for room that repetition was wasting | Remove repeated headings, helper prose, and redundant units first |
+| Hiding evidence to make a narrow layout look tidy | Responsive design is prioritization, not deletion | Collapse support below the primary path, or progressively disclose |
+
+### Color And Type
+
+| Mistake | Why it is wrong | Correction |
+|---|---|---|
+| A per-tab accent color for "identity" | Breaks system coherence; color stops meaning anything | `--accent` for interaction, semantic tokens for data |
+| Signal color on a button, border, or chrome element | Green/red/amber are data vocabulary | Signal colors on values only |
+| `--accent-2` used as a second chrome accent | It is an analytical comparison/warning color | Keep it in the data and chart palette |
+| Directional color with no sign, arrow, or label | Meaning disappears under color-vision differences | Pair color with a non-color cue |
+| Sans on numeric data, or mono forced onto navigation chrome | Inverts the Two-Type Rule | Mono carries the research; sans explains the instrument |
+| Type above `--text-xl` inside a research tab | Marketing-page feel | Build hierarchy with weight, placement, and contrast |
+| Gradient text or glow text | Decoration with no analytical job | Weight or size |
+
+### Data And State
+
+| Mistake | Why it is wrong | Correction |
+|---|---|---|
+| Spinner, shimmer, or skeleton on an analytical surface | Motion where the user is trying to read | Stable text (`LOADING...`, `N/A`, `No data`) in the final layout position |
+| A state that changes the layout's geometry | Content jumps as data resolves | Loading, empty, error, and partial states occupy the loaded contract |
+| Collapsing zero, missing, N/A, and stale into one `—` | Destroys the distinction the user needs to trust the number | Distinguish them explicitly |
+| A prose paragraph interpreting live data | Static string against a moving value; it goes stale silently | Remove it, or generate it in Copilot against live data |
+| Text that restates a heading, chart, or visible control | Occupies space that could hold evidence | Cut it |
+| Provenance internals (adapter names, concept IDs) in the primary path | Turns a research surface into a schema browser | Tooltip, drilldown, or provenance panel |
+| A lone number for a metric that has history | The lowest-information rendering available | Add compact trend context |
+| Entrance animation on data | Spectacle where precision is the point | Data appears; value flashes may signal direction |
+| Hover as the only route to critical content | Fails keyboard and touch | Give it a persistent or focusable path |
 
 ---
 
-## 15. Principles Summary
+## 15. Quick Reference
 
-| Principle | Direction |
+| Axis | Direction |
 |---|---|
-| Color | Near-black base, blue accent only, signal colors in data only, single color temperature |
-| Depth | Plane model. Borders define surfaces. No shadows, no gradients, no opacity layering |
-| Typography | Monospace, compact (13.5px base), hierarchy by weight then size, uppercase labels for categories |
-| Layout gaps | `0.5rem` (8px) between all panels — tight seams, not channels |
-| Panel backgrounds | `transparent`. Always. |
-| Cards | Sparingly. Border-defined, same background as root. Dividers first. |
-| Nested cards | Never |
-| Whitespace | Intentional, minimal. Earned by what it separates. |
-| Tab structure | Domain → Modes → shared state. Mode bar at top. |
-| Animation | Functional only. 150–200ms transitions. No entrance effects on data. |
-| Buttons/inputs | Compact. 25px chrome buttons, 28–32px target for data-context inputs. |
-| Charts | Dark (`--bg-0`), muted grids, token palette, no white backgrounds |
-| New tabs | Follow the checklist. Benchmark against Macro Cross-Asset. |
+| Plane | One ruled field. Borders and alignment define regions, never shadows or fills |
+| Panel background | `var(--panel-bg)` — solid, root-matching |
+| Panel seam | `--space-4` (8px) |
+| Radius | `--radius-md` top-level, `--radius-sm` controls, `0` nested |
+| Elevation | Overlays only (drawers, dialogs, tooltips, menus) |
+| Color | `--accent` for interaction; semantic tokens for data meaning; nothing for decoration |
+| Type | Mono for data, sans for chrome; ceiling `--text-xl` in tab content |
+| Density | Earned by removing repetition, not by shrinking legibility |
+| Controls | ~25px chrome, 28–32px data-context |
+| Tables | Default for multi-column comparison; the table owns its panel |
+| Charts | Transparent ground, muted grid, one clear primary series |
+| Motion | `--motion-fast` / `--motion-base`, functional only |
+| State | Stable geometry across loading, empty, stale, partial, and error |
+| Copy | Compact, factual, operational; no interpretation beside a live metric |
+
+Browser-level surfaces — text selection, caret, focus rings, scrollbars, and tabular numerals — are themed centrally in `tokens.css`. Inherit them; do not restyle them per view.
+
+The final question is simple: **does this feel like one trustworthy research instrument, or like a set of components arranged on a dark background?**
