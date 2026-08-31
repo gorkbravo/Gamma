@@ -18,6 +18,7 @@ from src.models.research_script import (
     ResearchScriptOutput,
     ResearchScriptRevision,
     ResearchScriptRun,
+    ResearchScriptStorageDiagnostics,
 )
 from src.utils.time import now_utc
 
@@ -88,6 +89,11 @@ class ResearchScriptStore:
             path.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self._recover_interrupted_writes_unlocked()
+            removed_count, removed_bytes = self._cleanup_orphaned_outputs_unlocked()
+            if removed_count:
+                self._storage_warnings.append(
+                    f"Removed {removed_count} orphaned retained output artifacts ({removed_bytes} bytes)."
+                )
 
     @property
     def storage_warnings(self) -> list[str]:
@@ -130,6 +136,21 @@ class ResearchScriptStore:
                 "research_script",
                 self._parse_script,
             )
+
+    def set_script_status(self, script_id: str, status: str) -> ResearchScript:
+        safe_id = self._require_safe_id(script_id, "script_id")
+        if status not in {"active", "archived", "discarded"}:
+            raise ResearchScriptStoreConflictError(f"Unsupported research script status: {status}")
+        script_path = self.scripts_dir / f"{safe_id}.json"
+        with self._lock:
+            script = self._load_record(script_path, "research_script", self._parse_script)
+            if script is None:
+                raise ResearchScriptStoreConflictError(f"Research script not found: {script_id}")
+            if script.status == status:
+                return script
+            updated = replace(script, status=status, updated_at=now_utc())
+            self._write_record_atomic(script_path, "research_script", updated)
+            return updated
 
     def list_revisions(self, script_id: str) -> list[ResearchScriptRevision]:
         safe_id = self._safe_id(script_id)
@@ -406,6 +427,97 @@ class ResearchScriptStore:
             return resolved_target.read_bytes()
         except OSError:
             return None
+
+    def cleanup_retained_outputs(self) -> tuple[int, int]:
+        with self._lock:
+            return self._cleanup_orphaned_outputs_unlocked()
+
+    def storage_diagnostics(self) -> ResearchScriptStorageDiagnostics:
+        with self._lock:
+            scripts = self.list_scripts()
+            revisions = [
+                revision
+                for script in scripts
+                for revision in self.list_revisions(script.script_id)
+            ]
+            snapshots = [
+                snapshot
+                for path in sorted(self.inputs_dir.glob("*/manifest.json"))
+                if (snapshot := self._load_record(path, "research_script_input", self._parse_snapshot)) is not None
+            ]
+            runs = [
+                run
+                for script in scripts
+                for run in self.list_runs(script.script_id)
+            ]
+            retained_output_count = 0
+            retained_output_bytes = 0
+            missing_output_count = 0
+            run_ids = {run.run_id for run in runs}
+            for run in runs:
+                for output in run.outputs:
+                    if not output.artifact_ref or not output.filename:
+                        continue
+                    content = self.load_output_artifact(run.run_id, output.output_id, output.filename)
+                    if content is None:
+                        missing_output_count += 1
+                    else:
+                        retained_output_count += 1
+                        retained_output_bytes += len(content)
+            orphan_output_count = sum(
+                1
+                for path in self.outputs_dir.iterdir()
+                if path.is_dir() and self._safe_id(path.name) and path.name not in run_ids
+            )
+            return ResearchScriptStorageDiagnostics(
+                script_count=len(scripts),
+                archived_script_count=sum(1 for script in scripts if script.status == "archived"),
+                revision_count=len(revisions),
+                input_snapshot_count=len(snapshots),
+                run_count=len(runs),
+                retained_output_count=retained_output_count,
+                retained_output_bytes=retained_output_bytes,
+                missing_output_count=missing_output_count,
+                orphan_output_count=orphan_output_count,
+                storage_warnings=list(self._storage_warnings),
+            )
+
+    def _cleanup_orphaned_outputs_unlocked(self) -> tuple[int, int]:
+        known_run_ids = {
+            path.stem
+            for path in self.runs_dir.glob("*/*.json")
+            if self._safe_id(path.stem)
+        }
+        removed_count = 0
+        removed_bytes = 0
+        resolved_root = self.outputs_dir.resolve()
+        for output_dir in sorted(self.outputs_dir.iterdir()):
+            safe_run_id = self._safe_id(output_dir.name)
+            if not output_dir.is_dir() or not safe_run_id or safe_run_id in known_run_ids:
+                continue
+            resolved_dir = output_dir.resolve()
+            if resolved_dir.parent != resolved_root:
+                self._storage_warnings.append(
+                    f"Skipped unsafe orphan output directory {output_dir.name}."
+                )
+                continue
+            nested = False
+            for output_path in list(output_dir.iterdir()):
+                if not output_path.is_file() or output_path.resolve().parent != resolved_dir:
+                    nested = True
+                    continue
+                try:
+                    removed_bytes += output_path.stat().st_size
+                except OSError:
+                    pass
+                output_path.unlink(missing_ok=True)
+                removed_count += 1
+            if not nested:
+                try:
+                    output_dir.rmdir()
+                except OSError:
+                    pass
+        return removed_count, removed_bytes
 
     def _prune_runs_unlocked(self, safe_script_id: str) -> None:
         runs = self.list_runs(safe_script_id)

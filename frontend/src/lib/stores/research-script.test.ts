@@ -75,6 +75,33 @@ const run = (): ResearchScriptRun => ({
   contract_version: "research-script-run.v1"
 });
 
+const diagnostics = (scripts = 1, revisions = 1, snapshots = 0, runs = 0) => ({
+  script_count: scripts,
+  archived_script_count: 0,
+  revision_count: revisions,
+  input_snapshot_count: snapshots,
+  run_count: runs,
+  retained_output_count: 0,
+  retained_output_bytes: 0,
+  missing_output_count: 0,
+  orphan_output_count: 0,
+  storage_warnings: [],
+  contract_version: "research-script-storage-diagnostics.v1"
+});
+
+const inputSnapshot = {
+  snapshot_id: "snapshot-1",
+  script_id: "script-1",
+  created_at: "2026-08-29T12:00:00",
+  files: [],
+  dataset_refs: [],
+  source_refs: [],
+  total_bytes: 0,
+  manifest_sha256: "a".repeat(64),
+  warnings: [],
+  contract_version: "research-script-input.v1"
+};
+
 const jsonResponse = (value: unknown, status = 200, statusText = "OK") => new Response(
   JSON.stringify(value),
   { status, statusText, headers: { "Content-Type": "application/json" } }
@@ -90,8 +117,12 @@ describe("research script workspace store", () => {
     const completedRun = run();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(first, 201, "Created"))
+      .mockResolvedValueOnce(jsonResponse(diagnostics()))
       .mockResolvedValueOnce(jsonResponse(revised, 201, "Created"))
-      .mockResolvedValueOnce(jsonResponse(completedRun, 201, "Created"));
+      .mockResolvedValueOnce(jsonResponse(diagnostics(1, 2)))
+      .mockResolvedValueOnce(jsonResponse(completedRun, 201, "Created"))
+      .mockResolvedValueOnce(jsonResponse(inputSnapshot))
+      .mockResolvedValueOnce(jsonResponse(diagnostics(1, 2, 1, 1)));
     vi.stubGlobal("fetch", fetchMock);
 
     updateResearchScriptDraft("print('preview')\n");
@@ -101,13 +132,14 @@ describe("research script workspace store", () => {
     await runSelectedResearchScript();
 
     const createBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const revisionBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
-    const runBody = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    const revisionBody = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    const runBody = JSON.parse(fetchMock.mock.calls[4][1].body as string);
     expect(createBody.source).toBe("print('preview')\n");
     expect(revisionBody.expected_parent_sha256).toBe("1".repeat(64));
     expect(revisionBody.source).toBe("print('edited preview')\n");
     expect(runBody.revision_id).toBe("revision-2");
     expect(get(researchScriptWorkspace).selectedRun?.run_id).toBe("run-1");
+    expect(get(researchScriptWorkspace).diagnostics?.run_count).toBe(1);
     expect(get(researchScriptWorkspace).notice).toBe("Safe-preview run completed.");
   });
 

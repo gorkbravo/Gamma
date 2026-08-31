@@ -1,10 +1,13 @@
-import { getJson, postJson } from "./client";
+import { getBlob, getJson, postJson } from "./client";
 import type {
   ResearchScriptDetail,
+  ResearchScriptInputSnapshot,
   ResearchScriptListResponse,
   ResearchScriptRun,
+  ResearchScriptRunComparison,
   ResearchScriptRunListResponse,
-  ResearchScriptRuntimeCapabilities
+  ResearchScriptRuntimeCapabilities,
+  ResearchScriptStorageDiagnostics
 } from "./types";
 
 export interface CreateResearchScriptPayload {
@@ -21,6 +24,7 @@ export interface CreateResearchScriptRevisionPayload {
 
 export interface CreateResearchScriptRunPayload {
   revision_id: string;
+  input_snapshot_id?: string;
   input_files?: Array<{
     logical_filename: string;
     media_type: string;
@@ -29,12 +33,25 @@ export interface CreateResearchScriptRunPayload {
   }>;
 }
 
+export interface ExportResearchScriptInputPayload {
+  domain: "equity_history" | "macro_series" | "saved_research";
+  object_id: string;
+  logical_filename: string;
+  region?: string;
+  timeframe?: string;
+  lookback_days?: number;
+  frequency?: "daily" | "weekly" | "monthly";
+  additional_input_files?: CreateResearchScriptRunPayload["input_files"];
+}
+
 export interface ResearchScriptRevisionDecisionPayload {
   expected_parent_sha256: string;
 }
 
-export const listResearchScripts = () =>
-  getJson<ResearchScriptListResponse>("/research/strategy-lab/scripts");
+export const listResearchScripts = (includeArchived = false) =>
+  getJson<ResearchScriptListResponse>(
+    `/research/strategy-lab/scripts${includeArchived ? "?include_archived=true" : ""}`
+  );
 
 export const getResearchScriptRuntimeCapabilities = () =>
   getJson<ResearchScriptRuntimeCapabilities>(
@@ -46,6 +63,32 @@ export const getResearchScript = (scriptId: string) =>
 
 export const createResearchScript = (payload: CreateResearchScriptPayload) =>
   postJson<ResearchScriptDetail>("/research/strategy-lab/scripts", payload);
+
+export const duplicateResearchScript = (scriptId: string, title?: string) =>
+  postJson<ResearchScriptDetail>(
+    `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/duplicate`,
+    { title: title?.trim() || null }
+  );
+
+export const archiveResearchScript = (scriptId: string) =>
+  postJson<ResearchScriptDetail>(
+    `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/archive`,
+    {}
+  );
+
+export const restoreResearchScript = (scriptId: string) =>
+  postJson<ResearchScriptDetail>(
+    `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/restore`,
+    {}
+  );
+
+export const exportResearchScriptInput = (
+  scriptId: string,
+  payload: ExportResearchScriptInputPayload
+) => postJson<ResearchScriptInputSnapshot>(
+  `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/inputs/export`,
+  payload
+);
 
 export const createResearchScriptRevision = (
   scriptId: string,
@@ -90,5 +133,31 @@ export const listResearchScriptRuns = (scriptId: string) =>
 export const getResearchScriptRun = (runId: string) =>
   getJson<ResearchScriptRun>(`/research/strategy-lab/script-runs/${encodeURIComponent(runId)}`);
 
-export const researchScriptOutputDownloadUrl = (runId: string, outputId: string) =>
-  `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/outputs/${encodeURIComponent(outputId)}`;
+export const getResearchScriptInputSnapshot = (snapshotId: string) =>
+  getJson<ResearchScriptInputSnapshot>(
+    `/research/strategy-lab/script-inputs/${encodeURIComponent(snapshotId)}`
+  );
+
+export const compareResearchScriptRuns = (baseRunId: string, comparisonRunId: string) =>
+  getJson<ResearchScriptRunComparison>(
+    `/research/strategy-lab/script-runs/compare?base_run_id=${encodeURIComponent(baseRunId)}&comparison_run_id=${encodeURIComponent(comparisonRunId)}`
+  );
+
+export const getResearchScriptStorageDiagnostics = () =>
+  getJson<ResearchScriptStorageDiagnostics>(
+    "/research/strategy-lab/scripts/storage-diagnostics"
+  );
+
+export const cleanupResearchScriptStorage = () =>
+  postJson<ResearchScriptStorageDiagnostics>(
+    "/research/strategy-lab/scripts/storage-diagnostics/cleanup",
+    {}
+  );
+
+export const fetchResearchScriptOutput = (runId: string, outputId: string) =>
+  getBlob(
+    `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/outputs/${encodeURIComponent(outputId)}`
+  );
+
+export const fetchResearchScriptRunExport = (runId: string) =>
+  getBlob(`/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/export`);

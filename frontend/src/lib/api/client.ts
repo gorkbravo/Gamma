@@ -213,6 +213,16 @@ export async function getText(path: string): Promise<string> {
   return response.text();
 }
 
+export async function getBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: sessionHeaders()
+  });
+  if (!response.ok) {
+    throw await httpError(response);
+  }
+  return response.blob();
+}
+
 function sessionHeaders(): Record<string, string> {
   const runtimeToken =
     typeof window !== "undefined" ? window.__GAMMA_SESSION_TOKEN__ : undefined;

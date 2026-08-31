@@ -8641,7 +8641,7 @@ def test_checkpoint5_representative_plans_select_domains_and_explain_omissions(
 def test_checkpoint7_model_policy_resolves_profiles_and_uses_adaptive_custom_operator():
     provider = OpenAIResponsesCopilotProvider(
         api_key="test-key",
-        model="gpt-5.5",
+        model="gpt-5.6-luna",
         reasoning_effort="medium",
         store_responses=False,
     )
@@ -8675,7 +8675,7 @@ def test_checkpoint7_model_policy_resolves_profiles_and_uses_adaptive_custom_ope
     )
     assert operator.orchestration_path == "gamma_custom_loop"
     assert operator.provider == "openai_responses_operator"
-    assert operator.model == "gpt-5.5"
+    assert operator.model == "gpt-5.6-luna"
     assert operator.provider_storage.effective == "disabled"
 
 

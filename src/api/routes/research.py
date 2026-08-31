@@ -23,14 +23,19 @@ from src.api.schemas.research import (
 )
 from src.api.schemas.research_script import (
     ResearchScriptCreateRequestModel,
+    ResearchScriptDataExportRequestModel,
     ResearchScriptDetailModel,
+    ResearchScriptDuplicateRequestModel,
+    ResearchScriptInputSnapshotModel,
     ResearchScriptListResponseModel,
     ResearchScriptRevisionCreateRequestModel,
     ResearchScriptRevisionDecisionRequestModel,
     ResearchScriptRunCreateRequestModel,
+    ResearchScriptRunComparisonModel,
     ResearchScriptRunListResponseModel,
     ResearchScriptRunModel,
     ResearchScriptRuntimeCapabilitiesModel,
+    ResearchScriptStorageDiagnosticsModel,
 )
 from src.application.research_script_service import (
     ResearchScriptConflictError,
@@ -177,8 +182,13 @@ def create_research_script(
 
 
 @router.get("/research/strategy-lab/scripts", response_model=ResearchScriptListResponseModel)
-def list_research_scripts(request: Request) -> ResearchScriptListResponseModel:
-    rows = request.app.state.runtime.research_script_service.list_scripts()
+def list_research_scripts(
+    request: Request,
+    include_archived: bool = Query(default=False),
+) -> ResearchScriptListResponseModel:
+    rows = request.app.state.runtime.research_script_service.list_scripts(
+        include_archived=include_archived
+    )
     return ResearchScriptListResponseModel.from_domain(rows)
 
 
@@ -194,6 +204,30 @@ def get_research_script_runtime_capabilities(
     )
 
 
+@router.get(
+    "/research/strategy-lab/scripts/storage-diagnostics",
+    response_model=ResearchScriptStorageDiagnosticsModel,
+)
+def get_research_script_storage_diagnostics(
+    request: Request,
+) -> ResearchScriptStorageDiagnosticsModel:
+    return ResearchScriptStorageDiagnosticsModel.from_domain(
+        request.app.state.runtime.research_script_service.storage_diagnostics()
+    )
+
+
+@router.post(
+    "/research/strategy-lab/scripts/storage-diagnostics/cleanup",
+    response_model=ResearchScriptStorageDiagnosticsModel,
+)
+def cleanup_research_script_storage(
+    request: Request,
+) -> ResearchScriptStorageDiagnosticsModel:
+    return ResearchScriptStorageDiagnosticsModel.from_domain(
+        request.app.state.runtime.research_script_service.cleanup_retained_outputs()
+    )
+
+
 @router.get("/research/strategy-lab/scripts/{script_id}", response_model=ResearchScriptDetailModel)
 def get_research_script(script_id: str, request: Request) -> ResearchScriptDetailModel:
     try:
@@ -201,6 +235,70 @@ def get_research_script(script_id: str, request: Request) -> ResearchScriptDetai
     except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
         _raise_script_http_error(exc)
     return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/duplicate",
+    response_model=ResearchScriptDetailModel,
+    status_code=201,
+)
+def duplicate_research_script(
+    script_id: str,
+    payload: ResearchScriptDuplicateRequestModel,
+    request: Request,
+) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.duplicate_script(
+            script_id,
+            title=payload.title,
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/archive",
+    response_model=ResearchScriptDetailModel,
+)
+def archive_research_script(script_id: str, request: Request) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.archive_script(script_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/restore",
+    response_model=ResearchScriptDetailModel,
+)
+def restore_research_script(script_id: str, request: Request) -> ResearchScriptDetailModel:
+    try:
+        detail = request.app.state.runtime.research_script_service.restore_script(script_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/inputs/export",
+    response_model=ResearchScriptInputSnapshotModel,
+    status_code=201,
+)
+def export_research_script_domain_input(
+    script_id: str,
+    payload: ResearchScriptDataExportRequestModel,
+    request: Request,
+) -> ResearchScriptInputSnapshotModel:
+    try:
+        snapshot = request.app.state.runtime.research_script_service.export_domain_input(
+            script_id,
+            payload.to_domain(),
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptInputSnapshotModel.from_domain(snapshot)
 
 
 @router.post(
@@ -296,6 +394,40 @@ def list_research_script_runs(script_id: str, request: Request) -> ResearchScrip
     return ResearchScriptRunListResponseModel.from_domain(runs)
 
 
+@router.get(
+    "/research/strategy-lab/script-inputs/{snapshot_id}",
+    response_model=ResearchScriptInputSnapshotModel,
+)
+def get_research_script_input_snapshot(
+    snapshot_id: str,
+    request: Request,
+) -> ResearchScriptInputSnapshotModel:
+    try:
+        snapshot = request.app.state.runtime.research_script_service.get_input_snapshot(snapshot_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptInputSnapshotModel.from_domain(snapshot)
+
+
+@router.get(
+    "/research/strategy-lab/script-runs/compare",
+    response_model=ResearchScriptRunComparisonModel,
+)
+def compare_research_script_runs(
+    request: Request,
+    base_run_id: str = Query(..., min_length=1, max_length=128),
+    comparison_run_id: str = Query(..., min_length=1, max_length=128),
+) -> ResearchScriptRunComparisonModel:
+    try:
+        comparison = request.app.state.runtime.research_script_service.compare_runs(
+            base_run_id,
+            comparison_run_id,
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptRunComparisonModel.from_domain(comparison)
+
+
 @router.get("/research/strategy-lab/script-runs/{run_id}", response_model=ResearchScriptRunModel)
 def get_research_script_run(run_id: str, request: Request) -> ResearchScriptRunModel:
     try:
@@ -303,6 +435,20 @@ def get_research_script_run(run_id: str, request: Request) -> ResearchScriptRunM
     except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
         _raise_script_http_error(exc)
     return ResearchScriptRunModel.from_domain(run)
+
+
+@router.get("/research/strategy-lab/script-runs/{run_id}/export")
+def export_research_script_run(run_id: str, request: Request) -> Response:
+    try:
+        filename, content = request.app.state.runtime.research_script_service.export_run_bundle(run_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+        raise AssertionError("unreachable")
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/research/strategy-lab/script-runs/{run_id}/outputs/{output_id}")

@@ -121,6 +121,36 @@ export interface ResearchScriptDetail {
   revisions: ResearchScriptRevision[];
 }
 
+export interface ResearchScriptInputFile {
+  logical_filename: string;
+  media_type: string;
+  byte_size: number;
+  content_sha256: string;
+  gamma_object_id: string | null;
+  provider_id: string | null;
+  source_timestamp: string | null;
+  retrieved_at: string;
+  transformation_note: string | null;
+  source_kind: "gamma_state" | "provider" | "user_upload";
+  artifact_ref: string;
+}
+
+export interface ResearchScriptInputSnapshot {
+  snapshot_id: string;
+  script_id: string;
+  created_at: string;
+  files: ResearchScriptInputFile[];
+  dataset_refs: Array<Record<string, unknown>>;
+  source_refs: Array<Record<string, unknown>>;
+  warnings: string[];
+  manifest_sha256: string;
+  total_bytes: number;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  contract_version: string;
+}
+
 export interface ResearchScriptOutput {
   output_id: string;
   kind: ResearchScriptOutputKind;
@@ -193,6 +223,35 @@ export interface ResearchScriptRuntimeCapabilities {
   active_limits: Record<string, number>;
   model: string | null;
   sanitized_provider_status: string;
+}
+
+export interface ResearchScriptRunComparison {
+  base_run_id: string;
+  comparison_run_id: string;
+  same_revision: boolean;
+  same_input_snapshot: boolean;
+  status_changed: boolean;
+  duration_delta_seconds: number | null;
+  input_token_delta: number | null;
+  output_token_delta: number | null;
+  output_count_delta: number;
+  warning_count_delta: number;
+  metric_deltas: Array<Record<string, unknown>>;
+  contract_version: string;
+}
+
+export interface ResearchScriptStorageDiagnostics {
+  script_count: number;
+  archived_script_count: number;
+  revision_count: number;
+  input_snapshot_count: number;
+  run_count: number;
+  retained_output_count: number;
+  retained_output_bytes: number;
+  missing_output_count: number;
+  orphan_output_count: number;
+  storage_warnings: string[];
+  contract_version: string;
 }
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";

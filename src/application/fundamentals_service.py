@@ -283,7 +283,10 @@ class FundamentalsService:
         # Company summaries reuse the same OPENAI_API_KEY as Copilot, but keep a separate
         # model knob so short filing summaries can stay on a smaller model by default.
         self.summary_model_provider = (os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_PROVIDER", "openai") or "openai").strip().lower()
-        self.summary_model = (os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_MODEL", "gpt-5.4-nano") or "gpt-5.4-nano").strip()
+        self.summary_model = (
+            os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_MODEL", "gpt-5.6-luna")
+            or "gpt-5.6-luna"
+        ).strip()
         self.summary_api_url = (
             os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_API_URL", "https://api.openai.com/v1/responses")
             or "https://api.openai.com/v1/responses"

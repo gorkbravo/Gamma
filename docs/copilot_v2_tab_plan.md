@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 
 ## Start Here
 
@@ -193,6 +193,19 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-08-31
+
+- [GPT-5.6 Luna model](https://developers.openai.com/api/docs/models/gpt-5.6-luna): the exact `gpt-5.6-luna` model supports Responses, function calling, structured outputs, and Code Interpreter, with the reasoning levels needed by Gamma's existing profiles.
+- [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model): model choice remains workload- and eval-dependent even when a newer family is available.
+
+Resulting decision:
+
+- At the user's direction, `gpt-5.6-luna` is now the one active default across Copilot, the Operator/Agents path, Research Script Code Interpreter, and Fundamentals summaries. Existing Quick/Standard/Deep reasoning-effort policy remains server-owned and observable.
+- This is a model/configuration migration, not an orchestration migration. Gamma's custom Responses loop remains the default, the Agents SDK remains feature-flagged, and the same strict action registry, sequential authorization, permissions, persistence, approvals, and audit contracts apply.
+- The Research Script adapter keeps exact source/input hash gates, network-disabled containers, typed terminal states, immediate artifact retention, and server-owned output provenance. Luna text-token cost estimates are labeled as estimates and exclude hosted-tool charges.
+- Verification: 30 affected Script/runtime/Agents smoke tests and 4 focused Copilot model-policy checks passed; 386 frontend tests, typecheck, and production build passed. An opt-in real-provider smoke and a browser-level Luna Code Interpreter run both passed; the latter retained CSV/SVG artifacts with authenticated rendering and OpenAI provenance.
+- This review supersedes the older active-default guidance in the dated 2026-08-29 notes. Those notes remain below as implementation history.
+
 ### Official Guidance Re-Reviewed 2026-08-29
 
 - [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter): the hosted tool writes and runs Python in a sandboxed container, accepts uploaded files, and can generate files/images. Containers are ephemeral, so Gamma must persist source, manifests, run metadata, and retained outputs independently.
@@ -380,17 +393,17 @@ The current OpenAI guidance names GPT-5.6 as the latest family. All three GPT-5.
 
 | Gamma workload | Candidate | Starting effort | Rationale |
 |---|---|---:|---|
-| Standard Research Agent answer and synthesis | `gpt-5.6-terra` | `medium` | Best default candidate for research quality versus cost. |
+| Standard Research Agent answer and synthesis | `gpt-5.6-luna` | `medium` | Current app baseline; benchmark alternative tiers only through retained evals. |
 | Quick follow-up, title, compact summary, low-risk formatting | `gpt-5.6-luna` | `low` or `none` | High-volume efficiency; only adopt where evals show no grounding/citation regression. |
-| Standard Research Operator tool selection | `gpt-5.6-terra` | `low`, compare `medium` | Natural successor candidate to the current passing GPT-5.5-low operator baseline. |
-| Deep cross-domain synthesis or difficult final report review | `gpt-5.6-sol` | `medium` or `high` | Reserve frontier capacity for work with measured quality benefit. |
+| Standard Research Operator tool selection | `gpt-5.6-luna` | `low`, compare `medium` | Current app baseline with existing Gamma-owned authorization and trace contracts. |
+| Deep cross-domain synthesis or difficult final report review | `gpt-5.6-luna` | `medium` or `high` | Keep one active model until retained evals justify workload-specific routing. |
 | Quality-first final review | same selected GPT-5.6 tier with `reasoning.mode: pro` | eval-backed | Use only for non-interactive, quality-first work; it is not the normal streaming chat path. |
 | Explicit outside-source deep research | `o4-mini-deep-research` or `o3-deep-research` | background job | Optional future workflow requiring source tools, long-run UX, retention disclosure, and separate cost limits. |
 
 Migration policy:
 
-- keep current GPT-5.5 defaults until the existing live operator and research-card eval suites run against GPT-5.6;
-- benchmark `gpt-5.6-terra` low/medium against GPT-5.5 low/medium first, then test Sol only on cases where Terra misses quality gates;
+- keep `gpt-5.6-luna` as the active app baseline until retained live operator and research-card evals authorize a workload-specific route;
+- benchmark any future Terra/Sol or legacy comparison profile against the Luna baseline rather than changing active defaults through aliases;
 - do not route by model marketing tier alone; route by depth profile, task risk, tool complexity, latency budget, and measured eval performance;
 - resolve `Auto` server-side and persist model, reasoning effort/mode, provider, usage, latency, cache reads/writes, and routing reason;
 - allow an advanced per-run override, but keep provider availability and safety policy authoritative;

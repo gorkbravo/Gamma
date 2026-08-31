@@ -36,7 +36,7 @@ _ALLOWED_ARTIFACT_MIME_TYPES = {
     "text/csv",
     "text/plain",
 }
-_CODE_INTERPRETER_MODEL = re.compile(r"^gpt-5\.(?:4|5)(?:$|-)", re.IGNORECASE)
+_CODE_INTERPRETER_MODEL = re.compile(r"^gpt-5\.(?:4|5|6)(?:$|-)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -317,21 +317,31 @@ class OpenAICodeInterpreterRuntime:
             )
 
         outputs: list[ResearchScriptRuntimeOutput] = []
+        provider_execution_failed = False
         sequence = 1
         for call in code_calls:
+            if str(getattr(call, "status", "") or "").strip().lower() == "failed":
+                provider_execution_failed = True
             for call_output in list(getattr(call, "outputs", []) or []):
                 if getattr(call_output, "type", None) == "logs":
                     logs = str(getattr(call_output, "logs", "") or "")
                     if logs:
+                        sanitized_logs = self._sanitize_provider_text(logs)
+                        log_failed = self._reports_execution_failure(sanitized_logs)
+                        provider_execution_failed = provider_execution_failed or log_failed
                         outputs.append(
                             ResearchScriptRuntimeOutput(
                                 output_id=f"provider-log-{sequence}",
-                                kind="log",
+                                kind="error" if log_failed else "log",
                                 sequence=sequence,
                                 media_type="text/plain",
-                                text=logs,
+                                text=sanitized_logs,
                                 provider_native_ref=str(getattr(call, "id", "") or "") or None,
-                                transformation_note="Code Interpreter logs retained from the exact-source wrapper call.",
+                                transformation_note=(
+                                    "Code Interpreter failure retained from the exact-source wrapper call."
+                                    if log_failed
+                                    else "Code Interpreter logs retained from the exact-source wrapper call."
+                                ),
                             )
                         )
                         sequence += 1
@@ -352,15 +362,22 @@ class OpenAICodeInterpreterRuntime:
                     continue
                 text = str(getattr(content, "text", "") or "")
                 if text:
+                    sanitized_text = self._sanitize_provider_text(text)
+                    summary_failed = self._reports_execution_failure(sanitized_text)
+                    provider_execution_failed = provider_execution_failed or summary_failed
                     outputs.append(
                         ResearchScriptRuntimeOutput(
                             output_id=f"provider-summary-{sequence}",
-                            kind="summary",
+                            kind="error" if summary_failed else "summary",
                             sequence=sequence,
                             media_type="text/plain",
-                            text=text,
+                            text=sanitized_text,
                             provider_native_ref=str(getattr(item, "id", "") or "") or None,
-                            transformation_note="Provider completion message; analytical claims remain subordinate to retained artifacts.",
+                            transformation_note=(
+                                "Provider-reported execution failure retained as a typed error."
+                                if summary_failed
+                                else "Provider completion message; analytical claims remain subordinate to retained artifacts."
+                            ),
                         )
                     )
                     sequence += 1
@@ -398,6 +415,7 @@ class OpenAICodeInterpreterRuntime:
             outputs.append(self._artifact_output(file_id, filename, content, media_type, sequence))
             sequence += 1
             for artifact_warning in self._artifact_warnings(content, media_type):
+                artifact_warning = self._sanitize_provider_text(artifact_warning)
                 warnings.append(artifact_warning)
                 outputs.append(
                     ResearchScriptRuntimeOutput(
@@ -413,9 +431,13 @@ class OpenAICodeInterpreterRuntime:
                 sequence += 1
 
         response_status = self._status(str(getattr(response, "status", "completed") or "completed"))
+        provider_execution_failed = provider_execution_failed or getattr(response, "error", None) is not None
         status: ResearchScriptRunStatus = response_status if exact_wrapper else "incomplete"
         if response_status == "completed" and not exact_wrapper:
             status = "incomplete"
+        elif provider_execution_failed and exact_wrapper:
+            status = "failed"
+            warnings.append("The isolated provider execution failed; see the retained typed error output.")
         usage = self._usage(response)
         usage.update(
             {
@@ -587,6 +609,23 @@ class OpenAICodeInterpreterRuntime:
         text = re.sub(r"(?:/mnt/data|/home/oai/share|/tmp)", "{container_root}", text)
         return text
 
+    @classmethod
+    def _sanitize_provider_text(cls, value: str) -> str:
+        text = str(value or "")
+        text = re.sub(
+            r"\[Download\s+([^\]]+)\]\(sandbox:[^)]+\)",
+            r"Retained artifact: \1",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"sandbox:(?:/mnt/data|/home/oai/share|/tmp)[^\s)\]]*",
+            "{retained_artifact}",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return cls._sanitize_wrapper(text)
+
     @staticmethod
     def _inline_image_output(value: Any, sequence: int, call_id: Any) -> ResearchScriptRuntimeOutput | None:
         url = str(getattr(value, "url", "") or "")
@@ -701,6 +740,14 @@ class OpenAICodeInterpreterRuntime:
             "incomplete": "incomplete",
             "expired": "expired",
         }.get(value.strip().lower(), "incomplete")  # type: ignore[return-value]
+
+    @staticmethod
+    def _reports_execution_failure(text: str) -> bool:
+        normalized = str(text or "").strip()
+        return bool(
+            re.search(r"(?im)^execution failed with\s*:", normalized)
+            or re.search(r"(?im)^traceback \(most recent call last\):", normalized)
+        )
 
     def _provider_error_result(
         self,

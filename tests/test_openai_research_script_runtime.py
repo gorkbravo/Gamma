@@ -97,6 +97,7 @@ class FakeResponses:
         generated_bytes: bytes = b"month,cumulative_return\n2026-01,0.01\n",
         annotation_filename: str | None = None,
         status: str = "completed",
+        summary_text: str | None = None,
     ) -> None:
         self.containers = containers
         self.expire_first = expire_first
@@ -105,6 +106,7 @@ class FakeResponses:
         self.generated_bytes = generated_bytes
         self.annotation_filename = annotation_filename
         self.status = status
+        self.summary_text = summary_text
         self.create_calls: list[dict[str, object]] = []
         self.cancel_calls: list[str] = []
 
@@ -140,7 +142,11 @@ class FakeResponses:
             content=[
                 SimpleNamespace(
                     type="output_text",
-                    text="Generated the requested retained outputs.",
+                    text=self.summary_text or (
+                        f"[Download {self.generated_filename}]"
+                        f"(sandbox:/mnt/data/{self.generated_filename})\n"
+                        "Generated the requested retained outputs."
+                    ),
                     annotations=[annotation],
                 )
             ],
@@ -218,7 +224,7 @@ def request(*, run_id: str = "run-1", source: str = SOURCE) -> ResearchScriptRun
     )
 
 
-def runtime(client: FakeOpenAIClient, *, model: str = "gpt-5.4") -> OpenAICodeInterpreterRuntime:
+def runtime(client: FakeOpenAIClient, *, model: str = "gpt-5.6-luna") -> OpenAICodeInterpreterRuntime:
     return OpenAICodeInterpreterRuntime(
         api_key="configured-test-key",
         model=model,
@@ -228,12 +234,12 @@ def runtime(client: FakeOpenAIClient, *, model: str = "gpt-5.4") -> OpenAICodeIn
 
 def test_capability_detection_is_sanitized_and_model_specific() -> None:
     available = runtime(FakeOpenAIClient()).capabilities()
-    unsupported = runtime(FakeOpenAIClient(), model="gpt-5.4-pro").capabilities()
+    unsupported = runtime(FakeOpenAIClient(), model="gpt-5.6-pro").capabilities()
 
     assert available.available is True
     assert available.network_access is False
     assert available.supports_cancellation is False
-    assert available.model == "gpt-5.4"
+    assert available.model == "gpt-5.6-luna"
     assert set(available.supported_output_types) >= {"table", "image", "file"}
     assert unsupported.available is False
     assert "lacks_verified" in unsupported.sanitized_provider_status
@@ -277,6 +283,10 @@ def test_container_reuse_output_normalization_and_terminal_idempotency() -> None
     assert len(client.responses.create_calls) == 2
     assert replay == first
     assert {item.kind for item in first.outputs} >= {"log", "summary", "table"}
+    summary = next(item for item in first.outputs if item.kind == "summary")
+    assert "sandbox:" not in (summary.text or "")
+    assert "/mnt/data" not in (summary.text or "")
+    assert "Retained artifact: returns.csv" in (summary.text or "")
     table = next(item for item in first.outputs if item.kind == "table")
     assert table.filename == "returns.csv"
     assert table.columns == ["month", "cumulative_return"]
@@ -291,6 +301,22 @@ def test_altered_wrapper_fails_exact_source_gate() -> None:
     assert result.status == "incomplete"
     assert result.executed_source_sha256 is None
     assert any("exact-source" in warning for warning in result.warnings)
+
+
+def test_provider_reported_python_failure_maps_to_typed_failed_terminal_state() -> None:
+    client = FakeOpenAIClient(
+        summary_text=(
+            "Execution failed with:\n\n"
+            "`FileNotFoundError: [Errno 2] No such file or directory: 'prices.csv'`"
+        )
+    )
+
+    result = runtime(client).start_run(request())
+
+    assert result.status == "failed"
+    assert result.executed_source_sha256 == request().source_sha256
+    assert any(item.kind == "error" for item in result.outputs)
+    assert any("provider execution failed" in warning.lower() for warning in result.warnings)
 
 
 def test_expired_container_replays_same_immutable_bundle_once() -> None:
@@ -333,6 +359,9 @@ def test_retained_artifact_survives_restart_and_has_no_provider_url(tmp_path: Pa
     run = service.create_run(detail.script.script_id, ResearchScriptRunCreateRequest())
     table = next(item for item in run.outputs if item.kind == "table")
 
+    assert all(output.source_provider == "openai" for output in run.outputs)
+    assert all(output.origin == "openai_code_interpreter_v1.collect_outputs" for output in run.outputs)
+
     restarted = ResearchScriptService(
         ResearchScriptStore(tmp_path / "retained"),
         runtime(FakeOpenAIClient()),
@@ -370,4 +399,3 @@ def test_hash_mismatch_blocks_provider_dispatch() -> None:
     assert result.executed_source_sha256 is None
     assert not client.containers.create_calls
     assert not client.responses.create_calls
-

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import ast
+import csv
 import hashlib
+import io
 import json
 import re
-from dataclasses import replace
+import zipfile
+from dataclasses import asdict, is_dataclass, replace
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -33,6 +37,7 @@ from src.application.request_limits import (
 from src.models.research_script import (
     ResearchScript,
     ResearchScriptCreateRequest,
+    ResearchScriptDataExportRequest,
     ResearchScriptDetail,
     ResearchScriptInputFile,
     ResearchScriptInputFileCreateRequest,
@@ -41,7 +46,9 @@ from src.models.research_script import (
     ResearchScriptRevision,
     ResearchScriptRevisionCreateRequest,
     ResearchScriptRun,
+    ResearchScriptRunComparison,
     ResearchScriptRunCreateRequest,
+    ResearchScriptStorageDiagnostics,
 )
 from src.services.research_script_runtime import (
     ResearchScriptRuntime,
@@ -77,9 +84,20 @@ class ResearchScriptValidationError(ResearchScriptServiceError):
 
 
 class ResearchScriptService:
-    def __init__(self, store: ResearchScriptStore, runtime: ResearchScriptRuntime) -> None:
+    def __init__(
+        self,
+        store: ResearchScriptStore,
+        runtime: ResearchScriptRuntime,
+        *,
+        research_provider: Any | None = None,
+        research_service: Any | None = None,
+        macro_service: Any | None = None,
+    ) -> None:
         self.store = store
         self.runtime = runtime
+        self.research_provider = research_provider
+        self.research_service = research_service
+        self.macro_service = macro_service
 
     @staticmethod
     def source_sha256(source: str) -> str:
@@ -192,8 +210,11 @@ class ResearchScriptService:
             raise ResearchScriptConflictError(str(exc)) from exc
         return ResearchScriptDetail(script=script, revisions=[revision])
 
-    def list_scripts(self) -> list[ResearchScript]:
-        return self.store.list_scripts()
+    def list_scripts(self, *, include_archived: bool = False) -> list[ResearchScript]:
+        scripts = self.store.list_scripts()
+        if include_archived:
+            return scripts
+        return [item for item in scripts if item.status not in {"archived", "discarded"}]
 
     def get_script(self, script_id: str) -> ResearchScriptDetail:
         script = self.store.load_script(script_id)
@@ -210,6 +231,8 @@ class ResearchScriptService:
         request: ResearchScriptRevisionCreateRequest,
     ) -> ResearchScriptDetail:
         detail = self.get_script(script_id)
+        if detail.script.status in {"archived", "discarded"}:
+            raise ResearchScriptConflictError("Restore the archived script before creating a revision.")
         parent = next(
             item for item in detail.revisions if item.revision_id == detail.script.canonical_revision_id
         )
@@ -473,6 +496,8 @@ class ResearchScriptService:
 
     def create_run(self, script_id: str, request: ResearchScriptRunCreateRequest) -> ResearchScriptRun:
         detail = self.get_script(script_id)
+        if detail.script.status in {"archived", "discarded"}:
+            raise ResearchScriptConflictError("Restore the archived script before creating a run.")
         revision_id = request.revision_id or detail.script.canonical_revision_id
         revision = self.store.load_revision(detail.script.script_id, revision_id)
         if revision is None:
@@ -559,6 +584,8 @@ class ResearchScriptService:
                 run_id,
                 runtime_outputs,
                 result.completed_at,
+                source_provider=capabilities.provider,
+                origin=f"{capabilities.runtime_kind}.collect_outputs",
             )
             run_warnings.extend(output_warnings)
             status = result.status
@@ -572,6 +599,8 @@ class ResearchScriptService:
                     byte_size=len(str(exc).encode("utf-8")),
                     created_at=result.completed_at,
                     text=str(exc),
+                    source_provider=capabilities.provider,
+                    origin="research_script_service.normalize_outputs",
                     transformation_note="Gamma rejected runtime output that exceeded the retained-output contract.",
                 )
             ]
@@ -600,6 +629,7 @@ class ResearchScriptService:
             warnings=list(dict.fromkeys(run_warnings)),
             usage={
                 **dict(result.usage),
+                **self._estimated_token_cost(result.usage, capabilities.model),
                 "executes_source": capabilities.executes_source,
                 "network_access": capabilities.network_access,
             },
@@ -640,6 +670,359 @@ class ResearchScriptService:
         if len(content) != output.byte_size:
             raise ResearchScriptServiceError("Retained research script artifact size does not match metadata.")
         return output.filename, output.media_type, content
+
+    def get_input_snapshot(self, snapshot_id: str) -> ResearchScriptInputSnapshot:
+        snapshot = self.store.load_input_snapshot(snapshot_id)
+        if snapshot is None:
+            raise ResearchScriptNotFoundError("Research script input snapshot not found.")
+        self.store.load_input_contents(snapshot)
+        return snapshot
+
+    def duplicate_script(self, script_id: str, *, title: str | None = None) -> ResearchScriptDetail:
+        detail = self.get_script(script_id)
+        canonical = next(
+            item for item in detail.revisions if item.revision_id == detail.script.canonical_revision_id
+        )
+        duplicate_title = str(title or f"{detail.script.title} copy").strip()
+        return self.create_script(
+            ResearchScriptCreateRequest(
+                session_id=detail.script.session_id,
+                title=duplicate_title,
+                source=canonical.source,
+                created_by="user",
+            )
+        )
+
+    def archive_script(self, script_id: str) -> ResearchScriptDetail:
+        try:
+            self.store.set_script_status(script_id, "archived")
+        except ResearchScriptStoreConflictError as exc:
+            if self.store.load_script(script_id) is None:
+                raise ResearchScriptNotFoundError("Research script not found.") from exc
+            raise ResearchScriptConflictError(str(exc)) from exc
+        return self.get_script(script_id)
+
+    def restore_script(self, script_id: str) -> ResearchScriptDetail:
+        try:
+            self.store.set_script_status(script_id, "active")
+        except ResearchScriptStoreConflictError as exc:
+            if self.store.load_script(script_id) is None:
+                raise ResearchScriptNotFoundError("Research script not found.") from exc
+            raise ResearchScriptConflictError(str(exc)) from exc
+        return self.get_script(script_id)
+
+    def export_domain_input(
+        self,
+        script_id: str,
+        request: ResearchScriptDataExportRequest,
+    ) -> ResearchScriptInputSnapshot:
+        detail = self.get_script(script_id)
+        if detail.script.status in {"archived", "discarded"}:
+            raise ResearchScriptConflictError("Restore the archived script before exporting inputs.")
+        object_id = str(request.object_id or "").strip()
+        filename = self._safe_output_filename(str(request.logical_filename or "").strip())
+        if not object_id:
+            raise ResearchScriptValidationError(["A Gamma object identifier is required for export."])
+
+        retrieved_at = now_utc()
+        dataset_ref: dict[str, Any]
+        source_ref: dict[str, Any]
+        warnings: list[str] = []
+        if request.domain == "equity_history":
+            if self.research_provider is None or not hasattr(self.research_provider, "load_symbol_history"):
+                raise ResearchScriptValidationError(["Gamma equity-history export is unavailable."])
+            symbol = object_id.upper()
+            lookback_days = int(request.lookback_days or 756)
+            if lookback_days < 20 or lookback_days > 3650:
+                raise ResearchScriptValidationError(["Equity-history lookback_days must be between 20 and 3650."])
+            frequency = request.frequency or "daily"
+            try:
+                series = self.research_provider.load_symbol_history(symbol, lookback_days)
+                if series is None or getattr(series, "empty", True):
+                    raise ValueError("empty history")
+                if frequency == "weekly":
+                    series = series.resample("W-FRI").last().dropna()
+                elif frequency == "monthly":
+                    series = series.resample("ME").last().dropna()
+                content = series.rename("close").to_csv(index_label="date").encode("utf-8")
+            except Exception as exc:
+                raise ResearchScriptValidationError(
+                    [f"Gamma could not export bounded equity history for {symbol}."]
+                ) from exc
+            provider_id = "gamma_research_market_data"
+            transformation = (
+                f"Gamma copied bounded {frequency} historical prices for {symbol}; "
+                "the isolated runtime receives only this immutable CSV snapshot."
+            )
+            dataset_ref = {
+                "contract_version": "research-script-domain-export.v1",
+                "domain": request.domain,
+                "object_id": symbol,
+                "frequency": frequency,
+                "lookback_days": lookback_days,
+                "logical_filename": filename,
+            }
+            source_ref = {
+                "source_id": f"equity_history:{symbol}",
+                "provider": provider_id,
+                "retrieved_at": retrieved_at.isoformat(),
+            }
+            media_type = "text/csv"
+        elif request.domain == "macro_series":
+            if self.macro_service is None or not hasattr(self.macro_service, "get_series_history"):
+                raise ResearchScriptValidationError(["Gamma macro-series export is unavailable."])
+            region = str(request.region or "US").strip() or "US"
+            timeframe = str(request.timeframe or "1Y").strip() or "1Y"
+            history = self.macro_service.get_series_history(
+                object_id,
+                region=region,
+                timeframe=timeframe,
+                force_refresh=False,
+            )
+            if history is None or not history.points:
+                raise ResearchScriptValidationError([f"Gamma macro series is unavailable: {object_id}."])
+            buffer = io.StringIO()
+            writer = csv.writer(buffer, lineterminator="\n")
+            writer.writerow(("timestamp", "value"))
+            for point in history.points:
+                writer.writerow((point.timestamp.isoformat(), point.value))
+            content = buffer.getvalue().encode("utf-8")
+            provider_id = str(history.source_provider or "gamma_macro")
+            transformation = (
+                f"Gamma copied the normalized {region}/{timeframe} macro series {history.series_id}; "
+                "the isolated runtime receives only this immutable CSV snapshot."
+            )
+            dataset_ref = {
+                "contract_version": "research-script-domain-export.v1",
+                "domain": request.domain,
+                "object_id": history.series_id,
+                "region": region,
+                "timeframe": timeframe,
+                "frequency": history.frequency,
+                "logical_filename": filename,
+            }
+            source_ref = {
+                "source_id": f"macro_series:{history.series_id}",
+                "provider": provider_id,
+                "retrieved_at": (history.retrieved_at or retrieved_at).isoformat(),
+            }
+            warnings.extend([])
+            media_type = "text/csv"
+        elif request.domain == "saved_research":
+            if self.research_service is None or not hasattr(self.research_service, "load_saved_research"):
+                raise ResearchScriptValidationError(["Gamma saved-research export is unavailable."])
+            saved = self.research_service.load_saved_research(object_id)
+            if saved is None:
+                raise ResearchScriptNotFoundError("Saved Gamma research object not found.")
+            payload = asdict(saved) if is_dataclass(saved) else dict(saved)
+            if self._payload_contains_sensitive_key(payload):
+                raise ResearchScriptValidationError(
+                    ["The selected saved research object contains fields outside the Script export boundary."]
+                )
+            content = json.dumps(
+                payload,
+                sort_keys=True,
+                ensure_ascii=False,
+                indent=2,
+                default=self._json_default,
+            ).encode("utf-8")
+            provider_id = str(getattr(saved, "source_provider", "gamma_saved_research") or "gamma_saved_research")
+            transformation = (
+                "Gamma serialized one selected saved research object into a bounded immutable JSON snapshot; "
+                "no live service handle or local path was exposed."
+            )
+            dataset_ref = {
+                "contract_version": "research-script-domain-export.v1",
+                "domain": request.domain,
+                "object_id": str(saved.id),
+                "object_type": str(saved.object_type),
+                "logical_filename": filename,
+            }
+            source_ref = {
+                "source_id": f"saved_research:{saved.id}",
+                "provider": provider_id,
+                "retrieved_at": (saved.retrieved_at or saved.updated_at).isoformat(),
+            }
+            warnings.extend(list(saved.warnings))
+            media_type = "application/json"
+        else:
+            raise ResearchScriptValidationError([f"Unsupported Gamma export domain: {request.domain}."])
+
+        exported_file = ResearchScriptInputFileCreateRequest(
+            logical_filename=filename,
+            media_type=media_type,
+            content=content,
+            gamma_object_id=object_id,
+            provider_id=provider_id,
+            retrieved_at=retrieved_at,
+            transformation_note=transformation,
+            source_kind="gamma_state",
+        )
+        return self._create_input_snapshot(
+            script_id,
+            ResearchScriptRunCreateRequest(
+                input_files=[exported_file, *request.additional_input_files],
+                dataset_refs=[dataset_ref],
+                source_refs=[source_ref],
+            ),
+            extra_warnings=warnings,
+        )
+
+    def compare_runs(
+        self,
+        base_run_id: str,
+        comparison_run_id: str,
+    ) -> ResearchScriptRunComparison:
+        base = self.get_run(base_run_id)
+        comparison = self.get_run(comparison_run_id)
+        if base.script_id != comparison.script_id:
+            raise ResearchScriptValidationError(["Research Script runs must belong to the same script."])
+        base_metrics = {
+            item.metric_name or item.output_id: item.metric_value
+            for item in base.outputs
+            if item.kind == "metric"
+        }
+        comparison_metrics = {
+            item.metric_name or item.output_id: item.metric_value
+            for item in comparison.outputs
+            if item.kind == "metric"
+        }
+        metric_deltas: list[dict[str, Any]] = []
+        for name in sorted(set(base_metrics) | set(comparison_metrics)):
+            left = base_metrics.get(name)
+            right = comparison_metrics.get(name)
+            delta = (
+                float(right) - float(left)
+                if isinstance(left, (int, float)) and isinstance(right, (int, float))
+                else None
+            )
+            metric_deltas.append({"name": name, "base": left, "comparison": right, "delta": delta})
+        return ResearchScriptRunComparison(
+            base_run_id=base.run_id,
+            comparison_run_id=comparison.run_id,
+            same_revision=base.revision_id == comparison.revision_id,
+            same_input_snapshot=base.input_snapshot_id == comparison.input_snapshot_id,
+            status_changed=base.status != comparison.status,
+            duration_delta_seconds=self._duration_seconds(comparison) - self._duration_seconds(base)
+            if base.completed_at and comparison.completed_at
+            else None,
+            input_token_delta=self._usage_delta(base, comparison, "input_tokens"),
+            output_token_delta=self._usage_delta(base, comparison, "output_tokens"),
+            output_count_delta=len(comparison.outputs) - len(base.outputs),
+            warning_count_delta=len(comparison.warnings) - len(base.warnings),
+            metric_deltas=metric_deltas,
+        )
+
+    def export_run_bundle(self, run_id: str) -> tuple[str, bytes]:
+        run = self.get_run(run_id)
+        detail = self.get_script(run.script_id)
+        revision = next(
+            (item for item in detail.revisions if item.revision_id == run.revision_id),
+            None,
+        )
+        snapshot = self.get_input_snapshot(run.input_snapshot_id)
+        if revision is None or revision.source_sha256 != run.source_sha256:
+            raise ResearchScriptServiceError("Run export source association is unavailable.")
+        input_contents = self.store.load_input_contents(snapshot)
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("source.py", revision.source)
+            bundle.writestr(
+                "input/manifest.json",
+                json.dumps(asdict(snapshot), indent=2, sort_keys=True, default=self._json_default),
+            )
+            for logical_filename, content in input_contents.items():
+                bundle.writestr(f"input/files/{logical_filename}", content)
+            bundle.writestr(
+                "run.json",
+                json.dumps(asdict(run), indent=2, sort_keys=True, default=self._json_default),
+            )
+            bundle.writestr(
+                "README.txt",
+                "Gamma Research Script export\n"
+                "Read-only research artifact. No broker, wallet, account, order, host, or network authority is included.\n",
+            )
+            for output in run.outputs:
+                if not output.artifact_ref or not output.filename:
+                    continue
+                content = self.store.load_output_artifact(run.run_id, output.output_id, output.filename)
+                if content is None:
+                    raise ResearchScriptServiceError(
+                        f"Retained output is unavailable for export: {output.output_id}."
+                    )
+                bundle.writestr(f"outputs/{output.output_id}-{output.filename}", content)
+        return f"gamma-research-script-{run.run_id[:12]}.zip", stream.getvalue()
+
+    def storage_diagnostics(self) -> ResearchScriptStorageDiagnostics:
+        return self.store.storage_diagnostics()
+
+    def cleanup_retained_outputs(self) -> ResearchScriptStorageDiagnostics:
+        self.store.cleanup_retained_outputs()
+        return self.store.storage_diagnostics()
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if is_dataclass(value):
+            return asdict(value)
+        raise TypeError(f"Unsupported research export value: {type(value).__name__}")
+
+    @classmethod
+    def _payload_contains_sensitive_key(cls, value: Any) -> bool:
+        sensitive_fragments = {
+            "account",
+            "api_key",
+            "authorization",
+            "broker",
+            "cookie",
+            "credential",
+            "order",
+            "password",
+            "secret",
+            "token",
+            "wallet",
+        }
+        if isinstance(value, dict):
+            for key, item in value.items():
+                normalized = str(key).strip().lower()
+                if any(fragment in normalized for fragment in sensitive_fragments):
+                    return True
+                if cls._payload_contains_sensitive_key(item):
+                    return True
+        elif isinstance(value, (list, tuple)):
+            return any(cls._payload_contains_sensitive_key(item) for item in value)
+        return False
+
+    @staticmethod
+    def _duration_seconds(run: ResearchScriptRun) -> float:
+        if run.completed_at is None:
+            return 0.0
+        return max((run.completed_at - run.started_at).total_seconds(), 0.0)
+
+    @staticmethod
+    def _usage_delta(base: ResearchScriptRun, comparison: ResearchScriptRun, key: str) -> int | None:
+        left = base.usage.get(key)
+        right = comparison.usage.get(key)
+        if isinstance(left, int) and isinstance(right, int):
+            return right - left
+        return None
+
+    @staticmethod
+    def _estimated_token_cost(usage: dict[str, Any], model: str | None) -> dict[str, Any]:
+        if str(model or "").strip().lower() != "gpt-5.6-luna":
+            return {}
+        input_tokens = usage.get("input_tokens")
+        output_tokens = usage.get("output_tokens")
+        if not isinstance(input_tokens, int) or not isinstance(output_tokens, int):
+            return {}
+        return {
+            "estimated_token_cost_usd": round(
+                (input_tokens * 0.20 + output_tokens * 1.20) / 1_000_000,
+                8,
+            ),
+            "estimated_cost_scope": "gpt-5.6-luna text tokens only; tool charges excluded",
+        }
 
     def _create_input_snapshot(
         self,
@@ -777,6 +1160,9 @@ class ResearchScriptService:
         run_id: str,
         runtime_outputs: list[ResearchScriptRuntimeOutput],
         created_at,
+        *,
+        source_provider: str = "gamma_mock_research_script_runtime",
+        origin: str = "mock_research_script_runtime",
     ) -> tuple[list[ResearchScriptOutput], dict[str, tuple[str, bytes]], list[str]]:
         if len(runtime_outputs) > MAX_RESEARCH_SCRIPT_OUTPUT_ARTIFACTS:
             raise ResearchScriptValidationError(
@@ -887,6 +1273,8 @@ class ResearchScriptService:
                     rows=rows,
                     filename=filename,
                     alt_text=raw.alt_text,
+                    source_provider=source_provider,
+                    origin=origin,
                     transformation_note=raw.transformation_note,
                 )
             )
@@ -913,19 +1301,32 @@ class ResearchScriptService:
             errors.append("Python source must parse successfully before it can become canonical.")
             return errors
         prohibited_modules = {
+            "ctypes",
             "ftplib",
             "http",
             "httpx",
             "ib_insync",
+            "multiprocessing",
             "openai",
             "paramiko",
             "pip",
             "requests",
+            "shlex",
             "socket",
             "subprocess",
             "urllib",
+            "webbrowser",
         }
-        prohibited_calls = {"eval", "exec", "compile", "__import__"}
+        prohibited_calls = {
+            "eval",
+            "exec",
+            "compile",
+            "__import__",
+            "breakpoint",
+            "globals",
+            "locals",
+            "vars",
+        }
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 names = [item.name for item in node.names] if isinstance(node, ast.Import) else [node.module or ""]
@@ -944,10 +1345,19 @@ class ResearchScriptService:
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
                 if node.value.id == "os" and node.attr == "environ":
                     errors.append("Python source cannot access environment variables.")
+            if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+                errors.append("Python source cannot traverse Python runtime internals.")
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 lowered = node.value.lower()
                 if re.search(r"(?:https?://|localhost|127\.0\.0\.1|\\\\\.\\pipe)", lowered):
                     errors.append("Python source cannot contain network or localhost destinations.")
+                if (
+                    lowered.startswith(("/", "\\\\", "file:"))
+                    or re.match(r"^[a-z]:[\\/]", lowered)
+                    or "../" in lowered
+                    or "..\\" in lowered
+                ):
+                    errors.append("Python source cannot contain absolute or parent-traversing file paths.")
         return errors
 
     @classmethod

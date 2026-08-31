@@ -3,8 +3,8 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-08-29
-- Last reviewed: 2026-08-29
-- Implementation status: Slices 1-4 implemented and verified; Slice 5 hardening/export work remains deferred
+- Last reviewed: 2026-08-31
+- Implementation status: Slices 1-5 implemented and verified; Workstream 2A completion gate satisfied
 - Roadmap owner: Workstream 2A in [`../roadmap.md`](../roadmap.md)
 - Primary product surface: `Strategy Lab / Script`
 - Natural-language entry point: Copilot Operator
@@ -703,14 +703,42 @@ Exit criterion: an explicit Operator request can draft, acquire inputs, material
 
 ### Slice 5 - Data bridge, hardening, and beta gate
 
-- [ ] Add bounded exports from selected Gamma domains.
-- [ ] Add richer table/image/file renderers and downloads.
-- [ ] Add run comparison, duplicate, archive, explicit save/export, and recovery UX.
-- [ ] Add security/escape tests and retained-output cleanup.
-- [ ] Add accessibility, responsive, disabled-provider, cost/usage, first-run, and diagnostics coverage.
-- [ ] Run representative live/mock/provider-disabled acceptance cases.
+- [x] Add bounded exports from selected Gamma domains.
+- [x] Add richer table/image/file renderers and downloads.
+- [x] Add run comparison, duplicate, archive, explicit save/export, and recovery UX.
+- [x] Add security/escape tests and retained-output cleanup.
+- [x] Add accessibility, responsive, disabled-provider, cost/usage, first-run, and diagnostics coverage.
+- [x] Run representative live/mock/provider-disabled acceptance cases.
+
+Status (2026-08-31): complete. The data bridge now creates immutable, provenance-bearing snapshots from bounded equity history, macro history, and saved-research exports. The workspace renders retained tables and authenticated images/files, exports an auditable ZIP containing source/input/run/output evidence, compares retained runs, and supports duplicate, archive/restore, recovery, and safe orphan cleanup. Storage diagnostics report scripts, archived scripts, runs, snapshots, outputs, retained bytes, and missing/orphaned files. Source validation rejects network, shell, environment, dynamic-execution, dunder, absolute-path, and parent-traversal escape attempts before dispatch. Provider paths and transient `sandbox:` links are sanitized, and provider-reported Python failures map to a typed `failed` terminal state rather than a false success.
+
+Verification evidence:
+
+- `tests/test_research_script.py`, `tests/test_openai_research_script_runtime.py`, and `tests/test_copilot_agents_sdk_smoke.py` — 30 tests passed after the final failure-state/provenance patch.
+- Focused Luna model-policy and incompatible-model checks — 4 tests passed.
+- Opt-in real-provider smoke — 1 test passed in `22.37s`, proving exact source/input association, network-disabled Code Interpreter execution, retained table/image outputs, and restart replay.
+- Browser acceptance against the live app completed a `gpt-5.6-luna` run in `13.43s` over a 939-row bounded SPY snapshot. The UI displayed source SHA `b14cfbcb012b`, input SHA `90329c4cec51`, OpenAI/Code Interpreter provenance, a retained CSV and SVG, authenticated blob rendering, no raw provider paths, `2,467` input / `567` output tokens, a `$0.001174` token-cost estimate, and clean `0 / 0` missing/orphan diagnostics.
+- Mock success/failure/timeout/unavailable/cancel paths, provider-disabled behavior, stale revisions, expired-container replay, oversized outputs, failed downloads, archive/run conflicts, cleanup, and authority-escape cases are covered by deterministic tests.
+- Frontend: 54 files and 386 tests passed; TypeScript typecheck and the production build passed. The build retained only three pre-existing warnings in `IvView.svelte` and `Surface3D.svelte`.
+- Repository-root `git diff --check` passed. A broad backend fail-fast still reaches the known, unrelated current-date commodities fixture whose August futures contract is now expired; the Script-focused and model-policy gates are green.
 
 Exit criterion: all Workstream 2A completion gates in the roadmap are satisfied.
+
+## Official OpenAI Guidance Review — 2026-08-31
+
+Reviewed official OpenAI documentation:
+
+- [GPT-5.6 Luna model](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
+- [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model)
+
+Resulting decisions:
+
+- At the user's direction, make exact model id `gpt-5.6-luna` the active default for Copilot, the Copilot Operator/Agents comparison default, Research Script Code Interpreter, and Fundamentals summary generation. Preserve existing Gamma profile reasoning efforts and record the resolved model on each run.
+- Luna's documented Responses, function-calling, structured-output, and Code Interpreter support fits the existing adapters; no framework expansion or provider-type leak is required.
+- Keep Gamma's custom Responses loop as the default control plane and the Agents SDK as a feature-flagged comparison path. The model change does not move tool exposure, permissions, validation, persistence, approvals, terminal truth, or audit ownership out of Gamma's server.
+- Keep Code Interpreter network disabled, continue immediate Gamma-owned artifact retention, and keep strict exact-wrapper/source/input hash verification.
+- Apply Luna pricing only as a clearly scoped text-token estimate; hosted-tool charges and unavailable usage fields remain excluded rather than guessed.
+- The 2026-08-29 `gpt-5.4` no-switch decision below is historical and is superseded by this explicit, tested Luna migration.
 
 ## Official OpenAI Guidance Review — 2026-08-29
 

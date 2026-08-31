@@ -32,6 +32,7 @@ ResearchScriptOutputKind = Literal[
 ]
 ResearchScriptInputSourceKind = Literal["gamma_state", "provider", "user_upload"]
 ResearchScriptMockScenario = Literal["success", "failed", "timed_out", "unavailable", "incomplete"]
+ResearchScriptDataExportDomain = Literal["equity_history", "macro_series", "saved_research"]
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,49 @@ class ResearchScriptRunCreateRequest:
     dataset_refs: list[dict[str, Any]] = field(default_factory=list)
     source_refs: list[dict[str, Any]] = field(default_factory=list)
     runtime_scenario: ResearchScriptMockScenario = "success"
+
+
+@dataclass(frozen=True)
+class ResearchScriptDataExportRequest:
+    domain: ResearchScriptDataExportDomain
+    object_id: str
+    logical_filename: str
+    region: str | None = None
+    timeframe: str | None = None
+    lookback_days: int | None = None
+    frequency: Literal["daily", "weekly", "monthly"] | None = None
+    additional_input_files: list[ResearchScriptInputFileCreateRequest] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ResearchScriptRunComparison:
+    base_run_id: str
+    comparison_run_id: str
+    same_revision: bool
+    same_input_snapshot: bool
+    status_changed: bool
+    duration_delta_seconds: float | None
+    input_token_delta: int | None
+    output_token_delta: int | None
+    output_count_delta: int
+    warning_count_delta: int
+    metric_deltas: list[dict[str, Any]] = field(default_factory=list)
+    contract_version: str = "research-script-run-comparison.v1"
+
+
+@dataclass(frozen=True)
+class ResearchScriptStorageDiagnostics:
+    script_count: int
+    archived_script_count: int
+    revision_count: int
+    input_snapshot_count: int
+    run_count: int
+    retained_output_count: int
+    retained_output_bytes: int
+    missing_output_count: int
+    orphan_output_count: int
+    storage_warnings: list[str] = field(default_factory=list)
+    contract_version: str = "research-script-storage-diagnostics.v1"
 
 
 @dataclass(frozen=True)

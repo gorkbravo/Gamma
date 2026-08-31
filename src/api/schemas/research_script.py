@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from src.models.research_script import (
     ResearchScript,
     ResearchScriptCreateRequest,
+    ResearchScriptDataExportRequest,
     ResearchScriptDetail,
     ResearchScriptInputFile,
     ResearchScriptInputFileCreateRequest,
@@ -15,7 +16,9 @@ from src.models.research_script import (
     ResearchScriptRevision,
     ResearchScriptRevisionCreateRequest,
     ResearchScriptRun,
+    ResearchScriptRunComparison,
     ResearchScriptRunCreateRequest,
+    ResearchScriptStorageDiagnostics,
 )
 from src.services.research_script_runtime import ResearchScriptRuntimeCapabilities
 
@@ -98,6 +101,33 @@ class ResearchScriptRunCreateRequestModel(BaseModel):
         )
 
 
+class ResearchScriptDataExportRequestModel(BaseModel):
+    domain: Literal["equity_history", "macro_series", "saved_research"]
+    object_id: str = Field(min_length=1, max_length=128)
+    logical_filename: str = Field(min_length=1, max_length=128)
+    region: str | None = Field(default=None, max_length=32)
+    timeframe: str | None = Field(default=None, max_length=16)
+    lookback_days: int | None = Field(default=None, ge=20, le=3650)
+    frequency: Literal["daily", "weekly", "monthly"] | None = None
+    additional_input_files: list[ResearchScriptInputFileCreateRequestModel] = Field(default_factory=list)
+
+    def to_domain(self) -> ResearchScriptDataExportRequest:
+        return ResearchScriptDataExportRequest(
+            domain=self.domain,
+            object_id=self.object_id,
+            logical_filename=self.logical_filename,
+            region=self.region,
+            timeframe=self.timeframe,
+            lookback_days=self.lookback_days,
+            frequency=self.frequency,
+            additional_input_files=[item.to_domain() for item in self.additional_input_files],
+        )
+
+
+class ResearchScriptDuplicateRequestModel(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class ResearchScriptModel(BaseModel):
     script_id: str
     session_id: str
@@ -174,6 +204,28 @@ class ResearchScriptInputFileModel(BaseModel):
     @classmethod
     def from_domain(cls, value: ResearchScriptInputFile) -> "ResearchScriptInputFileModel":
         return cls(**value.__dict__)
+
+
+class ResearchScriptInputSnapshotModel(BaseModel):
+    snapshot_id: str
+    script_id: str
+    created_at: datetime
+    files: list[ResearchScriptInputFileModel] = Field(default_factory=list)
+    dataset_refs: list[dict[str, Any]] = Field(default_factory=list)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    manifest_sha256: str
+    total_bytes: int
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+    contract_version: str
+
+    @classmethod
+    def from_domain(cls, value) -> "ResearchScriptInputSnapshotModel":
+        payload = dict(value.__dict__)
+        payload["files"] = [ResearchScriptInputFileModel.from_domain(item) for item in value.files]
+        return cls(**payload)
 
 
 class ResearchScriptOutputModel(BaseModel):
@@ -269,3 +321,40 @@ class ResearchScriptRuntimeCapabilitiesModel(BaseModel):
         payload = dict(value.__dict__)
         payload["supported_output_types"] = list(value.supported_output_types)
         return cls(**payload)
+
+
+class ResearchScriptRunComparisonModel(BaseModel):
+    base_run_id: str
+    comparison_run_id: str
+    same_revision: bool
+    same_input_snapshot: bool
+    status_changed: bool
+    duration_delta_seconds: float | None = None
+    input_token_delta: int | None = None
+    output_token_delta: int | None = None
+    output_count_delta: int
+    warning_count_delta: int
+    metric_deltas: list[dict[str, Any]] = Field(default_factory=list)
+    contract_version: str
+
+    @classmethod
+    def from_domain(cls, value: ResearchScriptRunComparison) -> "ResearchScriptRunComparisonModel":
+        return cls(**value.__dict__)
+
+
+class ResearchScriptStorageDiagnosticsModel(BaseModel):
+    script_count: int
+    archived_script_count: int
+    revision_count: int
+    input_snapshot_count: int
+    run_count: int
+    retained_output_count: int
+    retained_output_bytes: int
+    missing_output_count: int
+    orphan_output_count: int
+    storage_warnings: list[str] = Field(default_factory=list)
+    contract_version: str
+
+    @classmethod
+    def from_domain(cls, value: ResearchScriptStorageDiagnostics) -> "ResearchScriptStorageDiagnosticsModel":
+        return cls(**value.__dict__)

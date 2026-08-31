@@ -23,8 +23,8 @@ from src.utils.time import now_utc
 logger = logging.getLogger(__name__)
 
 COPILOT_PRODUCT_PROFILES = ("auto", "quick", "standard", "deep")
-SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
-OPENAI_BASELINE_MODEL = "gpt-5.5"
+SUPPORTED_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+OPENAI_BASELINE_MODEL = "gpt-5.6-luna"
 CUSTOM_OPERATOR_PATH = "gamma_custom_loop"
 AGENTS_SDK_PATH = "openai_agents_sdk"
 RESPONSES_PATH = "responses_custom_loop"
@@ -598,7 +598,14 @@ class CopilotModelPolicy:
             return False
         if normalized == self.configured_model or normalized == getattr(self.provider, "model", None):
             return True
-        return normalized in {"gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-5.6-mini", "gpt-5.6-nano"}
+        return normalized in {
+            "gpt-5.4",
+            "gpt-5.5",
+            "gpt-5.6",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        }
 
     @staticmethod
     def _routing_reason(

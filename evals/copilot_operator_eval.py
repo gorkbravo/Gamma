@@ -805,7 +805,7 @@ class _operator_orchestrator:
             self.runtime.copilot_service.model_policy.operator_orchestrator = "agents_sdk"
             self.runtime.copilot_service.agents_operator_service.config = CopilotAgentsOperatorConfig(
                 orchestrator="agents_sdk",
-                model=os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", "gpt-5.5"),
+                model=os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", "gpt-5.6-luna"),
                 reasoning_effort=os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_REASONING_EFFORT") or "low",
                 max_turns=8,
             )
@@ -816,7 +816,7 @@ class _operator_orchestrator:
             self.runtime.copilot_service.model_policy.operator_orchestrator = "agents_sdk"
             self.runtime.copilot_service.agents_operator_service.config = CopilotAgentsOperatorConfig(
                 orchestrator="agents_sdk",
-                model=model or "gpt-5.5",
+                model=model or "gpt-5.6-luna",
                 reasoning_effort=reasoning or None,
                 verbosity="low",
                 include_usage=True,
@@ -1067,7 +1067,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Run intentionally authorized live Agents SDK variants for the retained "
-            "gpt-5.5 baseline and explicit comparison profiles."
+            "gpt-5.6-luna app baseline and explicit legacy/comparison profiles."
         ),
     )
     args = parser.parse_args()
@@ -1117,6 +1117,7 @@ def main() -> int:
             if args.compare_gpt55 and os.getenv("OPENAI_API_KEY"):
                 orchestrators = (
                     "custom",
+                    "agents_sdk_live:gpt-5.6-luna:medium",
                     "agents_sdk_live:gpt-5.5:medium",
                     "agents_sdk_live:gpt-5.6:medium",
                     "agents_sdk_live:gpt-5.6:low",

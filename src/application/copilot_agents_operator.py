@@ -35,7 +35,7 @@ from src.models.copilot import (
 from src.utils.time import now_utc
 
 MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
-SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+SUPPORTED_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 
 ContextBuilder = Callable[[str], CopilotContextBundle]

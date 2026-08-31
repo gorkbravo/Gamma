@@ -330,7 +330,6 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     research_service = ResearchService(research_provider, saved_store=saved_research_store)
-    research_script_service = ResearchScriptService(research_script_store, research_script_runtime)
     prediction_research_store = PredictionResearchStore(base_dir=resolved_history_dir / "prediction_markets")
     prediction_market_service = PredictionMarketService(
         adapters={
@@ -405,6 +404,13 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     iv_service = IVService(client, market_data_mode)
+    research_script_service = ResearchScriptService(
+        research_script_store,
+        research_script_runtime,
+        research_provider=research_provider,
+        research_service=research_service,
+        macro_service=macro_service,
+    )
     copilot_provider = trace_provider(
         _build_copilot_provider(allow_mock=bool(mock_mode)),
         provider_usage,
