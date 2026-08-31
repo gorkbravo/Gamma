@@ -312,7 +312,7 @@
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Crypto modes">
         {#each modes as modeOption}
-          <button class:selected={modeOption.id === mode} role="tab" aria-selected={modeOption.id === mode} type="button" on:click={() => (mode = modeOption.id)}>{modeOption.label}</button>
+          <button class="mode-btn" class:selected={modeOption.id === mode} role="tab" aria-selected={modeOption.id === mode} type="button" on:click={() => (mode = modeOption.id)}>{modeOption.label}</button>
         {/each}
       </div>
       <div class="headline-strip">
@@ -534,7 +534,7 @@
             <div class="hero-controls">
               <div class="canvas-toggle" role="tablist" aria-label="Hero canvas">
                 {#each heroCanvasOptions as option}
-                  <button type="button" class:selected={option.id === heroCanvas} on:click={() => (heroCanvas = option.id)} disabled={option.id === "basket" && !syntheticPortfolio}>
+                  <button type="button" class="mode-btn" class:selected={option.id === heroCanvas} on:click={() => (heroCanvas = option.id)} disabled={option.id === "basket" && !syntheticPortfolio}>
                     {option.label}
                   </button>
                 {/each}
@@ -1267,47 +1267,6 @@
     white-space: nowrap;
   }
 
-  .mode-bar,
-  .canvas-toggle {
-    display: inline-grid;
-    border: 1px solid var(--panel-strong);
-  }
-
-  .mode-bar {
-    grid-template-columns: repeat(3, auto);
-  }
-
-  .canvas-toggle {
-    grid-template-columns: repeat(2, auto);
-  }
-
-  .mode-bar button,
-  .canvas-toggle button {
-    border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-5);
-    font: inherit;
-    font-family: var(--display-font);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
-  }
-
-  .mode-bar button:last-child,
-  .canvas-toggle button:last-child {
-    border-right: 0;
-  }
-
-  .mode-bar button:focus-visible,
-  .canvas-toggle button:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-  }
-
   button {
     border: 1px solid var(--panel-strong);
     background: var(--surface-0);
@@ -1316,19 +1275,6 @@
     font: inherit;
     font-size: var(--text-sm);
     cursor: pointer;
-  }
-
-  .mode-bar button.selected,
-  .canvas-toggle button.selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
-  }
-
-  .mode-bar button:hover:not(:disabled),
-  .canvas-toggle button:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-    color: var(--text-0);
-    border-color: var(--panel-strong);
   }
 
   button:hover {

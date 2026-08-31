@@ -545,6 +545,7 @@
       <div class="mode-bar" role="tablist" aria-label="Options modes">
         {#each optionsModes as optionMode}
           <button
+            class="mode-btn"
             class:selected={optionMode.id === mode}
             role="tab"
             aria-selected={optionMode.id === mode}
@@ -1445,32 +1446,6 @@
 
   .symbol-control input {
     width: 8rem;
-  }
-
-  .mode-bar {
-    display: inline-grid;
-    grid-template-columns: repeat(6, auto);
-    border: 1px solid var(--panel-strong);
-    width: fit-content;
-  }
-
-  .mode-bar button {
-    border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-1);
-    font-family: var(--display-font);
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .mode-bar button:last-child {
-    border-right: 0;
-  }
-
-  .mode-bar button.selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
   }
 
   .source-strip {

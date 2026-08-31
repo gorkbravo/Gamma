@@ -719,7 +719,7 @@
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Fundamentals modes">
         {#each modeOptions as option}
-          <button class:selected={option.id === mode} role="tab" aria-selected={option.id === mode} type="button" on:click={() => (mode = option.id)}>
+          <button class="mode-btn" class:selected={option.id === mode} role="tab" aria-selected={option.id === mode} type="button" on:click={() => (mode = option.id)}>
             {option.label}
           </button>
         {/each}
@@ -2433,12 +2433,6 @@
     border-color: color-mix(in srgb, var(--warning) 35%, var(--panel-strong));
   }
 
-  .mode-bar {
-    display: inline-grid;
-    border: 1px solid var(--panel-strong);
-    grid-template-columns: repeat(6, auto);
-  }
-
   .compact-bar {
     grid-template-columns: repeat(2, auto);
   }
@@ -2489,26 +2483,6 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
   }
-
-  .mode-bar button {
-    border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-5);
-    font: inherit;
-    font-family: var(--display-font);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
-  }
-
-  .mode-bar button:last-child { border-right: 0; }
-  .mode-bar button:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text-0); border-color: var(--panel-strong); }
-  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-bar button.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 
   .scenario-card.selected-scenario {
     background: color-mix(in srgb, var(--accent) 12%, transparent);

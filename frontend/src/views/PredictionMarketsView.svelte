@@ -725,6 +725,7 @@
     <div class="mode-bar" role="tablist" aria-label="Prediction Markets modes">
       {#each modes as item}
         <button
+          class="mode-btn"
           type="button"
           role="tab"
           aria-selected={mode === item.id}
@@ -2153,44 +2154,6 @@
     align-items: center;
     gap: var(--space-5);
     flex-wrap: wrap;
-  }
-
-  .mode-bar {
-    display: inline-grid;
-    grid-template-columns: repeat(4, auto);
-    border: 1px solid var(--panel-strong);
-    width: fit-content;
-  }
-
-  .mode-bar button {
-    border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-2);
-    padding: var(--space-2) var(--space-5);
-    font: inherit;
-    font-family: var(--display-font);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    width: auto;
-    min-height: 1.7rem;
-    transition: background 120ms ease, color 120ms ease;
-  }
-
-  .mode-bar button:last-child {
-    border-right: 0;
-  }
-
-  .mode-bar button:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-    color: var(--text-0);
-  }
-
-  .mode-bar button.selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--text-0);
   }
 
   .mode-meta {

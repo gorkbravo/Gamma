@@ -52,3 +52,64 @@
 .panel.is-flush {
   padding: 0;
 }
+
+/* ── Mode bar ─────────────────────────────────────────────────────────────
+   The segmented control that switches a tab between its modes. Sits inline
+   at its content width, so adding or removing a mode needs no CSS change —
+   every view previously hardcoded its own `repeat(N, auto)` column count.
+   Chrome, so it stays quiet until a segment is selected or focused. */
+.mode-bar,
+.canvas-toggle {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--panel-strong);
+}
+
+.mode-bar .mode-btn,
+.canvas-toggle .mode-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-5);
+  border: 0;
+  border-right: 1px solid var(--panel-strong);
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--display-font);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  min-height: auto;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
+}
+
+.mode-bar .mode-btn:last-child,
+.canvas-toggle .mode-btn:last-child {
+  border-right: 0;
+}
+
+.mode-bar .mode-btn:hover:not(:disabled),
+.canvas-toggle .mode-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-0);
+}
+
+.mode-bar .mode-btn.selected,
+.canvas-toggle .mode-btn.selected {
+  background: var(--active-bg);
+  color: var(--accent);
+}
+
+.mode-bar .mode-btn:focus-visible,
+.canvas-toggle .mode-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.mode-bar .mode-btn:disabled,
+.canvas-toggle .mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

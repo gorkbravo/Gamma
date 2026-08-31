@@ -288,7 +288,7 @@
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Macro modes">
         {#each modes as mode}
-          <button class:selected={mode.id === $macroContext.mode} role="tab" aria-selected={mode.id === $macroContext.mode} type="button" on:click={() => refreshContext({ mode: mode.id })}>
+          <button class="mode-btn" class:selected={mode.id === $macroContext.mode} role="tab" aria-selected={mode.id === $macroContext.mode} type="button" on:click={() => refreshContext({ mode: mode.id })}>
             {mode.label}
           </button>
         {/each}
@@ -527,32 +527,6 @@
     gap: var(--space-4);
     position: relative;
   }
-
-  .mode-bar {
-    display: inline-grid;
-    grid-template-columns: repeat(6, auto);
-    border: 1px solid var(--panel-strong);
-  }
-
-  .mode-bar button {
-    border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-5);
-    font: inherit;
-    font-family: var(--display-font);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
-  }
-
-  .mode-bar button:last-child { border-right: 0; }
-  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
-  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   /* ── Context bar ── */
   .context-bar { display: flex; gap: var(--space-3); flex-wrap: wrap; }

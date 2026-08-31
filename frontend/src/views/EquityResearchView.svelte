@@ -1249,6 +1249,7 @@
       <div class="mode-bar" role="tablist" aria-label="Equity Research modes">
         {#each equityResearchModes as item}
           <button
+            class="mode-btn"
             type="button"
             class:selected={mode === item.id}
             on:click={() => selectResearchMode(item.id)}
@@ -2189,36 +2190,6 @@
   }
 
   /* ── Mode bar (Risk pattern) ── */
-  .mode-bar {
-    display: inline-flex;
-    border: 1px solid var(--panel-strong);
-  }
-
-  .mode-bar button {
-    border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-5);
-    font: inherit;
-    font-family: var(--display-font);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    line-height: 1.2;
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--space-4);
-    white-space: nowrap;
-    cursor: pointer;
-    width: auto;
-    min-height: auto;
-    transition: background 120ms ease, color 120ms ease;
-  }
-
-  .mode-bar button:last-child { border-right: 0; }
-  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
-  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   /* ── Treemap panel header with inline controls ── */
   .treemap-header {
