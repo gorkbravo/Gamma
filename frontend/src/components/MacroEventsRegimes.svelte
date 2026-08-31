@@ -247,13 +247,6 @@
   }
 
   /* ── Panel ── */
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-    display: grid;
-    gap: var(--space-4);
-  }
 
   .panel-header > div { min-width: 0; }
   .span-2 { grid-column: span 2; }

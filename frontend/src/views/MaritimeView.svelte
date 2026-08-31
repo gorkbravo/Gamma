@@ -23,7 +23,7 @@
 </script>
 
 <section class="view">
-  <article class="panel map-panel">
+  <article class="panel is-flush map-panel">
     <MaritimeMap
       bind:is3D={map3D}
       positions={workspace?.positions ?? []}
@@ -51,11 +51,6 @@
     min-height: 38rem;
     display: grid;
     overflow: hidden;
-  }
-
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
   }
 
   .map-panel {

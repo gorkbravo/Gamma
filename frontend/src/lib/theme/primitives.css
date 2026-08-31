@@ -32,3 +32,23 @@
   justify-content: space-between;
   gap: var(--space-4);
 }
+
+/* ── Panel ────────────────────────────────────────────────────────────────
+   The bordered region that carries one piece of research. Solid --panel-bg
+   so it masks the canvas dot grid and the workspace still reads as one
+   plane divided by seams. Stacks its children on the space ramp; min-width
+   keeps a wide table from blowing out the grid column it sits in. */
+.panel {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+}
+
+/* A panel whose whole body is a table, a map, or a chart canvas supplies its
+   own edge padding, so the panel gives it the full box. */
+.panel.is-flush {
+  padding: 0;
+}

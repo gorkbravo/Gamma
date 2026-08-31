@@ -2242,14 +2242,6 @@
     align-items: start;
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-    display: grid;
-    gap: var(--space-4);
-  }
-
   .working-analysis-banner {
     grid-template-columns: minmax(12rem, 0.7fr) minmax(14rem, 0.75fr) minmax(0, 1.5fr) auto;
     align-items: center;

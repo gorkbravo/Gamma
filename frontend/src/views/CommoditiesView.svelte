@@ -2494,13 +2494,6 @@
     padding-bottom: var(--space-5);
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-    min-width: 0;
-  }
-
   /* ── Header panel ── */
   .header-panel {
     display: grid;

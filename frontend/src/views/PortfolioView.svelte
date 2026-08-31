@@ -1081,12 +1081,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-  }
-
   .performance-panel,
   .rail-panel {
     display: grid;

@@ -366,13 +366,6 @@
   }
 
   /* ── Header panel ── */
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-    display: grid;
-    gap: var(--space-4);
-  }
 
   .header-panel { gap: var(--space-3); padding: var(--space-4) var(--space-5); }
 

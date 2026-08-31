@@ -276,14 +276,6 @@
     align-content: start;
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-    display: grid;
-    gap: var(--space-4);
-  }
-
   .viz-panel {
     padding: var(--space-5);
   }

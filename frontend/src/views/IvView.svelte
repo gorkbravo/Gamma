@@ -1275,6 +1275,12 @@
 {/snippet}
 
 <style>
+  /* Local: this view's panels lay their own children out and do not want the
+     base panel's grid gap between them. */
+  .panel {
+    display: block;
+  }
+
   .view,
   .workspace-grid,
   .primary-column,
@@ -1296,13 +1302,6 @@
 
   .overview-grid {
     grid-template-columns: minmax(0, 1.35fr) minmax(22rem, 0.65fr);
-  }
-
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-    min-width: 0;
   }
 
   .header-panel {

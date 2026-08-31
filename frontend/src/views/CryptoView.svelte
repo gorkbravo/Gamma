@@ -1156,14 +1156,6 @@
     max-height: 24rem;
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-6);
-    display: grid;
-    gap: var(--space-4);
-  }
-
   .header-panel {
     gap: var(--space-3);
     padding: var(--space-4) var(--space-5);

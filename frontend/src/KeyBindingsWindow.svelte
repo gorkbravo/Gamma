@@ -174,12 +174,6 @@
     gap: 0.5rem;
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: 1rem;
-  }
-
   .hero h1,
   .section-head h2,
   .workspace-card-head h3 {

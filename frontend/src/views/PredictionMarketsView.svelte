@@ -2105,6 +2105,12 @@
 </section>
 
 <style>
+  /* Local: this view's panels lay their own children out and do not want the
+     base panel's grid gap between them. */
+  .panel {
+    display: block;
+  }
+
   .view,
   .screener-grid,
   .compare-grid,
@@ -2201,12 +2207,6 @@
   }
 
   /* ── Panels ──────────────────────────────────────────────── */
-
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
-  }
 
   .chart-panel,
   .composition-panel,

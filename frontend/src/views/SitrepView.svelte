@@ -1924,18 +1924,15 @@
 </section>
 
 <style>
+  /* Local: board panels are stretched by the workspace grid, so their rows
+     stack from the top instead of spreading to fill the column. */
+  .panel {
+    align-content: start;
+  }
+
   .view {
     display: grid;
     gap: var(--space-4);
-  }
-
-  .panel {
-    display: grid;
-    gap: var(--space-4);
-    align-content: start;
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: var(--space-5);
   }
 
   .table-panel,
