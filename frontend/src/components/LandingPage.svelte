@@ -25,38 +25,83 @@
     }
     return "Connect to IBKR";
   };
+
+  /* Everything here is already reported by /system/status. The old screen
+     asked you to connect without saying what you were connecting to. */
+  $: readout = status
+    ? [
+        { label: "Backend", value: status.backend, tone: status.healthy ? "ok" : "warn" },
+        {
+          label: "Data",
+          value: status.mock_mode ? "Mock" : status.market_data_mode || "Live",
+          tone: status.mock_mode ? "warn" : "ok"
+        },
+        { label: "Base currency", value: status.base_currency, tone: "" },
+        {
+          label: "Cached symbols",
+          value: status.cached_symbols.length ? String(status.cached_symbols.length) : "None",
+          tone: ""
+        }
+      ]
+    : [];
+
+  $: extraStatus =
+    status?.connection.status_text &&
+    status.connection.status_text !== `Status: ${connectedLabel(status)}`
+      ? status.connection.status_text
+      : null;
 </script>
 
 <section class="landing">
   <article class="card">
-    <div class="identity">
+    <header class="identity">
       <span class="mark" aria-hidden="true">Γ</span>
       <div class="wordmark">
         <h2>Gamma</h2>
         <p class="descriptor">Research Terminal</p>
       </div>
-    </div>
-    <p class="copy">Connect to IBKR or open a workspace.</p>
+      <p class="conn" class:live={status?.connection.connected}>
+        <span class="status-dot" class:connected={status?.connection.connected} aria-hidden="true"></span>
+        <strong>{connectedLabel(status)}</strong>
+      </p>
+    </header>
 
-    <div class="meta">
-      <span class="status-dot" class:connected={status?.connection.connected} aria-hidden="true"></span>
-      <strong>{connectedLabel(status)}</strong>
-      {#if status?.connection.status_text && status.connection.status_text !== `Status: ${connectedLabel(status)}`}
-        <small>{status.connection.status_text}</small>
-      {/if}
-    </div>
+    {#if status}
+      <dl class="readout">
+        {#each readout as row}
+          <div class="readout-row">
+            <dt>{row.label}</dt>
+            <dd class={row.tone}>{row.value}</dd>
+          </div>
+        {/each}
+      </dl>
+    {:else}
+      <p class="status-note">Reading backend status…</p>
+    {/if}
+
+    {#if extraStatus}
+      <p class="status-note">{extraStatus}</p>
+    {/if}
 
     <div class="actions">
       <button
-        class="primary apex"
+        class="primary"
         on:click={onConnect}
         disabled={busy || !status?.connection.action_enabled}
       >
         {busy ? "Working..." : connectionActionLabel(status)}
       </button>
-      <button class="secondary" on:click={onEnterPortfolio}>Portfolio View</button>
-      <button class="secondary" on:click={onEnterResearch}>Research View</button>
+      <button class="secondary" on:click={onEnterResearch}>
+        Research View
+        <small>Markets, macro, filings, options</small>
+      </button>
+      <button class="secondary" on:click={onEnterPortfolio}>
+        Portfolio View
+        <small>Positions, risk, attribution</small>
+      </button>
     </div>
+
+    <p class="boundary">Read-only. Gamma never places orders or moves funds.</p>
   </article>
 </section>
 
@@ -65,24 +110,27 @@
     min-height: 100vh;
     display: grid;
     place-items: center;
-    padding: var(--space-6);
+    padding: var(--space-7) var(--space-6);
   }
 
   .card {
-    width: min(28rem, calc(100vw - 2rem));
+    width: min(46rem, calc(100vw - 2rem));
     display: grid;
     gap: var(--space-6);
     padding: var(--space-7);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
     background: var(--surface-0);
-    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 24px 56px var(--shadow);
   }
 
   .identity {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-5);
+    padding-bottom: var(--space-5);
+    border-bottom: 1px solid var(--panel-border);
   }
 
   .mark {
@@ -107,18 +155,6 @@
     gap: var(--space-1);
   }
 
-  .descriptor {
-    color: var(--text-2);
-    font-family: var(--display-font);
-    font-size: var(--text-sm);
-    letter-spacing: 0.04em;
-  }
-
-  .copy,
-  small {
-    color: var(--text-2);
-  }
-
   h2,
   p {
     margin: 0;
@@ -130,12 +166,31 @@
     letter-spacing: 0.02em;
   }
 
-  .meta {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: baseline;
-    column-gap: var(--space-4);
-    row-gap: var(--space-2);
+  .descriptor {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: var(--text-sm);
+    letter-spacing: 0.04em;
+  }
+
+  .conn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    white-space: nowrap;
+  }
+
+  .conn strong {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .conn.live strong {
+    color: var(--positive);
   }
 
   .status-dot {
@@ -143,43 +198,86 @@
     height: 7px;
     border-radius: 50%;
     background: var(--text-2);
-    align-self: center;
+    flex-shrink: 0;
   }
 
   .status-dot.connected {
     background: var(--positive);
   }
 
-  strong {
-    color: var(--text-0);
-    font-size: var(--text-md);
+  .readout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 1px;
+    margin: 0;
+    background: var(--panel-border);
+    border: 1px solid var(--panel-border);
   }
 
-  small {
-    grid-column: 2;
-    line-height: 1.45;
+  .readout-row {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-4) var(--space-5);
+    background: var(--surface-0);
+  }
+
+  dt {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--text-0);
+    font-size: var(--text-base);
+  }
+
+  dd.ok {
+    color: var(--positive);
+  }
+
+  dd.warn {
+    color: var(--warning);
+  }
+
+  .status-note {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
   }
 
   .actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-5);
-    justify-items: center;
   }
 
   button {
-    width: 100%;
+    display: grid;
+    gap: var(--space-2);
+    justify-items: start;
+    text-align: left;
     min-height: 2.5rem;
     background: var(--bg-1);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-sm);
     color: var(--text-0);
-    padding: var(--space-4) var(--space-6);
+    padding: var(--space-5) var(--space-6);
     font: inherit;
     font-family: var(--display-font);
     font-weight: 500;
     cursor: pointer;
-    transition: border-color 0.12s ease, background 0.12s ease;
+    transition: border-color var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);
+  }
+
+  button small {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    font-weight: 400;
   }
 
   button:hover:enabled {
@@ -192,37 +290,39 @@
     opacity: 0.65;
   }
 
-  .apex {
-    grid-column: 1 / -1;
-    max-width: 15rem;
-  }
-
   .primary {
+    grid-column: 1 / -1;
+    justify-items: center;
+    text-align: center;
     border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
 
-  .secondary {
-    max-width: 12.5rem;
+  .boundary {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: var(--text-xs);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--panel-border);
   }
 
   @media (max-width: 640px) {
-    .landing {
-      place-items: center;
-    }
-
     .card {
       width: min(28rem, 100%);
       padding: var(--space-6);
     }
 
-    .actions {
-      grid-template-columns: 1fr;
+    .identity {
+      grid-template-columns: auto minmax(0, 1fr);
+      row-gap: var(--space-4);
     }
 
-    .apex,
-    .secondary {
-      max-width: none;
+    .conn {
+      grid-column: 1 / -1;
+    }
+
+    .actions {
+      grid-template-columns: 1fr;
     }
   }
 </style>

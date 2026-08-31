@@ -135,7 +135,7 @@
                     <span class="tag inline-tag {signalBadgeTone(card.signal_label)}">{card.signal_label}</span>
                   {/if}
                 </span>
-                <span class="row-summary">{card.summary}</span>
+                <span class="row-summary prose">{card.summary}</span>
                 {#if card.linked_markets?.length}
                   <span class="linked-hint">
                     <span class="linked-dot {linkedMarketTone(card.linked_markets[0].macro_alignment)}"></span>

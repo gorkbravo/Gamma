@@ -911,7 +911,7 @@
     {@render PanelTitle(title)}
     {#if rows.length}
       <div class="list">
-        {#each rows as row}<p>{row}</p>{/each}
+        {#each rows as row}<p class="prose">{row}</p>{/each}
       </div>
     {:else}
       <p class="muted">No active items.</p>

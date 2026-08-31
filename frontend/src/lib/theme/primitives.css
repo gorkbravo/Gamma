@@ -167,3 +167,14 @@
   color: var(--text-2);
   font-weight: 400;
 }
+
+/* ── Prose ────────────────────────────────────────────────────────────────
+   Sans, because mono is for values that have to align in a column. A filing
+   summary or a provenance note is neither, and a paragraph of monospace at
+   full width is the slowest thing in the app to read. Bounded measure so
+   lines stay scannable on a wide display. */
+.prose.prose {
+  font-family: var(--display-font);
+  line-height: var(--leading-normal);
+  max-width: 68ch;
+}

@@ -835,7 +835,7 @@
 
           <div class="profile-grid">
             <div class="profile-about">
-              <p>{companyAbout}</p>
+              <p class="prose">{companyAbout}</p>
               {#if companySummarySource}
                 <div class="summary-source-row">
                   <span>{companySummarySource.section ?? "Summary"}</span>
