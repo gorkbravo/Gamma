@@ -927,7 +927,7 @@
       <tbody>
         {#if rows.length}
           {#each rows as row}
-            <tr class={toneClass(row.tone)}>{#each row.cells as cell}<td>{cellValue(cell)}</td>{/each}</tr>
+            <tr class={toneClass(row.tone)}>{#each row.cells as cell}<td class:absent={cellValue(cell) === "N/A"}>{cellValue(cell)}</td>{/each}</tr>
           {/each}
         {:else}
           <tr><td colspan={headers.length} class="empty">No rows available.</td></tr>
@@ -944,7 +944,7 @@
       <thead><tr><th>Symbol</th><th>Name</th><th>Asset class</th><th>Weight</th><th>Market value</th><th>P&L</th><th>Vol</th><th>Beta</th><th>Risk contribution</th><th>Flag</th></tr></thead>
       <tbody>
         {#each rows as row}
-          <tr><td>{row.symbol}</td><td>{row.name}</td><td>{row.assetClass}</td><td>{pct(row.weight)}</td><td>{currency(row.marketValue)}</td><td class={row.pnl == null ? "" : row.pnl >= 0 ? "positive" : "negative"}>{currency(row.pnl)}</td><td>{pct(row.volatility)}</td><td>{fmt(row.beta, 2)}</td><td>{pct(row.riskContribution)}</td><td class:warning={row.qualityFlag !== "OK"}>{row.qualityFlag}</td></tr>
+          <tr><td>{row.symbol}</td><td>{row.name}</td><td>{row.assetClass}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={currency(row.marketValue) === "N/A"}>{currency(row.marketValue)}</td><td class={row.pnl == null ? "" : row.pnl >= 0 ? "positive" : "negative"}>{currency(row.pnl)}</td><td class:absent={pct(row.volatility) === "N/A"}>{pct(row.volatility)}</td><td class:absent={fmt(row.beta, 2) === "N/A"}>{fmt(row.beta, 2)}</td><td class:absent={pct(row.riskContribution) === "N/A"}>{pct(row.riskContribution)}</td><td class:warning={row.qualityFlag !== "OK"}>{row.qualityFlag}</td></tr>
         {/each}
       </tbody>
     </table>
@@ -956,7 +956,7 @@
     <header class="table-panel-header">Contribution Detail<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Symbol</th><th>Weight</th><th>Vol</th><th>Var %</th><th>Component VaR</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.weight)}</td><td>{pct(row.volatility)}</td><td>{pct(row.contribution)}</td><td>{currency(row.componentVar)}</td></tr>{/each}</tbody>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={pct(row.volatility) === "N/A"}>{pct(row.volatility)}</td><td class:absent={pct(row.contribution) === "N/A"}>{pct(row.contribution)}</td><td class:absent={currency(row.componentVar) === "N/A"}>{currency(row.componentVar)}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}
@@ -966,7 +966,7 @@
     <header class="table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Sector/category</th><th>Weight</th><th>Vol contribution</th><th>Benchmark</th><th>Active</th><th>Label</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.category}</td><td>{pct(row.weight)}</td><td>{pct(row.volatilityContribution)}</td><td>{pct(row.benchmarkWeight)}</td><td>{pct(row.activeWeight)}</td><td>{row.label}</td></tr>{/each}</tbody>
+      <tbody>{#each rows as row}<tr><td>{row.category}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={pct(row.volatilityContribution) === "N/A"}>{pct(row.volatilityContribution)}</td><td class:absent={pct(row.benchmarkWeight) === "N/A"}>{pct(row.benchmarkWeight)}</td><td class:absent={pct(row.activeWeight) === "N/A"}>{pct(row.activeWeight)}</td><td>{row.label}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}
@@ -976,7 +976,7 @@
     <header class="table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Start</th><th>Trough</th><th>Recovery</th><th>Depth</th><th>Duration</th><th>Benchmark DD</th><th>Main contributors</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.startDate}</td><td>{row.troughDate}</td><td>{row.recoveryDate}</td><td class="negative">{pct(row.depth)}</td><td>{row.duration}</td><td>{pct(row.benchmarkDrawdown)}</td><td>{row.contributors}</td></tr>{/each}</tbody>
+      <tbody>{#each rows as row}<tr><td>{row.startDate}</td><td>{row.troughDate}</td><td>{row.recoveryDate}</td><td class="negative" class:absent={pct(row.depth) === "N/A"}>{pct(row.depth)}</td><td>{row.duration}</td><td class:absent={pct(row.benchmarkDrawdown) === "N/A"}>{pct(row.benchmarkDrawdown)}</td><td>{row.contributors}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}
@@ -986,7 +986,7 @@
     <header class="table-panel-header">Scenario Results<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Scenario</th><th>Portfolio</th><th>Benchmark</th><th>Active</th><th>Worst contributor</th><th>Best hedge</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.scenario}</td><td class={row.portfolioReturn == null ? "" : row.portfolioReturn >= 0 ? "positive" : "negative"}>{pct(row.portfolioReturn)}</td><td>{pct(row.benchmarkReturn)}</td><td>{pct(row.activeReturn)}</td><td>{row.worstContributor}</td><td>{row.bestHedge}</td></tr>{/each}</tbody>
+      <tbody>{#each rows as row}<tr><td>{row.scenario}</td><td class={row.portfolioReturn == null ? "" : row.portfolioReturn >= 0 ? "positive" : "negative"}>{pct(row.portfolioReturn)}</td><td class:absent={pct(row.benchmarkReturn) === "N/A"}>{pct(row.benchmarkReturn)}</td><td class:absent={pct(row.activeReturn) === "N/A"}>{pct(row.activeReturn)}</td><td>{row.worstContributor}</td><td>{row.bestHedge}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}
@@ -996,7 +996,7 @@
     <header class="table-panel-header">Position-Level Impact<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Symbol</th><th>Current weight</th><th>Shock assumption</th><th>Estimated return</th><th>P&L impact</th><th>Contribution %</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.weight)}</td><td>{row.shock}</td><td>{pct(row.estimatedReturn)}</td><td>{currency(row.pnlImpact)}</td><td>{pct(row.contributionPct)}</td></tr>{/each}</tbody>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td>{row.shock}</td><td class:absent={pct(row.estimatedReturn) === "N/A"}>{pct(row.estimatedReturn)}</td><td class:absent={currency(row.pnlImpact) === "N/A"}>{currency(row.pnlImpact)}</td><td class:absent={pct(row.contributionPct) === "N/A"}>{pct(row.contributionPct)}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}
@@ -1006,7 +1006,7 @@
     <header class="table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Symbol</th><th>Current weight</th><th>Proposed weight</th><th>Delta</th><th>Current risk</th><th>Proposed risk</th><th>Constraint</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.currentWeight)}</td><td>{pct(row.proposedWeight)}</td><td class={row.delta == null ? "" : row.delta >= 0 ? "positive" : "negative"}>{pct(row.delta)}</td><td>{pct(row.currentRiskContribution)}</td><td>{pct(row.proposedRiskContribution)}</td><td>{row.constraintFlag}</td></tr>{/each}</tbody>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.currentWeight) === "N/A"}>{pct(row.currentWeight)}</td><td class:absent={pct(row.proposedWeight) === "N/A"}>{pct(row.proposedWeight)}</td><td class={row.delta == null ? "" : row.delta >= 0 ? "positive" : "negative"}>{pct(row.delta)}</td><td class:absent={pct(row.currentRiskContribution) === "N/A"}>{pct(row.currentRiskContribution)}</td><td class:absent={pct(row.proposedRiskContribution) === "N/A"}>{pct(row.proposedRiskContribution)}</td><td>{row.constraintFlag}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}
@@ -1160,12 +1160,12 @@
     <div class="sc-row">
       <span class="sc-lbl">Normal</span>
       <div class="sc-track"><div class="sc-fill" style={`width:${values.normal != null ? Math.abs(values.normal) * 100 : 0}%; background:${corrColor(values.normal)};`}></div></div>
-      <strong class="sc-val">{fmt(values.normal, 2)}</strong>
+      <strong class="sc-val" class:absent={fmt(values.normal, 2) === "N/A"}>{fmt(values.normal, 2)}</strong>
     </div>
     <div class="sc-row">
       <span class="sc-lbl">Stress</span>
       <div class="sc-track"><div class="sc-fill" style={`width:${values.stress != null ? Math.abs(values.stress) * 100 : 0}%; background:${corrColor(values.stress)};`}></div></div>
-      <strong class="sc-val">{fmt(values.stress, 2)}</strong>
+      <strong class="sc-val" class:absent={fmt(values.stress, 2) === "N/A"}>{fmt(values.stress, 2)}</strong>
     </div>
     <div class="sc-delta">
       <span>Δ Stress</span>
@@ -1335,8 +1335,8 @@
       </div>
 
       <span class="axis-label x-min">Vol {pct(plot.xMin)}</span>
-      <span class="axis-label x-max">{pct(plot.xMax)}</span>
-      <span class="axis-label y-min">{pct(plot.yMin)}</span>
+      <span class="axis-label x-max" class:absent={pct(plot.xMax) === "N/A"}>{pct(plot.xMax)}</span>
+      <span class="axis-label y-min" class:absent={pct(plot.yMin) === "N/A"}>{pct(plot.yMin)}</span>
       <span class="axis-label y-max">Ret {pct(plot.yMax)}</span>
 
       {#if hovered}

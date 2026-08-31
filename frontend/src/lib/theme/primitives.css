@@ -158,3 +158,12 @@
 .fills-viewport {
   max-height: max(var(--fill-min, 22rem), calc(100vh - var(--fill-reserve, 24rem)));
 }
+
+/* ── Absent values ────────────────────────────────────────────────────────
+   "N/A" is not data. It holds the row's geometry so the layout does not jump
+   when the value arrives, but it should not compete with the numbers around
+   it — an empty view was rendering twenty of these at full strength. */
+.absent.absent {
+  color: var(--text-2);
+  font-weight: 400;
+}

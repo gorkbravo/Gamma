@@ -105,7 +105,7 @@
     <div><span>Portfolio</span><strong>{text(entity.portfolio_label) ?? text(entity.label) ?? "Risk snapshot"}</strong></div>
     <div><span>Benchmark</span><strong>{text(entity.benchmark_symbol) ?? text(portfolioInput.benchmark_symbol) ?? "N/A"}</strong></div>
     <div><span>Legs</span><strong>{legs.length}</strong></div>
-    <div><span>Coverage</span><strong>{pct(metrics.risk_coverage_ratio)}</strong></div>
+    <div><span>Coverage</span><strong class:absent={pct(metrics.risk_coverage_ratio) === "N/A"}>{pct(metrics.risk_coverage_ratio)}</strong></div>
     <div><span>Estimated return</span><strong class:negative={(number(shockProxy.estimated_return_pct) ?? 0) < 0}>{pct(shockProxy.estimated_return_pct)}</strong></div>
   </div>
 
@@ -116,7 +116,7 @@
         <thead><tr><th>Symbol</th><th>Weight</th><th>Type</th></tr></thead>
         <tbody>
           {#each legs as leg}
-            <tr><td>{leg.symbol}</td><td>{pct(leg.weight)}</td><td>{leg.secType ?? "N/A"}</td></tr>
+            <tr><td>{leg.symbol}</td><td class:absent={pct(leg.weight) === "N/A"}>{pct(leg.weight)}</td><td class:absent={leg.secType == null}>{leg.secType ?? "N/A"}</td></tr>
           {:else}
             <tr><td colspan="3" class="empty">No temporary legs were retained.</td></tr>
           {/each}

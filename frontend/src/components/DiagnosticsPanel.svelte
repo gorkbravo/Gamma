@@ -56,7 +56,7 @@
     </article>
     <article>
       <span>Cache Hit Rate</span>
-      <strong>{fmtPct(diagnostics?.history_cache.hit_rate)}</strong>
+      <strong class:absent={fmtPct(diagnostics?.history_cache.hit_rate) === "N/A"}>{fmtPct(diagnostics?.history_cache.hit_rate)}</strong>
     </article>
     <article>
       <span>IV Session</span>

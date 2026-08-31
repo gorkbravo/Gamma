@@ -280,7 +280,7 @@
         <span class="next-event">
           <span class="next-event-label">Next</span>
           <span class="next-event-title">{nextEvent.title}</span>
-          <span class="next-event-date">{shortDate(nextEvent.scheduled_at)}</span>
+          <span class="next-event-date" class:absent={shortDate(nextEvent.scheduled_at) === "N/A"}>{shortDate(nextEvent.scheduled_at)}</span>
         </span>
       {/if}
     </div>

@@ -863,11 +863,11 @@
                       <tbody>
                         {#each bookValidationLegs as diagnostic}
                           <tr>
-                            <td>{diagnosticValue(diagnostic, "label")}</td>
-                            <td>{diagnosticValue(diagnostic, "source_provider")}</td>
+                            <td class:absent={diagnosticValue(diagnostic, "label") === "N/A"}>{diagnosticValue(diagnostic, "label")}</td>
+                            <td class:absent={diagnosticValue(diagnostic, "source_provider") === "N/A"}>{diagnosticValue(diagnostic, "source_provider")}</td>
                             <td>{diagnosticValue(diagnostic, "available_start").slice(0, 10)} - {diagnosticValue(diagnostic, "available_end").slice(0, 10)}</td>
-                            <td class="num-cell">{diagnosticValue(diagnostic, "observation_count")}</td>
-                            <td class="num-cell">{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
+                            <td class="num-cell" class:absent={diagnosticValue(diagnostic, "observation_count") === "N/A"}>{diagnosticValue(diagnostic, "observation_count")}</td>
+                            <td class="num-cell" class:absent={fmt(Number(diagnostic.normalized_weight ?? 0), 3) === "N/A"}>{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
                           </tr>
                         {/each}
                       </tbody>
@@ -959,11 +959,11 @@
                       <tbody>
                         {#each compositionDiagnosticLegs as diagnostic}
                           <tr>
-                            <td>{diagnosticValue(diagnostic, "label")}</td>
-                            <td>{diagnosticValue(diagnostic, "source_provider")}</td>
+                            <td class:absent={diagnosticValue(diagnostic, "label") === "N/A"}>{diagnosticValue(diagnostic, "label")}</td>
+                            <td class:absent={diagnosticValue(diagnostic, "source_provider") === "N/A"}>{diagnosticValue(diagnostic, "source_provider")}</td>
                             <td>{diagnosticValue(diagnostic, "available_start").slice(0, 10)} - {diagnosticValue(diagnostic, "available_end").slice(0, 10)}</td>
-                            <td class="num-cell">{diagnosticValue(diagnostic, "observation_count")}</td>
-                            <td class="num-cell">{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
+                            <td class="num-cell" class:absent={diagnosticValue(diagnostic, "observation_count") === "N/A"}>{diagnosticValue(diagnostic, "observation_count")}</td>
+                            <td class="num-cell" class:absent={fmt(Number(diagnostic.normalized_weight ?? 0), 3) === "N/A"}>{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
                           </tr>
                         {/each}
                       </tbody>
@@ -972,8 +972,8 @@
                 </div>
               {/if}
               <div class="kpi-grid">
-                <article class="metric"><span>Total Return</span><strong class={signClass(strategyComposition.metrics.total_return)}>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
-                <article class="metric"><span>Annual Vol</span><strong>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
+                <article class="metric"><span>Total Return</span><strong class={signClass(strategyComposition.metrics.total_return)} class:absent={pct(strategyComposition.metrics.total_return) === "N/A"}>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
+                <article class="metric"><span>Annual Vol</span><strong class:absent={pct(strategyComposition.metrics.annual_volatility) === "N/A"}>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
                 <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
                 <article class="metric"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
                 <article class="metric"><span>Lenses</span><strong>{strategyComposition.lenses.length}</strong><small>{strategyComposition.overlays.length} overlays</small></article>
@@ -1012,11 +1012,11 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric"><span>Total Return</span><strong class={signClass(activeStrategyResult?.metrics.total_return)}>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
-            <article class="metric"><span>Annual Return</span><strong class={signClass(activeStrategyResult?.metrics.annual_return)}>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
-            <article class="metric"><span>Annual Vol</span><strong>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
-            <article class="metric"><span>Sharpe</span><strong class={signClass(activeStrategyResult?.metrics.sharpe_ratio)}>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
-            <article class="metric"><span>Sortino</span><strong class={signClass(activeStrategyResult?.metrics.sortino_ratio)}>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
+            <article class="metric"><span>Total Return</span><strong class={signClass(activeStrategyResult?.metrics.total_return)} class:absent={pct(activeStrategyResult?.metrics.total_return) === "N/A"}>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
+            <article class="metric"><span>Annual Return</span><strong class={signClass(activeStrategyResult?.metrics.annual_return)} class:absent={pct(activeStrategyResult?.metrics.annual_return) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
+            <article class="metric"><span>Annual Vol</span><strong class:absent={pct(activeStrategyResult?.metrics.annual_volatility) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
+            <article class="metric"><span>Sharpe</span><strong class={signClass(activeStrategyResult?.metrics.sharpe_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sharpe_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
+            <article class="metric"><span>Sortino</span><strong class={signClass(activeStrategyResult?.metrics.sortino_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sortino_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
             <article class="metric"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
           </div>
 
@@ -1071,7 +1071,7 @@
                   <tbody>
                     {#if stressDrawdownRows.length}
                       {#each stressDrawdownRows as point}
-                        <tr><td>{shortDate(point.timestamp)}</td><td class="num-cell {signClass(point.value)}">{pct(point.value)}</td></tr>
+                        <tr><td class:absent={shortDate(point.timestamp) === "N/A"}>{shortDate(point.timestamp)}</td><td class="num-cell {signClass(point.value)}" class:absent={pct(point.value) === "N/A"}>{pct(point.value)}</td></tr>
                       {/each}
                     {:else}
                       <tr><td colspan="2">No drawdown series yet.</td></tr>
@@ -1090,11 +1090,11 @@
                     {#if rollingStressRows.length}
                       {#each rollingStressRows as row}
                         <tr>
-                          <td>{shortDate(row.timestamp)}</td>
-                          <td class="num-cell {signClass(row.rolling_return)}">{pct(row.rolling_return)}</td>
-                          <td class="num-cell">{pct(row.rolling_volatility)}</td>
-                          <td class="num-cell">{fmt(row.rolling_beta, 2)}</td>
-                          <td class="num-cell">{fmt(row.rolling_correlation, 2)}</td>
+                          <td class:absent={shortDate(row.timestamp) === "N/A"}>{shortDate(row.timestamp)}</td>
+                          <td class="num-cell {signClass(row.rolling_return)}" class:absent={pct(row.rolling_return) === "N/A"}>{pct(row.rolling_return)}</td>
+                          <td class="num-cell" class:absent={pct(row.rolling_volatility) === "N/A"}>{pct(row.rolling_volatility)}</td>
+                          <td class="num-cell" class:absent={fmt(row.rolling_beta, 2) === "N/A"}>{fmt(row.rolling_beta, 2)}</td>
+                          <td class="num-cell" class:absent={fmt(row.rolling_correlation, 2) === "N/A"}>{fmt(row.rolling_correlation, 2)}</td>
                         </tr>
                       {/each}
                     {:else}
@@ -1115,7 +1115,7 @@
                 <tbody>
                   {#if activeStrategyResult?.monthly_returns.length}
                     {#each activeStrategyResult.monthly_returns.slice(-18) as row}
-                      <tr><td>{row.period}</td><td class="num-cell {signClass(row.value)}">{pct(row.value)}</td></tr>
+                      <tr><td>{row.period}</td><td class="num-cell {signClass(row.value)}" class:absent={pct(row.value) === "N/A"}>{pct(row.value)}</td></tr>
                     {/each}
                   {:else}
                     <tr><td colspan="2">No monthly table yet.</td></tr>
@@ -1133,7 +1133,7 @@
                 <tbody>
                   {#if activeStrategyResult?.annual_returns.length}
                     {#each activeStrategyResult.annual_returns as row}
-                      <tr><td>{row.period}</td><td class="num-cell {signClass(row.value)}">{pct(row.value)}</td></tr>
+                      <tr><td>{row.period}</td><td class="num-cell {signClass(row.value)}" class:absent={pct(row.value) === "N/A"}>{pct(row.value)}</td></tr>
                     {/each}
                   {:else}
                     <tr><td colspan="2">No annual table yet.</td></tr>
@@ -1182,7 +1182,7 @@
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Mode Context</p><h3>{strategyModeTitle}</h3></div></div>
           <div class="stack">
-            <div class="row"><span>Active Stream</span><strong>{activeStrategyResult?.name ?? "N/A"}</strong></div>
+            <div class="row"><span>Active Stream</span><strong class:absent={activeStrategyResult?.name == null}>{activeStrategyResult?.name ?? "N/A"}</strong></div>
             <div class="row"><span>Return Points</span><strong>{activeStrategyResult?.returns_points.length ?? 0}</strong></div>
             <div class="row"><span>Benchmark Points</span><strong>{activeStrategyResult?.benchmark_points.length ?? 0}</strong></div>
             <div class="row"><span>Rolling Windows</span><strong>{activeStrategyResult?.rolling_points.length ?? 0}</strong></div>
@@ -1225,7 +1225,7 @@
                     <tr>
                       <td>{item.title}</td>
                       <td>{item.object_type}</td>
-                      <td>{shortDate(item.updated_at)}</td>
+                      <td class:absent={shortDate(item.updated_at) === "N/A"}>{shortDate(item.updated_at)}</td>
                       <td>{item.warnings.length}</td>
                       <td>
                         <div class="table-actions">

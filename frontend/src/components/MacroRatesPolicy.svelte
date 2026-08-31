@@ -141,10 +141,10 @@
             {#each snapshot.rates_policy.meeting_path.meetings as meeting}
               <tr>
                 <td>{meeting.title}</td>
-                <td>{shortDate(meeting.scheduled_at)}</td>
-                <td>{meeting.implied_policy_rate_display ?? "N/A"}</td>
-                <td class={deltaClass(meeting.incremental_change_display)}>{meeting.incremental_change_display ?? "N/A"}</td>
-                <td class={deltaClass(meeting.cumulative_change_display)}>{meeting.cumulative_change_display ?? "N/A"}</td>
+                <td class:absent={shortDate(meeting.scheduled_at) === "N/A"}>{shortDate(meeting.scheduled_at)}</td>
+                <td class:absent={meeting.implied_policy_rate_display == null}>{meeting.implied_policy_rate_display ?? "N/A"}</td>
+                <td class={deltaClass(meeting.incremental_change_display)} class:absent={meeting.incremental_change_display == null}>{meeting.incremental_change_display ?? "N/A"}</td>
+                <td class={deltaClass(meeting.cumulative_change_display)} class:absent={meeting.cumulative_change_display == null}>{meeting.cumulative_change_display ?? "N/A"}</td>
               </tr>
             {/each}
           </tbody>
@@ -173,8 +173,8 @@
           {#each snapshot?.rates_policy?.curve_nodes ?? [] as node}
             <tr>
               <td>{node.tenor}</td>
-              <td>{fmt(node.current_value)}</td>
-              <td>{fmt(node.prior_value)}</td>
+              <td class:absent={fmt(node.current_value) === "N/A"}>{fmt(node.current_value)}</td>
+              <td class:absent={fmt(node.prior_value) === "N/A"}>{fmt(node.prior_value)}</td>
               <td class="{node.change_bps != null && node.change_bps > 0 ? 'positive' : ''} {node.change_bps != null && node.change_bps < 0 ? 'negative' : ''}">{node.change_bps == null ? "N/A" : `${node.change_bps > 0 ? "+" : ""}${node.change_bps.toFixed(0)} bps`}</td>
             </tr>
           {/each}
@@ -211,7 +211,7 @@
             <div class="list-row">
               <strong>{event.title}</strong>
               <span class="list-detail">
-                <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                <span class="event-date" class:absent={shortDate(event.scheduled_at) === "N/A"}>{shortDate(event.scheduled_at)}</span>
                 <span class="event-category">{event.category}</span>
                 <span class="event-category">{event.importance}</span>
               </span>

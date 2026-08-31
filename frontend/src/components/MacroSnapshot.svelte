@@ -152,7 +152,7 @@
               {#each card.metrics as metric}
                 <td class="col-metric">
                   <span class="metric-label" title={metric.label}>{metric.label}</span>
-                  <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
+                  <strong class="metric-value" class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
                   {#if metric.delta_display}
                     <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
                   {/if}
@@ -252,7 +252,7 @@
             <div class="list-row">
               <strong>{event.title}</strong>
               <span class="list-detail">
-                <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                <span class="event-date" class:absent={shortDate(event.scheduled_at) === "N/A"}>{shortDate(event.scheduled_at)}</span>
                 <span class="event-category">{event.category}</span>
                 <span class="event-category">{event.importance}</span>
               </span>

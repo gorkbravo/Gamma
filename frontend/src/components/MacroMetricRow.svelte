@@ -22,7 +22,7 @@
   {#each metrics as metric}
     <div class="metric">
       <span class="metric-label" title={metric.label}>{metric.label}</span>
-      <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
+      <strong class="metric-value" class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
       {#if metric.delta_display}
         <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
       {/if}

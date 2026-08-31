@@ -1506,7 +1506,7 @@
         <div class="drawer-grid">
           <div><span>Region</span><strong>{selectedChokepoint.region}</strong></div>
           <div><span>Vessels</span><strong>{selectedChokepoint.total_vessel_count}</strong></div>
-          <div><span>Score</span><strong>{number(selectedChokepoint.congestion_score, 2)}</strong></div>
+          <div><span>Score</span><strong class:absent={number(selectedChokepoint.congestion_score, 2) === "N/A"}>{number(selectedChokepoint.congestion_score, 2)}</strong></div>
           <div><span>Label</span><strong>{selectedChokepoint.congestion_label}</strong></div>
         </div>
         <div class="drawer-section">
@@ -1532,7 +1532,7 @@
           <div><span>Route</span><strong>{selectedFlow.route_label}</strong></div>
           <div><span>Vessels</span><strong>{selectedFlow.vessel_count}</strong></div>
           <div><span>Type</span><strong>{vesselTypeLabel(selectedFlow.vessel_type)}</strong></div>
-          <div><span>Confidence</span><strong>{pct(selectedFlow.inference_confidence)}</strong></div>
+          <div><span>Confidence</span><strong class:absent={pct(selectedFlow.inference_confidence) === "N/A"}>{pct(selectedFlow.inference_confidence)}</strong></div>
         </div>
         <div class="drawer-section">
           <span>Commodity</span>
@@ -1549,9 +1549,9 @@
       {:else if selectedVessel}
         <div class="drawer-grid">
           <div><span>MMSI</span><strong>{selectedVessel.identity.mmsi}</strong></div>
-          <div><span>IMO</span><strong>{selectedVessel.identity.imo ?? "N/A"}</strong></div>
+          <div><span>IMO</span><strong class:absent={selectedVessel.identity.imo == null}>{selectedVessel.identity.imo ?? "N/A"}</strong></div>
           <div><span>Class</span><strong>{selectedVessel.vessel_class}</strong></div>
-          <div><span>Flag</span><strong>{selectedVessel.flag ?? "N/A"}</strong></div>
+          <div><span>Flag</span><strong class:absent={selectedVessel.flag == null}>{selectedVessel.flag ?? "N/A"}</strong></div>
         </div>
         <div class="drawer-section">
           <span>Type</span>
@@ -1569,8 +1569,8 @@
         <div class="drawer-grid">
           <div><span>Region</span><strong>{selectedEvent.region}</strong></div>
           <div><span>Type</span><strong>{selectedEvent.event_type}</strong></div>
-          <div><span>Start</span><strong>{shortDate(selectedEvent.start_at)}</strong></div>
-          <div><span>End</span><strong>{shortDate(selectedEvent.end_at)}</strong></div>
+          <div><span>Start</span><strong class:absent={shortDate(selectedEvent.start_at) === "N/A"}>{shortDate(selectedEvent.start_at)}</strong></div>
+          <div><span>End</span><strong class:absent={shortDate(selectedEvent.end_at) === "N/A"}>{shortDate(selectedEvent.end_at)}</strong></div>
         </div>
         <div class="drawer-section">
           <span>Summary</span>

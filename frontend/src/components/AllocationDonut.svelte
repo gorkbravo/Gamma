@@ -165,7 +165,7 @@
             <div class="hover-grid">
               <div>
                 <span>Base Value</span>
-                <strong>{money(activeSlice.value)}</strong>
+                <strong class:absent={money(activeSlice.value) === "N/A"}>{money(activeSlice.value)}</strong>
               </div>
               <div>
                 <span>Unreal. P&amp;L</span>

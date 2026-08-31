@@ -1423,7 +1423,7 @@
             </div>
           </div>
           <div class="stack">
-            <div class="row"><span>Group</span><strong>{selectedOverviewNode?.group ?? "N/A"}</strong></div>
+            <div class="row"><span>Group</span><strong class:absent={selectedOverviewNode?.group == null}>{selectedOverviewNode?.group ?? "N/A"}</strong></div>
             <div class="row"><span>Market Cap</span><strong>{formatResearchOverviewSortValue(selectedOverviewNode?.market_cap_usd, "market_cap_desc")}</strong></div>
             <div class="row"><span>History Obs</span><strong>{selectedOverviewNode?.metrics.observation_count ?? 0}</strong></div>
             <div class="row"><span>{overviewReturnPeriodLabel(overview)}</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "return") : null, "return")}</strong></div>
@@ -1442,7 +1442,7 @@
           </div>
           <div class="stack">
             <div class="row"><span>Source</span><ProvenanceBadge data={overviewBadge} /></div>
-            <div class="row"><span>Coverage Type</span><strong>{overview?.coverage_label ?? "N/A"}</strong></div>
+            <div class="row"><span>Coverage Type</span><strong class:absent={overview?.coverage_label == null}>{overview?.coverage_label ?? "N/A"}</strong></div>
             <div class="row"><span>Missing / Thin</span><strong>{overview?.coverage?.missing_count ?? 0} / {overview?.coverage?.thin_history_symbols?.length ?? 0}</strong></div>
             <div class="row"><span>Observation Range</span><strong>{overview?.coverage?.min_observation_count ?? 0}-{overview?.coverage?.max_observation_count ?? 0}</strong></div>
           </div>
@@ -1515,12 +1515,12 @@
           </article>
           <article class="metric">
             <span>Annual Return</span>
-            <strong>{pct(result?.summary.annual_return)}</strong>
+            <strong class:absent={pct(result?.summary.annual_return) === "N/A"}>{pct(result?.summary.annual_return)}</strong>
             <small>{result?.benchmark_symbol ?? "N/A"} benchmark</small>
           </article>
           <article class="metric">
             <span>Annual Vol</span>
-            <strong>{pct(result?.summary.annual_vol)}</strong>
+            <strong class:absent={pct(result?.summary.annual_vol) === "N/A"}>{pct(result?.summary.annual_vol)}</strong>
             <small>{fmt(structureMetrics.aligned_symbol_count, 0)} aligned names</small>
           </article>
           <article class="metric">
@@ -1535,7 +1535,7 @@
           </article>
           <article class="metric">
             <span>Correlation</span>
-            <strong>{fmt(result?.summary.correlation, 3)}</strong>
+            <strong class:absent={fmt(result?.summary.correlation, 3) === "N/A"}>{fmt(result?.summary.correlation, 3)}</strong>
             <small>{pct(structureMetrics.top5_weight)} top-5 weight</small>
           </article>
         </div>
@@ -1584,10 +1584,10 @@
           <BarRankChart items={weightBars} emptyMessage="Weights will appear after running analysis." formatValue={(value) => pct(value)} />
 
           <div class="stack">
-            <div class="row"><span>Top Weight</span><strong>{pct(structureMetrics.top_weight)}</strong></div>
-            <div class="row"><span>Top-5 Weight</span><strong>{pct(structureMetrics.top5_weight)}</strong></div>
-            <div class="row"><span>HHI</span><strong>{fmt(structureMetrics.concentration_hhi, 3)}</strong></div>
-            <div class="row"><span>Effective Positions</span><strong>{fmt(structureMetrics.effective_positions, 2)}</strong></div>
+            <div class="row"><span>Top Weight</span><strong class:absent={pct(structureMetrics.top_weight) === "N/A"}>{pct(structureMetrics.top_weight)}</strong></div>
+            <div class="row"><span>Top-5 Weight</span><strong class:absent={pct(structureMetrics.top5_weight) === "N/A"}>{pct(structureMetrics.top5_weight)}</strong></div>
+            <div class="row"><span>HHI</span><strong class:absent={fmt(structureMetrics.concentration_hhi, 3) === "N/A"}>{fmt(structureMetrics.concentration_hhi, 3)}</strong></div>
+            <div class="row"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong></div>
           </div>
         </article>
 
@@ -1646,11 +1646,11 @@
                     on:keydown={(event) => handleEquityRowKeydown(event, equityRow)}
                   >
                     <td>{constituent.display_symbol ?? constituent.symbol}</td>
-                    <td>{pct(constituent.weight)}</td>
-                    <td>{pct(constituent.total_return)}</td>
-                    <td>{pct(constituent.annual_vol)}</td>
-                    <td>{pct(constituent.max_drawdown)}</td>
-                    <td>{pct(constituent.weighted_return)}</td>
+                    <td class:absent={pct(constituent.weight) === "N/A"}>{pct(constituent.weight)}</td>
+                    <td class:absent={pct(constituent.total_return) === "N/A"}>{pct(constituent.total_return)}</td>
+                    <td class:absent={pct(constituent.annual_vol) === "N/A"}>{pct(constituent.annual_vol)}</td>
+                    <td class:absent={pct(constituent.max_drawdown) === "N/A"}>{pct(constituent.max_drawdown)}</td>
+                    <td class:absent={pct(constituent.weighted_return) === "N/A"}>{pct(constituent.weighted_return)}</td>
                   </tr>
                 {/each}
               {:else}
@@ -1795,8 +1795,8 @@
                       on:keydown={(event) => handleEquityRowKeydown(event, equityRow)}
                     >
                       <td>{row.symbol}</td>
-                      <td>{fmt(row.inputWeight, 4)}</td>
-                      <td>{pct(row.normalizedWeight)}</td>
+                      <td class:absent={fmt(row.inputWeight, 4) === "N/A"}>{fmt(row.inputWeight, 4)}</td>
+                      <td class:absent={pct(row.normalizedWeight) === "N/A"}>{pct(row.normalizedWeight)}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1820,8 +1820,8 @@
           <div class="row"><span>Scope Type</span><strong>{formatScopeLabel(result?.scope_type)}</strong></div>
           <div class="row"><span>Primary Symbol</span><strong>{activePrimaryScopeLabel(result)}</strong></div>
           <div class="row"><span>Aligned Symbols</span><strong>{structureMetrics.aligned_symbol_count}</strong></div>
-          <div class="row"><span>Total Weight</span><strong>{fmt(structureMetrics.total_weight, 4)}</strong></div>
-          <div class="row"><span>Effective Positions</span><strong>{fmt(structureMetrics.effective_positions, 2)}</strong></div>
+          <div class="row"><span>Total Weight</span><strong class:absent={fmt(structureMetrics.total_weight, 4) === "N/A"}>{fmt(structureMetrics.total_weight, 4)}</strong></div>
+          <div class="row"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong></div>
           <div class="row"><span>HHI / Top-5</span><strong>{fmt(structureMetrics.concentration_hhi, 3)} / {pct(structureMetrics.top5_weight)}</strong></div>
         </div>
 
@@ -1854,7 +1854,7 @@
           <div class="row"><span>Observations</span><strong>{result?.observations_count ?? 0}</strong></div>
           <div class="row"><span>Benchmark Overlap</span><strong>{coverageMetrics.benchmark_overlap_count}</strong></div>
           <div class="row"><span>Missing Symbols</span><strong>{coverageMetrics.missing_symbols.length}</strong></div>
-          <div class="row"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? "N/A"}</strong></div>
+          <div class="row"><span>Benchmark</span><strong class:absent={result?.benchmark_symbol == null}>{result?.benchmark_symbol ?? "N/A"}</strong></div>
         </div>
 
         {#if result?.warnings?.length || coverageMetrics.missing_symbols.length}
@@ -1898,7 +1898,7 @@
           <div class="stack">
             <div class="row"><span>Base Currency</span><strong>{result.snapshot.base_currency}</strong></div>
             <div class="row"><span>Positions</span><strong>{result.snapshot.positions.length}</strong></div>
-            <div class="row"><span>Portfolio Value</span><strong>{fmt(result.snapshot.net_liquidation)}</strong></div>
+            <div class="row"><span>Portfolio Value</span><strong class:absent={fmt(result.snapshot.net_liquidation) === "N/A"}>{fmt(result.snapshot.net_liquidation)}</strong></div>
             <div class="row"><span>Snapshot Time</span><strong>{new Date(result.snapshot.timestamp).toLocaleString("en-US")}</strong></div>
           </div>
         {:else}
@@ -1921,11 +1921,11 @@
 
           <div class="kpi-grid">
             <article class="metric"><span>Aligned Obs</span><strong>{compareResult?.aligned_observation_count ?? 0}</strong><small>Common return calendar</small></article>
-            <article class="metric"><span>Relative Return</span><strong>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
-            <article class="metric"><span>Vol Difference</span><strong>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
-            <article class="metric"><span>Drawdown Gap</span><strong>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
-            <article class="metric"><span>Correlation</span><strong>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
-            <article class="metric"><span>Beta</span><strong>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
+            <article class="metric"><span>Relative Return</span><strong class:absent={pct(compareResult?.relative_return) === "N/A"}>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
+            <article class="metric"><span>Vol Difference</span><strong class:absent={pct(compareResult?.volatility_difference) === "N/A"}>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
+            <article class="metric"><span>Drawdown Gap</span><strong class:absent={pct(compareResult?.max_drawdown_difference) === "N/A"}>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
+            <article class="metric"><span>Correlation</span><strong class:absent={fmt(compareResult?.correlation, 3) === "N/A"}>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
+            <article class="metric"><span>Beta</span><strong class:absent={fmt(compareResult?.beta, 3) === "N/A"}>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
           </div>
 
           <TimeSeriesChart series={compareChartSeries} height={380} emptyMessage="Select two loaded or saved return streams to compare." />
@@ -1950,7 +1950,7 @@
               <article class="metric"><span>Scope</span><strong>{formatScopeLabel(result?.scope_type)}</strong><small>{activePrimaryScopeLabel(result)}</small></article>
               <article class="metric"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? benchmarkSymbol}</strong><small>{coverageMetrics.benchmark_overlap_count} overlap obs</small></article>
               <article class="metric"><span>Available Names</span><strong>{coverageMetrics.available_symbols.length}</strong><small>{coverageMetrics.missing_symbols.length} missing</small></article>
-              <article class="metric"><span>Effective Positions</span><strong>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
+              <article class="metric"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
             </div>
           </article>
         {/if}
@@ -1979,7 +1979,7 @@
               <thead><tr><th>Metric</th><th>{compareResult?.left.label ?? "Left"}</th><th>{compareResult?.right.label ?? "Right"}</th></tr></thead>
               <tbody>
                 {#each compareMetricRows as row}
-                  <tr><td>{row.label}</td><td>{pct(row.left)}</td><td>{pct(row.right)}</td></tr>
+                  <tr><td>{row.label}</td><td class:absent={pct(row.left) === "N/A"}>{pct(row.left)}</td><td class:absent={pct(row.right) === "N/A"}>{pct(row.right)}</td></tr>
                 {/each}
               </tbody>
             </table>
@@ -2007,9 +2007,9 @@
                     {#each constituentRows.slice(0, 10) as constituent}
                       <tr>
                         <td>{constituent.display_symbol ?? constituent.symbol}</td>
-                        <td>{pct(constituent.weight)}</td>
-                        <td>{pct(constituent.total_return)}</td>
-                        <td>{pct(constituent.annual_vol)}</td>
+                        <td class:absent={pct(constituent.weight) === "N/A"}>{pct(constituent.weight)}</td>
+                        <td class:absent={pct(constituent.total_return) === "N/A"}>{pct(constituent.total_return)}</td>
+                        <td class:absent={pct(constituent.annual_vol) === "N/A"}>{pct(constituent.annual_vol)}</td>
                       </tr>
                     {/each}
                   {:else}
@@ -2052,7 +2052,7 @@
                     <tr>
                       <td>{item.title}</td>
                       <td>{item.object_type}</td>
-                      <td>{shortDate(item.updated_at)}</td>
+                      <td class:absent={shortDate(item.updated_at) === "N/A"}>{shortDate(item.updated_at)}</td>
                       <td>{item.warnings.length}</td>
                       <td>
                         <div class="table-actions">

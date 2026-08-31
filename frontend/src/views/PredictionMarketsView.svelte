@@ -902,7 +902,7 @@
                       </div>
                     </td>
                     <td class="num"
-                      ><span class={marketTone(market.current_probability)}>{pct(market.current_probability)}</span></td
+                      ><span class={marketTone(market.current_probability)} class:absent={pct(market.current_probability) === "N/A"}>{pct(market.current_probability)}</span></td
                     >
                     <td class="num {toneOf(market.recent_price_change)}"
                       ><span
@@ -912,11 +912,11 @@
                         }}>{signedPct(market.recent_price_change)}</span
                       ></td
                     >
-                    <td class="num">{fmt(market.volume_24h)}</td>
-                    <td class="num">{fmt(market.volume)}</td>
-                    <td class="num">{fmt(market.liquidity)}</td>
-                    <td class="num">{fmt(market.open_interest)}</td>
-                    <td class="num">{pct(market.spread, 1)}</td>
+                    <td class="num" class:absent={fmt(market.volume_24h) === "N/A"}>{fmt(market.volume_24h)}</td>
+                    <td class="num" class:absent={fmt(market.volume) === "N/A"}>{fmt(market.volume)}</td>
+                    <td class="num" class:absent={fmt(market.liquidity) === "N/A"}>{fmt(market.liquidity)}</td>
+                    <td class="num" class:absent={fmt(market.open_interest) === "N/A"}>{fmt(market.open_interest)}</td>
+                    <td class="num" class:absent={pct(market.spread, 1) === "N/A"}>{pct(market.spread, 1)}</td>
                     <td class="num">{daysLabel(daysUntil(market.end_time))}</td>
                     <td><span class="venue-label">{market.venue === "polymarket" ? "PM" : "KL"}</span></td>
                     <td
@@ -954,7 +954,7 @@
                 {#each watchlist as entry (entry.market_id)}
                   <tr class="clickable-row" on:click={() => openContract(entry.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => openContract(entry.market_id))}>
                     <td class="wrap-cell"><strong>{truncName(entry.title, 46)}</strong></td>
-                    <td class="num">{pct(entry.probability)}</td>
+                    <td class="num" class:absent={pct(entry.probability) === "N/A"}>{pct(entry.probability)}</td>
                     <td><span class="venue-label">{entry.venue === "polymarket" ? "PM" : "KL"}</span></td>
                     <td class="tick-col">
                       <button
@@ -1112,7 +1112,7 @@
             </article>
             <article class="metric">
               <span>Window Δ</span>
-              <strong class={toneOf(historyStats?.change)}>{signedPct(historyStats?.change)}</strong>
+              <strong class={toneOf(historyStats?.change)} class:absent={signedPct(historyStats?.change) === "N/A"}>{signedPct(historyStats?.change)}</strong>
               <small>{historyRange.toUpperCase()} range {pct(historyStats?.range_width)}</small>
             </article>
             <article class="metric">
@@ -1136,7 +1136,7 @@
             </article>
             <article class="metric">
               <span>Liquidity</span>
-              <strong>{fmt(detail?.liquidity)}</strong>
+              <strong class:absent={fmt(detail?.liquidity) === "N/A"}>{fmt(detail?.liquidity)}</strong>
               <small>{(detail?.open_interest ?? 0) > 0 ? `OI ${fmt(detail?.open_interest)}` : "—"}</small>
             </article>
             <article class="metric">
@@ -1204,8 +1204,8 @@
                     on:keydown={(event) => activateRowOnKey(event, () => row.hasHistory && selectOutcome(row.outcome_id))}
                   >
                     <td class="wrap-cell"><strong>{row.label}</strong></td>
-                    <td class="num">{pct(row.probability)}</td>
-                    <td class="num {toneOf(row.change)}">{signedPct(row.change)}</td>
+                    <td class="num" class:absent={pct(row.probability) === "N/A"}>{pct(row.probability)}</td>
+                    <td class="num {toneOf(row.change)}" class:absent={signedPct(row.change) === "N/A"}>{signedPct(row.change)}</td>
                     <td class="num">{row.points}</td>
                     <td>
                       {#if !row.hasHistory}
@@ -1237,7 +1237,7 @@
             <div class="kpi-strip">
               <article class="metric">
                 <span>Book Sum</span>
-                <strong class={eventBook.overround_is_meaningful ? "" : "muted"}>{pct(eventBook.probability_sum)}</strong>
+                <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
                 <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
               </article>
               <article class="metric">
@@ -1286,14 +1286,14 @@
                         <strong>{truncName(leg.subtitle ?? leg.title, 44)}</strong>
                         {#if leg.divergence_flags.length}<small>{leg.divergence_flags[0]}</small>{/if}
                       </td>
-                      <td class="num"><span class={marketTone(leg.probability)}>{pct(leg.probability)}</span></td>
-                      <td class="num">{pct(leg.best_bid)}</td>
+                      <td class="num"><span class={marketTone(leg.probability)} class:absent={pct(leg.probability) === "N/A"}>{pct(leg.probability)}</span></td>
+                      <td class="num" class:absent={pct(leg.best_bid) === "N/A"}>{pct(leg.best_bid)}</td>
                       <td class="num">{unquoted ? "N/A" : pct(leg.best_ask)}</td>
                       <td class="num {!unquoted && (leg.spread ?? 0) >= 0.05 ? 'elevated' : ''}"
                         >{unquoted ? "N/A" : pct(leg.spread)}</td
                       >
-                      <td class="num">{fmt(leg.liquidity)}</td>
-                      <td class="num">{fmt(leg.volume)}</td>
+                      <td class="num" class:absent={fmt(leg.liquidity) === "N/A"}>{fmt(leg.liquidity)}</td>
+                      <td class="num" class:absent={fmt(leg.volume) === "N/A"}>{fmt(leg.volume)}</td>
                       <td>
                         {#if leg.divergence_flags.length}
                           <span class="stale">differs</span>
@@ -1334,7 +1334,7 @@
               </article>
               <article class="metric">
                 <span>Notional</span>
-                <strong>{fmt(wallet?.total_notional, 2)}</strong>
+                <strong class:absent={fmt(wallet?.total_notional, 2) === "N/A"}>{fmt(wallet?.total_notional, 2)}</strong>
               </article>
               <article class="metric">
                 <span>Top Share</span>
@@ -1371,9 +1371,9 @@
                       >{participant.side}</td
                     >
                     <td class="num">{participant.trade_count}</td>
-                    <td class="num">{fmt(participant.total_size, 2)}</td>
-                    <td class="num">{pct(participant.average_price)}</td>
-                    <td class="num {toneOf(participant.current_edge)}">{signedPct(participant.current_edge)}</td>
+                    <td class="num" class:absent={fmt(participant.total_size, 2) === "N/A"}>{fmt(participant.total_size, 2)}</td>
+                    <td class="num" class:absent={pct(participant.average_price) === "N/A"}>{pct(participant.average_price)}</td>
+                    <td class="num {toneOf(participant.current_edge)}" class:absent={signedPct(participant.current_edge) === "N/A"}>{signedPct(participant.current_edge)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -1465,11 +1465,11 @@
             <div class="meta-row"><span>Venue ID</span><code>{compactId(detail?.provider_market_id)}</code></div>
             <div class="meta-row">
               <span>Series</span>
-              <strong>{detail?.series_title ?? "N/A"}</strong>
+              <strong class:absent={detail?.series_title == null}>{detail?.series_title ?? "N/A"}</strong>
             </div>
-            <div class="meta-row"><span>Resolution</span><strong>{shortDate(detail?.end_time)}</strong></div>
-            <div class="meta-row"><span>Opened</span><strong>{dayStamp(detail?.open_time)}</strong></div>
-            <div class="meta-row"><span>Retrieved</span><strong>{shortDate(detail?.retrieved_at)}</strong></div>
+            <div class="meta-row"><span>Resolution</span><strong class:absent={shortDate(detail?.end_time) === "N/A"}>{shortDate(detail?.end_time)}</strong></div>
+            <div class="meta-row"><span>Opened</span><strong class:absent={dayStamp(detail?.open_time) === "N/A"}>{dayStamp(detail?.open_time)}</strong></div>
+            <div class="meta-row"><span>Retrieved</span><strong class:absent={shortDate(detail?.retrieved_at) === "N/A"}>{shortDate(detail?.retrieved_at)}</strong></div>
             <div class="meta-row"><span>Origin</span><small>{detail?.origin ?? "N/A"}</small></div>
             {#if detail?.resolution_source}
               <div class="meta-row"><span>Res. Source</span><small>{detail.resolution_source}</small></div>
@@ -1500,17 +1500,17 @@
             <div class="kpi-strip">
               <article class="metric">
                 <span>Bid Depth</span>
-                <strong>{fmt(depth?.bid_notional_within_band, 0)}</strong>
+                <strong class:absent={fmt(depth?.bid_notional_within_band, 0) === "N/A"}>{fmt(depth?.bid_notional_within_band, 0)}</strong>
                 <small>total {fmt(depth?.total_bid_notional, 0)}</small>
               </article>
               <article class="metric">
                 <span>Ask Depth</span>
-                <strong>{fmt(depth?.ask_notional_within_band, 0)}</strong>
+                <strong class:absent={fmt(depth?.ask_notional_within_band, 0) === "N/A"}>{fmt(depth?.ask_notional_within_band, 0)}</strong>
                 <small>total {fmt(depth?.total_ask_notional, 0)}</small>
               </article>
               <article class="metric">
                 <span>Imbalance</span>
-                <strong class={toneOf(depth?.depth_imbalance)}>{signedPct(depth?.depth_imbalance, 0)}</strong>
+                <strong class={toneOf(depth?.depth_imbalance)} class:absent={signedPct(depth?.depth_imbalance, 0) === "N/A"}>{signedPct(depth?.depth_imbalance, 0)}</strong>
                 <small>bid vs ask</small>
               </article>
               <article class="metric">
@@ -1537,10 +1537,10 @@
               <tbody>
                 {#each depthLevels as level (level.index)}
                   <tr>
-                    <td class="num">{fmt(level.bidNotional, 0)}</td>
-                    <td class="num positive">{pct(level.bidPrice, 1)}</td>
-                    <td class="num negative">{pct(level.askPrice, 1)}</td>
-                    <td class="num">{fmt(level.askNotional, 0)}</td>
+                    <td class="num" class:absent={fmt(level.bidNotional, 0) === "N/A"}>{fmt(level.bidNotional, 0)}</td>
+                    <td class="num positive" class:absent={pct(level.bidPrice, 1) === "N/A"}>{pct(level.bidPrice, 1)}</td>
+                    <td class="num negative" class:absent={pct(level.askPrice, 1) === "N/A"}>{pct(level.askPrice, 1)}</td>
+                    <td class="num" class:absent={fmt(level.askNotional, 0) === "N/A"}>{fmt(level.askNotional, 0)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -1579,7 +1579,7 @@
                       <strong>{truncName(market.title, 40)}</strong>
                       <small>{market.relationship} | {market.venue}</small>
                     </td>
-                    <td class="num">{pct(market.probability)}</td>
+                    <td class="num" class:absent={pct(market.probability) === "N/A"}>{pct(market.probability)}</td>
                     <td class="num {(market.price_gap ?? 0) >= 0.1 ? 'elevated' : ''}">{pct(market.price_gap)}</td>
                     <td class="tick-col">
                       <button
@@ -1640,8 +1640,8 @@
                     <strong>{truncName(leg?.title ?? row.title, 52)}</strong>
                   </td>
                   <td><span class="venue-label">{(leg?.venue ?? row.venue) === "polymarket" ? "PM" : "KL"}</span></td>
-                  <td class="num">{pct(leg?.current_probability ?? row.current_probability)}</td>
-                  <td class="num {toneOf(leg?.stats?.change)}">{signedPct(leg?.stats?.change)}</td>
+                  <td class="num" class:absent={pct(leg?.current_probability ?? row.current_probability) === "N/A"}>{pct(leg?.current_probability ?? row.current_probability)}</td>
+                  <td class="num {toneOf(leg?.stats?.change)}" class:absent={signedPct(leg?.stats?.change) === "N/A"}>{signedPct(leg?.stats?.change)}</td>
                   <td class="num">{leg?.stats?.point_count ?? 0}</td>
                   <td class="tick-col">
                     <button type="button" class="tick" aria-label="Remove" on:click={() => toggleCompare(row.market_id)}
@@ -1760,7 +1760,7 @@
             </article>
             <article class="metric">
               <span>Prob Sum</span>
-              <strong>{pct(comparison.basket.probability_sum)}</strong>
+              <strong class:absent={pct(comparison.basket.probability_sum) === "N/A"}>{pct(comparison.basket.probability_sum)}</strong>
               <small>{comparison.basket.same_event ? "same venue event" : "cross-event"}</small>
             </article>
             <article class="metric">
@@ -1821,11 +1821,11 @@
                       >
                       {#if pair.warnings.length}<small>{pair.warnings[0]}</small>{/if}
                     </td>
-                    <td class="num {toneOf(pair.current_spread)}">{signedPct(pair.current_spread)}</td>
-                    <td class="num">{signedPct(pair.mean_spread)}</td>
-                    <td class="num">{signedPct(pair.min_spread)}</td>
-                    <td class="num">{signedPct(pair.max_spread)}</td>
-                    <td class="num">{pct(pair.spread_volatility, 2)}</td>
+                    <td class="num {toneOf(pair.current_spread)}" class:absent={signedPct(pair.current_spread) === "N/A"}>{signedPct(pair.current_spread)}</td>
+                    <td class="num" class:absent={signedPct(pair.mean_spread) === "N/A"}>{signedPct(pair.mean_spread)}</td>
+                    <td class="num" class:absent={signedPct(pair.min_spread) === "N/A"}>{signedPct(pair.min_spread)}</td>
+                    <td class="num" class:absent={signedPct(pair.max_spread) === "N/A"}>{signedPct(pair.max_spread)}</td>
+                    <td class="num" class:absent={pct(pair.spread_volatility, 2) === "N/A"}>{pct(pair.spread_volatility, 2)}</td>
                     <td class="num {(pair.current_spread_percentile ?? 0) >= 0.9 ? 'elevated' : ''}"
                       >{pct(pair.current_spread_percentile, 0)}</td
                     >
@@ -1907,7 +1907,7 @@
         <div class="kpi-grid five">
           <article class="metric">
             <span>Venue</span>
-            <strong>{calibration?.venue ?? "N/A"}</strong>
+            <strong class:absent={calibration?.venue == null}>{calibration?.venue ?? "N/A"}</strong>
             <small>{calibration?.markets_sampled ?? 0} of {calibration?.resolved_markets_considered ?? 0} resolved</small>
           </article>
           <article class="metric">
@@ -1929,7 +1929,7 @@
           </article>
           <article class="metric">
             <span>Settlement Drift</span>
-            <strong class="elevated">{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
+            <strong class="elevated" class:absent={pct(calibration?.convergence?.average_distance_to_outcome) === "N/A"}>{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
             <small>{pct(calibration?.convergence?.share_within_five_points, 0)} within 5pts of outcome</small>
           </article>
         </div>
@@ -1956,9 +1956,9 @@
               {#each calibrationRows as row (row.label)}
                 <tr>
                   <td>{row.label}</td>
-                  <td class="num">{pct(row.predicted)}</td>
-                  <td class="num">{pct(row.realized)}</td>
-                  <td class="num {toneOf(row.error)}">{signedPct(row.error)}</td>
+                  <td class="num" class:absent={pct(row.predicted) === "N/A"}>{pct(row.predicted)}</td>
+                  <td class="num" class:absent={pct(row.realized) === "N/A"}>{pct(row.realized)}</td>
+                  <td class="num {toneOf(row.error)}" class:absent={signedPct(row.error) === "N/A"}>{signedPct(row.error)}</td>
                   <td class="num {row.meets_minimum ? '' : 'stale'}">{row.sample_size}</td>
                   <td class="reliability-col">
                     {#if activeCurve?.is_plottable && row.meets_minimum}
@@ -2020,7 +2020,7 @@
                   <td><strong>{curve.label}</strong></td>
                   <td class="num">{curve.sample_size}</td>
                   <td class="num">{curve.brier_score == null ? "N/A" : curve.brier_score.toFixed(3)}</td>
-                  <td class="num {toneOf(curve.mean_signed_error)}">{signedPct(curve.mean_signed_error)}</td>
+                  <td class="num {toneOf(curve.mean_signed_error)}" class:absent={signedPct(curve.mean_signed_error) === "N/A"}>{signedPct(curve.mean_signed_error)}</td>
                   <td><span class={curve.is_plottable ? "fresh" : "stale"}>{curve.is_plottable ? "drawn" : "withheld"}</span></td>
                 </tr>
               {/each}
@@ -2056,11 +2056,11 @@
                   {@const surprise = (observation.outcome ? 1 : 0) - observation.probability}
                   <tr class="clickable-row" on:click={() => openContract(observation.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => openContract(observation.market_id))}>
                     <td class="wrap-cell"><strong>{truncName(observation.title, 48)}</strong></td>
-                    <td class="num">{pct(observation.probability)}</td>
-                    <td class="num muted">{pct(observation.settlement_probability)}</td>
+                    <td class="num" class:absent={pct(observation.probability) === "N/A"}>{pct(observation.probability)}</td>
+                    <td class="num muted" class:absent={pct(observation.settlement_probability) === "N/A"}>{pct(observation.settlement_probability)}</td>
                     <td class={observation.outcome ? "positive" : "negative"}>{observation.outcome ? "YES" : "NO"}</td>
-                    <td class="num {toneOf(surprise)}">{signedPct(surprise)}</td>
-                    <td>{dayStamp(observation.settled_at)}</td>
+                    <td class="num {toneOf(surprise)}" class:absent={signedPct(surprise) === "N/A"}>{signedPct(surprise)}</td>
+                    <td class:absent={dayStamp(observation.settled_at) === "N/A"}>{dayStamp(observation.settled_at)}</td>
                   </tr>
                 {/each}
               </tbody>

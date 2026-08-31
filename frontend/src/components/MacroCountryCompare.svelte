@@ -25,10 +25,10 @@
             {#each countryCompare.rows as row}
               <tr>
                 <td><strong>{row.label}</strong></td>
-                <td>{row.base_value_display ?? "N/A"}</td>
-                <td>{row.comparison_value_display ?? "N/A"}</td>
+                <td class:absent={row.base_value_display == null}>{row.base_value_display ?? "N/A"}</td>
+                <td class:absent={row.comparison_value_display == null}>{row.comparison_value_display ?? "N/A"}</td>
                 <td class:positive={(row.gap_value ?? 0) > 0} class:negative={(row.gap_value ?? 0) < 0}>{row.gap_display ?? "N/A"}</td>
-                <td>{row.interpretation ?? "N/A"}</td>
+                <td class:absent={row.interpretation == null}>{row.interpretation ?? "N/A"}</td>
               </tr>
             {/each}
           </tbody>

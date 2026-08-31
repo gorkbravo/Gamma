@@ -1394,7 +1394,7 @@
           </div>
           <div class="header-kpi">
             <span>Region</span>
-            <strong>{workspace.coverage.regions[0] ?? "N/A"}</strong>
+            <strong class:absent={workspace.coverage.regions[0] == null}>{workspace.coverage.regions[0] ?? "N/A"}</strong>
           </div>
         </div>
       {/if}
@@ -1451,10 +1451,10 @@
                         <strong>{row.name}</strong>
                         <span>{row.symbol} | {row.quoteUnit} | {row.quoteBasisLabel}</span>
                       </td>
-                      <td>{formatNumber(row.latestPrice, 2)}</td>
-                      <td class={valueClass(row.latestChangePct)}>{formatPct(row.latestChangePct)}</td>
+                      <td class:absent={formatNumber(row.latestPrice, 2) === "N/A"}>{formatNumber(row.latestPrice, 2)}</td>
+                      <td class={valueClass(row.latestChangePct)} class:absent={formatPct(row.latestChangePct) === "N/A"}>{formatPct(row.latestChangePct)}</td>
                       <td><span class="tag {curveTone(row.curveState)}" title={humanize(row.curveState)}>{humanize(row.curveState)}</span></td>
-                      <td class={valueClass(row.frontSpread)}>{formatNumber(row.frontSpread, 2)}</td>
+                      <td class={valueClass(row.frontSpread)} class:absent={formatNumber(row.frontSpread, 2) === "N/A"}>{formatNumber(row.frontSpread, 2)}</td>
                       <td>{row.inventoryDisplay}</td>
                     </tr>
                   {/each}
@@ -1483,15 +1483,15 @@
           <div class="inline-stats">
             <div>
               <span>Shape</span>
-              <strong class={curveTone(selectedCurve?.shape_label ?? selectedSummary?.curve_state)}>{selectedCurve?.shape_label ?? "N/A"}</strong>
+              <strong class={curveTone(selectedCurve?.shape_label ?? selectedSummary?.curve_state)} class:absent={selectedCurve?.shape_label == null}>{selectedCurve?.shape_label ?? "N/A"}</strong>
             </div>
             <div>
               <span>M1-M6</span>
-              <strong class={valueClass(selectedCurve?.m1_m6_spread)}>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
+              <strong class={valueClass(selectedCurve?.m1_m6_spread)} class:absent={formatNumber(selectedCurve?.m1_m6_spread, 3) === "N/A"}>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
             </div>
             <div>
               <span>Roll</span>
-              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
+              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
           <TimeSeriesChart series={curveSeries} height={220} emptyMessage="NO CURVE NODES" showLegend={true} />
@@ -1671,7 +1671,7 @@
                 {#if workspace.events.length}
                   {#each workspace.events.slice(0, 8) as event}
                     <tr>
-                      <td class="mono">{formatDate(event.scheduled_at)}</td>
+                      <td class="mono" class:absent={formatDate(event.scheduled_at) === "N/A"}>{formatDate(event.scheduled_at)}</td>
                       <td><strong>{event.title}</strong></td>
                       <td class="num"><span class="tag">{displayStatus(event.importance)}</span></td>
                     </tr>
@@ -1704,7 +1704,7 @@
                     <tr>
                       <td><strong>{link.target_label}</strong></td>
                       <td>{humanize(link.target_domain)}</td>
-                      <td class="num">{formatNumber(link.confidence, 2)}</td>
+                      <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1732,7 +1732,7 @@
             </div>
             <div class="ctx-kpi">
               <span>Last</span>
-              <strong>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
+              <strong class:absent={formatNumber(selectedSummary?.latest_price, 2) === "N/A"}>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
             </div>
             <div class="ctx-kpi wide">
               <span>Basis</span>
@@ -1740,7 +1740,7 @@
             </div>
             <div class="ctx-kpi">
               <span>Chg</span>
-              <strong class={valueClass(selectedSummary?.latest_change)}>{formatPct(selectedSummary?.latest_change_pct)}</strong>
+              <strong class={valueClass(selectedSummary?.latest_change)} class:absent={formatPct(selectedSummary?.latest_change_pct) === "N/A"}>{formatPct(selectedSummary?.latest_change_pct)}</strong>
             </div>
             <div class="ctx-kpi">
               <span>Curve</span>
@@ -1748,11 +1748,11 @@
             </div>
             <div class="ctx-kpi">
               <span>M1-M2</span>
-              <strong class={valueClass(selectedCurve?.front_spread)}>{formatNumber(selectedCurve?.front_spread, 3)}</strong>
+              <strong class={valueClass(selectedCurve?.front_spread)} class:absent={formatNumber(selectedCurve?.front_spread, 3) === "N/A"}>{formatNumber(selectedCurve?.front_spread, 3)}</strong>
             </div>
             <div class="ctx-kpi">
               <span>Roll</span>
-              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
+              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
             <div class="ctx-kpi">
               <span>Inv Pctl</span>
@@ -1760,7 +1760,7 @@
             </div>
             <div class="ctx-kpi">
               <span>Unit</span>
-              <strong>{selectedSummary?.instrument.quote_unit ?? "N/A"}</strong>
+              <strong class:absent={selectedSummary?.instrument.quote_unit == null}>{selectedSummary?.instrument.quote_unit ?? "N/A"}</strong>
             </div>
           </div>
         </div>
@@ -1842,8 +1842,8 @@
                           <span>{summary.instrument.name}</span>
                         </button>
                       </td>
-                      <td class="num">{formatNumber(summary.latest_price, 2)}</td>
-                      <td class="num {valueClass(summary.latest_change)}">{formatPct(summary.latest_change_pct)}</td>
+                      <td class="num" class:absent={formatNumber(summary.latest_price, 2) === "N/A"}>{formatNumber(summary.latest_price, 2)}</td>
+                      <td class="num {valueClass(summary.latest_change)}" class:absent={formatPct(summary.latest_change_pct) === "N/A"}>{formatPct(summary.latest_change_pct)}</td>
                       <td><span class="tag {curveTone(summary.curve_state)}">{humanize(summary.curve_state)}</span></td>
                     </tr>
                   {/each}
@@ -1865,20 +1865,20 @@
         <article class="panel chart-panel">
           <header class="panel-title">
             <span>{selectedInstrument?.symbol ?? "Curve"} · Forward Curve</span>
-            <span class="header-meta">{selectedCurve?.shape_label ?? "N/A"}</span>
+            <span class="header-meta" class:absent={selectedCurve?.shape_label == null}>{selectedCurve?.shape_label ?? "N/A"}</span>
           </header>
           <div class="inline-stats">
             <div>
               <span>M1-M6</span>
-              <strong class={valueClass(selectedCurve?.m1_m6_spread)}>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
+              <strong class={valueClass(selectedCurve?.m1_m6_spread)} class:absent={formatNumber(selectedCurve?.m1_m6_spread, 3) === "N/A"}>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
             </div>
             <div>
               <span>Slope</span>
-              <strong class={valueClass(selectedCurve?.curve_slope)}>{formatNumber(selectedCurve?.curve_slope, 3)}</strong>
+              <strong class={valueClass(selectedCurve?.curve_slope)} class:absent={formatNumber(selectedCurve?.curve_slope, 3) === "N/A"}>{formatNumber(selectedCurve?.curve_slope, 3)}</strong>
             </div>
             <div>
               <span>Roll</span>
-              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
+              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
           <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
@@ -1907,8 +1907,8 @@
                       <td><strong>{node.contract.symbol}</strong></td>
                       <td>{node.contract.contract_month}</td>
                       <td class="num">{node.days_to_expiry == null ? "N/A" : `${node.days_to_expiry}d`}</td>
-                      <td class="num">{formatNumber(node.price, 3)}</td>
-                      <td class="num {valueClass(node.change)}">{formatNumber(node.change, 3)}</td>
+                      <td class="num" class:absent={formatNumber(node.price, 3) === "N/A"}>{formatNumber(node.price, 3)}</td>
+                      <td class="num {valueClass(node.change)}" class:absent={formatNumber(node.change, 3) === "N/A"}>{formatNumber(node.change, 3)}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1944,9 +1944,9 @@
                   {#each crackMatrixRows as row}
                     <tr>
                       <td><strong>{row.label}</strong><span class="meta">{row.formula}</span></td>
-                      <td class="num">{formatNumber(row.value, 2)}</td>
-                      <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
-                      <td class="num">{formatPercentile(row.percentile)}</td>
+                      <td class="num" class:absent={formatNumber(row.value, 2) === "N/A"}>{formatNumber(row.value, 2)}</td>
+                      <td class="num {row.tone}" class:absent={formatNumber(row.change, 2) === "N/A"}>{formatNumber(row.change, 2)}</td>
+                      <td class="num" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1970,7 +1970,7 @@
                   <div class="heatmap-track">
                     <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
                   </div>
-                  <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
+                  <strong class="num {row.tone}" class:absent={formatNumber(row.value, 3) === "N/A"}>{formatNumber(row.value, 3)}</strong>
                 </div>
               {/each}
             </div>
@@ -2002,7 +2002,7 @@
                     <td><strong>{link.target_label}</strong></td>
                     <td>{humanize(link.target_domain)}</td>
                     <td>{humanize(link.relationship)}</td>
-                    <td class="num">{formatNumber(link.confidence, 2)}</td>
+                    <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
                   </tr>
                 {/each}
               {:else}
@@ -2038,10 +2038,10 @@
                   {#each substitutionSpreadRows as row}
                     <tr>
                       <td><strong>{row.label}</strong></td>
-                      <td class="num">{formatNumber(row.value, 1)}</td>
-                      <td class="num {valueClass(row.change)}">{formatNumber(row.change, 1)}</td>
-                      <td class="num {valueClass(row.zScore)}">{formatNumber(row.zScore, 2)}</td>
-                      <td class="num">{formatPercentile(row.percentile)}</td>
+                      <td class="num" class:absent={formatNumber(row.value, 1) === "N/A"}>{formatNumber(row.value, 1)}</td>
+                      <td class="num {valueClass(row.change)}" class:absent={formatNumber(row.change, 1) === "N/A"}>{formatNumber(row.change, 1)}</td>
+                      <td class="num {valueClass(row.zScore)}" class:absent={formatNumber(row.zScore, 2) === "N/A"}>{formatNumber(row.zScore, 2)}</td>
+                      <td class="num" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -2065,7 +2065,7 @@
                   <div class="heatmap-track">
                     <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
                   </div>
-                  <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
+                  <strong class="num {row.tone}" class:absent={formatNumber(row.value, 3) === "N/A"}>{formatNumber(row.value, 3)}</strong>
                 </div>
               {/each}
             </div>
@@ -2088,7 +2088,7 @@
                 <div class="heatmap-track">
                   <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
                 </div>
-                <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
+                <strong class="num {row.tone}" class:absent={formatNumber(row.value, 3) === "N/A"}>{formatNumber(row.value, 3)}</strong>
               </div>
             {/each}
           </div>
@@ -2122,9 +2122,9 @@
                   <tr>
                     <td><strong>{spread.definition.label}</strong><span class="meta">{spread.definition.formula}</span></td>
                     <td class="num">{formatNumber(spread.value, 3)} {spreadUnit(spread)}</td>
-                    <td class="num {valueClass(spread.change)}">{formatNumber(spread.change, 3)}</td>
-                    <td class="num {valueClass(spread.z_score)}">{formatNumber(spread.z_score, 2)}</td>
-                    <td class="num">{formatPercentile(spread.percentile)}</td>
+                    <td class="num {valueClass(spread.change)}" class:absent={formatNumber(spread.change, 3) === "N/A"}>{formatNumber(spread.change, 3)}</td>
+                    <td class="num {valueClass(spread.z_score)}" class:absent={formatNumber(spread.z_score, 2) === "N/A"}>{formatNumber(spread.z_score, 2)}</td>
+                    <td class="num" class:absent={formatPercentile(spread.percentile) === "N/A"}>{formatPercentile(spread.percentile)}</td>
                   </tr>
                 {/each}
               {:else}
@@ -2159,7 +2159,7 @@
                     <tr>
                       <td><strong>{row.metal}</strong></td>
                       <td>{row.driver}</td>
-                      <td class="num"><span class="tag {row.tone}">{formatNumber(row.value, 2)}</span></td>
+                      <td class="num"><span class="tag {row.tone}" class:absent={formatNumber(row.value, 2) === "N/A"}>{formatNumber(row.value, 2)}</span></td>
                     </tr>
                   {/each}
                 {:else}
@@ -2180,7 +2180,7 @@
               {#each metalRatioGaugeRows as row}
                 <div class="seasonality-row">
                   <span class="row-label" title={row.label}>{row.label}</span>
-                  <span class="num meta range-min">{formatNumber(row.min, 2)}</span>
+                  <span class="num meta range-min" class:absent={formatNumber(row.min, 2) === "N/A"}>{formatNumber(row.min, 2)}</span>
                   <div class="seasonality-band">
                     <span class="band-whisker"></span>
                     {#if row.q1Pos != null && row.q3Pos != null}
@@ -2193,9 +2193,9 @@
                       <span class="band-marker {row.tone}" style={`left:${row.position}%`}></span>
                     {/if}
                   </div>
-                  <span class="num meta range-max">{formatNumber(row.max, 2)}</span>
+                  <span class="num meta range-max" class:absent={formatNumber(row.max, 2) === "N/A"}>{formatNumber(row.max, 2)}</span>
                   <strong class="num {row.tone}">{formatNumber(row.current, 2)}x</strong>
-                  <span class="num meta pctl-cell">{formatPercentile(row.percentile)}</span>
+                  <span class="num meta pctl-cell" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</span>
                 </div>
               {/each}
             {:else}
@@ -2280,8 +2280,8 @@
                     <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
                     <td>{row.category}</td>
                     <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
-                    <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
-                    <td class="num">{formatPercentile(row.percentile)}</td>
+                    <td class="num {row.tone}" class:absent={formatNumber(row.change, 2) === "N/A"}>{formatNumber(row.change, 2)}</td>
+                    <td class="num" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</td>
                     <td class="sparkline-cell">
                       {#if row.path}
                         <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
@@ -2314,7 +2314,7 @@
             {#each inventoryCloudRows as row}
               <div class="seasonality-row">
                 <span class="row-label" title={row.label}>{row.label}</span>
-                <span class="num meta range-min">{formatNumber(row.min, 1)}</span>
+                <span class="num meta range-min" class:absent={formatNumber(row.min, 1) === "N/A"}>{formatNumber(row.min, 1)}</span>
                 <div class="seasonality-band">
                   <span class="band-whisker"></span>
                   {#if row.q1Pos != null && row.q3Pos != null}
@@ -2327,9 +2327,9 @@
                     <span class="band-marker {row.tone}" style={`left:${row.position}%`}></span>
                   {/if}
                 </div>
-                <span class="num meta range-max">{formatNumber(row.max, 1)}</span>
-                <strong class="num {row.tone}">{formatNumber(row.latest, 1)}</strong>
-                <span class="num meta pctl-cell">{formatPercentile(row.percentile)}</span>
+                <span class="num meta range-max" class:absent={formatNumber(row.max, 1) === "N/A"}>{formatNumber(row.max, 1)}</span>
+                <strong class="num {row.tone}" class:absent={formatNumber(row.latest, 1) === "N/A"}>{formatNumber(row.latest, 1)}</strong>
+                <span class="num meta pctl-cell" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</span>
               </div>
             {/each}
           {:else}
@@ -2364,8 +2364,8 @@
                     <td><strong>{series.metadata.label}</strong><span class="meta">{series.metadata.source_provider}</span></td>
                     <td>{series.metadata.frequency}</td>
                     <td class="num">{formatNumber(series.latest_value, 2)} {series.metadata.unit}</td>
-                    <td class="num {valueClass(series.latest_change)}">{formatNumber(series.latest_change, 2)}</td>
-                    <td class="num">{formatPercentile(series.seasonal_percentile)}</td>
+                    <td class="num {valueClass(series.latest_change)}" class:absent={formatNumber(series.latest_change, 2) === "N/A"}>{formatNumber(series.latest_change, 2)}</td>
+                    <td class="num" class:absent={formatPercentile(series.seasonal_percentile) === "N/A"}>{formatPercentile(series.seasonal_percentile)}</td>
                     <td class="sparkline-cell">
                       {#if sparklinePath(series.points, 96, 28)}
                         <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${series.metadata.label} recent history`}>
@@ -2407,7 +2407,7 @@
                 {#if eventRows.length}
                   {#each eventRows as event}
                     <tr>
-                      <td class="mono">{formatDate(event.scheduled_at)}</td>
+                      <td class="mono" class:absent={formatDate(event.scheduled_at) === "N/A"}>{formatDate(event.scheduled_at)}</td>
                       <td><strong>{event.title}</strong><span class="meta">{event.relative_label ?? ""}</span></td>
                       <td>{humanize(event.category)}</td>
                       <td class="num"><span class="tag">{displayStatus(event.importance)}</span></td>
@@ -2443,7 +2443,7 @@
                       <td><strong>{link.target_label}</strong></td>
                       <td>{humanize(link.target_domain)}</td>
                       <td>{humanize(link.relationship)}</td>
-                      <td class="num">{formatNumber(link.confidence, 2)}</td>
+                      <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
                     </tr>
                   {/each}
                 {:else}

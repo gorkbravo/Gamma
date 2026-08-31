@@ -557,11 +557,11 @@
         {/each}
       </div>
       <div class="source-strip">
-        <div><span>Spot</span><strong>{money(result?.spot)}</strong></div>
-        <div><span>ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
-        <div><span>Term</span><strong class={rowClass(surfaceStats.termSlope)}>{signedPct(surfaceStats.termSlope)}</strong></div>
-        <div><span>Expiry</span><strong>{formatExpiry(activeExpiry)}</strong></div>
-        <div><span>Depth</span><strong>{depthLabel(result?.collection?.depth_preset)}</strong></div>
+        <div><span>Spot</span><strong class:absent={money(result?.spot) === "N/A"}>{money(result?.spot)}</strong></div>
+        <div><span>ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"}>{pct(surfaceStats.frontAtmIv)}</strong></div>
+        <div><span>Term</span><strong class={rowClass(surfaceStats.termSlope)} class:absent={signedPct(surfaceStats.termSlope) === "N/A"}>{signedPct(surfaceStats.termSlope)}</strong></div>
+        <div><span>Expiry</span><strong class:absent={formatExpiry(activeExpiry) === "N/A"}>{formatExpiry(activeExpiry)}</strong></div>
+        <div><span>Depth</span><strong class:absent={depthLabel(result?.collection?.depth_preset) === "N/A"}>{depthLabel(result?.collection?.depth_preset)}</strong></div>
         <div><span>Source</span><ProvenanceBadge data={surfaceBadge} /></div>
       </div>
     </div>
@@ -583,12 +583,12 @@
       <div class="primary-column">
         <article class="panel kpi-panel">
           <div class="kpi-grid">
-            <div class="metric"><span>Front ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong><small>{formatExpiry(surfaceStats.frontExpiry)}</small></div>
-            <div class="metric"><span>Back ATM IV</span><strong>{pct(surfaceStats.backAtmIv)}</strong><small>{signedPct(surfaceStats.termSlope)} slope</small></div>
-            <div class="metric"><span>ATM Strike</span><strong>{fmt(surfaceStats.atmStrike, 2)}</strong><small>Spot {money(result?.spot)}</small></div>
-            <div class="metric"><span>Put / Call OI</span><strong>{fmt(overview.putCallOpenInterestRatio, 2)}</strong><small>Volume {fmt(overview.putCallVolumeRatio, 2)}</small></div>
-            <div class="metric"><span>Implied Move</span><strong>{pct(overview.atmPair?.impliedMovePct)}</strong><small>Straddle {money(overview.atmPair?.straddleMidpoint)}</small></div>
-            <div class="metric"><span>Max Pain</span><strong>{fmt(overview.maxPainStrike, 2)}</strong><small>{overview.frontChain.length} chain rows</small></div>
+            <div class="metric"><span>Front ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"}>{pct(surfaceStats.frontAtmIv)}</strong><small>{formatExpiry(surfaceStats.frontExpiry)}</small></div>
+            <div class="metric"><span>Back ATM IV</span><strong class:absent={pct(surfaceStats.backAtmIv) === "N/A"}>{pct(surfaceStats.backAtmIv)}</strong><small>{signedPct(surfaceStats.termSlope)} slope</small></div>
+            <div class="metric"><span>ATM Strike</span><strong class:absent={fmt(surfaceStats.atmStrike, 2) === "N/A"}>{fmt(surfaceStats.atmStrike, 2)}</strong><small>Spot {money(result?.spot)}</small></div>
+            <div class="metric"><span>Put / Call OI</span><strong class:absent={fmt(overview.putCallOpenInterestRatio, 2) === "N/A"}>{fmt(overview.putCallOpenInterestRatio, 2)}</strong><small>Volume {fmt(overview.putCallVolumeRatio, 2)}</small></div>
+            <div class="metric"><span>Implied Move</span><strong class:absent={pct(overview.atmPair?.impliedMovePct) === "N/A"}>{pct(overview.atmPair?.impliedMovePct)}</strong><small>Straddle {money(overview.atmPair?.straddleMidpoint)}</small></div>
+            <div class="metric"><span>Max Pain</span><strong class:absent={fmt(overview.maxPainStrike, 2) === "N/A"}>{fmt(overview.maxPainStrike, 2)}</strong><small>{overview.frontChain.length} chain rows</small></div>
           </div>
         </article>
 
@@ -619,14 +619,14 @@
                     on:contextmenu={(event) => openOptionStrategyMenu(event, row)}
                     on:keydown={(event) => handleOptionRowKeydown(event, row)}
                   >
-                    <td class:itm={callItm}>{fmt(row.callDelta, 3)}</td>
-                    <td class:itm={callItm}>{pct(row.callIv)}</td>
-                    <td class:itm={callItm}>{money(row.callMidpoint)}</td>
-                    <td class="strike-cell">{fmt(row.strike, 2)}</td>
-                    <td class:itm={putItm}>{money(row.putMidpoint)}</td>
-                    <td class:itm={putItm}>{pct(row.putIv)}</td>
-                    <td class:itm={putItm}>{fmt(row.putDelta, 3)}</td>
-                    <td>{pct(row.impliedMovePct)}</td>
+                    <td class:itm={callItm} class:absent={fmt(row.callDelta, 3) === "N/A"}>{fmt(row.callDelta, 3)}</td>
+                    <td class:itm={callItm} class:absent={pct(row.callIv) === "N/A"}>{pct(row.callIv)}</td>
+                    <td class:itm={callItm} class:absent={money(row.callMidpoint) === "N/A"}>{money(row.callMidpoint)}</td>
+                    <td class="strike-cell" class:absent={fmt(row.strike, 2) === "N/A"}>{fmt(row.strike, 2)}</td>
+                    <td class:itm={putItm} class:absent={money(row.putMidpoint) === "N/A"}>{money(row.putMidpoint)}</td>
+                    <td class:itm={putItm} class:absent={pct(row.putIv) === "N/A"}>{pct(row.putIv)}</td>
+                    <td class:itm={putItm} class:absent={fmt(row.putDelta, 3) === "N/A"}>{fmt(row.putDelta, 3)}</td>
+                    <td class:absent={pct(row.impliedMovePct) === "N/A"}>{pct(row.impliedMovePct)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -669,7 +669,7 @@
                       {#each row.cells as cell}
                         <td style={payoffHeatStyle(cell.pct, payoffMatrix.maxGain)}>{payoffPct(cell.pct)}</td>
                       {/each}
-                      <td class="move-col {rowClass(row.movePct)}">{signedPct(row.movePct, 0)}</td>
+                      <td class="move-col {rowClass(row.movePct)}" class:absent={signedPct(row.movePct, 0) === "N/A"}>{signedPct(row.movePct, 0)}</td>
                     </tr>
                   {/each}
                 </tbody>
@@ -764,16 +764,16 @@
                   on:contextmenu={(event) => openOptionStrategyMenu(event, row)}
                   on:keydown={(event) => handleOptionRowKeydown(event, row)}
                 >
-                  <td class:itm={callItm}>{fmt(row.callOpenInterest, 0)}</td>
-                  <td class:itm={callItm}>{fmt(row.callDelta, 3)}</td>
-                  <td class:itm={callItm}>{pct(row.callIv)}</td>
-                  <td class:itm={callItm}>{money(row.callMidpoint)}</td>
-                  <td class="strike-cell">{fmt(row.strike, 2)}</td>
-                  <td class={rowClass(row.distancePct)}>{signedPct(row.distancePct)}</td>
-                  <td class:itm={putItm}>{money(row.putMidpoint)}</td>
-                  <td class:itm={putItm}>{pct(row.putIv)}</td>
-                  <td class:itm={putItm}>{fmt(row.putDelta, 3)}</td>
-                  <td class:itm={putItm}>{fmt(row.putOpenInterest, 0)}</td>
+                  <td class:itm={callItm} class:absent={fmt(row.callOpenInterest, 0) === "N/A"}>{fmt(row.callOpenInterest, 0)}</td>
+                  <td class:itm={callItm} class:absent={fmt(row.callDelta, 3) === "N/A"}>{fmt(row.callDelta, 3)}</td>
+                  <td class:itm={callItm} class:absent={pct(row.callIv) === "N/A"}>{pct(row.callIv)}</td>
+                  <td class:itm={callItm} class:absent={money(row.callMidpoint) === "N/A"}>{money(row.callMidpoint)}</td>
+                  <td class="strike-cell" class:absent={fmt(row.strike, 2) === "N/A"}>{fmt(row.strike, 2)}</td>
+                  <td class={rowClass(row.distancePct)} class:absent={signedPct(row.distancePct) === "N/A"}>{signedPct(row.distancePct)}</td>
+                  <td class:itm={putItm} class:absent={money(row.putMidpoint) === "N/A"}>{money(row.putMidpoint)}</td>
+                  <td class:itm={putItm} class:absent={pct(row.putIv) === "N/A"}>{pct(row.putIv)}</td>
+                  <td class:itm={putItm} class:absent={fmt(row.putDelta, 3) === "N/A"}>{fmt(row.putDelta, 3)}</td>
+                  <td class:itm={putItm} class:absent={fmt(row.putOpenInterest, 0) === "N/A"}>{fmt(row.putOpenInterest, 0)}</td>
                   <td class="action-cell">
                     <button type="button" on:click={() => addLeg(row, "call")}>+C</button>
                     <button type="button" on:click={() => addLeg(row, "put")}>+P</button>
@@ -792,11 +792,11 @@
         <article class="panel">
           <h3>Chain Context</h3>
           <div class="metric-list">
-            <div><span>Expiry</span><strong>{formatExpiry(activeExpiry)}</strong></div>
+            <div><span>Expiry</span><strong class:absent={formatExpiry(activeExpiry) === "N/A"}>{formatExpiry(activeExpiry)}</strong></div>
             <div><span>DTE</span><strong>{activeExpiry ? daysToExpiry(activeExpiry) : "N/A"}</strong></div>
             <div><span>Rows</span><strong>{chainRows.length}</strong></div>
-            <div><span>ATM Pair</span><strong>{fmt(overview.atmPair?.strike, 2)}</strong></div>
-            <div><span>Straddle</span><strong>{money(overview.atmPair?.straddleMidpoint)}</strong></div>
+            <div><span>ATM Pair</span><strong class:absent={fmt(overview.atmPair?.strike, 2) === "N/A"}>{fmt(overview.atmPair?.strike, 2)}</strong></div>
+            <div><span>Straddle</span><strong class:absent={money(overview.atmPair?.straddleMidpoint) === "N/A"}>{money(overview.atmPair?.straddleMidpoint)}</strong></div>
           </div>
         </article>
         <article class="panel greek-panel">
@@ -819,10 +819,10 @@
                 <tbody>
                   {#each chainGreekRows as row}
                     <tr class:atm={row.strike === overview.atmPair?.strike}>
-                      <td>{fmt(row.strike, 1)}</td>
+                      <td class:absent={fmt(row.strike, 1) === "N/A"}>{fmt(row.strike, 1)}</td>
                       <td>{formatGreekMetric(row, "call")}</td>
                       <td>{formatGreekMetric(row, "put")}</td>
-                      <td>{pct(row.call?.sigma ?? row.put?.sigma)}</td>
+                      <td class:absent={pct(row.call?.sigma ?? row.put?.sigma) === "N/A"}>{pct(row.call?.sigma ?? row.put?.sigma)}</td>
                     </tr>
                   {/each}
                 </tbody>
@@ -957,10 +957,10 @@
               <tbody>
                 {#each skewRows as row}
                   <tr>
-                    <td>{formatExpiry(row.expiry)}</td>
-                    <td class={rowClass(row.putSkew)}>{signedPct(row.putSkew)}</td>
-                    <td class={rowClass(row.callSkew)}>{signedPct(row.callSkew)}</td>
-                    <td class={rowClass(row.wingSpread)}>{signedPct(row.wingSpread)}</td>
+                    <td class:absent={formatExpiry(row.expiry) === "N/A"}>{formatExpiry(row.expiry)}</td>
+                    <td class={rowClass(row.putSkew)} class:absent={signedPct(row.putSkew) === "N/A"}>{signedPct(row.putSkew)}</td>
+                    <td class={rowClass(row.callSkew)} class:absent={signedPct(row.callSkew) === "N/A"}>{signedPct(row.callSkew)}</td>
+                    <td class={rowClass(row.wingSpread)} class:absent={signedPct(row.wingSpread) === "N/A"}>{signedPct(row.wingSpread)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -982,9 +982,9 @@
               {#each realizedRows as row}
                 <tr>
                   <td>{row.window}D</td>
-                  <td>{pct(row.realizedVol)}</td>
-                  <td>{pct(surfaceStats.frontAtmIv)}</td>
-                  <td class={rowClass(row.spreadToFrontIv)}>{signedPct(row.spreadToFrontIv)}</td>
+                  <td class:absent={pct(row.realizedVol) === "N/A"}>{pct(row.realizedVol)}</td>
+                  <td class:absent={pct(surfaceStats.frontAtmIv) === "N/A"}>{pct(surfaceStats.frontAtmIv)}</td>
+                  <td class={rowClass(row.spreadToFrontIv)} class:absent={signedPct(row.spreadToFrontIv) === "N/A"}>{signedPct(row.spreadToFrontIv)}</td>
                   <td>{row.observationCount}</td>
                 </tr>
               {/each}
@@ -1005,7 +1005,7 @@
             <div><span>Realized Source</span><strong>{realizedSourceLabel}</strong></div>
             <div><span>Price Points</span><strong>{realizedPricePoints.length}</strong></div>
             <div><span>History Freshness</span><ProvenanceBadge data={historyBadge} /></div>
-            <div><span>Front ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
+            <div><span>Front ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"}>{pct(surfaceStats.frontAtmIv)}</strong></div>
           </div>
         </article>
         {@render DiagnosticsPanel(result, session, status, sessionLoading)}
@@ -1089,9 +1089,9 @@
           <div class="metric-list">
             <div><span>Method</span><strong>Local lognormal RND proxy</strong></div>
             <div><span>Fit</span><strong>{result?.surface_model_label ?? "Line interpolation"}</strong></div>
-            <div><span>Expiry</span><strong>{formatExpiry(probabilitySlice?.expiry)}</strong></div>
-            <div><span>DTE</span><strong>{probabilitySlice?.dte ?? "N/A"}</strong></div>
-            <div><span>Visible Mass</span><strong>{pct(probabilitySelection?.probabilityMass, 2)}</strong></div>
+            <div><span>Expiry</span><strong class:absent={formatExpiry(probabilitySlice?.expiry) === "N/A"}>{formatExpiry(probabilitySlice?.expiry)}</strong></div>
+            <div><span>DTE</span><strong class:absent={probabilitySlice?.dte == null}>{probabilitySlice?.dte ?? "N/A"}</strong></div>
+            <div><span>Visible Mass</span><strong class:absent={pct(probabilitySelection?.probabilityMass, 2) === "N/A"}>{pct(probabilitySelection?.probabilityMass, 2)}</strong></div>
             <div><span>Range</span><strong>{probabilitySelection ? `${fmt(probabilitySelection.lowerStrike, 1)}-${fmt(probabilitySelection.upperStrike, 1)}` : "N/A"}</strong></div>
           </div>
         </article>
@@ -1152,9 +1152,9 @@
                     on:contextmenu={(event) => openOptionStrategyMenu(event, row)}
                     on:keydown={(event) => handleOptionRowKeydown(event, row)}
                   >
-                    <td>{fmt(row.strike, 2)}</td>
-                    <td>{money(row.callMidpoint)}</td>
-                    <td>{money(row.putMidpoint)}</td>
+                    <td class:absent={fmt(row.strike, 2) === "N/A"}>{fmt(row.strike, 2)}</td>
+                    <td class:absent={money(row.callMidpoint) === "N/A"}>{money(row.callMidpoint)}</td>
+                    <td class:absent={money(row.putMidpoint) === "N/A"}>{money(row.putMidpoint)}</td>
                     <td><button type="button" on:click={() => addLeg(row)}>Add</button></td>
                   </tr>
                 {/each}
@@ -1200,9 +1200,9 @@
                     <tr class:atm={Math.abs(row.movePct) < 1e-9}>
                       <th class="price-col">{fmt(row.price, 0)}</th>
                       {#each row.cells as cell}
-                        <td style={strategyPayoffHeatStyle(cell.pl)}>{signedMoney(cell.pl)}</td>
+                        <td style={strategyPayoffHeatStyle(cell.pl)} class:absent={signedMoney(cell.pl) === "N/A"}>{signedMoney(cell.pl)}</td>
                       {/each}
-                      <td class="move-col {rowClass(row.movePct)}">{signedPct(row.movePct, 0)}</td>
+                      <td class="move-col {rowClass(row.movePct)}" class:absent={signedPct(row.movePct, 0) === "N/A"}>{signedPct(row.movePct, 0)}</td>
                     </tr>
                   {/each}
                 </tbody>
@@ -1218,15 +1218,15 @@
         <article class="panel">
           <h3>Strategy Summary</h3>
           <div class="metric-list">
-            <div><span>Net Premium</span><strong>{signedMoney(strategyPayoff.netPremium)}</strong></div>
+            <div><span>Net Premium</span><strong class:absent={signedMoney(strategyPayoff.netPremium) === "N/A"}>{signedMoney(strategyPayoff.netPremium)}</strong></div>
             <div><span>Max Profit</span><strong>{strategyPayoff.maxProfit == null ? "Open" : signedMoney(strategyPayoff.maxProfit)}</strong></div>
             <div><span>Max Loss</span><strong>{strategyPayoff.maxLoss == null ? "Open" : signedMoney(strategyPayoff.maxLoss)}</strong></div>
             <div><span>Breakevens</span><strong>{strategyPayoff.breakevens.length ? strategyPayoff.breakevens.map((value) => fmt(value, 2)).join(", ") : "N/A"}</strong></div>
-            <div><span>Net Delta</span><strong>{signedGreek(strategyGreeks?.delta, 3)}</strong></div>
-            <div><span>Net Gamma</span><strong>{signedGreek(strategyGreeks?.gamma, 4)}</strong></div>
-            <div><span>Net Vega</span><strong>{signedGreek(strategyGreeks?.vega, 3)}</strong></div>
-            <div><span>Net Theta</span><strong>{signedGreek(strategyGreeks?.theta, 3)}</strong></div>
-            <div><span>Net Rho</span><strong>{signedGreek(strategyGreeks?.rho, 3)}</strong></div>
+            <div><span>Net Delta</span><strong class:absent={signedGreek(strategyGreeks?.delta, 3) === "N/A"}>{signedGreek(strategyGreeks?.delta, 3)}</strong></div>
+            <div><span>Net Gamma</span><strong class:absent={signedGreek(strategyGreeks?.gamma, 4) === "N/A"}>{signedGreek(strategyGreeks?.gamma, 4)}</strong></div>
+            <div><span>Net Vega</span><strong class:absent={signedGreek(strategyGreeks?.vega, 3) === "N/A"}>{signedGreek(strategyGreeks?.vega, 3)}</strong></div>
+            <div><span>Net Theta</span><strong class:absent={signedGreek(strategyGreeks?.theta, 3) === "N/A"}>{signedGreek(strategyGreeks?.theta, 3)}</strong></div>
+            <div><span>Net Rho</span><strong class:absent={signedGreek(strategyGreeks?.rho, 3) === "N/A"}>{signedGreek(strategyGreeks?.rho, 3)}</strong></div>
           </div>
         </article>
         {@render DiagnosticsPanel(result, session, status, sessionLoading)}
@@ -1260,7 +1260,7 @@
       <div><span>Fit</span><strong>{result?.surface_model_label ?? "Line interpolation"}</strong></div>
       <div><span>Cells</span><strong>{result?.quality ? `${result.quality.observed_surface_cells}/${result.quality.expected_surface_cells}` : "N/A"}</strong></div>
       <div><span>Lines</span><strong>{result?.collection ? `${result.collection.estimated_total_market_data_lines}/${result.collection.configured_market_data_line_budget}` : "N/A"}</strong></div>
-      <div><span>Updated</span><strong>{shortTime(result?.timestamp)}</strong></div>
+      <div><span>Updated</span><strong class:absent={shortTime(result?.timestamp) === "N/A"}>{shortTime(result?.timestamp)}</strong></div>
     </div>
     {#if result?.transformation_note}
       <p class="note">{result.transformation_note}</p>

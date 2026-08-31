@@ -218,11 +218,11 @@
                   <strong>{flagForPartner(partner)} {partner.partner_name}</strong>
                   <span>{partner.partner_code}</span>
                 </td>
-                <td>{partner.export_value_display ?? "N/A"}</td>
-                <td>{partner.import_value_display ?? "N/A"}</td>
-                <td>{partner.total_trade_value_display ?? "N/A"}</td>
+                <td class:absent={partner.export_value_display == null}>{partner.export_value_display ?? "N/A"}</td>
+                <td class:absent={partner.import_value_display == null}>{partner.import_value_display ?? "N/A"}</td>
+                <td class:absent={partner.total_trade_value_display == null}>{partner.total_trade_value_display ?? "N/A"}</td>
                 <td class:positive={(partner.trade_balance ?? 0) > 0} class:negative={(partner.trade_balance ?? 0) < 0}>{partner.trade_balance_display ?? "N/A"}</td>
-                <td>{partner.share_of_total_display ?? "N/A"}</td>
+                <td class:absent={partner.share_of_total_display == null}>{partner.share_of_total_display ?? "N/A"}</td>
               </tr>
             {/each}
           </tbody>

@@ -413,7 +413,7 @@
                   </div>
                   <div class="focus-row compact-focus">
                     <span class="focus-label">Flow</span>
-                    <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
+                    <strong class={flowToneClass(flow?.flow_signal_label)} class:absent={flow?.flow_signal_label == null}>{flow?.flow_signal_label ?? "N/A"}</strong>
                     <p>{flow?.summary ?? "Flow context appears after token selection."}</p>
                   </div>
                 </div>
@@ -436,10 +436,10 @@
                       {#each workspace.tokens as token}
                         <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id))}>
                           <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
-                          <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
-                          <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                          <td>{compactMoney(token.market_cap)}</td>
-                          <td>{ratio(token.turnover_ratio_24h)}</td>
+                          <td class:absent={money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2) === "N/A"}>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
+                          <td class={toneClass(token.price_change_pct_24h)} class:absent={pct(token.price_change_pct_24h) === "N/A"}>{pct(token.price_change_pct_24h)}</td>
+                          <td class:absent={compactMoney(token.market_cap) === "N/A"}>{compactMoney(token.market_cap)}</td>
+                          <td class:absent={ratio(token.turnover_ratio_24h) === "N/A"}>{ratio(token.turnover_ratio_24h)}</td>
                           <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
                         </tr>
                       {/each}
@@ -467,7 +467,7 @@
                   {#each workspace.narratives as basket}
                     <button type="button" class="basket-card" on:click={() => applyNarrative(basket.label)}>
                       <span>{basket.label}</span>
-                      <strong>{compactMoney(basket.market_cap)}</strong>
+                      <strong class:absent={compactMoney(basket.market_cap) === "N/A"}>{compactMoney(basket.market_cap)}</strong>
                       <small class={toneClass(basket.market_cap_change_pct_24h)}>
                         {pct(basket.market_cap_change_pct_24h)} | {compactMoney(basket.volume_24h)} vol
                       </small>
@@ -506,9 +506,9 @@
                               <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
                             </div>
                           </td>
-                          <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                          <td>{ratio(token.turnover_ratio_24h)}</td>
-                          <td>{compactMoney(token.total_volume)}</td>
+                          <td class={toneClass(token.price_change_pct_24h)} class:absent={pct(token.price_change_pct_24h) === "N/A"}>{pct(token.price_change_pct_24h)}</td>
+                          <td class:absent={ratio(token.turnover_ratio_24h) === "N/A"}>{ratio(token.turnover_ratio_24h)}</td>
+                          <td class:absent={compactMoney(token.total_volume) === "N/A"}>{compactMoney(token.total_volume)}</td>
                           <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
                         </tr>
                       {/each}
@@ -554,22 +554,22 @@
             {#if heroCanvas === "basket" && syntheticPortfolio}
               <div class="metric hero-stat">
                 <span>Basket Return</span>
-                <strong>{pct(syntheticPortfolio.cumulative_return_pct)}</strong>
+                <strong class:absent={pct(syntheticPortfolio.cumulative_return_pct) === "N/A"}>{pct(syntheticPortfolio.cumulative_return_pct)}</strong>
                 <small>{syntheticPortfolio.lookback_days}D window</small>
               </div>
               <div class="metric hero-stat">
                 <span>Vs {syntheticPortfolio.benchmark_label}</span>
-                <strong class={toneClass(syntheticPortfolio.relative_return_pct)}>{pct(syntheticPortfolio.relative_return_pct)}</strong>
+                <strong class={toneClass(syntheticPortfolio.relative_return_pct)} class:absent={pct(syntheticPortfolio.relative_return_pct) === "N/A"}>{pct(syntheticPortfolio.relative_return_pct)}</strong>
                 <small>{pct(syntheticPortfolio.benchmark_return_pct)}</small>
               </div>
               <div class="metric hero-stat">
                 <span>Volatility</span>
-                <strong>{pct(syntheticPortfolio.annualized_volatility_pct)}</strong>
+                <strong class:absent={pct(syntheticPortfolio.annualized_volatility_pct) === "N/A"}>{pct(syntheticPortfolio.annualized_volatility_pct)}</strong>
                 <small>annualized</small>
               </div>
               <div class="metric hero-stat">
                 <span>Weighted Mcap</span>
-                <strong>{compactMoney(syntheticPortfolio.weighted_market_cap)}</strong>
+                <strong class:absent={compactMoney(syntheticPortfolio.weighted_market_cap) === "N/A"}>{compactMoney(syntheticPortfolio.weighted_market_cap)}</strong>
                 <small>Turnover {ratio(syntheticPortfolio.weighted_turnover_ratio_24h)}</small>
               </div>
               <div class="metric hero-stat">
@@ -580,22 +580,22 @@
             {:else}
               <div class="metric hero-stat">
                 <span>Price</span>
-                <strong>{money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2)}</strong>
+                <strong class:absent={money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2) === "N/A"}>{money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2)}</strong>
                 <small class={toneClass(detail?.price_change_pct_24h)}>{pct(detail?.price_change_pct_24h)} 24H</small>
               </div>
               <div class="metric hero-stat">
                 <span>Market Cap</span>
-                <strong>{compactMoney(detail?.market_cap)}</strong>
+                <strong class:absent={compactMoney(detail?.market_cap) === "N/A"}>{compactMoney(detail?.market_cap)}</strong>
                 <small>FDV {compactMoney(detail?.fully_diluted_valuation)}</small>
               </div>
               <div class="metric hero-stat">
                 <span>24H Volume</span>
-                <strong>{compactMoney(detail?.total_volume)}</strong>
+                <strong class:absent={compactMoney(detail?.total_volume) === "N/A"}>{compactMoney(detail?.total_volume)}</strong>
                 <small>Turnover {ratio(detail?.turnover_ratio_24h)}</small>
               </div>
               <div class="metric hero-stat">
                 <span>7D</span>
-                <strong class={toneClass(detail?.price_change_pct_7d)}>{pct(detail?.price_change_pct_7d)}</strong>
+                <strong class={toneClass(detail?.price_change_pct_7d)} class:absent={pct(detail?.price_change_pct_7d) === "N/A"}>{pct(detail?.price_change_pct_7d)}</strong>
                 <small>30D {pct(detail?.price_change_pct_30d)}</small>
               </div>
               <div class="metric hero-stat">
@@ -640,20 +640,20 @@
             <div class="focus-list">
               <div class="focus-row">
                 <span class="focus-label">Target</span>
-                <strong class="focus-value">{comparison?.target_kind ?? "N/A"}</strong>
+                <strong class="focus-value" class:absent={comparison?.target_kind == null}>{comparison?.target_kind ?? "N/A"}</strong>
                 <p>{comparison?.summary ?? "Comparison context will appear once Gamma resolves a target."}</p>
               </div>
               <div class="focus-row">
                 <span class="focus-label">7D Gap</span>
-                <strong class={`focus-value ${toneClass(comparison?.price_gap_pct_7d)}`}>{pct(comparison?.price_gap_pct_7d)}</strong>
+                <strong class={`focus-value ${toneClass(comparison?.price_gap_pct_7d)}`} class:absent={pct(comparison?.price_gap_pct_7d) === "N/A"}>{pct(comparison?.price_gap_pct_7d)}</strong>
               </div>
               <div class="focus-row">
                 <span class="focus-label">30D Gap</span>
-                <strong class={`focus-value ${toneClass(comparison?.price_gap_pct_30d)}`}>{pct(comparison?.price_gap_pct_30d)}</strong>
+                <strong class={`focus-value ${toneClass(comparison?.price_gap_pct_30d)}`} class:absent={pct(comparison?.price_gap_pct_30d) === "N/A"}>{pct(comparison?.price_gap_pct_30d)}</strong>
               </div>
               <div class="focus-row">
                 <span class="focus-label">Mcap Ratio</span>
-                <strong class="focus-value">{ratio(comparison?.market_cap_ratio)}</strong>
+                <strong class="focus-value" class:absent={ratio(comparison?.market_cap_ratio) === "N/A"}>{ratio(comparison?.market_cap_ratio)}</strong>
               </div>
             </div>
           </article>
@@ -691,7 +691,7 @@
               </div>
               <div class="meta-row">
                 <span>Retrieved</span>
-                <strong>{shortDate(detail?.retrieved_at)}</strong>
+                <strong class:absent={shortDate(detail?.retrieved_at) === "N/A"}>{shortDate(detail?.retrieved_at)}</strong>
               </div>
             </div>
 
@@ -721,7 +721,7 @@
                 {#each workspace.narratives as basket}
                   <button type="button" class="basket-card" on:click={() => applyNarrative(basket.label)}>
                     <span>{basket.label}</span>
-                    <strong>{compactMoney(basket.market_cap)}</strong>
+                    <strong class:absent={compactMoney(basket.market_cap) === "N/A"}>{compactMoney(basket.market_cap)}</strong>
                     <small class={toneClass(basket.market_cap_change_pct_24h)}>{pct(basket.market_cap_change_pct_24h)} | {compactMoney(basket.volume_24h)} vol</small>
                   </button>
                 {/each}
@@ -743,7 +743,7 @@
             {#if syntheticPortfolio}
               <div class="meta-flat">
                 <div class="meta-row"><span>Benchmark</span><strong>{syntheticPortfolio.benchmark_label}</strong></div>
-                <div class="meta-row"><span>Relative Return</span><strong class={toneClass(syntheticPortfolio.relative_return_pct)}>{pct(syntheticPortfolio.relative_return_pct)}</strong></div>
+                <div class="meta-row"><span>Relative Return</span><strong class={toneClass(syntheticPortfolio.relative_return_pct)} class:absent={pct(syntheticPortfolio.relative_return_pct) === "N/A"}>{pct(syntheticPortfolio.relative_return_pct)}</strong></div>
                 <div class="meta-row"><span>Effective Positions</span><strong>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong></div>
                 <div class="meta-row"><span>Warnings</span><strong>{syntheticPortfolio.warnings.length || "None"}</strong></div>
               </div>
@@ -763,9 +763,9 @@
                     {#each syntheticPortfolio.constituents as constituent}
                       <tr>
                         <td><div class="market-title"><strong>{constituent.symbol}</strong><small>{constituent.name}</small></div></td>
-                        <td>{pct(constituent.normalized_weight * 100, 0)}</td>
-                        <td>{ratio(constituent.turnover_ratio_24h)}</td>
-                        <td>{constituent.layer_bucket ?? "N/A"}</td>
+                        <td class:absent={pct(constituent.normalized_weight * 100, 0) === "N/A"}>{pct(constituent.normalized_weight * 100, 0)}</td>
+                        <td class:absent={ratio(constituent.turnover_ratio_24h) === "N/A"}>{ratio(constituent.turnover_ratio_24h)}</td>
+                        <td class:absent={constituent.layer_bucket == null}>{constituent.layer_bucket ?? "N/A"}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -794,22 +794,22 @@
           <div class="kpi-grid">
             <article class="metric">
               <span>DEX Share</span>
-              <strong>{pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null)}</strong>
+              <strong class:absent={pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null) === "N/A"}>{pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null)}</strong>
               <small>of spot volume</small>
             </article>
             <article class="metric">
               <span>Buy Pressure</span>
-              <strong class={toneClass((flow?.buy_pressure_pct ?? 50) - 50)}>{pct(flow?.buy_pressure_pct)}</strong>
+              <strong class={toneClass((flow?.buy_pressure_pct ?? 50) - 50)} class:absent={pct(flow?.buy_pressure_pct) === "N/A"}>{pct(flow?.buy_pressure_pct)}</strong>
               <small>{flow?.active_trader_proxy_24h?.toLocaleString("en-US") ?? "N/A"} trader proxy</small>
             </article>
             <article class="metric">
               <span>Reserve / Volume</span>
-              <strong>{ratio(flow?.reserve_volume_ratio_24h)}</strong>
+              <strong class:absent={ratio(flow?.reserve_volume_ratio_24h) === "N/A"}>{ratio(flow?.reserve_volume_ratio_24h)}</strong>
               <small>{flow?.slippage_proxy_label ?? "N/A"} depth</small>
             </article>
             <article class="metric">
               <span>Top Pool Share</span>
-              <strong>{pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null)}</strong>
+              <strong class:absent={pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null) === "N/A"}>{pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null)}</strong>
               <small>{flow?.pool_count ?? 0} matched pools</small>
             </article>
           </div>
@@ -844,8 +844,8 @@
                       <tr>
                         <td><div class="market-title"><strong>{pool.pair_name}</strong><small>{pool.network}</small></div></td>
                         <td>{pool.dex}</td>
-                        <td>{compactMoney(pool.reserve_usd)}</td>
-                        <td>{compactMoney(pool.volume_24h)}</td>
+                        <td class:absent={compactMoney(pool.reserve_usd) === "N/A"}>{compactMoney(pool.reserve_usd)}</td>
+                        <td class:absent={compactMoney(pool.volume_24h) === "N/A"}>{compactMoney(pool.volume_24h)}</td>
                         <td>{pool.buys_24h}/{pool.sells_24h}</td>
                       </tr>
                     {/each}
@@ -867,10 +867,10 @@
             </div>
 
             <div class="focus-list">
-              <div class="focus-row"><span class="focus-label">Liquidity</span><strong class={flowToneClass(flow?.liquidity_concentration_label)}>{flow?.liquidity_concentration_label ?? "N/A"}</strong></div>
-              <div class="focus-row"><span class="focus-label">Flow Regime</span><strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong></div>
-              <div class="focus-row"><span class="focus-label">Reserve / Mcap</span><strong>{pct(flow?.reserve_to_market_cap_ratio != null ? flow.reserve_to_market_cap_ratio * 100 : null)}</strong></div>
-              <div class="focus-row"><span class="focus-label">Buyer / Seller</span><strong>{ratio(flow?.participant_balance_ratio)}</strong></div>
+              <div class="focus-row"><span class="focus-label">Liquidity</span><strong class={flowToneClass(flow?.liquidity_concentration_label)} class:absent={flow?.liquidity_concentration_label == null}>{flow?.liquidity_concentration_label ?? "N/A"}</strong></div>
+              <div class="focus-row"><span class="focus-label">Flow Regime</span><strong class={flowToneClass(flow?.flow_signal_label)} class:absent={flow?.flow_signal_label == null}>{flow?.flow_signal_label ?? "N/A"}</strong></div>
+              <div class="focus-row"><span class="focus-label">Reserve / Mcap</span><strong class:absent={pct(flow?.reserve_to_market_cap_ratio != null ? flow.reserve_to_market_cap_ratio * 100 : null) === "N/A"}>{pct(flow?.reserve_to_market_cap_ratio != null ? flow.reserve_to_market_cap_ratio * 100 : null)}</strong></div>
+              <div class="focus-row"><span class="focus-label">Buyer / Seller</span><strong class:absent={ratio(flow?.participant_balance_ratio) === "N/A"}>{ratio(flow?.participant_balance_ratio)}</strong></div>
             </div>
           </article>
         </div>
@@ -890,7 +890,7 @@
                 {#each narrativeLeaderboard as basket}
                   <div class="focus-row compact-focus">
                     <span class="focus-label">{basket.label}</span>
-                    <strong class={toneClass(basket.market_cap_change_pct_24h)}>{pct(basket.market_cap_change_pct_24h)}</strong>
+                    <strong class={toneClass(basket.market_cap_change_pct_24h)} class:absent={pct(basket.market_cap_change_pct_24h) === "N/A"}>{pct(basket.market_cap_change_pct_24h)}</strong>
                     <p>{compactMoney(basket.volume_24h)} volume | {compactMoney(basket.market_cap)} market cap</p>
                   </div>
                 {/each}
@@ -916,8 +916,8 @@
                     {#each flowLeaderboard as token}
                       <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id))}>
                         <td><div class="market-title"><strong>{token.symbol.toUpperCase()}</strong><small>{compactMoney(token.market_cap)}</small></div></td>
-                        <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                        <td>{ratio(token.turnover_ratio_24h)}</td>
+                        <td class={toneClass(token.price_change_pct_24h)} class:absent={pct(token.price_change_pct_24h) === "N/A"}>{pct(token.price_change_pct_24h)}</td>
+                        <td class:absent={ratio(token.turnover_ratio_24h) === "N/A"}>{ratio(token.turnover_ratio_24h)}</td>
                         <td>{token.narrative_labels?.[0] ?? token.layer_bucket ?? "N/A"}</td>
                       </tr>
                     {/each}
@@ -1005,8 +1005,8 @@
                       <tr>
                         <td><div class="market-title"><strong>{row.symbol}</strong><small>{row.resolvedToken?.name ?? "External resolution on submit"}</small></div></td>
                         <td>{row.inputWeight.toFixed(2)}</td>
-                        <td>{pct(row.normalizedWeight * 100, 0)}</td>
-                        <td>{row.resolvedToken?.layer_bucket ?? "N/A"}</td>
+                        <td class:absent={pct(row.normalizedWeight * 100, 0) === "N/A"}>{pct(row.normalizedWeight * 100, 0)}</td>
+                        <td class:absent={row.resolvedToken?.layer_bucket == null}>{row.resolvedToken?.layer_bucket ?? "N/A"}</td>
                       </tr>
                     {/each}
                   {:else}
@@ -1039,7 +1039,7 @@
               </div>
               <div class="focus-row compact-focus">
                 <span class="focus-label">Flow</span>
-                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
+                <strong class={flowToneClass(flow?.flow_signal_label)} class:absent={flow?.flow_signal_label == null}>{flow?.flow_signal_label ?? "N/A"}</strong>
                 <p>{flow?.summary ?? "Flow summary will appear after a token is selected and DEX context is available."}</p>
               </div>
             </div>
@@ -1062,10 +1062,10 @@
                   {#each workspace.tokens as token}
                     <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => chooseToken(token.token_id))}>
                       <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
-                      <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
-                      <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                      <td>{compactMoney(token.market_cap)}</td>
-                      <td>{ratio(token.turnover_ratio_24h)}</td>
+                      <td class:absent={money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2) === "N/A"}>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
+                      <td class={toneClass(token.price_change_pct_24h)} class:absent={pct(token.price_change_pct_24h) === "N/A"}>{pct(token.price_change_pct_24h)}</td>
+                      <td class:absent={compactMoney(token.market_cap) === "N/A"}>{compactMoney(token.market_cap)}</td>
+                      <td class:absent={ratio(token.turnover_ratio_24h) === "N/A"}>{ratio(token.turnover_ratio_24h)}</td>
                       <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
                     </tr>
                   {/each}

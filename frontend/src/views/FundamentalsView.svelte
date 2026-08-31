@@ -728,7 +728,7 @@
         {#each headlineStripMetrics as metric}
           <div class="headline-kpi">
             <span class="headline-kpi-label">{metric.label}</span>
-            <strong class="headline-kpi-value">{metric.display_value ?? "N/A"}</strong>
+            <strong class="headline-kpi-value" class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
           </div>
         {/each}
       </div>
@@ -876,7 +876,7 @@
             {#each (marketContextMetrics.length ? marketContextMetrics : headlineMetrics.slice(0, 7)) as metric}
               <div class="metric">
                 <span>{metric.label}</span>
-                <strong class={metricTone(metric.metric_id, metric.value)}>{metric.display_value ?? "N/A"}</strong>
+                <strong class={metricTone(metric.metric_id, metric.value)} class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
               </div>
             {/each}
           </div>
@@ -912,7 +912,7 @@
                         {#each row.cells as cell}
                           <td class:selected-cell={cell.ticker === currentCompany?.ticker}>
                             <div class={`heat-cell ${heatmapCellClass(row.metric_id, cell.value, row.cells.map((candidate) => candidate.value))}`}>
-                              <strong>{cell.display_value ?? "N/A"}</strong>
+                              <strong class:absent={cell.display_value == null}>{cell.display_value ?? "N/A"}</strong>
                             </div>
                           </td>
                         {/each}
@@ -970,8 +970,8 @@
                         <input type="checkbox" checked={peerDraftTickers.includes(candidate.ticker)} on:change={(event) => togglePeer(candidate.ticker, (event.currentTarget as HTMLInputElement).checked)} />
                       </td>
                       <td><strong>{candidate.ticker}</strong><small>{candidate.name}</small></td>
-                      <td>{candidate.reason ?? "N/A"}</td>
-                      <td>{candidate.exchange ?? "N/A"}</td>
+                      <td class:absent={candidate.reason == null}>{candidate.reason ?? "N/A"}</td>
+                      <td class:absent={candidate.exchange == null}>{candidate.exchange ?? "N/A"}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1000,7 +1000,7 @@
                 {@const pricePct = scenarioRangePercent(scenario.summary?.current_price)}
                 <div class="focus-row compact-focus scenario-row">
                   <span class="focus-label">{scenario.label}</span>
-                  <strong class={toneClass(scenario.summary?.upside_downside_pct)}>{currency(scenario.summary?.implied_value_per_share, 2)}</strong>
+                  <strong class={toneClass(scenario.summary?.upside_downside_pct)} class:absent={currency(scenario.summary?.implied_value_per_share, 2) === "N/A"}>{currency(scenario.summary?.implied_value_per_share, 2)}</strong>
                   <p>
                     EV {compactCurrency(scenario.summary?.enterprise_value)}
                     | Equity {compactCurrency(scenario.summary?.equity_value)}
@@ -1076,8 +1076,8 @@
                   {#each overview.filings as filing}
                     <tr>
                       <td>{filing.form}</td>
-                      <td>{shortDate(filing.report_period)}</td>
-                      <td>{shortDate(filing.filing_date)}</td>
+                      <td class:absent={shortDate(filing.report_period) === "N/A"}>{shortDate(filing.report_period)}</td>
+                      <td class:absent={shortDate(filing.filing_date) === "N/A"}>{shortDate(filing.filing_date)}</td>
                       <td>{filing.is_amendment ? "Yes" : "No"}</td>
                     </tr>
                   {/each}
@@ -1133,9 +1133,9 @@
                         <input type="checkbox" checked={peerDraftTickers.includes(candidate.ticker)} on:change={(event) => togglePeer(candidate.ticker, (event.currentTarget as HTMLInputElement).checked)} />
                       </td>
                       <td><strong>{candidate.ticker}</strong><small>{candidate.name}</small></td>
-                      <td>{candidate.reason ?? "N/A"}</td>
-                      <td>{compactCurrency(candidate.market_cap)}</td>
-                      <td>{compactCurrency(candidate.revenue)}</td>
+                      <td class:absent={candidate.reason == null}>{candidate.reason ?? "N/A"}</td>
+                      <td class:absent={compactCurrency(candidate.market_cap) === "N/A"}>{compactCurrency(candidate.market_cap)}</td>
+                      <td class:absent={compactCurrency(candidate.revenue) === "N/A"}>{compactCurrency(candidate.revenue)}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1190,7 +1190,7 @@
                     <td class:selected-cell={row.ticker === currentCompany?.ticker}><strong>{row.ticker}</strong><small>{row.name}</small></td>
                     <td>{row.candidate_reason ?? (row.selected ? "selected" : "candidate")}</td>
                     {#each row.metrics as metric}
-                      <td class={metricTone(metric.metric_id, metric.value)}>{metric.display_value ?? "N/A"}</td>
+                      <td class={metricTone(metric.metric_id, metric.value)} class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</td>
                     {/each}
                     <td>{row.warnings.join(" | ") || "None"}</td>
                   </tr>
@@ -1233,7 +1233,7 @@
                       {#each row.cells as cell}
                         <td class:selected-cell={cell.ticker === currentCompany?.ticker}>
                           <div class={`heat-cell ${heatmapCellClass(row.metric_id, cell.value, row.cells.map((candidate) => candidate.value))}`}>
-                            <strong>{cell.display_value ?? "N/A"}</strong>
+                            <strong class:absent={cell.display_value == null}>{cell.display_value ?? "N/A"}</strong>
                           </div>
                         </td>
                       {/each}
@@ -1291,7 +1291,7 @@
           <div class="kpi-grid compact-kpi-grid">
             <div class="metric"><span>Statement periods</span><strong>{currentAmendmentSummary.amendedPeriods}</strong></div>
             <div class="metric"><span>Mapped cells</span><strong>{currentAmendmentSummary.amendedCells}</strong></div>
-            <div class="metric"><span>Latest amendment</span><strong>{shortDate(currentAmendmentSummary.latestAmendmentDate)}</strong></div>
+            <div class="metric"><span>Latest amendment</span><strong class:absent={shortDate(currentAmendmentSummary.latestAmendmentDate) === "N/A"}>{shortDate(currentAmendmentSummary.latestAmendmentDate)}</strong></div>
           </div>
           <p class="method-note">Amendment markers come from SEC filing forms and normalized period metadata. They flag source chronology; they do not claim every amended filing changed every mapped value.</p>
         </article>
@@ -1337,7 +1337,7 @@
                         class:gamma-derived-cell={isGammaDerivedStatementCell(cell.source_provider)}
                         title={isGammaDerivedStatementCell(cell.source_provider) ? (cell.transformation_note ?? "Gamma derived this value from adjacent normalized statement rows.") : undefined}
                       >
-                        <strong>{cell.display_value ?? "N/A"}</strong>
+                        <strong class:absent={cell.display_value == null}>{cell.display_value ?? "N/A"}</strong>
                       </td>
                     {/each}
                   </tr>
@@ -1382,7 +1382,7 @@
                     <tr>
                       <td>{line.label}</td>
                       {#each line.cells as cell}
-                        <td class={metricTone(line.line_key, cell.value)}>{cell.display_value ?? "N/A"}</td>
+                        <td class={metricTone(line.line_key, cell.value)} class:absent={cell.display_value == null}>{cell.display_value ?? "N/A"}</td>
                       {/each}
                     </tr>
                   {/each}
@@ -1414,10 +1414,10 @@
                     <tr>
                       <td>{trace.line_label}</td>
                       <td>{trace.period_label ?? trace.period_key}</td>
-                      <td>{trace.display_value ?? "N/A"}</td>
+                      <td class:absent={trace.display_value == null}>{trace.display_value ?? "N/A"}</td>
                       <td>{trace.concept_name ?? "Derived"}</td>
                       <td>{trace.filing_form ?? "N/A"} {trace.is_amendment ? "A" : ""}<small>{trace.accession_number ?? ""}</small></td>
-                      <td>{trace.transformation_note ?? "N/A"}</td>
+                      <td class:absent={trace.transformation_note == null}>{trace.transformation_note ?? "N/A"}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1447,9 +1447,9 @@
                   {#each financials.filings as filing}
                     <tr>
                       <td>{filing.form}</td>
-                      <td>{shortDate(filing.report_period)}</td>
-                      <td>{shortDate(filing.filing_date)}</td>
-                      <td>{filing.accession_number ?? "N/A"}</td>
+                      <td class:absent={shortDate(filing.report_period) === "N/A"}>{shortDate(filing.report_period)}</td>
+                      <td class:absent={shortDate(filing.filing_date) === "N/A"}>{shortDate(filing.filing_date)}</td>
+                      <td class:absent={filing.accession_number == null}>{filing.accession_number ?? "N/A"}</td>
                     </tr>
                   {/each}
                 {:else}
@@ -1504,7 +1504,7 @@
         <div class="kpi-grid scenario-kpi-grid">
           <article class="metric">
             <span>Current Price</span>
-            <strong>{currency(activeScenarioSummary?.current_price, 2)}</strong>
+            <strong class:absent={currency(activeScenarioSummary?.current_price, 2) === "N/A"}>{currency(activeScenarioSummary?.current_price, 2)}</strong>
           </article>
           <article class="metric">
             <span>Enterprise Value</span>
@@ -1525,10 +1525,10 @@
         </div>
 
         <div class="terminal-framing" aria-label="Terminal value framing">
-          <div><span>Terminal growth</span><strong>{pct(activeTerminalFraming.terminalGrowth)}</strong></div>
-          <div><span>WACC</span><strong>{pct(activeTerminalFraming.wacc)}</strong></div>
+          <div><span>Terminal growth</span><strong class:absent={pct(activeTerminalFraming.terminalGrowth) === "N/A"}>{pct(activeTerminalFraming.terminalGrowth)}</strong></div>
+          <div><span>WACC</span><strong class:absent={pct(activeTerminalFraming.wacc) === "N/A"}>{pct(activeTerminalFraming.wacc)}</strong></div>
           <div><span>Implied terminal EV / FCF</span><strong>{activeTerminalFraming.impliedTerminalFcfMultiple == null ? "N/A" : `${activeTerminalFraming.impliedTerminalFcfMultiple.toFixed(1)}x`}</strong></div>
-          <div><span>PV terminal share of EV</span><strong>{pct(activeTerminalFraming.terminalValueShare)}</strong></div>
+          <div><span>PV terminal share of EV</span><strong class:absent={pct(activeTerminalFraming.terminalValueShare) === "N/A"}>{pct(activeTerminalFraming.terminalValueShare)}</strong></div>
           <p>This is a framing of the active perpetual-growth DCF, not a second valuation method. The implied multiple makes duration dependence easier to inspect.</p>
         </div>
       </article>
@@ -1553,7 +1553,7 @@
                   {#each activeCostOfCapitalRows as row}
                     <tr>
                       <td>{row.label}</td>
-                      <td class="numeric-cell">{row.display_value ?? "N/A"}</td>
+                      <td class="numeric-cell" class:absent={row.display_value == null}>{row.display_value ?? "N/A"}</td>
                       <td><small>{row.note ?? row.transformation_note ?? "N/A"}</small></td>
                     </tr>
                   {/each}
@@ -1584,7 +1584,7 @@
                   {#each activeValuationBridgeRows as row}
                     <tr>
                       <td>{row.label}</td>
-                      <td class={`numeric-cell ${bridgeTone(row.unit, row.value)}`}>{row.display_value ?? "N/A"}</td>
+                      <td class={`numeric-cell ${bridgeTone(row.unit, row.value)}`} class:absent={row.display_value == null}>{row.display_value ?? "N/A"}</td>
                       <td><small>{row.note ?? row.transformation_note ?? "N/A"}</small></td>
                     </tr>
                   {/each}
@@ -1616,7 +1616,7 @@
                     <tr>
                       <td>{check.label}</td>
                       <td class={sanitySeverityClass(check.severity)}>{check.severity.toUpperCase()}</td>
-                      <td class="numeric-cell">{check.display_value ?? "N/A"}</td>
+                      <td class="numeric-cell" class:absent={check.display_value == null}>{check.display_value ?? "N/A"}</td>
                       <td><small>{check.benchmark ?? "N/A"}</small></td>
                       <td><small>{check.message ?? check.transformation_note ?? "N/A"}</small></td>
                     </tr>
@@ -1649,7 +1649,7 @@
                     <tr>
                       <td>{driver.label}</td>
                       <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.display_value ?? "N/A"}</td>
-                      <td>{driver.base_display_value ?? "N/A"}</td>
+                      <td class:absent={driver.base_display_value == null}>{driver.base_display_value ?? "N/A"}</td>
                       <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.gap_display_value ?? "N/A"}</td>
                     </tr>
                   {/each}
@@ -1685,9 +1685,9 @@
                   {@const activeSummary = snapshot.scenario_summaries.find((summary) => summary.scenario_id === snapshot.active_scenario_id) ?? snapshot.scenario_summaries[0]}
                   <tr>
                     <td><strong>{snapshotDisplayName(snapshot.name, snapshot.created_at)}</strong><small>{snapshot.snapshot_id}</small></td>
-                    <td>{shortDate(snapshot.created_at)}</td>
+                    <td class:absent={shortDate(snapshot.created_at) === "N/A"}>{shortDate(snapshot.created_at)}</td>
                     <td>{snapshot.active_scenario_id}</td>
-                    <td>{currency(activeSummary?.implied_value_per_share, 2)}</td>
+                    <td class:absent={currency(activeSummary?.implied_value_per_share, 2) === "N/A"}>{currency(activeSummary?.implied_value_per_share, 2)}</td>
                     <td><button type="button" class="secondary compact-button" on:click={() => loadSnapshot(snapshot.snapshot_id)} disabled={saving}>Load</button></td>
                   </tr>
                 {/each}
@@ -1724,7 +1724,7 @@
                   <tr>
                     <td class="sheet-label">{row.label}</td>
                     {#each row.display_values as value}
-                      <td class="sheet-cell sheet-cell-fixed"><span class="sheet-fixed">{value ?? "N/A"}</span></td>
+                      <td class="sheet-cell sheet-cell-fixed"><span class="sheet-fixed" class:absent={value == null}>{value ?? "N/A"}</span></td>
                     {/each}
                   </tr>
                 {/each}
@@ -1843,7 +1843,7 @@
                             on:change={(event) => handleProjectionOverrideChange(row.line_key, index, event)}
                           />
                         {:else}
-                          <span class="sheet-fixed">{row.display_values[index] ?? "N/A"}</span>
+                          <span class="sheet-fixed" class:absent={row.display_values[index] == null}>{row.display_values[index] ?? "N/A"}</span>
                         {/if}
                       </td>
                     {/each}
@@ -1880,7 +1880,7 @@
               {#if dcfModel?.sensitivity_matrix?.rows?.length}
                 {#each dcfModel.sensitivity_matrix.rows as row, rowIndex}
                   <tr>
-                    <td class="sheet-label">{pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
+                    <td class="sheet-label" class:absent={pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex]) === "N/A"}>{pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
                     {#each row as cell}
                       <td class={`sheet-cell sens-cell ${dcfDecisionGate.blocked ? "" : sensitivityHeatClass(cell.implied_value_per_share, activeScenarioSummary?.current_price)}`}>{dcfDecisionGate.blocked ? "N/A" : currency(cell.implied_value_per_share, 2)}</td>
                     {/each}
@@ -1908,15 +1908,15 @@
         <div class="kpi-grid scenario-kpi-grid">
           <article class="metric">
             <span>Current Price</span>
-            <strong>{currency(reverseValuation?.current_price, 2)}</strong>
+            <strong class:absent={currency(reverseValuation?.current_price, 2) === "N/A"}>{currency(reverseValuation?.current_price, 2)}</strong>
           </article>
           <article class="metric">
             <span>Target Equity Value</span>
-            <strong>{compactCurrency(reverseValuation?.target_equity_value)}</strong>
+            <strong class:absent={compactCurrency(reverseValuation?.target_equity_value) === "N/A"}>{compactCurrency(reverseValuation?.target_equity_value)}</strong>
           </article>
           <article class="metric">
             <span>Target EV</span>
-            <strong>{compactCurrency(reverseValuation?.target_enterprise_value)}</strong>
+            <strong class:absent={compactCurrency(reverseValuation?.target_enterprise_value) === "N/A"}>{compactCurrency(reverseValuation?.target_enterprise_value)}</strong>
           </article>
           <article class="metric">
             <span>Base Value / Share</span>
@@ -1962,7 +1962,7 @@
                   <tr>
                     <td><strong>{driver.label}</strong><small>{driver.driver_id}</small></td>
                     <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.display_value ?? "N/A"}</td>
-                    <td>{driver.base_display_value ?? "N/A"}</td>
+                    <td class:absent={driver.base_display_value == null}>{driver.base_display_value ?? "N/A"}</td>
                     <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.gap_display_value ?? "N/A"}</td>
                     <td>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(driver.solved_enterprise_value)}</td>
                     <td>{dcfDecisionGate.blocked ? "Gated" : driver.success ? "Solved" : "Bounded"}</td>
@@ -2020,7 +2020,7 @@
                 {#if reverseValuation?.sensitivity_matrix?.rows?.length}
                   {#each reverseValuation.sensitivity_matrix.rows as row, rowIndex}
                     <tr>
-                      <td class="sheet-label">{pct(reverseValuation.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
+                      <td class="sheet-label" class:absent={pct(reverseValuation.sensitivity_matrix.terminal_growth_values[rowIndex]) === "N/A"}>{pct(reverseValuation.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
                       {#each row as cell}
                         <td class={`sheet-cell sens-cell ${dcfDecisionGate.blocked ? "" : reverseSensitivityHeatClass(cell.implied_revenue_growth_pct)}`}>
                           <strong>{dcfDecisionGate.blocked ? "N/A" : pct(cell.implied_revenue_growth_pct)}</strong>
@@ -2059,9 +2059,9 @@
                 {#each referenceFilings as filing}
                   <tr>
                     <td>{filing.form}</td>
-                    <td>{shortDate(filing.report_period)}</td>
-                    <td>{shortDate(filing.filing_date)}</td>
-                    <td>{filing.accession_number ?? "N/A"}</td>
+                    <td class:absent={shortDate(filing.report_period) === "N/A"}>{shortDate(filing.report_period)}</td>
+                    <td class:absent={shortDate(filing.filing_date) === "N/A"}>{shortDate(filing.filing_date)}</td>
+                    <td class:absent={filing.accession_number == null}>{filing.accession_number ?? "N/A"}</td>
                     <td>{filing.is_amendment ? "Yes" : "No"}</td>
                     <td>{filing.source_provider}</td>
                   </tr>
@@ -2131,7 +2131,7 @@
             {/each}
             <div class="focus-row compact-focus">
               <span class="focus-label">Inspection</span>
-              <strong>{referenceInspection?.source_provider ?? "N/A"}</strong>
+              <strong class:absent={referenceInspection?.source_provider == null}>{referenceInspection?.source_provider ?? "N/A"}</strong>
               <p>{referenceInspection?.transformation_note ?? "N/A"}</p>
             </div>
           </div>
@@ -2158,10 +2158,10 @@
                     <td>{trace.basis} {trace.statement}</td>
                     <td>{trace.line_label}</td>
                     <td>{trace.period_label ?? trace.period_key}</td>
-                    <td>{trace.display_value ?? "N/A"}</td>
+                    <td class:absent={trace.display_value == null}>{trace.display_value ?? "N/A"}</td>
                     <td>{trace.concept_name ?? "Derived"}</td>
                     <td>{trace.filing_form ?? "N/A"} | {shortDate(trace.filing_date)}<small>{trace.accession_number ?? ""}</small></td>
-                    <td>{trace.transformation_note ?? "N/A"}</td>
+                    <td class:absent={trace.transformation_note == null}>{trace.transformation_note ?? "N/A"}</td>
                   </tr>
                 {/each}
               {:else}

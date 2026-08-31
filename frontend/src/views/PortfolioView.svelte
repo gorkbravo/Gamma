@@ -786,12 +786,12 @@
                         {quoteStatus.label}
                       </span>
                     </td>
-                    <td class="num">{fmt(position.quantity, 3)}</td>
-                    <td class="num">{fmt(position.avg_cost)}</td>
-                    <td class="num">{fmt(position.market_price)}</td>
-                    <td class="num">{fmt(position.market_value)}</td>
-                    <td class="num">{fmt(position.base_market_value)}</td>
-                    <td class="num">{fmt(position.fx_rate, 4)}</td>
+                    <td class="num" class:absent={fmt(position.quantity, 3) === "N/A"}>{fmt(position.quantity, 3)}</td>
+                    <td class="num" class:absent={fmt(position.avg_cost) === "N/A"}>{fmt(position.avg_cost)}</td>
+                    <td class="num" class:absent={fmt(position.market_price) === "N/A"}>{fmt(position.market_price)}</td>
+                    <td class="num" class:absent={fmt(position.market_value) === "N/A"}>{fmt(position.market_value)}</td>
+                    <td class="num" class:absent={fmt(position.base_market_value) === "N/A"}>{fmt(position.base_market_value)}</td>
+                    <td class="num" class:absent={fmt(position.fx_rate, 4) === "N/A"}>{fmt(position.fx_rate, 4)}</td>
                     <td class="num" class:elevated={(position.weight ?? 0) > 0.25}>{pct(position.weight)}</td>
                     <td
                       class="num"
