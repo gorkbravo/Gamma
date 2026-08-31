@@ -1223,7 +1223,6 @@
     background: transparent;
   }
 
-  .panel-header,
   .header-top,
   .chart-foot,
   .top-line {
@@ -1402,7 +1401,6 @@
   }
 
   label > span,
-  .eyebrow,
   .section-label,
   .focus-label {
     color: var(--text-2);

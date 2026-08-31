@@ -1,0 +1,34 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Gamma UI primitives
+
+   These implement the component contracts in docs/design_principles.md §8.
+   Before this file existed each view wrote its own copy of every primitive
+   in scoped CSS, so they drifted apart silently — .eyebrow alone had twelve
+   different definitions across nineteen files.
+
+   A view that genuinely needs to differ overrides the specific declaration
+   in its own scoped block: Svelte compiles a scoped `.panel` to `.panel.s-x`,
+   which outranks the single class here. Exceptions stay visible and local
+   rather than becoming a thirteenth definition of the base.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Eyebrow ──────────────────────────────────────────────────────────────
+   The category label above a panel title. Chrome, not data, so it takes the
+   display font from tokens.css. Never larger than --text-2xs. */
+.eyebrow {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ── Panel header ─────────────────────────────────────────────────────────
+   Title block on the left, controls or counts on the right. Aligns to the
+   top so a two-line title does not drag the controls down with it. */
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}

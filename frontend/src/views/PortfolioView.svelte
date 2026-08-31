@@ -1146,14 +1146,6 @@
     outline-offset: 2px;
   }
 
-  .eyebrow {
-    color: var(--text-2);
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
   .count {
     color: var(--text-2);
     font-weight: 500;

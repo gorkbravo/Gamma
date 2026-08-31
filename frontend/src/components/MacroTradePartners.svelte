@@ -463,14 +463,6 @@
     color: var(--negative);
   }
 
-  .eyebrow {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
   h3,
   .summary,
   .empty,

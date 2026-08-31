@@ -1395,7 +1395,6 @@
   }
 
   /* ── Panel header rows ── */
-  .panel-header,
   .rail-header,
   .chart-foot {
     display: flex;
@@ -1490,7 +1489,6 @@
   }
 
   /* ── Typography ── */
-  .eyebrow,
   label > span {
     color: var(--text-2);
     text-transform: uppercase;

@@ -2315,7 +2315,6 @@
   }
 
   .header-top,
-  .panel-header,
   .mode-kpi-row,
   .headline-title-row,
   .builder-actions,
@@ -2368,7 +2367,6 @@
     line-height: var(--leading-snug);
   }
 
-  .panel-header,
   .mode-kpi-row {
     justify-content: space-between;
     align-items: flex-start;
@@ -2837,7 +2835,6 @@
     background: color-mix(in srgb, var(--accent) 11%, var(--bg-1));
   }
 
-  .eyebrow,
   .focus-label,
   label > span {
     color: var(--text-2);

@@ -2259,7 +2259,6 @@
 
   /* ── Headers ─────────────────────────────────────────────── */
 
-  .panel-header,
   .chart-foot {
     display: flex;
     justify-content: space-between;
@@ -2368,7 +2367,6 @@
 
   /* ── Typography ──────────────────────────────────────────── */
 
-  .eyebrow,
   .group-label,
   label > span,
   .metric span {

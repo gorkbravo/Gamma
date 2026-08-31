@@ -276,13 +276,6 @@
     gap: var(--space-4);
   }
 
-  .panel-header {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-5);
-    align-items: start;
-  }
-
   .panel-header > div { min-width: 0; }
 
   /* ── Focus cards (What Matters Now) ── */
@@ -652,13 +645,6 @@
   }
 
   /* ── Typography ── */
-  .eyebrow {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
-    margin: 0;
-  }
 
   h3, p, small { margin: 0; }
 

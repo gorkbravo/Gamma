@@ -369,7 +369,6 @@
     gap: var(--space-1);
   }
 
-  .eyebrow,
   label > span,
   legend,
   .artifact-type {

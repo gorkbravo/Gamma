@@ -2620,7 +2620,6 @@
   }
 
   /* ── Panel header rows ── */
-  .panel-header,
   .rail-header,
   .chart-foot,
   .section-head {
@@ -2741,7 +2740,6 @@
   }
 
   /* ── Typography ── */
-  .eyebrow,
   .group-label,
   .inline-field > span,
   label > span {

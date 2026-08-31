@@ -115,14 +115,6 @@
     min-width: 0;
   }
 
-  .eyebrow {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
-    margin: 0;
-  }
-
   h3 { margin: 0; font-size: var(--text-base); }
 
   .card-badges {

@@ -716,7 +716,6 @@
     line-height: 1.45;
   }
 
-  .panel-header,
   .rail-header,
   .output-head,
   .editor-footer,
@@ -731,7 +730,6 @@
     gap: var(--space-4);
   }
 
-  .eyebrow,
   label > span,
   .source-field > span,
   .output-head > span,

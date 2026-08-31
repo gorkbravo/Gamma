@@ -1,3 +1,5 @@
+@import "./primitives.css";
+
 :root {
   color-scheme: dark;
   --app-font: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";

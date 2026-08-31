@@ -86,6 +86,11 @@
 </section>
 
 <style>
+  /* Local: this panel's eyebrows head a stacked list and need the gap below. */
+  .eyebrow {
+    margin-bottom: var(--space-3);
+  }
+
   .console {
     display: grid;
     gap: var(--space-6);
@@ -110,17 +115,9 @@
     justify-content: flex-end;
   }
 
-  .eyebrow,
   span,
   p {
     color: var(--text-2);
-  }
-
-  .eyebrow {
-    margin: 0 0 var(--space-3);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-sm);
   }
 
   h2,

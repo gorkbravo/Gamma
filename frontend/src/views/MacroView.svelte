@@ -599,13 +599,6 @@
   }
 
   /* ── Typography ── */
-  .eyebrow {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
-    margin: 0;
-  }
 
   p, small { margin: 0; }
 

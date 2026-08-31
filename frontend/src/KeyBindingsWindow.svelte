@@ -191,14 +191,6 @@
     gap: 0.4rem;
   }
 
-  .eyebrow {
-    margin: 0;
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--text-2);
-  }
-
   .copy,
   .annotation,
   small {

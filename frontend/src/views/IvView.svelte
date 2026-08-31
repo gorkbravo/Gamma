@@ -1367,7 +1367,6 @@
     flex-wrap: wrap;
   }
 
-  .eyebrow,
   span,
   .muted,
   th,
@@ -1375,7 +1374,6 @@
     color: var(--text-2);
   }
 
-  .eyebrow,
   th {
     font-size: var(--text-xs);
     text-transform: uppercase;
