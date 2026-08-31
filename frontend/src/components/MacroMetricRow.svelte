@@ -21,7 +21,7 @@
 <div class="metric-row" class:compact>
   {#each metrics as metric}
     <div class="metric">
-      <span class="metric-label">{metric.label}</span>
+      <span class="metric-label" title={metric.label}>{metric.label}</span>
       <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
       {#if metric.delta_display}
         <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
@@ -44,7 +44,7 @@
     padding: var(--space-3) var(--space-4);
     border-left: 1px solid rgba(46, 60, 74, 0.42);
     min-width: 0;
-    flex: 1 1 4.5rem;
+    flex: 1 1 5.75rem;
   }
 
   .metric:first-child {
@@ -53,14 +53,20 @@
   }
 
   .metric-label {
-    display: block;
+    /* A label cut to "US UNEMPL…" costs more than the row it saves. Two lines
+       at --text-2xs, with the height reserved either way so values across the
+       row stay on one baseline. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     color: var(--text-2);
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.05em;
     font-size: var(--text-2xs);
-    white-space: nowrap;
+    line-height: var(--leading-tight);
+    min-height: calc(2em * 1.2);
     overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .metric-value {

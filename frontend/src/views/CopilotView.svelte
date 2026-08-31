@@ -1040,6 +1040,22 @@
     padding: 0 var(--space-4) var(--space-3);
   }
 
+  /* Rename / Archive / Delete are per-row actions, not row content. At rest
+     the sidebar was showing a red "Delete" against every conversation.
+     Opacity rather than visibility so the buttons stay in the tab order and
+     :focus-within can reveal them; the space stays reserved so rows do not
+     jump under the pointer. */
+  .session-actions {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--ease);
+  }
+
+  .session-row:hover .session-actions,
+  .session-row.active .session-actions,
+  .session-actions:focus-within {
+    opacity: 1;
+  }
+
   .session-actions button,
   .session-rename button {
     padding: 0;
@@ -1047,6 +1063,7 @@
     background: transparent;
     color: var(--text-2);
     font: inherit;
+    font-family: var(--display-font);
     font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1059,8 +1076,12 @@
   }
 
   .session-actions .danger-link {
-    color: var(--negative);
     margin-left: auto;
+  }
+
+  .session-actions .danger-link:hover,
+  .session-actions .danger-link:focus-visible {
+    color: var(--negative);
   }
 
   .session-rename {

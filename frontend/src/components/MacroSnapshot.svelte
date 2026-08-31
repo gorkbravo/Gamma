@@ -151,7 +151,7 @@
               </td>
               {#each card.metrics as metric}
                 <td class="col-metric">
-                  <span class="metric-label">{metric.label}</span>
+                  <span class="metric-label" title={metric.label}>{metric.label}</span>
                   <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
                   {#if metric.delta_display}
                     <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
@@ -343,7 +343,11 @@
   .snapshot-table {
     width: 100%;
     border-collapse: collapse;
-    table-layout: fixed;
+    /* Auto layout, not fixed: themes carry different numbers of metrics, and
+       fixed layout padded every row out to the widest one and then split the
+       width equally — so columns that were empty in most rows took the same
+       89px as the ones carrying labels. */
+    table-layout: auto;
   }
 
   .snapshot-table thead th {
@@ -361,9 +365,12 @@
     font-weight: 500;
   }
 
-  .snapshot-table .col-theme { width: 21%; }
-  .snapshot-table .col-drill { width: 17%; }
-  .snapshot-table .col-metric { width: auto; }
+  .snapshot-table .col-theme { width: 20%; min-width: 15rem; }
+  .snapshot-table .col-drill { width: 11%; }
+  .snapshot-table .col-metric {
+    width: auto;
+    min-width: 6.5rem;
+  }
 
   .snapshot-row {
     cursor: pointer;
@@ -405,7 +412,8 @@
     line-height: 1.3;
     margin-top: var(--space-1);
     display: -webkit-box;
-    -webkit-line-clamp: 1;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
@@ -436,14 +444,20 @@
 
   /* ── Metrics in snapshot table ── */
   .metric-label {
-    display: block;
+    /* A label cut to "US UNEMPL…" costs more than the row it saves. Two lines
+       at --text-2xs, with the height reserved either way so values across the
+       row stay on one baseline. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: var(--text-2xs);
-    white-space: nowrap;
+    line-height: var(--leading-tight);
+    min-height: calc(2em * 1.2);
     overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .metric-value {
