@@ -1598,6 +1598,40 @@ describe("app store orchestration", () => {
     expect(get(ivSurface)?.symbol).toBe("SPY");
   });
 
+  it("does not let an older IV session surface replace an explicit symbol snapshot", async () => {
+    ivSurface.set(makeIvSurface({
+      symbol: "AAPL",
+      spot: 210,
+      expiries: ["20260320"],
+      strikes: [205, 210, 215],
+      iv_grid: [[0.28, 0.27, 0.29]],
+      points: 3
+    }));
+    const session: IvSessionStatus = {
+      running: false,
+      status_text: "Idle",
+      active_symbol: "SPY",
+      market_data_mode: "delayed",
+      messages: [],
+      surface: makeIvSurface({
+        symbol: "SPY",
+        spot: 500,
+        expiries: ["20260320"],
+        strikes: [495, 500, 505],
+        iv_grid: [[0.2, 0.19, 0.21]],
+        points: 3
+      })
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(session));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadIvSession();
+
+    expect(get(ivSession)?.surface?.symbol).toBe("SPY");
+    expect(get(ivSurface)?.symbol).toBe("AAPL");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("prefetches default FX histories when loading the macro snapshot workspace", async () => {
     const snapshot: MacroSnapshot = {
       region: "US",

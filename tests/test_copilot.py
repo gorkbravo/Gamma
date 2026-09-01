@@ -5578,6 +5578,102 @@ def test_checkpoint8c_temporary_portfolio_risk_workflow_materializes_and_replays
         runtime.shutdown()
 
 
+def test_checkpoint8d_options_working_analysis_materializes_and_replays(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        session_id = "session_checkpoint8d_aapl_options"
+        created = client.post(
+            "/copilot/sessions",
+            json={"session_id": session_id, "title": "AAPL temporary options"},
+        )
+        assert created.status_code == 200
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run options IV realized implied comparison for AAPL",
+                "user_session_id": session_id,
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        options_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_options_realized_implied_comparison"
+        )
+        assert options_trace["arguments"] == {
+            "symbol": "AAPL",
+            "max_expiries": 6,
+            "depth_preset": "compact",
+            "market_data_mode": "auto",
+        }
+        assert "temporary working analysis" in options_trace["summary"].lower()
+
+        detail = client.get(f"/copilot/sessions/{session_id}")
+        assert detail.status_code == 200
+        analyses = detail.json()["working_analyses"]
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis["contract_version"] == "copilot.working-analysis.v1"
+        assert analysis["analysis_type"] == "options_realized_implied_comparison"
+        assert analysis["status"] == "active"
+        assert analysis["state_scope"] == "session_ephemeral"
+        assert analysis["tool_id"] == "run_options_realized_implied_comparison"
+        assert analysis["entity"] == {
+            "entity_type": "listed_instrument",
+            "normalized_id": "AAPL",
+            "symbol": "AAPL",
+            "ticker": "AAPL",
+            "label": "AAPL",
+        }
+        assert analysis["inputs"] == options_trace["arguments"]
+        assert analysis["outputs"]["symbol"] == "AAPL"
+        assert analysis["outputs"]["snapshot_available"] is True
+        assert analysis["outputs"]["expiry_comparisons"]
+        assert analysis["source_ids"] == ["iv.realized_implied.AAPL"]
+        assert analysis["owning_tab"] == "iv"
+        assert analysis["owning_mode"] == "realized_implied"
+        assert (
+            analysis["materialization"]["payload_contract"]
+            == "copilot.options-working-analysis.v1"
+        )
+        assert analysis["materialization"]["durable"] is False
+        assert analysis["materialization"]["persistence_policy"] == "non_durable_only"
+        assert analysis["materialization"]["navigation_context"] == {"symbol": "AAPL"}
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.get_working_analysis(analysis["analysis_id"])
+        assert restored is not None
+        assert restored.inputs == analysis["inputs"]
+        assert restored.outputs == analysis["outputs"]
+        assert restored.materialized_at is None
+
+        materialized = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert materialized.status_code == 200
+        assert materialized.json()["materialized_at"] is not None
+        assert materialized.json()["owning_tab"] == "iv"
+        assert materialized.json()["owning_mode"] == "realized_implied"
+
+        discarded = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/discard"
+        )
+        assert discarded.status_code == 200
+        assert discarded.json()["status"] == "discarded"
+        blocked = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert blocked.status_code == 409
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_operator_execution_stops_before_confirmed_dcf_apply(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

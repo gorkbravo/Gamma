@@ -110,6 +110,36 @@ describe("Copilot working-analysis materialization", () => {
     });
   });
 
+  it("resolves a non-durable Options realized-versus-implied target", () => {
+    expect(
+      resolveWorkingAnalysisTarget(
+        workingAnalysis({
+          tool_id: "run_options_realized_implied_comparison",
+          domain: "iv",
+          analysis_type: "options_realized_implied_comparison",
+          entity: {
+            entity_type: "listed_instrument",
+            symbol: "aapl"
+          },
+          owning_tab: "iv",
+          owning_mode: "realized_implied",
+          materialization: {
+            contract_version: "copilot.materialization.v1",
+            payload_contract: "copilot.options-working-analysis.v1",
+            target_tab: "iv",
+            target_mode: "realized_implied",
+            durable: false
+          }
+        })
+      )
+    ).toEqual({
+      analysisId: "work-lmt",
+      symbol: "AAPL",
+      tab: "iv",
+      mode: "realized_implied"
+    });
+  });
+
   it("resolves a non-durable Strategy Lab Script target with immutable identities", () => {
     expect(
       resolveWorkingAnalysisTarget(

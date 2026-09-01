@@ -1,8 +1,10 @@
 <script lang="ts">
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import CopilotOptionsWorkingAnalysis from "../components/CopilotOptionsWorkingAnalysis.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
+    CopilotWorkingAnalysis,
     CrossTabHandoffEnvelope,
     IvSessionStatus,
     IvSurface,
@@ -68,6 +70,7 @@
   export let status: SystemStatus | null = null;
   export let requestedSymbol = "";
   export let result: IvSurface | null = null;
+  export let workingAnalysis: CopilotWorkingAnalysis | null = null;
   export let session: IvSessionStatus | null = null;
   export let underlyingHistory: IvUnderlyingHistoryResponse | null = null;
   export let underlyingPricePoints: TimeSeriesPoint[] = [];
@@ -576,6 +579,10 @@
         {/each}
       </div>
     </article>
+  {/if}
+
+  {#if mode === "realized_implied" && workingAnalysis}
+    <CopilotOptionsWorkingAnalysis analysis={workingAnalysis} />
   {/if}
 
   {#if mode === "overview"}

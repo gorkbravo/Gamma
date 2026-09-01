@@ -326,6 +326,7 @@
   let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
   let fundamentalsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let riskWorkingAnalysis: CopilotWorkingAnalysis | null = null;
+  let optionsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
   // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
@@ -1828,6 +1829,16 @@
       riskWorkingAnalysis = materialized;
       riskMode = target.mode;
       workspaceMode = "research";
+    } else if (target.tab === "iv") {
+      optionsWorkingAnalysis = materialized;
+      optionsMode = target.mode;
+      ivRequestedSymbol = target.symbol;
+      workspaceMode = "research";
+      selectSharedEquity(
+        target.symbol,
+        String(analysis.entity.label ?? target.symbol),
+        "copilot"
+      );
     } else {
       await openMaterializedResearchScript({
         scriptId: target.scriptId,
@@ -1850,6 +1861,9 @@
     }
     if (discarded && riskWorkingAnalysis?.analysis_id === discarded.analysis_id) {
       riskWorkingAnalysis = null;
+    }
+    if (discarded && optionsWorkingAnalysis?.analysis_id === discarded.analysis_id) {
+      optionsWorkingAnalysis = null;
     }
   }
 
@@ -3153,6 +3167,7 @@
             status={$systemStatus}
             requestedSymbol={ivRequestedSymbol}
             result={$ivSurface}
+            workingAnalysis={optionsWorkingAnalysis}
             session={$ivSession}
             underlyingHistory={$ivUnderlyingHistory}
             underlyingPricePoints={$researchResult?.primary_price_points ?? []}

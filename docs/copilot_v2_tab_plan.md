@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## Start Here
 
@@ -193,6 +193,18 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-01
+
+- [Responses create reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create): application-defined custom tools retain typed input schemas while tool selection remains separate from application execution and state ownership.
+
+Checkpoint 8D architectural decision from the 2026-09-01 review:
+
+- Keep `run_options_realized_implied_comparison` behind Gamma's existing strict action registry and IV service. The model may select the authorized tool and provide schema-valid arguments; Gamma remains responsible for validation, provider access, complete output capture, lifecycle state, and tab materialization.
+- Create `copilot.options-working-analysis.v1` only when the user explicitly requests an Options/IV/realized-versus-implied workflow. A comparison invoked as supporting evidence for an unrelated workflow must not silently create an extra Options working object.
+- Persist the exact bounded comparison rows, requested depth and market-data mode, quality, warnings, provider, origin, and source ids in Gamma-owned session state. Provider response state is not the authoritative copy.
+- Materialize only into the existing Options / Realized vs IV surface as visibly temporary, non-durable state. Opening may hydrate the selected symbol's read-only Options context, but it cannot save an option set, place an order, or acquire trading authority.
+- No framework or model migration is justified by this slice. The custom Responses loop remains the default and the Agents SDK remains the feature-flagged comparison under the same server-owned authority contract.
+
 ### Official Guidance Re-Reviewed 2026-08-31
 
 - [GPT-5.6 Luna model](https://developers.openai.com/api/docs/models/gpt-5.6-luna): the exact `gpt-5.6-luna` model supports Responses, function calling, structured outputs, and Code Interpreter, with the reasoning levels needed by Gamma's existing profiles.
@@ -303,14 +315,14 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is **approximately 85% complete** through Checkpoint 8C. This is a scope correction plus verified capability advances, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, Checkpoint 7 adds the bounded closed-loop Operator core, and Checkpoints 8A-8C prove unloaded-company Fundamentals plus user-specified hypothetical portfolio/Risk working-analysis and materialization contracts without yet generalizing them to every analytical family.
+The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is **approximately 87% complete** through Checkpoint 8D. This is a scope correction plus verified capability advances, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, Checkpoint 7 adds the bounded closed-loop Operator core, and Checkpoints 8A-8D prove unloaded-company Fundamentals, user-specified hypothetical portfolio/Risk, and explicit Options realized-versus-implied working-analysis/materialization contracts without yet generalizing them to every analytical family.
 
 The material remaining gaps are product behavior, not only release hardening:
 
 - public-company names now have a model-assisted, SEC-validated ticker preflight, but entity and intent acquisition remain shallow for other asset classes and multi-entity workflows;
 - entity acquisition remains inconsistent across non-Fundamentals tools; several workflows still depend on already-active tab context or precomputed results;
-- the versioned session-scoped working-analysis contract now covers unloaded Fundamentals reverse valuation and user-specified hypothetical portfolio/Risk workflows, but option sets, strategy inputs, temporary assumptions, and remaining cross-tool outputs are not yet covered;
-- Fundamentals reverse-valuation and Risk scenario results can now materialize temporarily in their owning tabs, but other tool results do not yet consistently materialize in the corresponding Gamma tab or working object;
+- the versioned session-scoped working-analysis contract now covers unloaded Fundamentals reverse valuation, user-specified hypothetical portfolio/Risk workflows, and explicit Options realized-versus-implied comparisons, but option-set drafts, Strategy Lab inputs, temporary assumptions, and remaining cross-tool outputs are not yet covered;
+- Fundamentals reverse-valuation, Risk scenario, and Options realized-versus-implied results can now materialize temporarily in their owning tabs, but other tool results do not yet consistently materialize in the corresponding Gamma tab or working object;
 - the durable approval model is narrow and DCF-specific rather than a general pause/approve-or-reject/resume-the-same-run contract;
 - replayable events preserve history, but do not yet provide generalized workflow recovery, replanning, retries, or approval resumption;
 - role escalation from Agent to Operator is not yet a complete, visible authority transition;
@@ -554,7 +566,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - Verification: 31 focused Operator tests, 8 focused Checkpoint 7 contract tests, 2 Agents SDK smoke tests, the full 542-test backend suite, 368 frontend tests across 50 files, TypeScript typecheck, and the production frontend build passed. The installed `openai 2.38.0` / `agents 0.17.4` contract was exercised without dependency changes.
 - Authorized live smoke reached the real Responses transport on 2026-07-30 with provider storage disabled. The provider returned a streamed quota exhaustion before any tool call; Gamma persisted a safe `quota_exhausted`/`provider_error` `copilot.operator.loop.v1` terminal with zero tools and no fallback card. This validates the live error boundary, not a successful live model-tool-model result.
 
-#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8C complete)
+#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8D complete)
 
 - [x] Prove unloaded entity acquisition with `LMT` reverse valuation: the planned ticker hydrates Fundamentals context and remains the authoritative tool argument without requiring the tab to be preloaded.
 - [x] Add `copilot.working-analysis.v1` as Gamma-owned session-scoped state for Fundamentals reverse-valuation outputs, including entity, inputs, complete bounded output, provenance, context fingerprint, read-only safety, expiry, restart replay, discard, and recoverable session deletion.
@@ -562,7 +574,8 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Materialize the active result into Fundamentals / Reverse Valuation through a server-recorded typed target plus normal app navigation; UI clicking remains non-authoritative and no DCF draft is silently written.
 - [x] Add the Checkpoint 8B public-company identity preflight: natural names may be proposed by the configured model, but Gamma validates them against SEC reference data, injects only a unique canonical ticker, records resolution provenance/usage, and stops with typed candidates on issuer or share-class ambiguity.
 - [x] Generalize the same contract to user-specified hypothetical portfolios and Risk, preserving exact legs, normalized weights, typed shocks, complete bounded outputs, provenance, restart/discard/expiry, and typed non-durable Risk materialization.
-- [ ] Continue the contract through Options sets, Strategy Lab inputs, temporary assumptions, and other cross-tool outputs.
+- [x] Add the Checkpoint 8D Options vertical slice: explicit realized-versus-implied requests retain exact expiry comparisons, requested collection settings, quality, warnings, and provenance, then materialize non-durably into Options / Realized vs IV.
+- [ ] Continue the contract through option-set drafts, Strategy Lab inputs, temporary assumptions, and other cross-tool outputs.
 - [ ] Integrate the separately tracked Research Script Workspace only after its mock contracts, immutable revision store, and Script-mode materialization payload are stable; do not fold arbitrary source execution into `run_strategy_lab_backtest`.
 - [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
 
@@ -591,6 +604,14 @@ Implementation note (2026-08-25, Checkpoint 8C):
 - The existing Risk tab owns materialization through `copilot.risk-working-analysis.v1` in Overview or Scenarios mode. Its compact `TEMPORARY` module shows the portfolio definition, typed shocks, estimated proxy impact, warnings, and provenance without populating a saved portfolio, changing the live account snapshot, or exposing save/rebalance/order controls.
 - The retained unprepared-session acceptance asks for `60% AAPL / 40% TLT`, `+100 bps`, and `-10% equity`; it verifies both exact tool calls, one merged working record, restart replay, typed Risk materialization, discard/reopen rejection, and an unchanged portfolio snapshot. Verification on 2026-08-25: all 139 Copilot backend tests and all 375 frontend tests passed, along with TypeScript typecheck and the production frontend build. The repository-wide backend run reached 544 passes with the same seven unrelated current-clock/data failures recorded before 8C (six expired August futures fixtures and one SITREP NaN serialization case). The build retained pre-existing IV/Surface3D warnings unrelated to this checkpoint.
 - A bounded live `store=false` custom-Responses smoke with the configured `gpt-5.5-2026-04-23` model selected both intended tools and preserved `AAPL=0.6`, `TLT=0.4`, `+100 bps`, and `-10%` exactly. The default 12-second guard stopped before the second observation, which led to the intent-specific 60-second guard above. A test-only 90-second rerun executed the Risk scenario and created the correct temporary Risk / Scenarios record, but Yahoo history rate limits degraded the comparison and the final Responses continuation returned HTTP 400. This is useful live argument/state evidence, not a successful end-to-end live acceptance claim.
+
+Implementation note (2026-09-01, Checkpoint 8D):
+
+- A successful explicit `run_options_realized_implied_comparison` observation now creates one seven-day `copilot.working-analysis.v1` record with `analysis_type=options_realized_implied_comparison`, the exact strict inputs, complete expiry rows and summary/quality/collection output, warnings, source ids, provider/origin, restart lifecycle, and `copilot.options-working-analysis.v1` materialization metadata. Supporting Options evidence in a non-Options prompt is intentionally not decorated with a second working object.
+- The existing Options / Realized vs IV mode owns materialization. Its compact `TEMPORARY` module presents the exact retained comparison separately from the freshly hydrated surrounding surface, shows provider and collection boundaries, and states that it does not save an option set, place an order, or create trading authority.
+- Options session polling now preserves a renderable explicitly selected symbol when an older session-status surface belongs to a different symbol. This prevents a materialized AAPL analysis from being shown inside a stale SPY shell while retaining the session status separately.
+- Retained backend acceptance starts from an unprepared Copilot session, verifies exact `AAPL`, expiry, depth, and market-data arguments, complete stored output/source ids, restart replay, typed Options materialization, discard, and rejected reopen. Three focused backend regressions passed. All 392 frontend tests, TypeScript typecheck, and the production build passed; the build retains the pre-existing IV SVG-interaction and Surface3D unused-export warnings.
+- A mock browser acceptance opened the analysis through the run inspector and verified aligned AAPL context plus the temporary module at 1440, 1024, and 640 pixel widths with no console errors. No live-provider/model-tool-model acceptance is claimed for this checkpoint.
 
 #### K. Generalized interruptions, recovery, and role transition — open
 
@@ -621,14 +642,14 @@ Implementation note (2026-08-25, Checkpoint 8C):
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
 10. ~~Build the closed-loop Operator and model-assisted, schema-validated argument path.~~ Completed 2026-07-30 at Checkpoint 7 (82%).
-11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization. In progress: unloaded-company Fundamentals and hypothetical portfolio/Risk vertical slices are complete through Checkpoint 8C; Options, Strategy Lab, and the remaining owning surfaces are next.
+11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization. In progress: unloaded-company Fundamentals, hypothetical portfolio/Risk, and explicit Options realized-versus-implied vertical slices are complete through Checkpoint 8D; option-set drafts, Strategy Lab inputs, temporary assumptions, and the remaining owning surfaces are next.
 12. Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.
 13. Pass trace-level deterministic and live acceptance cases against the clarified completion boundary.
 14. Optional external deep research; later voice.
 
 Do not start with model-string replacement alone. Any future candidate-model rollout must use the Checkpoint 6 policy and land with provider streaming, capability validation, usage instrumentation, and recorded eval/live evidence so it improves the product rather than merely changing metadata.
 
-The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 85%** end-state baseline through Checkpoint 8C.
+The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 87%** end-state baseline through Checkpoint 8D.
 
 ### Definition Of Done
 
@@ -1170,7 +1191,7 @@ Current Research Operator state (foundation inventory, not the desired end state
 
 What remains for the next agents:
 
-1. Generalize `copilot.working-analysis.v1` from the completed Fundamentals and hypothetical-portfolio/Risk slices to Options sets, Strategy Lab inputs, and the remaining tab-owned temporary analyses.
+1. Generalize `copilot.working-analysis.v1` beyond the completed Fundamentals, hypothetical-portfolio/Risk, and Options realized-versus-implied slices to option-set drafts, Strategy Lab inputs, temporary assumptions, and the remaining tab-owned analyses.
 2. Generalize interruptions and recovery as described in workstream K. Do not broaden durable mutation families until pause/resume state, idempotency, diffs, rollback policy, and permission evals are reusable.
 3. Extend the Checkpoint 7 trace gate with degraded-result cross-domain replanning, unnecessary-tool, stale-context, remaining unloaded-entity families, working-state, and same-run approval-resume cases.
 4. Compare the custom Responses loop and Agents SDK as later end-state contracts enter the benchmark. Promote Agents SDK only if sessions, interruptions, traces, maintainability, quality, reliability, latency, or cost show a practical advantage without weakening permissions.

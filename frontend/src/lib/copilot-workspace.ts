@@ -40,6 +40,13 @@ export type CopilotRiskWorkingAnalysisTarget = {
   mode: "overview" | "scenarios";
 };
 
+export type CopilotOptionsWorkingAnalysisTarget = {
+  analysisId: string;
+  symbol: string;
+  tab: "iv";
+  mode: "realized_implied";
+};
+
 export type CopilotResearchScriptWorkingAnalysisTarget = {
   analysisId: string;
   tab: "strategy_lab";
@@ -53,6 +60,7 @@ export type CopilotResearchScriptWorkingAnalysisTarget = {
 export type CopilotWorkingAnalysisTarget =
   | CopilotFundamentalsWorkingAnalysisTarget
   | CopilotRiskWorkingAnalysisTarget
+  | CopilotOptionsWorkingAnalysisTarget
   | CopilotResearchScriptWorkingAnalysisTarget;
 
 /** Accept only explicit non-durable materialization contracts supported by Gamma. */
@@ -69,7 +77,9 @@ export function resolveWorkingAnalysisTarget(
   ) {
     return null;
   }
-  const ticker = String(analysis.entity.ticker ?? analysis.entity.normalized_id ?? "")
+  const ticker = String(
+    analysis.entity.ticker ?? analysis.entity.symbol ?? analysis.entity.normalized_id ?? ""
+  )
     .trim()
     .toUpperCase();
   if (
@@ -94,6 +104,19 @@ export function resolveWorkingAnalysisTarget(
       analysisId: analysis.analysis_id,
       tab: "risk",
       mode: analysis.owning_mode
+    };
+  }
+  if (
+    analysis.owning_tab === "iv" &&
+    analysis.owning_mode === "realized_implied" &&
+    materialization.payload_contract === "copilot.options-working-analysis.v1" &&
+    ticker
+  ) {
+    return {
+      analysisId: analysis.analysis_id,
+      symbol: ticker,
+      tab: "iv",
+      mode: "realized_implied"
     };
   }
   const scriptId = String(analysis.entity.script_id ?? analysis.entity.normalized_id ?? "").trim();

@@ -5785,6 +5785,7 @@ class CopilotService:
             tool_id=tool_id,
             arguments=arguments,
             context=context,
+            request=request,
         )
         if spec is None:
             return execution
@@ -5891,6 +5892,7 @@ class CopilotService:
         tool_id: str,
         arguments: dict[str, Any],
         context: CopilotContextBundle,
+        request: CopilotResearchCardRequest,
     ) -> dict[str, Any] | None:
         output = execution.output
         if not isinstance(output, dict):
@@ -6069,6 +6071,64 @@ class CopilotService:
                 "transformation_note": (
                     "Created from an authorized read-only Risk Operator action. Opening this temporary "
                     "result does not save, rebalance, trade, or alter the source portfolio."
+                ),
+            }
+        if tool_id == "run_options_realized_implied_comparison":
+            normalized_prompt = str(request.prompt or "").strip().lower()
+            explicitly_requested = bool(
+                re.search(r"\b(?:option|options|iv)\b", normalized_prompt)
+                or "implied volatility" in normalized_prompt
+                or "realized volatility" in normalized_prompt
+                or "realised volatility" in normalized_prompt
+                or "volatility comparison" in normalized_prompt
+                or (
+                    re.search(r"\breali[sz]ed\b", normalized_prompt)
+                    and re.search(r"\bimplied\b", normalized_prompt)
+                )
+            )
+            if not explicitly_requested:
+                # Supporting Options observations remain in the run trace. Gamma
+                # only creates owning-tab working state when the user asked for
+                # the Options/volatility workflow itself.
+                return None
+            trace_arguments = deepcopy(execution.trace.arguments)
+            symbol = str(
+                output.get("symbol")
+                or trace_arguments.get("symbol")
+                or ""
+            ).strip().upper()
+            if not symbol:
+                return None
+            return {
+                "family_key": f"options.realized_implied:{symbol}",
+                "domain": "iv",
+                "analysis_type": "options_realized_implied_comparison",
+                "title": f"{symbol} realized vs implied volatility",
+                "entity": {
+                    "entity_type": "listed_instrument",
+                    "normalized_id": symbol,
+                    "symbol": symbol,
+                    "ticker": symbol,
+                    "label": symbol,
+                },
+                "inputs": trace_arguments,
+                "outputs": deepcopy(output),
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "iv",
+                "owning_mode": "realized_implied",
+                "materialization": self._working_analysis_materialization(
+                    tab="iv",
+                    mode="realized_implied",
+                    payload_contract="copilot.options-working-analysis.v1",
+                    navigation_context={"symbol": symbol},
+                    persistence_policy="non_durable_only",
+                    save_target=None,
+                ),
+                "source_provider": str(output.get("source_provider") or "gamma"),
+                "origin": str(output.get("origin") or "gamma.iv.surface"),
+                "transformation_note": (
+                    "Created from an authorized read-only Options Operator comparison. Opening this "
+                    "session-ephemeral result does not save an option set or create any trading authority."
                 ),
             }
         return None
@@ -7051,6 +7111,7 @@ class CopilotService:
             ("fundamentals", "reverse_valuation", "copilot.fundamentals-working-analysis.v1"),
             ("risk", "overview", "copilot.risk-working-analysis.v1"),
             ("risk", "scenarios", "copilot.risk-working-analysis.v1"),
+            ("iv", "realized_implied", "copilot.options-working-analysis.v1"),
             (
                 "strategy_lab",
                 "script",

@@ -5304,13 +5304,31 @@ export async function loadIvSession() {
       const session = await getJson<IvSessionStatus>("/iv/session", { signal });
       if (signal.aborted) return null;
       ivSession.set(session);
-      ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
       const sessionHasSurface = hasRenderableIvSurface(session.surface);
       const sessionSymbol = String(sessionHasSurface ? session.surface?.symbol : "").trim().toUpperCase();
+      let preservedExplicitSurface = false;
+      ivSurface.update((current) => {
+        if (!sessionHasSurface) return current;
+        const currentHasSurface = hasRenderableIvSurface(current);
+        const currentSymbol = String(currentHasSurface ? current?.symbol : "").trim().toUpperCase();
+        preservedExplicitSurface = Boolean(
+          currentSymbol && sessionSymbol && currentSymbol !== sessionSymbol
+        );
+        return preservedExplicitSurface ? current : session.surface;
+      });
+      const visibleSurface = get(ivSurface);
+      const visibleSymbol = String(
+        hasRenderableIvSurface(visibleSurface) ? visibleSurface?.symbol : sessionSymbol
+      ).trim().toUpperCase();
       const currentHistory = get(ivUnderlyingHistory);
       const currentHistorySymbol = String(currentHistory?.symbol ?? "").trim().toUpperCase();
-      if (sessionSymbol && (currentHistorySymbol !== sessionSymbol || !currentHistory?.points.length)) {
-        await loadIvUnderlyingHistory({ symbol: sessionSymbol });
+      if (
+        sessionHasSurface &&
+        !preservedExplicitSurface &&
+        visibleSymbol &&
+        (currentHistorySymbol !== visibleSymbol || !currentHistory?.points.length)
+      ) {
+        await loadIvUnderlyingHistory({ symbol: visibleSymbol });
       }
       if (signal.aborted) return null;
       if (sessionHasSurface) {
