@@ -178,3 +178,83 @@
   line-height: var(--leading-normal);
   max-width: 68ch;
 }
+
+/* ── View header ──────────────────────────────────────────────────────────
+   Every research tab opens the same way: a panel carrying the tab's name and
+   its current subject, then the mode bar with the tab's headline numbers
+   opposite it. Nine views each wrote their own copy of this, and Prediction
+   Markets had no header panel at all — its mode bar sat bare on the canvas,
+   which is why that tab never looked like the others. */
+.header-panel {
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.header-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.header-top .title {
+  color: var(--text-0);
+  font-family: var(--display-font);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.header-top .subtitle {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  min-width: 0;
+}
+
+.mode-kpi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
+/* Headline numbers: a rule between each, so the strip reads as one instrument
+   cluster rather than a row of loose labels. */
+.header-kpis {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+  border-left: 1px solid var(--divider);
+}
+
+.header-kpi {
+  display: grid;
+  gap: 0.05rem;
+  padding: var(--space-1) var(--space-5);
+  border-right: 1px solid var(--divider);
+  min-width: 5.5rem;
+}
+
+.header-kpi span {
+  color: var(--text-2);
+  font-family: var(--display-font);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  line-height: 1.1;
+}
+
+.header-kpi strong {
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.header-kpi strong.positive { color: var(--positive); }
+.header-kpi strong.negative { color: var(--negative); }
+.header-kpi strong.warning { color: var(--warning); }

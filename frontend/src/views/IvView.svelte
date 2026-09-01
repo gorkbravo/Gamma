@@ -1297,11 +1297,6 @@
     grid-template-columns: minmax(0, 1.35fr) minmax(22rem, 0.65fr);
   }
 
-  .header-panel {
-    padding: var(--space-4) var(--space-5);
-  }
-
-  .header-top,
   .mode-row,
   .header-actions,
   .source-strip,
@@ -1315,11 +1310,6 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-5);
-  }
-
-  .header-top {
-    align-items: end;
-    margin-bottom: var(--space-4);
   }
 
   .header-actions,

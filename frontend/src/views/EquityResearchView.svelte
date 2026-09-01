@@ -2130,11 +2130,6 @@
 
   /* ── Panels ── */
 
-  .header-panel {
-    gap: var(--space-3);
-    padding: var(--space-4) var(--space-5);
-  }
-
   .header-panel .title {
     color: var(--text-0);
     font-size: var(--text-sm);
@@ -2161,11 +2156,6 @@
   }
 
   /* ── Header panel internals ── */
-  .header-top {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-  }
 
   .loading-pill {
     font-size: var(--text-2xs);
@@ -2176,14 +2166,6 @@
     background: color-mix(in srgb, var(--accent) 6%, transparent);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
-  }
-
-  .mode-kpi-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
   }
 
   /* ── Mode bar (Risk pattern) ── */

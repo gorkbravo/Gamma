@@ -2496,32 +2496,10 @@
   }
 
   /* ── Header panel ── */
-  .header-panel {
-    display: grid;
-    gap: var(--space-4);
-    padding: var(--space-4) var(--space-5);
-  }
 
-  .header-top {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-  }
-
-  .title {
-    color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-
+  /* Local: this subtitle carries a long provider list and has to truncate. */
   .subtitle {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    letter-spacing: 0.04em;
     flex: 1 1 auto;
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2587,51 +2565,9 @@
     font-size: var(--text-xs);
   }
 
-  .mode-kpi-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-5);
-    flex-wrap: wrap;
-  }
-
   /* ── Mode bar (Risk pattern) ── */
 
   /* ── Header KPIs (Risk pattern) ── */
-  .header-kpis {
-    display: flex;
-    gap: 0;
-    flex-wrap: wrap;
-    border-left: 1px solid var(--divider);
-  }
-
-  .header-kpi {
-    display: grid;
-    gap: 0.05rem;
-    padding: var(--space-1) var(--space-5);
-    border-right: 1px solid var(--divider);
-    min-width: 5rem;
-  }
-
-  .header-kpi span {
-    color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    line-height: 1.1;
-  }
-
-  .header-kpi strong {
-    color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    line-height: 1.15;
-    white-space: nowrap;
-  }
-
-  .header-kpi strong.warning { color: var(--warning); }
-  .header-kpi strong.positive { color: var(--positive); }
-  .header-kpi strong.negative { color: var(--negative); }
 
   /* ── Controls card (non-overview) ── */
   .controls-card { padding: var(--space-4) var(--space-5); }

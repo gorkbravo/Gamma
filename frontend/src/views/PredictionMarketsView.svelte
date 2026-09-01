@@ -637,6 +637,13 @@
   }
   $: venueButtons = allVenues.map((venue) => cachedVenueStatuses[venue] ?? fallbackVenueStatus(venue));
 
+  const VENUE_NAMES: Record<string, string> = { polymarket: "Polymarket", kalshi: "Kalshi" };
+  $: activeVenueLabel =
+    (venueSelection.length ? venueSelection : allVenues)
+      .map((venue) => VENUE_NAMES[venue] ?? venue)
+      .join(" / ") || "No venue";
+  $: statusLabel = status === "all" ? "All contracts" : `${status[0].toUpperCase()}${status.slice(1)} contracts`;
+
   $: currentScreenerKey = JSON.stringify({
     query: query.trim(),
     status,
@@ -721,28 +728,43 @@
 <svelte:window on:keydown={handleContractKeydown} />
 
 <section class="view">
-  <div class="mode-row">
-    <div class="mode-bar" role="tablist" aria-label="Prediction Markets modes">
-      {#each modes as item}
-        <button
-          class="mode-btn"
-          type="button"
-          role="tab"
-          aria-selected={mode === item.id}
-          class:selected={mode === item.id}
-          on:click={() => selectMode(item.id)}
-        >
-          {item.label}
-        </button>
-      {/each}
-    </div>
-    <div class="mode-meta">
-      <span>{screener?.markets.length ?? 0} contracts</span>
-      <span>{watchlist.length} watched</span>
-      <span>{compareSelection.length}/{MAX_COMPARE_LEGS} in compare</span>
+  <article class="panel header-panel">
+    <div class="header-top">
+      <span class="title">Prediction Markets</span>
+      <span class="subtitle">{activeVenueLabel} · {statusLabel}</span>
       {#if loading || historyLoading || compareLoading}<span class="loading-flag">LOADING...</span>{/if}
     </div>
-  </div>
+    <div class="mode-kpi-row">
+      <div class="mode-bar" role="tablist" aria-label="Prediction Markets modes">
+        {#each modes as item}
+          <button
+            class="mode-btn"
+            type="button"
+            role="tab"
+            aria-selected={mode === item.id}
+            class:selected={mode === item.id}
+            on:click={() => selectMode(item.id)}
+          >
+            {item.label}
+          </button>
+        {/each}
+      </div>
+      <div class="header-kpis">
+        <div class="header-kpi">
+          <span>Contracts</span>
+          <strong>{screener?.markets.length ?? 0}</strong>
+        </div>
+        <div class="header-kpi">
+          <span>Watched</span>
+          <strong>{watchlist.length}</strong>
+        </div>
+        <div class="header-kpi">
+          <span>In compare</span>
+          <strong>{compareSelection.length}/{MAX_COMPARE_LEGS}</strong>
+        </div>
+      </div>
+    </div>
+  </article>
 
   {#if mode === "screener"}
     <div class="screener-grid">
@@ -2134,23 +2156,6 @@
   }
 
   /* ── Mode bar ────────────────────────────────────────────── */
-
-  .mode-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-5);
-    flex-wrap: wrap;
-  }
-
-  .mode-meta {
-    display: flex;
-    gap: var(--space-5);
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
 
   .loading-flag {
     color: var(--accent);

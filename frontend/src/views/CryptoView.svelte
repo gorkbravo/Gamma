@@ -1142,11 +1142,6 @@
     max-height: 24rem;
   }
 
-  .header-panel {
-    gap: var(--space-3);
-    padding: var(--space-4) var(--space-5);
-  }
-
   .header-panel .header-top {
     align-items: baseline;
     justify-content: flex-start;
@@ -1201,7 +1196,6 @@
     background: transparent;
   }
 
-  .header-top,
   .chart-foot,
   .top-line {
     display: flex;
@@ -1216,7 +1210,6 @@
   }
 
   .headline-title-row,
-  .mode-kpi-row,
   .builder-actions,
   .hero-controls,
   .header-badges,
@@ -1230,11 +1223,6 @@
   .headline-title-row {
     align-items: baseline;
     flex-wrap: wrap;
-  }
-
-  .mode-kpi-row {
-    justify-content: space-between;
-    align-items: flex-start;
   }
 
   .header-badges,

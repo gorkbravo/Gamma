@@ -1511,7 +1511,7 @@
 </script>
 
 <section class="view">
-  <article class="panel header-panel">
+  <article class="panel tape-header-strip">
     <div class="header-identity">
       <span class="title">SITREP</span>
     </div>
@@ -2041,7 +2041,7 @@
     }
   }
 
-  .header-panel {
+  .tape-header-strip {
     display: flex;
     flex-direction: row;
     align-items: stretch;

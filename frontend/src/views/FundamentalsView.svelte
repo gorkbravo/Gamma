@@ -2292,13 +2292,6 @@
     background: transparent;
   }
 
-  .header-panel {
-    gap: var(--space-3);
-    padding: var(--space-4) var(--space-5);
-  }
-
-  .header-top,
-  .mode-kpi-row,
   .headline-title-row,
   .builder-actions,
   .panel-actions,
@@ -2308,10 +2301,6 @@
   .scenario-strip {
     display: flex;
     gap: var(--space-4);
-  }
-
-  .header-top {
-    align-items: baseline;
   }
 
   .handoff-strip,
@@ -2348,11 +2337,6 @@
     color: var(--text-1);
     font-size: var(--text-sm);
     line-height: var(--leading-snug);
-  }
-
-  .mode-kpi-row {
-    justify-content: space-between;
-    align-items: flex-start;
   }
 
   .header-panel .title {

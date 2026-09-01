@@ -103,7 +103,7 @@ describe("MacroView", () => {
       }
     });
 
-    expect(body).toContain("What Matters Now");
+    expect(body).toContain("What matters now");
     expect(body).toContain("coherent");
     expect(body).toContain("Open Cross-Asset (inflation)");
   });
