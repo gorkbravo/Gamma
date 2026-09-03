@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pandas as pd
@@ -33,6 +33,7 @@ from src.services.commodities_adapters import (
     SampleCommoditiesDataProvider,
 )
 from src.services.market_data import QuoteSnapshot
+from src.utils.time import now_utc
 
 
 def test_commodity_coverage_rejects_unknown_status():
@@ -407,7 +408,35 @@ class _FakeMarketData:
         return self.history.copy()
 
 
-def _future_detail(con_id: int, month: str, local_symbol: str, symbol: str = "CL", exchange: str = "NYMEX"):
+_FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"
+
+
+def _forward_contract_months(count: int, *, reference: datetime | None = None) -> list[str]:
+    """`YYYYMM` keys for the next `count` contract months.
+
+    The provider drops any contract that has already expired, so a fixture
+    pinned to a hardcoded month quietly loses its front node once that month
+    passes and the curve assertions start failing on their own. Months run from
+    the month after the current one, so the 20th-of-the-month expiry below is
+    always still ahead whatever day the suite runs on.
+    """
+
+    today = reference or now_utc()
+    base = today.year * 12 + today.month
+    return [f"{(base + index) // 12:04d}{(base + index) % 12 + 1:02d}" for index in range(count)]
+
+
+def _contract_local_symbol(root: str, month: str) -> str:
+    """The IBKR local symbol for a root and month, e.g. `CL` + 202610 -> CLV6."""
+
+    return f"{root}{_FUTURES_MONTH_CODES[int(month[4:6]) - 1]}{int(month[:4]) % 10}"
+
+
+def _contract_month_label(month: str) -> str:
+    return datetime(int(month[:4]), int(month[4:6]), 1).strftime("%b %Y")
+
+
+def _future_detail(con_id: int, month: str, symbol: str = "CL", exchange: str = "NYMEX"):
     contract = Contract(
         conId=con_id,
         symbol=symbol,
@@ -415,17 +444,42 @@ def _future_detail(con_id: int, month: str, local_symbol: str, symbol: str = "CL
         exchange=exchange,
         currency="USD",
         lastTradeDateOrContractMonth=month,
-        localSymbol=local_symbol,
+        localSymbol=_contract_local_symbol(symbol, month),
         tradingClass=symbol,
     )
     return SimpleNamespace(contract=contract, realExpirationDate=f"{month}20")
 
 
+@pytest.mark.parametrize("day", [1, 15, 20, 21, 28])
+@pytest.mark.parametrize("month", list(range(1, 13)))
+def test_forward_contract_months_never_expire_on_the_day_the_suite_runs(month: int, day: int):
+    """Guards the rot these fixtures already suffered once.
+
+    Six curve tests failed on their own once 2026-08 passed, because the
+    provider drops contracts whose expiry is behind the run date and the
+    fixtures pinned 202608/202609/202610. The generated months must stay ahead
+    of any run date, including the back half of a month and a December rollover.
+    """
+
+    reference = datetime(2026, month, day, tzinfo=timezone.utc)
+    months = _forward_contract_months(4, reference=reference)
+
+    assert len(months) == len(set(months)) == 4
+    assert months == sorted(months)
+    for key in months:
+        # The fixture expiry is the 20th of the contract month.
+        expiry = datetime(int(key[:4]), int(key[4:6]), 20, tzinfo=timezone.utc)
+        assert expiry.date() >= reference.date()
+    assert _contract_local_symbol("CL", months[0]).startswith("CL")
+    assert len(_contract_local_symbol("CL", months[0])) == 4
+
+
 def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp_path):
+    months = _forward_contract_months(3)
     details = [
-        _future_detail(1003, "202610", "CLV6"),
-        _future_detail(1001, "202608", "CLQ6"),
-        _future_detail(1002, "202609", "CLU6"),
+        _future_detail(1003, months[2]),
+        _future_detail(1001, months[0]),
+        _future_detail(1002, months[1]),
     ]
     provider = IbkrCommoditiesDataProvider(
         client=_FakeIbkrClient(details),
@@ -446,13 +500,15 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
 
     wti_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "wti")
     assert wti_curve.source_provider == "ibkr"
-    assert [node.contract.symbol for node in wti_curve.nodes] == ["CLQ6", "CLU6", "CLV6"]
+    assert [node.contract.symbol for node in wti_curve.nodes] == [
+        _contract_local_symbol("CL", month) for month in months
+    ]
     assert [node.price for node in wti_curve.nodes] == [80.0, 79.2, 78.7]
     assert [node.previous_price for node in wti_curve.nodes] == [79.25, None, None]
     assert [node.change for node in wti_curve.nodes] == [0.75, None, None]
     assert wti_curve.previous_as_of == datetime(2026, 1, 4)
     assert wti_curve.nodes[0].contract.contract_id == "ibkr:1001"
-    assert wti_curve.nodes[0].contract.contract_month == "Aug 2026"
+    assert wti_curve.nodes[0].contract.contract_month == _contract_month_label(months[0])
     assert any("Delayed IBKR quote" in warning for warning in wti_curve.warnings)
 
     wti_history = next(history for history in snapshot.price_histories if history.instrument_id == "wti")
@@ -490,9 +546,10 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
 
 def test_ibkr_cached_curve_retains_exact_fresh_quote_prior_pair_across_restart(tmp_path):
     cache_dir = tmp_path / "cache"
+    months = _forward_contract_months(2)
     details = [
-        _future_detail(1101, "202608", "CLQ6"),
-        _future_detail(1102, "202609", "CLU6"),
+        _future_detail(1101, months[0]),
+        _future_detail(1102, months[1]),
     ]
     history = pd.Series(
         [86.83, 86.83],
@@ -562,9 +619,10 @@ def test_ibkr_cached_curve_retains_exact_fresh_quote_prior_pair_across_restart(t
 
 
 def test_ibkr_cached_curve_without_prior_reference_keeps_change_unavailable(tmp_path):
+    months = _forward_contract_months(2)
     details = [
-        _future_detail(1201, "202608", "CLQ6"),
-        _future_detail(1202, "202609", "CLU6"),
+        _future_detail(1201, months[0]),
+        _future_detail(1202, months[1]),
     ]
     provider = IbkrCommoditiesDataProvider(
         client=_FakeIbkrClient(details),
@@ -597,9 +655,10 @@ def test_ibkr_cached_curve_without_prior_reference_keeps_change_unavailable(tmp_
 
 
 def test_ibkr_cached_curve_rejects_mismatched_quote_context_timestamps(tmp_path):
+    months = _forward_contract_months(2)
     details = [
-        _future_detail(1301, "202608", "CLQ6"),
-        _future_detail(1302, "202609", "CLU6"),
+        _future_detail(1301, months[0]),
+        _future_detail(1302, months[1]),
     ]
     provider = IbkrCommoditiesDataProvider(
         client=_FakeIbkrClient(details),
@@ -636,18 +695,19 @@ def test_ibkr_cached_curve_rejects_mismatched_quote_context_timestamps(tmp_path)
 
 
 def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_path):
+    months = _forward_contract_months(4)
     details = {
         "CL": [
-            _future_detail(2001, "202608", "CLQ6"),
-            _future_detail(2002, "202609", "CLU6"),
-            _future_detail(2003, "202610", "CLV6"),
-            _future_detail(2004, "202611", "CLX6"),
+            _future_detail(2001, months[0]),
+            _future_detail(2002, months[1]),
+            _future_detail(2003, months[2]),
+            _future_detail(2004, months[3]),
         ],
         "GC": [
-            _future_detail(3001, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
-            _future_detail(3002, "202609", "GCU6", symbol="GC", exchange="COMEX"),
-            _future_detail(3003, "202610", "GCV6", symbol="GC", exchange="COMEX"),
-            _future_detail(3004, "202611", "GCX6", symbol="GC", exchange="COMEX"),
+            _future_detail(3001, months[0], symbol="GC", exchange="COMEX"),
+            _future_detail(3002, months[1], symbol="GC", exchange="COMEX"),
+            _future_detail(3003, months[2], symbol="GC", exchange="COMEX"),
+            _future_detail(3004, months[3], symbol="GC", exchange="COMEX"),
         ],
     }
     fake_client = _FakeIbkrClient(details)
@@ -719,16 +779,17 @@ def test_ibkr_provider_defaults_to_shallow_breadth_for_all_configured_roots(tmp_
     monkeypatch.delenv("IBKR_COMMODITIES_ENABLED", raising=False)
     monkeypatch.delenv("IBKR_COMMODITIES_BREADTH_ENABLED", raising=False)
     monkeypatch.delenv("IBKR_COMMODITIES_STARTUP_ENABLED", raising=False)
+    months = _forward_contract_months(3)
     details = {
         "CL": [
-            _future_detail(4001, "202608", "CLQ6"),
-            _future_detail(4002, "202609", "CLU6"),
-            _future_detail(4003, "202610", "CLV6"),
+            _future_detail(4001, months[0]),
+            _future_detail(4002, months[1]),
+            _future_detail(4003, months[2]),
         ],
         "GC": [
-            _future_detail(5001, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
-            _future_detail(5002, "202609", "GCU6", symbol="GC", exchange="COMEX"),
-            _future_detail(5003, "202610", "GCV6", symbol="GC", exchange="COMEX"),
+            _future_detail(5001, months[0], symbol="GC", exchange="COMEX"),
+            _future_detail(5002, months[1], symbol="GC", exchange="COMEX"),
+            _future_detail(5003, months[2], symbol="GC", exchange="COMEX"),
         ],
     }
     fake_client = _FakeIbkrClient(details)
