@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -673,7 +673,71 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_commodity_draft(tmp_path)
         assert payload["composer_draft_leg"]["value_kind"] == "return"
         assert len(payload["composer_draft_leg"]["return_points"]) >= 5
         assert payload["provenance"]["transformation"] == "commodity_price_level_to_return_stream"
+        assert payload["provenance"]["history_source"] == "provider_reload"
         assert "roll-adjusted strategy performance" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_strategy_lab_resolve_handoff_endpoint_accepts_a_carried_commodity_series(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        carried_points = [
+            {
+                "timestamp": (datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(days=index)).isoformat(),
+                "value": 2400.0 + index * 1.5,
+            }
+            for index in range(200)
+        ]
+        response = client.post(
+            "/research/strategy-lab/resolve-handoff",
+            json={
+                "handoff": {
+                    "source_tab": "commodities",
+                    "source_mode": "metals",
+                    "intended_target_tab": "strategy_lab",
+                    "intended_target_mode": "composer",
+                    "selected_entity": {
+                        "entity_type": "commodity_instrument",
+                        "label": "Gold",
+                        "normalized_id": "gold",
+                        "provider_id": "GC",
+                        "native_id": "GCU6",
+                        "metadata": {"symbol": "GC", "family": "metals"},
+                    },
+                    "resolver_capability": "return_leg",
+                    "asset_class": "commodity",
+                    "value_kind": "price",
+                    "default_side": "long",
+                    "default_weight": 0.1,
+                    "selected_timeframe": None,
+                    "loaded_series": {
+                        "label": "Gold",
+                        "value_kind": "price",
+                        "points": carried_points,
+                        "source_provider": "ibkr",
+                        "contract_symbol": "GCU6",
+                        "unit": "USD/oz",
+                        "retrieved_at": "2026-09-03T15:17:00Z",
+                        "origin": "ibkr.commodities.history",
+                        "transformation_note": None,
+                    },
+                    "provider": "ibkr",
+                    "source": {"origin": "fixture"},
+                    "warnings": [],
+                    "normalized_ids": {"instrument_id": "gold"},
+                    "timestamp": "2026-09-03T15:17:00Z",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "resolved"
+        assert payload["provenance"]["history_source"] == "handoff_payload"
+        assert payload["provenance"]["carried_contract_symbol"] == "GCU6"
+        assert len(payload["composer_draft_leg"]["return_points"]) == len(carried_points) - 1
+        assert "Gamma used the series carried by the handoff" in " ".join(payload["warnings"])
     finally:
         runtime.shutdown()
 

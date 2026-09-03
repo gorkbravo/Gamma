@@ -772,12 +772,23 @@ function loadPersistedStrategyLabHandoffQueue(): StrategyLabHandoffQueueItem[] {
           return { ...item, stale: false };
         }
         // Drop any previously resolved payload so day-old return streams cannot be
-        // accepted into the composer without an explicit revive + re-resolve.
-        return { ...item, stale: true, status: "pending" as const, resolved: null };
+        // accepted into the composer without an explicit revive + re-resolve. The
+        // carried series goes with it: a revived handoff re-reads its provider.
+        return withoutCarriedSeries({ ...item, stale: true, status: "pending" as const, resolved: null });
       });
   } catch {
     return [];
   }
+}
+
+// A carried series can be thousands of points. Only an item that still has to be
+// resolved needs one, so resolved and stale items persist without it rather than
+// filling the storage quota with series nothing will read again.
+function withoutCarriedSeries(item: StrategyLabHandoffQueueItem): StrategyLabHandoffQueueItem {
+  if (!item.handoff.loaded_series) {
+    return item;
+  }
+  return { ...item, handoff: { ...item.handoff, loaded_series: null } };
 }
 
 function persistStrategyLabHandoffQueue(items: StrategyLabHandoffQueueItem[]) {
@@ -785,7 +796,14 @@ function persistStrategyLabHandoffQueue(items: StrategyLabHandoffQueueItem[]) {
     return;
   }
   try {
-    localStorage.setItem(STRATEGY_LAB_HANDOFF_STORAGE_KEY, JSON.stringify(items.slice(0, 20)));
+    const persistable = items
+      .slice(0, 20)
+      .map((item) =>
+        !item.stale && (item.status === "pending" || item.status === "resolving" || item.status === "error")
+          ? item
+          : withoutCarriedSeries(item)
+      );
+    localStorage.setItem(STRATEGY_LAB_HANDOFF_STORAGE_KEY, JSON.stringify(persistable));
   } catch {
     // Local persistence is best-effort; the in-memory queue remains authoritative.
   }

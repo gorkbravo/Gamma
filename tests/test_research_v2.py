@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -18,6 +18,8 @@ from src.api.schemas.research import GammaResearchObjectModel
 from src.models.research_lab import (
     GammaResearchObject,
     CrossTabHandoffEntity,
+    CrossTabHandoffSeries,
+    CrossTabHandoffSeriesPoint,
     ImportedReturnStreamRequest,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
@@ -644,7 +646,153 @@ def test_strategy_lab_unsupported_commodity_handoff_returns_reference_only(tmp_p
     assert result.resolved_capability == "reference_only"
     assert result.composer_draft_leg is None
     assert result.unsupported_reason == "Commodity handoff needs at least five computable return observations from price history."
-    assert any("too sparse" in warning for warning in result.warnings)
+    assert any("at least five are needed" in warning for warning in result.warnings)
+
+
+def _commodity_handoff(*, loaded_series=None):
+    return StrategyLabHandoffResolveRequest(
+        handoff=StrategyLabHandoffEnvelope(
+            source_tab="commodities",
+            source_mode="metals",
+            intended_target_tab="strategy_lab",
+            intended_target_mode="composer",
+            selected_entity=CrossTabHandoffEntity(
+                entity_type="commodity_instrument",
+                label="Gold",
+                normalized_id="gold",
+                provider_id="GC",
+                native_id="GCU6",
+            ),
+            resolver_capability="return_leg",
+            asset_class="commodity",
+            value_kind="price",
+            default_side="long",
+            default_weight=0.1,
+            loaded_series=loaded_series,
+            provider="ibkr",
+            normalized_ids={"instrument_id": "gold"},
+            timestamp="2026-09-03T15:17:00Z",
+        )
+    )
+
+
+def _carried_gold_series(count: int) -> CrossTabHandoffSeries:
+    return CrossTabHandoffSeries(
+        label="Gold",
+        value_kind="price",
+        points=[
+            CrossTabHandoffSeriesPoint(
+                timestamp=(datetime(2026, 4, 1, tzinfo=timezone.utc) + timedelta(days=index)).isoformat(),
+                value=4000.0 + index * 4.0,
+            )
+            for index in range(count)
+        ],
+        source_provider="ibkr",
+        contract_symbol="GCU6",
+        unit="USD/oz",
+        retrieved_at="2026-09-03T15:17:00Z",
+        origin="ibkr.commodities.history",
+    )
+
+
+class _GoldCommoditiesService:
+    """Stands in for the live path where the reload answers with fewer points
+    than Commodities displayed: a cached IBKR curve skips the front-history
+    fetch and the FRED reference series behind it failed."""
+
+    def __init__(self, reload_point_count: int) -> None:
+        self.reload_point_count = reload_point_count
+
+    def get_workspace(self, request):
+        instrument = SimpleNamespace(
+            instrument_id="gold",
+            symbol="GC",
+            name="Gold",
+            family="metals",
+            subgroup="precious",
+            quote_unit="USD/oz",
+            source_provider="ibkr",
+            front_symbol="GCU6",
+            exchange="COMEX",
+        )
+        histories = []
+        if self.reload_point_count:
+            histories.append(
+                SimpleNamespace(
+                    instrument_id="gold",
+                    label="Gold",
+                    unit="USD/oz",
+                    points=[
+                        SimpleNamespace(
+                            timestamp=datetime(2026, 4, 1, tzinfo=timezone.utc) + timedelta(days=index),
+                            value=3900.0 + index * 3.0,
+                        )
+                        for index in range(self.reload_point_count)
+                    ],
+                    source_provider="fred",
+                    retrieved_at=datetime(2026, 9, 3, tzinfo=timezone.utc),
+                    origin="tests.gold_reload",
+                )
+            )
+        return SimpleNamespace(
+            selected_instrument_id=request.selected_instrument_id,
+            instruments=[instrument],
+            price_histories=histories,
+            market_summaries=[],
+            curves=[],
+            warnings=[],
+            source_provider="gamma",
+            retrieved_at=datetime(2026, 9, 3, tzinfo=timezone.utc),
+            origin="tests.gold",
+            coverage=SimpleNamespace(coverage_status="partial", provider_label="IBKR"),
+        )
+
+
+def test_commodity_handoff_uses_the_carried_series_when_the_reload_lost_history(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.resolve_strategy_lab_handoff(
+        _commodity_handoff(loaded_series=_carried_gold_series(120)),
+        commodities_service=_GoldCommoditiesService(reload_point_count=0),
+    )
+
+    assert result.status == "resolved"
+    assert result.composer_draft_leg is not None
+    assert len(result.composer_draft_leg.return_points) == 119
+    assert result.provenance["history_source"] == "handoff_payload"
+    assert result.provenance["carried_contract_symbol"] == "GCU6"
+    assert result.provenance["carried_unit"] == "USD/oz"
+    assert result.provider_summary == "ibkr"
+    assert any("Gamma used the series carried by the handoff" in warning for warning in result.warnings)
+    assert any("GCU6" in warning and "not roll-adjusted" in warning for warning in result.warnings)
+
+
+def test_commodity_handoff_prefers_the_reload_when_it_covers_more_than_the_carried_series(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.resolve_strategy_lab_handoff(
+        _commodity_handoff(loaded_series=_carried_gold_series(10)),
+        commodities_service=_GoldCommoditiesService(reload_point_count=60),
+    )
+
+    assert result.status == "resolved"
+    assert result.provenance["history_source"] == "provider_reload"
+    assert len(result.composer_draft_leg.return_points) == 59
+    assert not any("carried by the handoff" in warning for warning in result.warnings)
+
+
+def test_commodity_handoff_separates_missing_history_from_sparse_history(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.resolve_strategy_lab_handoff(
+        _commodity_handoff(loaded_series=None),
+        commodities_service=_GoldCommoditiesService(reload_point_count=0),
+    )
+
+    assert result.status == "unsupported"
+    assert result.unsupported_reason is not None
+    assert "found no price history" in result.unsupported_reason
+    assert any("none was carried by the handoff" in warning for warning in result.warnings)
 
 
 def test_strategy_lab_resolves_macro_handoff_to_lens(tmp_path):

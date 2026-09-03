@@ -22,6 +22,8 @@ from src.models.research_lab import (
     GammaResearchObject,
     ImportedReturnStreamRequest,
     CrossTabHandoffEntity,
+    CrossTabHandoffSeries,
+    CrossTabHandoffSeriesPoint,
     CrossTabHandoffTimeframe,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
@@ -341,6 +343,57 @@ class CrossTabHandoffTimeframeModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class CrossTabHandoffSeriesPointModel(BaseModel):
+    timestamp: str = Field(min_length=1, max_length=96)
+    value: float
+
+    def to_domain(self) -> CrossTabHandoffSeriesPoint:
+        return CrossTabHandoffSeriesPoint(timestamp=self.timestamp, value=self.value)
+
+    @classmethod
+    def from_domain(cls, row: CrossTabHandoffSeriesPoint) -> "CrossTabHandoffSeriesPointModel":
+        return cls(**row.__dict__)
+
+
+class CrossTabHandoffSeriesModel(BaseModel):
+    label: str = Field(min_length=1, max_length=256)
+    value_kind: Literal["return", "level", "probability", "price", "spread", "context"] = "price"
+    points: list[CrossTabHandoffSeriesPointModel] = Field(default_factory=list, max_length=5000)
+    source_provider: str | None = Field(default=None, max_length=96)
+    contract_symbol: str | None = Field(default=None, max_length=96)
+    unit: str | None = Field(default=None, max_length=96)
+    retrieved_at: str | None = Field(default=None, max_length=96)
+    origin: str | None = Field(default=None, max_length=128)
+    transformation_note: str | None = Field(default=None, max_length=512)
+
+    def to_domain(self) -> CrossTabHandoffSeries:
+        return CrossTabHandoffSeries(
+            label=self.label,
+            value_kind=self.value_kind,
+            points=[point.to_domain() for point in self.points],
+            source_provider=self.source_provider,
+            contract_symbol=self.contract_symbol,
+            unit=self.unit,
+            retrieved_at=self.retrieved_at,
+            origin=self.origin,
+            transformation_note=self.transformation_note,
+        )
+
+    @classmethod
+    def from_domain(cls, row: CrossTabHandoffSeries) -> "CrossTabHandoffSeriesModel":
+        return cls(
+            label=row.label,
+            value_kind=row.value_kind,
+            points=[CrossTabHandoffSeriesPointModel.from_domain(point) for point in row.points],
+            source_provider=row.source_provider,
+            contract_symbol=row.contract_symbol,
+            unit=row.unit,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
 class StrategyLabHandoffEnvelopeModel(BaseModel):
     source_tab: str = Field(min_length=1, max_length=96)
     source_mode: str | None = Field(default=None, max_length=96)
@@ -364,6 +417,7 @@ class StrategyLabHandoffEnvelopeModel(BaseModel):
     default_side: Literal["long", "short", "long_yes", "long_no", "none"] = "long"
     default_weight: float | None = None
     selected_timeframe: CrossTabHandoffTimeframeModel | None = None
+    loaded_series: CrossTabHandoffSeriesModel | None = None
     provider: str | None = Field(default=None, max_length=96)
     source: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list, max_length=64)
@@ -383,6 +437,7 @@ class StrategyLabHandoffEnvelopeModel(BaseModel):
             default_side=self.default_side,
             default_weight=self.default_weight,
             selected_timeframe=self.selected_timeframe.to_domain() if self.selected_timeframe is not None else None,
+            loaded_series=self.loaded_series.to_domain() if self.loaded_series is not None else None,
             provider=self.provider,
             source=dict(self.source) if self.source is not None else None,
             warnings=list(self.warnings),
@@ -407,6 +462,9 @@ class StrategyLabHandoffEnvelopeModel(BaseModel):
                 CrossTabHandoffTimeframeModel.from_domain(row.selected_timeframe)
                 if row.selected_timeframe is not None
                 else None
+            ),
+            loaded_series=(
+                CrossTabHandoffSeriesModel.from_domain(row.loaded_series) if row.loaded_series is not None else None
             ),
             provider=row.provider,
             source=dict(row.source) if row.source is not None else None,

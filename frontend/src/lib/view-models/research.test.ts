@@ -434,6 +434,41 @@ describe("research view model helpers", () => {
     expect(handoff.default_side).toBe("long");
     expect(handoff.normalized_ids.instrument_id).toBe("wti");
     expect(handoff.warnings.join(" ")).toContain("not roll-adjusted futures strategies");
+    expect(handoff.loaded_series?.points).toEqual([
+      { timestamp: "2026-02-01T00:00:00Z", value: 72 },
+      { timestamp: "2026-03-01T00:00:00Z", value: 75 }
+    ]);
+    expect(handoff.loaded_series?.unit).toBe("USD/bbl");
+    expect(handoff.loaded_series?.source_provider).toBe("sample_data");
+    expect(handoff.loaded_series?.contract_symbol).toBe("CL");
+  });
+
+  it("carries no series when the commodity has no loaded history", () => {
+    const handoff = buildCommodityStrategyHandoff({
+      instrument: {
+        instrument_id: "gold",
+        symbol: "GC",
+        name: "Gold",
+        family: "metals",
+        subgroup: "precious",
+        quote_unit: "USD/oz",
+        currency: "USD",
+        exchange: "COMEX",
+        front_symbol: "GCU6",
+        provider_symbols: { ibkr: "GC" },
+        aliases: ["gold"],
+        description: "Gold futures",
+        source_provider: "ibkr",
+        retrieved_at: "2026-09-03T15:00:00Z",
+        origin: "ibkr",
+        transformation_note: null
+      },
+      history: null,
+      sourceMode: "metals"
+    });
+
+    expect(handoff.loaded_series).toBeNull();
+    expect(handoff.warnings.join(" ")).toContain("no loaded price history");
   });
 
   it("builds macro Strategy Lab lens handoffs from active context", () => {

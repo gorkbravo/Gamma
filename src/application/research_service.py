@@ -44,6 +44,7 @@ from src.models.research_lab import (
     SavedResearchItem,
     StrategyLabHandoffResolveRequest,
     StrategyLabResolvedHandoff,
+    CrossTabHandoffSeries,
     CrossTabHandoffTimeframe,
     StrategyLabAnalysisResult,
     StrategyLabCompositionLeg,
@@ -150,6 +151,30 @@ def _align_ohlcv_to_close(frame: pd.DataFrame | None, close_series: pd.Series) -
         aligned["volume"] = pd.to_numeric(aligned["volume"], errors="coerce")
     aligned["close"] = close
     return aligned.dropna(subset=["close"]).sort_index()
+
+
+@dataclass(frozen=True)
+class _CarriedSeriesHistory:
+    """Adapts a series carried on a handoff to the price-history shape the
+    commodity resolver's provenance and staleness helpers already read."""
+
+    label: str
+    points: list[Any]
+    source_provider: str | None
+    origin: str | None
+    retrieved_at: datetime | None
+    warnings: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_series(cls, series: CrossTabHandoffSeries) -> "_CarriedSeriesHistory":
+        retrieved_at = pd.to_datetime(series.retrieved_at, errors="coerce", utc=True)
+        return cls(
+            label=series.label,
+            points=list(series.points),
+            source_provider=series.source_provider,
+            origin=series.origin,
+            retrieved_at=None if pd.isna(retrieved_at) else retrieved_at.to_pydatetime(),
+        )
 
 
 class ResearchService:
@@ -949,20 +974,39 @@ class ResearchService:
         warnings.extend(getattr(summary, "warnings", []) or [])
         warnings.extend(getattr(curve, "warnings", []) or [])
 
-        prices: dict[pd.Timestamp, float] = {}
-        invalid_points = 0
-        for point in getattr(history, "points", []) if history is not None else []:
-            timestamp = pd.to_datetime(getattr(point, "timestamp", None), errors="coerce")
-            value = getattr(point, "value", None)
-            try:
-                price = float(value)
-            except (TypeError, ValueError):
-                invalid_points += 1
-                continue
-            if pd.isna(timestamp) or not math.isfinite(price) or price <= 0:
-                invalid_points += 1
-                continue
-            prices[self._normalize_return_point_date(timestamp)] = price
+        # The resolver re-reads the provider, which can answer with less than the
+        # user was looking at: a cached IBKR curve skips the front-history fetch,
+        # and a failed reference series leaves nothing behind it. The originating
+        # tab therefore carries the series it had on screen, and whichever of the
+        # two covers more of the visible window wins.
+        reloaded_prices, reloaded_invalid = self._commodity_price_series(history)
+        carried_series = getattr(handoff, "loaded_series", None)
+        carried_history = (
+            _CarriedSeriesHistory.from_series(carried_series)
+            if carried_series is not None and carried_series.points
+            else None
+        )
+        carried_prices, carried_invalid = self._commodity_price_series(carried_history)
+
+        if len(carried_prices) > len(reloaded_prices):
+            history_source = "handoff_payload"
+            prices = carried_prices
+            invalid_points = carried_invalid
+            history = carried_history
+            provider = carried_series.source_provider or provider
+            warnings.append(
+                f"Provider reload returned {len(reloaded_prices)} usable observation(s) for the "
+                f"{len(carried_prices)} loaded in Commodities; Gamma used the series carried by the handoff."
+            )
+            if carried_series.contract_symbol:
+                warnings.append(
+                    f"Carried commodity series is the {carried_series.contract_symbol} basis shown in Commodities; "
+                    "it is not roll-adjusted."
+                )
+        else:
+            history_source = "provider_reload"
+            prices = reloaded_prices
+            invalid_points = reloaded_invalid
         if invalid_points:
             warnings.append(f"Dropped {invalid_points} commodity history point(s) with invalid timestamps or prices.")
 
@@ -984,8 +1028,30 @@ class ResearchService:
             instrument_id=resolved_id,
             transformation="commodity_price_level_to_return_stream",
             return_points=len(points),
+            history_source=history_source,
+            carried_series=carried_series if history_source == "handoff_payload" else None,
         )
         if len(points) < 5:
+            # A handoff that found nothing and one that found a stub are different
+            # problems: the first is a data-availability failure the user can act
+            # on, the second is a transformation limit.
+            if not prices:
+                sparse_warning = (
+                    f"No commodity price history was available for {label} from "
+                    f"{provider or 'the configured provider'}, and none was carried by the handoff."
+                )
+                unsupported_reason = (
+                    "Commodity handoff found no price history to convert; the provider returned none and the "
+                    "originating tab carried none."
+                )
+            else:
+                sparse_warning = (
+                    f"Commodity price history for {label} yielded {len(points)} return observation(s); "
+                    "at least five are needed to create a return leg."
+                )
+                unsupported_reason = (
+                    "Commodity handoff needs at least five computable return observations from price history."
+                )
             return StrategyLabResolvedHandoff(
                 handoff_id=self._handoff_id(handoff),
                 envelope=handoff,
@@ -993,8 +1059,8 @@ class ResearchService:
                 resolved_capability="reference_only",
                 provider_summary=provider,
                 provenance=provenance,
-                warnings=list(dict.fromkeys(warnings + ["Commodity price history is too sparse to create a return leg."])),
-                unsupported_reason="Commodity handoff needs at least five computable return observations from price history.",
+                warnings=list(dict.fromkeys(warnings + [sparse_warning])),
+                unsupported_reason=unsupported_reason,
             )
 
         research_object = GammaResearchObject(
@@ -1236,6 +1302,23 @@ class ResearchService:
         }
         return {key: value for key, value in provenance.items() if value not in (None, "")}
 
+    def _commodity_price_series(self, history: Any) -> tuple[dict[pd.Timestamp, float], int]:
+        prices: dict[pd.Timestamp, float] = {}
+        invalid_points = 0
+        for point in getattr(history, "points", []) if history is not None else []:
+            timestamp = pd.to_datetime(getattr(point, "timestamp", None), errors="coerce")
+            value = getattr(point, "value", None)
+            try:
+                price = float(value)
+            except (TypeError, ValueError):
+                invalid_points += 1
+                continue
+            if pd.isna(timestamp) or not math.isfinite(price) or price <= 0:
+                invalid_points += 1
+                continue
+            prices[self._normalize_return_point_date(timestamp)] = price
+        return prices, invalid_points
+
     @staticmethod
     def _commodity_handoff_provenance(
         *,
@@ -1246,6 +1329,8 @@ class ResearchService:
         instrument_id: str,
         transformation: str,
         return_points: int,
+        history_source: str = "provider_reload",
+        carried_series: CrossTabHandoffSeries | None = None,
     ) -> dict[str, Any]:
         coverage = getattr(workspace, "coverage", None)
         history_points = list(getattr(history, "points", []) or [])
@@ -1258,7 +1343,19 @@ class ResearchService:
             if latest_history_point is None or candidate > latest_history_point:
                 latest_history_point = candidate
 
+        carried_context = (
+            {
+                "carried_contract_symbol": carried_series.contract_symbol,
+                "carried_unit": carried_series.unit,
+                "carried_retrieved_at": carried_series.retrieved_at,
+                "carried_origin": carried_series.origin,
+            }
+            if carried_series is not None
+            else {}
+        )
+
         return {
+            **carried_context,
             "source_provider": getattr(history, "source_provider", None) or getattr(workspace, "source_provider", None),
             "coverage_status": getattr(coverage, "coverage_status", None),
             "provider_label": getattr(coverage, "provider_label", None),
@@ -1269,6 +1366,7 @@ class ResearchService:
             "family": getattr(instrument, "family", None),
             "quote_unit": getattr(instrument, "quote_unit", None),
             "history_points": len(history_points),
+            "history_source": history_source,
             "return_points": return_points,
             "latest_history_point": latest_history_point.isoformat() if latest_history_point is not None else None,
             "curve_shape": getattr(curve, "shape_label", None),

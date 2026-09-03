@@ -159,6 +159,34 @@ class CrossTabHandoffTimeframe:
 
 
 @dataclass(frozen=True)
+class CrossTabHandoffSeriesPoint:
+    timestamp: str
+    value: float
+
+
+@dataclass(frozen=True)
+class CrossTabHandoffSeries:
+    """The series the originating tab actually had on screen.
+
+    A resolver that re-reads its own provider can get a different answer than the
+    user was looking at: a cached path, an expired reference series, or a partial
+    provider can all return less than the visible screen showed. Carrying the
+    loaded series keeps the handoff faithful to what was displayed, and the
+    resolver records which of the two it used.
+    """
+
+    label: str
+    value_kind: StrategyLabHandoffValueKind
+    points: list[CrossTabHandoffSeriesPoint] = field(default_factory=list)
+    source_provider: str | None = None
+    contract_symbol: str | None = None
+    unit: str | None = None
+    retrieved_at: str | None = None
+    origin: str | None = None
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class StrategyLabHandoffEnvelope:
     source_tab: str
     source_mode: str | None
@@ -171,6 +199,7 @@ class StrategyLabHandoffEnvelope:
     default_side: StrategyLabHandoffDefaultSide = "long"
     default_weight: float | None = None
     selected_timeframe: CrossTabHandoffTimeframe | None = None
+    loaded_series: CrossTabHandoffSeries | None = None
     provider: str | None = None
     source: dict[str, Any] | None = None
     warnings: list[str] = field(default_factory=list)

@@ -310,6 +310,21 @@ export function buildCommodityStrategyHandoff(
           end: history.points.at(-1)?.timestamp ?? null
         }
       : null,
+    // Carry what the user is looking at. The resolver re-reads the provider, and
+    // a cached curve or a failed reference series can return less than this.
+    loaded_series: history?.points.length
+      ? {
+          label: history.label,
+          value_kind: "price",
+          points: history.points.map((point) => ({ timestamp: point.timestamp, value: point.value })),
+          source_provider: history.source_provider ?? null,
+          contract_symbol: commodity.summary?.quote_basis?.contract_symbol ?? instrument.front_symbol ?? null,
+          unit: history.unit ?? instrument.quote_unit ?? null,
+          retrieved_at: history.retrieved_at ?? null,
+          origin: history.origin ?? null,
+          transformation_note: history.transformation_note ?? null
+        }
+      : null,
     provider,
     source: {
       origin: history?.origin ?? instrument.origin ?? workspace?.origin ?? null,

@@ -4203,11 +4203,31 @@ export interface CrossTabHandoffTimeframe {
   end: string | null;
 }
 
+export interface CrossTabHandoffSeriesPoint {
+  timestamp: string;
+  value: number;
+}
+
+/** The series the originating tab had on screen, carried so a resolver that
+ *  re-reads its provider cannot silently hand over less than was displayed. */
+export interface CrossTabHandoffSeries {
+  label: string;
+  value_kind: StrategyLabHandoffValueKind;
+  points: CrossTabHandoffSeriesPoint[];
+  source_provider: string | null;
+  contract_symbol: string | null;
+  unit: string | null;
+  retrieved_at: string | null;
+  origin: string | null;
+  transformation_note: string | null;
+}
+
 export interface CrossTabHandoffEnvelope {
   source_tab: TabId | string;
   source_mode: string | null;
   selected_entity: CrossTabHandoffEntity | null;
   selected_timeframe: CrossTabHandoffTimeframe | null;
+  loaded_series?: CrossTabHandoffSeries | null;
   provider: string | null;
   source: Record<string, unknown> | null;
   warnings: string[];
