@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Tuple
 
 import numpy as np
@@ -22,11 +23,20 @@ def compute_weights(values: pd.Series) -> pd.Series:
 
 
 def realized_vol(returns: pd.Series) -> Tuple[float | None, float | None]:
-    if returns.empty:
+    """Sample volatility, or absence when it cannot be computed.
+
+    A single observation has no sample standard deviation, and pandas answers
+    NaN. Returning that NaN as a number made an uncomputable metric look like a
+    computed one, and it is not JSON-encodable, so it took the whole response
+    down with it rather than degrading one value.
+    """
+
+    if len(returns) < 2:
         return None, None
     daily = float(returns.std())
-    annual = daily * (252 ** 0.5)
-    return daily, annual
+    if not math.isfinite(daily):
+        return None, None
+    return daily, daily * (252 ** 0.5)
 
 
 def max_drawdown(returns: pd.Series) -> float | None:
@@ -35,7 +45,8 @@ def max_drawdown(returns: pd.Series) -> float | None:
     cumulative = (1 + returns).cumprod()
     peak = cumulative.cummax()
     drawdown = (cumulative / peak) - 1
-    return float(drawdown.min())
+    worst = float(drawdown.min())
+    return worst if math.isfinite(worst) else None
 
 
 def risk_contributions(weights: np.ndarray, cov: np.ndarray) -> np.ndarray:

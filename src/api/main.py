@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.json_response import GammaJSONResponse
 from src.api.session_auth import GAMMA_SESSION_HEADER, GammaSessionMiddleware, resolve_session_token
 from src.api.routes import (
     copilot_router,
@@ -41,6 +42,7 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
         title="Gamma API",
         version="0.1.0",
         lifespan=lifespan,
+        default_response_class=GammaJSONResponse,
     )
     app.state.runtime = runtime_instance
     app.state.gamma_session_token = resolved_session_token
