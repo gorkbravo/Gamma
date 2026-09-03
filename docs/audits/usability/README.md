@@ -4,6 +4,8 @@ Live product workflow audits and research-thread evaluations.
 
 ## Audits
 
+- [`gamma_usability_findings_2026-09-03-2.md`](./gamma_usability_findings_2026-09-03-2.md) (current): live IBKR verification of the 2026-09-03 fixes; four of five acceptance criteria passed, Strategy Lab supported a public QQQ-minus-SPY thesis, while Copilot workbench loss and cross-symbol stale strategy state remain P1 defects.
+
 - [`gamma_usability_findings_2026-09-03.md`](./gamma_usability_findings_2026-09-03.md) (current): IBKR-integrated GOOGL concentration/hedge thesis partially confirmed; live Portfolio/Risk/Fundamentals/Options worked, while P1 ATM-IV interpolation, account-sizing, and Copilot-grounding defects blocked a clean account-matched expression.
 
 - [`gamma_usability_findings_2026-09-01.md`](./gamma_usability_findings_2026-09-01.md) (current): degraded provider-backed AAPL thesis journey; yfinance/SEC evidence rejected the thesis, while P1 benchmark loss into Risk, run-state/provenance contradictions, and Copilot terminal failure blocked a clean end-to-end result.
