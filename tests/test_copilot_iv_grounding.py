@@ -164,3 +164,39 @@ def test_summarize_iv_workbench_handles_an_empty_builder():
     assert empty is not None
     assert empty["strategy"] is None
     assert empty["legs"] == []
+
+
+def test_workbench_for_a_different_symbol_is_discarded_with_a_warning():
+    """GUA-20260903-6: an AAPL surface must never carry a GOOGL structure."""
+    stale = dict(WORKBENCH)
+    stale["symbol"] = "AAPL"
+
+    summary = summarize_iv_state(SURFACE, None, stale)
+
+    assert summary["workbench"] is None
+    assert any("Discarded an Options workbench snapshot for AAPL" in warning for warning in summary["warnings"])
+
+
+def test_legs_priced_against_another_symbol_are_stripped_but_the_view_state_survives():
+    stale = dict(WORKBENCH)
+    stale["strategy_symbol"] = "AAPL"
+
+    summary = summarize_iv_state(SURFACE, None, stale)
+    workbench = summary["workbench"]
+
+    assert workbench is not None
+    assert workbench["selected_expiry"] == "20261120"
+    assert workbench["legs"] == []
+    assert workbench["strategy"] is None
+    assert any("Discarded strategy legs priced against AAPL" in warning for warning in summary["warnings"])
+
+
+def test_matching_symbols_keep_the_full_workbench():
+    matching = dict(WORKBENCH)
+    matching["strategy_symbol"] = "GOOGL"
+
+    summary = summarize_iv_state(SURFACE, None, matching)
+
+    assert summary["workbench"]["strategy"] is not None
+    assert len(summary["workbench"]["legs"]) == 2
+    assert not any("Discarded" in warning for warning in summary["warnings"])

@@ -256,6 +256,34 @@ def summarize_risk_result(
     }
 
 
+def _validate_workbench_symbols(
+    workbench: dict[str, Any],
+    active_surface: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop workbench state that does not belong to the loaded surface."""
+    if not workbench:
+        return {}, []
+    surface_symbol = str(active_surface.get("symbol") or "").strip().upper()
+    workbench_symbol = str(workbench.get("symbol") or "").strip().upper()
+    if surface_symbol and workbench_symbol and surface_symbol != workbench_symbol:
+        return {}, [
+            f"Discarded an Options workbench snapshot for {workbench_symbol}: the loaded surface is "
+            f"{surface_symbol}."
+        ]
+
+    strategy_symbol = str(workbench.get("strategy_symbol") or "").strip().upper()
+    reference_symbol = workbench_symbol or surface_symbol
+    if strategy_symbol and reference_symbol and strategy_symbol != reference_symbol:
+        stripped = dict(workbench)
+        stripped["legs"] = []
+        stripped["strategy"] = None
+        return stripped, [
+            f"Discarded strategy legs priced against {strategy_symbol}: the active Options symbol is "
+            f"{reference_symbol}."
+        ]
+    return workbench, []
+
+
 def summarize_iv_workbench(workbench: dict[str, Any] | None) -> dict[str, Any] | None:
     """The visible Options workbench state, tenor-tagged.
 
@@ -336,6 +364,11 @@ def summarize_iv_state(
     if not active_surface:
         return None
     workbench = workbench if isinstance(workbench, dict) else {}
+    # Server-side guard: a workbench snapshot describing a different underlying is
+    # not evidence about this surface. Options state used to survive a symbol
+    # change (GUA-20260903-6), so mismatches are rejected here rather than
+    # silently reinterpreted against the loaded chain.
+    workbench, workbench_warnings = _validate_workbench_symbols(workbench, active_surface)
     strikes = [_as_float(value) for value in active_surface.get("strikes", [])]
     clean_strikes = [value for value in strikes if value is not None]
     expiries = [str(value) for value in active_surface.get("expiries", [])]
@@ -421,6 +454,7 @@ def summarize_iv_state(
         "warnings": dedupe_warnings(
             active_surface.get("warnings", []),
             (session or {}).get("messages", []),
+            workbench_warnings,
         ),
     }
 

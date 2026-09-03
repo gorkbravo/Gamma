@@ -63,6 +63,8 @@ import {
   ivError,
   ivSession,
   ivSurface,
+  ivWorkbenchState,
+  previewCopilotContextFingerprint,
   lastError,
   loadCopilotResearchCard,
   loadCryptoWorkspace,
@@ -3363,3 +3365,97 @@ function makeMacroSnapshot(): MacroSnapshot {
     transformation_note: null
   };
 }
+
+
+describe("Options workbench snapshot lifecycle", () => {
+  function makeWorkbench(overrides: Record<string, unknown> = {}) {
+    return {
+      mode: "strategies",
+      symbol: "SPY",
+      strategy_symbol: "SPY",
+      selected_expiry: "20260320",
+      selected_expiry_days: 19,
+      contracts: 1,
+      contract_multiplier: 100,
+      legs: [
+        {
+          side: "long",
+          option_type: "put",
+          expiry: "20260320",
+          days_to_expiry: 19,
+          strike: 500,
+          premium: 8.0,
+          quantity: 1
+        }
+      ],
+      strategy: {
+        net_premium_per_share: -8,
+        net_premium_total: -800,
+        premium_direction: "debit",
+        max_profit_per_share: 12,
+        max_loss_per_share: -8,
+        max_profit_total: 1200,
+        max_loss_total: -800,
+        breakevens: [492],
+        net_delta: -0.4,
+        net_gamma: 0.01,
+        net_vega: 0.1,
+        net_theta: -0.02,
+        shares_represented: 100,
+        live_position_shares: 300,
+        coverage_ratio: 0.333,
+        sizing_warnings: []
+      },
+      realized_vs_implied: [],
+      ...overrides
+    } as never;
+  }
+
+  beforeEach(() => {
+    ivWorkbenchState.reset();
+    ivSurface.set(null);
+    ivSession.set(null);
+  });
+
+  it("keeps the snapshot when the Options view unmounts on a Copilot handoff", () => {
+    ivWorkbenchState.set(makeWorkbench());
+
+    ivWorkbenchState.markDetached();
+
+    const snapshot = get(ivWorkbenchState);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.detached).toBe(true);
+    expect(snapshot?.strategy).not.toBeNull();
+  });
+
+  it("carries the strategy into the Copilot fingerprint after the view is detached", () => {
+    ivSurface.set(makeIvSurface({ symbol: "SPY" }));
+    ivWorkbenchState.set(makeWorkbench());
+    ivWorkbenchState.markDetached();
+
+    const fingerprint = previewCopilotContextFingerprint("iv");
+
+    expect(fingerprint).toContain("long:put:20260320:500:1");
+    expect(fingerprint).toContain("\"selectedExpiry\":\"20260320\"");
+  });
+
+  it("drops a snapshot that belongs to a different symbol", () => {
+    ivSurface.set(makeIvSurface({ symbol: "AAPL" }));
+    ivWorkbenchState.set(makeWorkbench({ symbol: "SPY" }));
+
+    const fingerprint = previewCopilotContextFingerprint("iv");
+
+    expect(fingerprint).toContain("\"selectedExpiry\":null");
+    expect(fingerprint).not.toContain("long:put:20260320:500:1");
+  });
+
+  it("strips legs priced against another symbol but keeps the view state", () => {
+    ivSurface.set(makeIvSurface({ symbol: "SPY" }));
+    ivWorkbenchState.set(makeWorkbench({ symbol: "SPY", strategy_symbol: "GOOGL" }));
+
+    const fingerprint = previewCopilotContextFingerprint("iv");
+
+    expect(fingerprint).toContain("\"selectedExpiry\":\"20260320\"");
+    expect(fingerprint).not.toContain("long:put:20260320:500:1");
+  });
+});

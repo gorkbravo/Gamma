@@ -264,7 +264,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     message=str(exc),
                     sources=list(tool_sources.values()),
                     tool_traces=tool_traces,
-                    warnings=warnings,
+                    warnings=warnings + self._turn_failure_warnings(turn, input_items, tool_traces),
                 ))
             usage = self._merge_usage_records(
                 usage,
@@ -431,7 +431,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             except CopilotRunCancelled:
                 raise
             except RuntimeError as exc:
-                emit("provider.error", {"message": str(exc), "provider": self.provider_name})
+                warnings.extend(self._turn_failure_warnings(turn, input_items, tool_traces))
+                emit("provider.error", {"message": str(exc), "provider": self.provider_name, "turn": turn + 1})
                 return build_result(status="error", message=str(exc))
 
             self._emit_usage(emit, response)
@@ -983,6 +984,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
 
     @staticmethod
     def _sdk_error_message(exc: Exception) -> str:
+        """Render a provider failure with the fields that identify its cause.
+
+        A bare status and prose left a 4xx on a tool continuation undiagnosable
+        (GUA-20260903-2): `param` names the exact rejected input item and `code`
+        names the rule it broke, which is what separates a malformed replayed
+        item from a model or account problem. All three fields are provider
+        metadata, not prompt content.
+        """
         if isinstance(exc, APITimeoutError):
             return "OpenAI request timed out."
         if isinstance(exc, APIConnectionError):
@@ -991,8 +1000,37 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             status = getattr(exc, "status_code", None)
             message = getattr(exc, "message", None) or str(exc)
             prefix = f"OpenAI request failed ({status})" if status else "OpenAI request failed"
-            return f"{prefix}: {message}"
+            details = []
+            for label, attribute in (("code", "code"), ("param", "param"), ("request_id", "request_id")):
+                value = getattr(exc, attribute, None)
+                text = str(value).strip() if value is not None else ""
+                if text and text.lower() != "none":
+                    details.append(f"{label}={text}")
+            suffix = f" [{', '.join(details)}]" if details else ""
+            return f"{prefix}: {message}{suffix}"
         return f"OpenAI request failed: {exc}"
+
+    @staticmethod
+    def _turn_failure_warnings(
+        turn: int,
+        input_items: list[dict[str, Any]],
+        tool_traces: list[CopilotToolTrace],
+    ) -> list[str]:
+        """Say where in the exchange a provider call died.
+
+        A failure on the first call and a failure while replaying tool output are
+        different problems with different fixes, and the audit could not tell them
+        apart from the rendered error (GUA-20260903-2).
+        """
+        if turn <= 0:
+            return []
+        replayed = sum(1 for item in input_items if isinstance(item, dict) and item.get("type") == "function_call_output")
+        tool_names = ", ".join(trace.tool_name for trace in tool_traces[-3:]) or "none"
+        return [
+            f"The provider call failed while continuing after tool output (turn {turn + 1}, "
+            f"{len(input_items)} replayed input items, {replayed} tool results, recent tools: {tool_names}). "
+            "The initial request succeeded, so the failure is in the continuation, not the prompt."
+        ]
 
     def _build_response_payload(
         self,

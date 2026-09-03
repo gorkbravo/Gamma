@@ -50,6 +50,7 @@
     livePositionForSymbol,
     nearestStrikeIndex,
     optionsModes,
+    reconcileStrategyToSymbol,
     selectedExpiryForSurface,
     type ChainRow,
     type ChainGreekRow,
@@ -172,6 +173,8 @@
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   let strategyPayoffMatrix: StrategyPayoffMatrix | null = null;
   let strategyContracts = 1;
+  // The symbol the current strategy legs were priced against.
+  let strategySymbol: string | null = null;
   let strategySizing: StrategySizing = deriveStrategySizing(strategyPayoff, strategyLegs, strategyContracts, null);
   let strategyGreeks: StrategyGreekSummary | null = null;
   let probabilitySurface: ImpliedProbabilitySurface | null = null;
@@ -204,6 +207,11 @@
     symbol = requestedSymbol.toUpperCase();
     selectedExpiry = null;
   }
+
+  // Legs, marks, payoff and sizing are all symbol-specific. Loading a different
+  // underlying used to leave the previous symbol's spread rendered under the new
+  // header (GUA-20260903-6), so the structure is dropped with a visible notice.
+  $: syncStrategyToActiveSymbol(result?.symbol ?? null);
 
   $: activeExpiry = selectedExpiryForSurface(result, selectedExpiry);
   $: chainRows = deriveChainRows(result, activeExpiry);
@@ -267,6 +275,7 @@
   $: ivWorkbenchState.set({
     mode,
     symbol: result?.symbol ?? displayedSymbol ?? null,
+    strategy_symbol: strategySymbol,
     selected_expiry: activeExpiry,
     selected_expiry_days: activeExpiry ? daysToExpiry(activeExpiry) : null,
     contracts: strategySizing.contracts,
@@ -310,7 +319,12 @@
     })),
   });
 
-  onDestroy(() => ivWorkbenchState.set(null));
+  // Deliberately NOT cleared on destroy. Handing off to Copilot switches the
+  // active tab, which unmounts this view before the user submits the prompt, so
+  // clearing here threw away the very strategy the run was meant to evaluate
+  // (GUA-20260903-2). The snapshot stays addressable and is symbol-guarded by
+  // the context builder instead.
+  onDestroy(() => ivWorkbenchState.markDetached());
   $: strategyGreeks = deriveStrategyGreeks(strategyLegs, result);
   $: ivSmile = deriveIvSmile(
     chainRows,
@@ -487,7 +501,25 @@
 
   function clearStrategy() {
     strategyLegs = [];
+    strategyContracts = 1;
     strategyTemplateNotice = "";
+  }
+
+  function syncStrategyToActiveSymbol(nextSymbol: string | null) {
+    const reconciled = reconcileStrategyToSymbol(
+      nextSymbol,
+      strategySymbol,
+      strategyLegs,
+      strategyContracts,
+      strategyTemplateNotice
+    );
+    strategySymbol = reconciled.strategySymbol;
+    if (!reconciled.cleared) {
+      return;
+    }
+    strategyLegs = reconciled.legs;
+    strategyContracts = reconciled.contracts;
+    strategyTemplateNotice = reconciled.notice;
   }
 
   function applyStrategyTemplate(templateId: StrategyTemplateId) {

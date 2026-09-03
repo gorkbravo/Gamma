@@ -583,6 +583,10 @@ export const riskWorkspaceMode = writable<string>("overview");
 export interface IvWorkbenchState {
   mode: string;
   symbol: string | null;
+  /** Symbol the legs were priced against; guards against cross-symbol carryover. */
+  strategy_symbol: string | null;
+  /** True once the Options view unmounted: still a valid snapshot, no longer live. */
+  detached?: boolean;
   selected_expiry: string | null;
   selected_expiry_days: number | null;
   contracts: number;
@@ -624,7 +628,54 @@ export interface IvWorkbenchState {
   }[];
 }
 
-export const ivWorkbenchState = writable<IvWorkbenchState | null>(null);
+function createIvWorkbenchStore() {
+  const inner = writable<IvWorkbenchState | null>(null);
+  return {
+    subscribe: inner.subscribe,
+    set(value: IvWorkbenchState | null) {
+      inner.set(value ? { ...value, detached: false } : null);
+    },
+    /**
+     * The Options view unmounted. The snapshot is kept — handing off to Copilot
+     * switches tabs and destroys the view before the prompt is submitted, so
+     * discarding here lost the strategy the run was about (GUA-20260903-2) — but
+     * it is flagged so consumers know it is no longer being refreshed.
+     */
+    markDetached() {
+      inner.update((current) => (current ? { ...current, detached: true } : current));
+    },
+    reset() {
+      inner.set(null);
+    }
+  };
+}
+
+export const ivWorkbenchState = createIvWorkbenchStore();
+
+/**
+ * The workbench snapshot, but only the parts that belong to the surface actually
+ * loaded. A snapshot for another symbol never travels with the context, and legs
+ * priced against a different underlying are dropped rather than reinterpreted
+ * (GUA-20260903-6).
+ */
+function resolvedIvWorkbench(): IvWorkbenchState | null {
+  const workbench = get(ivWorkbenchState);
+  if (!workbench) {
+    return null;
+  }
+  const surfaceSymbol = String(resolvedIvSurface()?.symbol ?? get(ivSession)?.active_symbol ?? "")
+    .trim()
+    .toUpperCase();
+  const workbenchSymbol = String(workbench.symbol ?? "").trim().toUpperCase();
+  if (surfaceSymbol && workbenchSymbol && surfaceSymbol !== workbenchSymbol) {
+    return null;
+  }
+  const strategySymbol = String(workbench.strategy_symbol ?? "").trim().toUpperCase();
+  if (workbenchSymbol && strategySymbol && strategySymbol !== workbenchSymbol) {
+    return { ...workbench, legs: [], strategy: null };
+  }
+  return workbench;
+}
 const STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY = "gamma.strategyLab.latestResearchBook";
 
 function loadPersistedStrategyLabResearchBook(): StrategyLabResearchBook | null {
@@ -1357,7 +1408,7 @@ function buildCopilotContextFingerprint(
 
   const surface = resolvedIvSurface();
   const session = get(ivSession);
-  const workbench = get(ivWorkbenchState);
+  const workbench = resolvedIvWorkbench();
   return JSON.stringify({
     domain,
     workspaceMode,
@@ -1368,6 +1419,7 @@ function buildCopilotContextFingerprint(
     // The visible workbench state is part of the context identity: a card built
     // against a different submode, expiry, or strategy is a different card.
     mode: workbench?.mode ?? null,
+    strategySymbol: workbench?.strategy_symbol ?? null,
     selectedExpiry: workbench?.selected_expiry ?? null,
     contracts: workbench?.contracts ?? null,
     legs: (workbench?.legs ?? []).map(
@@ -3657,7 +3709,7 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         iv_state: {
           surface: resolvedIvSurface(),
           session: get(ivSession),
-          workbench: get(ivWorkbenchState)
+          workbench: resolvedIvWorkbench()
         }
       };
     case "synthesis":

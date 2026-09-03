@@ -1831,3 +1831,44 @@ export function livePositionForSymbol(
   }
   return { symbol: target, quantity: matches.reduce((sum, position) => sum + position.quantity, 0) };
 }
+
+export interface StrategySymbolReconciliation {
+  strategySymbol: string | null;
+  legs: StrategyLeg[];
+  contracts: number;
+  notice: string;
+  cleared: boolean;
+}
+
+/**
+ * Decide what survives when the loaded Options symbol changes.
+ *
+ * Legs, marks, payoff and sizing are all priced against one underlying, so a
+ * symbol change used to leave the previous symbol's spread rendered under the
+ * new header (GUA-20260903-6). The structure is dropped and the user is told,
+ * rather than silently reinterpreted against a different chain.
+ */
+export function reconcileStrategyToSymbol(
+  nextSymbol: string | null | undefined,
+  currentStrategySymbol: string | null,
+  legs: StrategyLeg[],
+  contracts: number,
+  notice = ""
+): StrategySymbolReconciliation {
+  const normalized = String(nextSymbol ?? "").trim().toUpperCase() || null;
+  if (normalized === currentStrategySymbol) {
+    return { strategySymbol: currentStrategySymbol, legs, contracts, notice, cleared: false };
+  }
+  if (!legs.length) {
+    return { strategySymbol: normalized, legs, contracts, notice, cleared: false };
+  }
+  return {
+    strategySymbol: normalized,
+    legs: [],
+    contracts: 1,
+    notice: currentStrategySymbol
+      ? `Cleared the ${currentStrategySymbol} structure. Legs, marks, payoff and sizing do not carry across symbols; rebuild on ${normalized ?? "the new symbol"}.`
+      : "",
+    cleared: true,
+  };
+}

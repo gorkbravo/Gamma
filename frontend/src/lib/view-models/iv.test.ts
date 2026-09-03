@@ -31,6 +31,7 @@ import {
   hasParametricIvFit,
   livePositionForSymbol,
   nearestStrikeIndex,
+  reconcileStrategyToSymbol,
 } from "./iv";
 
 const connectedStatus: SystemStatus = {
@@ -709,5 +710,54 @@ describe("livePositionForSymbol", () => {
   it("returns null when the symbol is not held", () => {
     expect(livePositionForSymbol(positions as any, "AAPL")).toBeNull();
     expect(livePositionForSymbol(positions as any, "")).toBeNull();
+  });
+});
+
+describe("reconcileStrategyToSymbol", () => {
+  const googlLegs = [
+    { id: "a", optionType: "put", side: "long", expiry: "20261120", strike: 335, premium: 16.2, quantity: 1 },
+    { id: "b", optionType: "put", side: "short", expiry: "20261120", strike: 315, premium: 8.11, quantity: 1 },
+  ] as any;
+
+  it("clears a GOOGL spread when the loaded symbol becomes AAPL", () => {
+    const result = reconcileStrategyToSymbol("AAPL", "GOOGL", googlLegs, 3);
+
+    expect(result.cleared).toBe(true);
+    expect(result.legs).toEqual([]);
+    expect(result.contracts).toBe(1);
+    expect(result.strategySymbol).toBe("AAPL");
+    expect(result.notice).toContain("Cleared the GOOGL structure");
+    expect(result.notice).toContain("rebuild on AAPL");
+  });
+
+  it("leaves the structure alone when the symbol is unchanged", () => {
+    const result = reconcileStrategyToSymbol("GOOGL", "GOOGL", googlLegs, 3);
+
+    expect(result.cleared).toBe(false);
+    expect(result.legs).toBe(googlLegs);
+    expect(result.contracts).toBe(3);
+  });
+
+  it("normalizes casing and whitespace before comparing", () => {
+    const result = reconcileStrategyToSymbol("  googl ", "GOOGL", googlLegs, 2);
+
+    expect(result.cleared).toBe(false);
+    expect(result.legs).toBe(googlLegs);
+  });
+
+  it("adopts the first symbol without a notice when nothing is built yet", () => {
+    const result = reconcileStrategyToSymbol("GOOGL", null, [], 1);
+
+    expect(result.cleared).toBe(false);
+    expect(result.strategySymbol).toBe("GOOGL");
+    expect(result.notice).toBe("");
+  });
+
+  it("clears the structure when the surface is unloaded entirely", () => {
+    const result = reconcileStrategyToSymbol(null, "GOOGL", googlLegs, 1);
+
+    expect(result.cleared).toBe(true);
+    expect(result.strategySymbol).toBeNull();
+    expect(result.legs).toEqual([]);
   });
 });

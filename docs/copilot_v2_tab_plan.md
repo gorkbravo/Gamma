@@ -193,6 +193,21 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-03 — Tool-Continuation Failure Diagnosis
+
+Context: the 2026-09-03 fix-verification audit saw both bounded Copilot attempts succeed on the initial Responses call, complete `run_options_realized_implied_comparison`, then fail with a 4xx on the continuation. Gamma runs with `GAMMA_COPILOT_STORE_RESPONSES=false`, so the working hypothesis was that replayed reasoning items were unresolvable without stored state.
+
+- [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning): under `store: false` the Responses API returns `encrypted_content` on reasoning items **by default**, and the caller must preserve and replay every output item. The `include: ["reasoning.encrypted_content"]` request parameter is legacy back-compat and is no longer required.
+- [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state): `previous_response_id` is only valid against stored responses; a stateless exchange must replay the full item sequence in order.
+
+Resulting decision:
+
+- The hypothesis was **rejected**. `_continuation_output_items` already replays every output item verbatim, preserving `encrypted_content`, and `previous_response_id` is already gated on `_store_responses(request)`. No architectural or framework change is warranted on current guidance.
+- The upstream `error.code` and `error.param` were never rendered, so the audit could locate the failure point but not its cause. `param` identifies the exact rejected input item and `code` names the violated rule, and both are provider metadata rather than prompt content. Surface them alongside the status and request id.
+- Attach a continuation-context warning naming the turn, the replayed input-item count, the tool-result count, and the recent tool names, so a first-call failure and a replay failure are distinguishable without provider-side logs.
+- Do **not** speculatively restructure the replay, drop reasoning items, or switch to a stored-response exchange. The next live audit should capture `code`/`param` and drive the fix from that evidence.
+- Gamma's server remains the authority for tool exposure, validation, permissions, persistence, and terminal truth. Nothing here grants the model new authority.
+
 ### Official Guidance Re-Reviewed 2026-09-01 — Repository Audit Skill
 
 - [Build skills](https://developers.openai.com/codex/build-skills): repository-scoped skills live under `.agents/skills`, use `SKILL.md` as their required instruction surface, and may add focused references, scripts, and UI metadata while keeping instructions progressively disclosed.
