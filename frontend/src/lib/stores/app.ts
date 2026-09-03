@@ -39,7 +39,11 @@ export {
   portfolioSnapshotRequestState,
   updatePortfolioPreferences
 } from "./portfolio";
-import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
+import {
+  buildResearchBookObjectFromStrategyComposition,
+  defaultStrategyPortfolioDraftLeg,
+  type StrategyPortfolioDraftLeg
+} from "../view-models/research";
 import {
   DEFAULT_CALIBRATION_LEAD_TIMES,
   DEFAULT_CALIBRATION_SAMPLE,
@@ -676,6 +680,66 @@ function resolvedIvWorkbench(): IvWorkbenchState | null {
   }
   return workbench;
 }
+/**
+ * The Strategy Lab composer's editable inputs, held outside the view.
+ *
+ * Leaving Strategy Lab unmounts the view, so a draft kept in component state was
+ * discarded on every tab switch -- including the one to Risk that the draft's own
+ * result had just triggered, which sent the user back to a default template with
+ * no way to revise the book they were looking at (GUA-20260903-9, and
+ * GUA-20260708-8 before it).
+ */
+export interface StrategyComposerDraft {
+  name: string;
+  benchmarkSymbol: string;
+  lookbackDays: number;
+  legs: StrategyPortfolioDraftLeg[];
+  selection: Record<string, boolean>;
+  weights: Record<string, number>;
+}
+
+export function defaultStrategyComposerDraft(): StrategyComposerDraft {
+  return {
+    name: "Strategy Lab Portfolio",
+    benchmarkSymbol: "SPY",
+    lookbackDays: 756,
+    legs: [
+      {
+        ...defaultStrategyPortfolioDraftLeg(1),
+        label: "Long AI / Growth",
+        assetClass: "etf",
+        identifier: "QQQ",
+        weight: 0.6
+      },
+      {
+        ...defaultStrategyPortfolioDraftLeg(2),
+        label: "Short broad beta",
+        assetClass: "etf",
+        identifier: "SPY",
+        weight: -0.4
+      },
+      {
+        ...defaultStrategyPortfolioDraftLeg(3),
+        label: "Election contract proxy",
+        assetClass: "prediction_contract",
+        identifier: "PM-CONTRACT",
+        weight: 0.1,
+        valueKind: "level",
+        historyText:
+          "date,value\n2026-01-02,0.51\n2026-01-05,0.53\n2026-01-06,0.52\n2026-01-07,0.55\n2026-01-08,0.56\n2026-01-09,0.58"
+      }
+    ],
+    selection: {},
+    weights: {}
+  };
+}
+
+export const strategyComposerDraft = writable<StrategyComposerDraft>(defaultStrategyComposerDraft());
+
+export function resetStrategyComposerDraft() {
+  strategyComposerDraft.set(defaultStrategyComposerDraft());
+}
+
 const STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY = "gamma.strategyLab.latestResearchBook";
 
 function loadPersistedStrategyLabResearchBook(): StrategyLabResearchBook | null {

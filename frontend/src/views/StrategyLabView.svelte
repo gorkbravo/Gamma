@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { get } from "svelte/store";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import StrategyScriptWorkspace from "../components/StrategyScriptWorkspace.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
@@ -14,6 +15,7 @@
     StrategyLabResult,
     TimeSeriesPoint
   } from "../lib/api/types";
+  import { strategyComposerDraft } from "../lib/stores/app";
   import type {
     SavedResearchCreateOptions,
     StrategyLabAnalyzeOptions,
@@ -88,25 +90,16 @@
   let strategyBenchmarkColumn = "benchmark";
   let strategyBenchmarkValueKind: "return" | "level" = "return";
   let strategyInputWarning = "";
-  let composerSelection: Record<string, boolean> = {};
-  let composerWeights: Record<string, number> = {};
+  // Seeded from the store so the draft survives leaving the tab, and written back
+  // on every edit (GUA-20260903-9).
+  const restoredDraft = get(strategyComposerDraft);
+  let composerSelection: Record<string, boolean> = { ...restoredDraft.selection };
+  let composerWeights: Record<string, number> = { ...restoredDraft.weights };
   let expandedDraftLegs: Record<string, boolean> = {};
-  let portfolioName = "Strategy Lab Portfolio";
-  let portfolioBenchmarkSymbol = "SPY";
-  let portfolioLookbackDays = 756;
-  let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = [
-    { ...defaultStrategyPortfolioDraftLeg(1), label: "Long AI / Growth", assetClass: "etf", identifier: "QQQ", weight: 0.6 },
-    { ...defaultStrategyPortfolioDraftLeg(2), label: "Short broad beta", assetClass: "etf", identifier: "SPY", weight: -0.4 },
-    {
-      ...defaultStrategyPortfolioDraftLeg(3),
-      label: "Election contract proxy",
-      assetClass: "prediction_contract",
-      identifier: "PM-CONTRACT",
-      weight: 0.1,
-      valueKind: "level",
-      historyText: "date,value\n2026-01-02,0.51\n2026-01-05,0.53\n2026-01-06,0.52\n2026-01-07,0.55\n2026-01-08,0.56\n2026-01-09,0.58"
-    }
-  ];
+  let portfolioName = restoredDraft.name;
+  let portfolioBenchmarkSymbol = restoredDraft.benchmarkSymbol;
+  let portfolioLookbackDays = restoredDraft.lookbackDays;
+  let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = restoredDraft.legs.map((leg) => ({ ...leg }));
   let showHandoffReview = true;
   let bookValidation: StrategyLabBookValidation | null = null;
   let bookValidationLoading = false;
@@ -410,6 +403,14 @@
   let stressDrawdownRows: TimeSeriesPoint[] = [];
   let rollingStressRows: StrategyLabResult["rolling_points"] = [];
 
+  $: strategyComposerDraft.set({
+    name: portfolioName,
+    benchmarkSymbol: portfolioBenchmarkSymbol,
+    lookbackDays: portfolioLookbackDays,
+    legs: portfolioDraftLegs,
+    selection: composerSelection,
+    weights: composerWeights
+  });
   $: parsedStrategyCsv = parseResearchCsvText(strategyCsvText);
   $: {
     if (parsedStrategyCsv.columns.length) {
