@@ -193,6 +193,16 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-01 — Repository Audit Skill
+
+- [Build skills](https://developers.openai.com/codex/build-skills): repository-scoped skills live under `.agents/skills`, use `SKILL.md` as their required instruction surface, and may add focused references, scripts, and UI metadata while keeping instructions progressively disclosed.
+
+Resulting decision:
+
+- Add `.agents/skills/gamma-usability-check` as a repository-local, audit-only QA workflow. It may drive Gamma's UI because the product interface is the object under test, but it is external to Gamma's Copilot execution architecture and grants no authority to the in-product model.
+- Keep Gamma's server as the authority for Copilot tool exposure, validation, provider access, permissions, persistence, approvals, and audit state. The skill does not alter the action registry, model routing, orchestration framework, or read-only product boundary.
+- Limit skill-authored repository changes during an audit to the usability report, its index entry, and selected supporting evidence. Findings remain recommendations with acceptance criteria; remediation requires a separate task.
+
 ### Official Guidance Re-Reviewed 2026-09-01
 
 - [Responses create reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create): application-defined custom tools retain typed input schemas while tool selection remains separate from application execution and state ownership.

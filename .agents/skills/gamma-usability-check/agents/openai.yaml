@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gamma Usability Check"
+  short_description: "Audit Gamma with IBKR and coverage rotation"
+  default_prompt: "Use $gamma-usability-check to run an audit-only, IBKR-integrated Gamma research journey, rotate through the highest-debt specialist surface, and write the usability report."

@@ -4,6 +4,10 @@ Live product workflow audits and research-thread evaluations.
 
 ## Audits
 
+- [`gamma_usability_findings_2026-09-03.md`](./gamma_usability_findings_2026-09-03.md) (current): IBKR-integrated GOOGL concentration/hedge thesis partially confirmed; live Portfolio/Risk/Fundamentals/Options worked, while P1 ATM-IV interpolation, account-sizing, and Copilot-grounding defects blocked a clean account-matched expression.
+
+- [`gamma_usability_findings_2026-09-01.md`](./gamma_usability_findings_2026-09-01.md) (current): degraded provider-backed AAPL thesis journey; yfinance/SEC evidence rejected the thesis, while P1 benchmark loss into Risk, run-state/provenance contradictions, and Copilot terminal failure blocked a clean end-to-end result.
+
 - [`gamma_portfolio_verification_2026-07-27.md`](./gamma_portfolio_verification_2026-07-27.md) (current): deterministic Portfolio completion-contract pass; mock runtime, persistence/restart, degraded-state, browser, production, packaged-backend, and desktop gates passed. Current live TWS verification was unavailable, so the roadmap completion marker remains withheld.
 
 - [`gamma_usability_findings_2026-07-24.md`](./gamma_usability_findings_2026-07-24.md) (current): targeted live TWS regression pass; live XLE IV, signed Strategy Lab → isolated Risk, and provider-native Copilot streaming passed. Confirmed fresh Commodities changes still disappear on drill/cached reload; found Copilot provider-usage misattribution and a Portfolio quote-timeout/worker-budget mismatch.
