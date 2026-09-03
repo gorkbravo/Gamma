@@ -170,6 +170,16 @@ class RiskResults:
     monte_carlo_fan_percentiles: pd.DataFrame | None = None
     monte_carlo_sample_paths: pd.DataFrame | None = None
     aligned_obs_count: int | None = None
+    # GUA-20260903-4: the requested horizon, the window actually analysed, and the
+    # row reconciliation between them, so a "252D" run can never silently report an
+    # unexplained 281-row sample.
+    requested_lookback_days: int | None = None
+    effective_start_date: str | None = None
+    effective_end_date: str | None = None
+    effective_span_calendar_days: int | None = None
+    raw_observation_count: int | None = None
+    dropped_observation_count: int | None = None
+    return_calendar_basis: str | None = None
     benchmark_overlap_count: int | None = None
     concentration_hhi: float | None = None
     top5_weight: float | None = None

@@ -137,6 +137,7 @@ class ProviderUsageSummaryModel(BaseModel):
     success_count: int
     unavailable_count: int
     error_count: int
+    incomplete_count: int = 0
     cache_hit_count: int
     cache_miss_count: int
     average_duration_ms: float
@@ -163,6 +164,8 @@ class ProviderUsageHealthModel(BaseModel):
     success_count: int = 0
     unavailable_count: int = 0
     error_count: int = 0
+    incomplete_count: int = 0
+    session_status: str | None = None
     last_called_at: datetime | None = None
 
     @classmethod

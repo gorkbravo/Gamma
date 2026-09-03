@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -7,6 +8,8 @@ from dataclasses import dataclass, field
 from src.application.system_service import normalize_market_data_mode
 from src.services.ibkr_client import IBKRClient
 from src.services.iv_surface_engine import IVSurfaceEngine, IVSurfaceSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -38,8 +41,14 @@ class IVStreamResult:
 
 
 class IVService:
-    def __init__(self, client: IBKRClient, market_data_mode: str = "delayed") -> None:
+    def __init__(
+        self,
+        client: IBKRClient,
+        market_data_mode: str = "delayed",
+        usage_ledger: object | None = None,
+    ) -> None:
         self.client = client
+        self.usage_ledger = usage_ledger
         self.market_data_mode = normalize_market_data_mode(market_data_mode)
         self._engine: IVSurfaceEngine | None = None
         self._active_symbol = "SPY"
@@ -54,6 +63,43 @@ class IVService:
             "include_calls": str(os.getenv("IV_INCLUDE_CALLS", "true")).strip().lower() != "false",
             "include_puts": str(os.getenv("IV_INCLUDE_PUTS", "true")).strip().lower() != "false",
         }
+
+    def _record_surface_usage(self, symbol: str, result: "IVSurfaceResult") -> "IVSurfaceResult":
+        """Log the visible completeness of a surface load, not just whether it returned.
+
+        GUA-20260903-5: a surface that came back with 71 of 104 cells is not a
+        clean success, and the provider badge has to be able to say so.
+        """
+        ledger = self.usage_ledger
+        if ledger is None or self.client.mock:
+            return result
+        snapshot = result.snapshot
+        if snapshot is None:
+            status = "unavailable"
+            message = f"No options surface snapshot was collected for {symbol}."
+        else:
+            quality = snapshot.quality
+            expected = int(getattr(quality, "expected_surface_cells", 0) or 0)
+            observed = int(getattr(quality, "observed_surface_cells", 0) or 0)
+            if expected and observed < expected:
+                status = "incomplete"
+                message = (
+                    f"{symbol} options surface returned {observed} of {expected} requested cells; "
+                    "the remainder is fitted, not quoted."
+                )
+            else:
+                status = "success"
+                message = f"{symbol} options surface returned all {observed} requested cells."
+        try:
+            ledger.record(
+                provider_id=(snapshot.source_provider if snapshot is not None else "ibkr"),
+                endpoint="iv.surface",
+                status=status,
+                message=message,
+            )
+        except Exception:  # pragma: no cover - telemetry must never break a load
+            logger.debug("Failed to record options surface usage for %s", symbol, exc_info=True)
+        return result
 
     @staticmethod
     def normalize_market_data_mode(value: str | None) -> str:
@@ -232,6 +278,10 @@ class IVService:
         return self._active_surface_model
 
     def get_surface(self, request: IVSurfaceRequest) -> IVSurfaceResult:
+        symbol = str(request.symbol or "").strip().upper() or "SPY"
+        return self._record_surface_usage(symbol, self._get_surface(request))
+
+    def _get_surface(self, request: IVSurfaceRequest) -> IVSurfaceResult:
         symbol = str(request.symbol or "").strip().upper() or "SPY"
         mode = self.normalize_market_data_mode(request.market_data_mode or self.market_data_mode)
         surface_model = self.normalize_surface_model(request.surface_model)

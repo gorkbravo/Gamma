@@ -1025,6 +1025,13 @@ export interface RiskMetrics {
   monte_carlo_var_total_estimate: number | null;
   monte_carlo_cvar_total_estimate: number | null;
   aligned_obs_count: number | null;
+  requested_lookback_days?: number | null;
+  effective_start_date?: string | null;
+  effective_end_date?: string | null;
+  effective_span_calendar_days?: number | null;
+  raw_observation_count?: number | null;
+  dropped_observation_count?: number | null;
+  return_calendar_basis?: string | null;
   benchmark_overlap_count: number | null;
   concentration_hhi: number | null;
   top5_weight: number | null;
@@ -4343,6 +4350,7 @@ export interface IvSurface {
   expiries: string[];
   strikes: number[];
   iv_grid: number[][];
+  cell_sources?: string[][];
   delayed: boolean | null;
   points: number;
   warnings: string[];
@@ -4355,6 +4363,7 @@ export interface IvSurface {
   surface_model_label?: string;
   surface_model_status?: string;
   surface_model_notes?: string[];
+  surface_model_discontinuities?: string[];
   collection: IvSurfaceCollection | null;
   quality: IvSurfaceQuality | null;
   pairs: IvOptionPair[];

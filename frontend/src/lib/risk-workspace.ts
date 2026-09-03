@@ -420,10 +420,37 @@ function buildCoverageWarnings(snapshot: PortfolioSnapshot | null, result: RiskR
   ];
 }
 
+/**
+ * GUA-20260903-4: the requested horizon and the window actually analysed are
+ * different facts, so both are stated with the dates and row reconciliation
+ * that connect them.
+ */
+export function describeAnalysisWindow(result: RiskResult | null): string {
+  const metrics = result?.metrics;
+  const requested = metrics?.requested_lookback_days ?? metrics?.lookback_days ?? 252;
+  const aligned = metrics?.aligned_obs_count ?? 0;
+  if (!metrics || !aligned) {
+    return `Return history: requested ${requested} observations; none were analysed yet.`;
+  }
+  const dates =
+    metrics.effective_start_date && metrics.effective_end_date
+      ? ` spanning ${metrics.effective_start_date} to ${metrics.effective_end_date}`
+      : "";
+  const raw = metrics.raw_observation_count ?? aligned;
+  const dropped = metrics.dropped_observation_count ?? Math.max(raw - aligned, 0);
+  const reconciliation = dropped > 0 ? `; ${raw} rows available, ${dropped} outside the window` : "";
+  const basis = metrics.return_calendar_basis ? ` (${metrics.return_calendar_basis})` : "";
+  return `Return history: requested ${requested} observations, analysed ${aligned}${dates}${reconciliation}${basis}.`;
+}
+
 function buildWhatChanged(result: RiskResult | null, holdings: HoldingRiskRow[]) {
   if (!result) return ["Run a core risk pass to compare current risk state against the latest snapshot."];
   const rows = [
-    `Coverage is ${formatPercent(result.metrics.risk_coverage_ratio)} with ${result.metrics.aligned_obs_count ?? 0} aligned observations.`,
+    `Coverage is ${formatPercent(result.metrics.risk_coverage_ratio)} with ${result.metrics.aligned_obs_count ?? 0} aligned observations${
+      result.metrics.effective_start_date && result.metrics.effective_end_date
+        ? ` (${result.metrics.effective_start_date} to ${result.metrics.effective_end_date})`
+        : ""
+    }.`,
     `Largest modeled risk contributor is ${holdings.find((row) => row.riskContribution != null)?.symbol ?? UNKNOWN}.`,
     `Benchmark beta is ${formatNumber(result.metrics.beta, 2)} versus ${result.metrics.benchmark_overlap_count ?? 0} overlapping observations.`,
   ];
@@ -785,7 +812,7 @@ function buildProvenance(
   return [
     `Risk source: ${result?.source_label ?? sourceScopeLabel(sourceScope)}.`,
     `Price source: ${priceSource}.`,
-    `Return history length: ${result?.metrics.aligned_obs_count ?? 0} aligned observations over ${result?.metrics.lookback_days ?? 252} days.`,
+    describeAnalysisWindow(result),
     `Benchmark used: ${benchmarkSymbol}; overlap ${result?.metrics.benchmark_overlap_count ?? 0} observations.`,
     `Base currency: ${snapshot?.base_currency ?? "USD"}; conversion caveats are carried in warnings when present.`,
     "Model assumptions: historical and parametric VaR from backend risk service; scenarios and optimization candidates are transparent research proxies.",

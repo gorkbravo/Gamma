@@ -9,11 +9,13 @@
     IvSessionStatus,
     IvSurface,
     IvUnderlyingHistoryResponse,
+    Position,
     StrategyLabHandoffEnvelope,
     SystemStatus,
     TimeSeriesPoint
   } from "../lib/api/types";
-  import type { IvLoadOptions } from "../lib/stores/app";
+  import { ivWorkbenchState, type IvLoadOptions } from "../lib/stores/app";
+  import { onDestroy } from "svelte";
   import { buildOptionsStrategyHandoff } from "../lib/view-models/research";
   import {
     STRATEGY_TEMPLATES,
@@ -27,6 +29,8 @@
     deriveImpliedProbabilitySurface,
     deriveIvSurfaceAlerts,
     deriveFittedSmileSamples,
+    cellSource,
+    cellSourceLabel,
     deriveIvSmile,
     deriveOptionPayoffMatrix,
     deriveOverviewSnapshot,
@@ -37,10 +41,13 @@
     deriveStrategyPayoff,
     deriveStrategyPayoffMatrix,
     deriveStrategyGreeks,
+    deriveStrategySizing,
     deriveSurfaceStats,
     deriveTermCurve,
     deriveTermStructure,
     hasParametricIvFit,
+    isFittedCell,
+    livePositionForSymbol,
     nearestStrikeIndex,
     optionsModes,
     selectedExpiryForSurface,
@@ -59,6 +66,7 @@
     type StrategyTemplateId,
     type StrategyGreekSummary,
     type StrategyPayoffMatrix,
+    type StrategySizing,
     type StrategyOptionType,
     type StrategySide,
     type TermCurve,
@@ -75,6 +83,8 @@
   export let underlyingHistory: IvUnderlyingHistoryResponse | null = null;
   export let underlyingPricePoints: TimeSeriesPoint[] = [];
   export let researchPrimarySymbol: string | null = null;
+  /** Live stock lines, used only to size a research structure against real exposure. */
+  export let portfolioPositions: Position[] = [];
   export let loading = false;
   export let sessionLoading = false;
   export let errorMessage = "";
@@ -161,6 +171,8 @@
   let realizedRows = deriveRealizedVolatility([], surfaceStats.frontAtmIv);
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   let strategyPayoffMatrix: StrategyPayoffMatrix | null = null;
+  let strategyContracts = 1;
+  let strategySizing: StrategySizing = deriveStrategySizing(strategyPayoff, strategyLegs, strategyContracts, null);
   let strategyGreeks: StrategyGreekSummary | null = null;
   let probabilitySurface: ImpliedProbabilitySurface | null = null;
   let probabilitySlice: ImpliedProbabilitySlice | null = null;
@@ -229,7 +241,14 @@
       : researchHistoryMatches
         ? "Equity Research price history"
         : "N/A";
-  $: realizedRows = deriveRealizedVolatility(realizedPricePoints, surfaceStats.frontAtmIv);
+  $: selectedExpiryRowIndex = activeExpiry ? (result?.expiries ?? []).indexOf(activeExpiry) : -1;
+  $: selectedAtmIv =
+    selectedExpiryRowIndex >= 0 ? result?.iv_grid?.[selectedExpiryRowIndex]?.[atmStrikeIndex] ?? null : null;
+  $: realizedRows = deriveRealizedVolatility(realizedPricePoints, surfaceStats.frontAtmIv, [20, 60, 120], {
+    iv: selectedAtmIv,
+    expiry: activeExpiry,
+    days: activeExpiry ? daysToExpiry(activeExpiry) : null,
+  });
   $: probabilitySurface = deriveImpliedProbabilitySurface(result);
   $: probabilitySlice = deriveImpliedProbabilitySlice(probabilitySurface, activeExpiry);
   $: if (probabilitySlice && lastProbabilityExpiry !== probabilitySlice.expiry) {
@@ -239,6 +258,59 @@
   $: probabilitySelection = deriveImpliedProbabilitySelection(probabilitySlice, probabilityRange?.lower, probabilityRange?.upper);
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   $: strategyPayoffMatrix = deriveStrategyPayoffMatrix(strategyLegs, chainRows, result?.spot);
+  $: livePosition = livePositionForSymbol(portfolioPositions, result?.symbol ?? symbol);
+  $: strategySizing = deriveStrategySizing(strategyPayoff, strategyLegs, strategyContracts, livePosition);
+
+  // Publish exactly what the workbench is showing so a Copilot run from Options
+  // is grounded in the visible submode, expiry, legs, payoff and RV-IV state
+  // rather than defaulting to the front expiry (GUA-20260903-2).
+  $: ivWorkbenchState.set({
+    mode,
+    symbol: result?.symbol ?? displayedSymbol ?? null,
+    selected_expiry: activeExpiry,
+    selected_expiry_days: activeExpiry ? daysToExpiry(activeExpiry) : null,
+    contracts: strategySizing.contracts,
+    contract_multiplier: strategySizing.multiplier,
+    legs: strategyLegs.map((leg) => ({
+      side: leg.side,
+      option_type: leg.optionType,
+      expiry: leg.expiry,
+      days_to_expiry: daysToExpiry(leg.expiry),
+      strike: leg.strike,
+      premium: leg.premium,
+      quantity: leg.quantity,
+    })),
+    strategy: strategyLegs.length
+      ? {
+          net_premium_per_share: strategyPayoff.netPremium,
+          net_premium_total: strategySizing.netPremiumTotal,
+          premium_direction: strategySizing.premiumDirection,
+          max_profit_per_share: strategyPayoff.maxProfit,
+          max_loss_per_share: strategyPayoff.maxLoss,
+          max_profit_total: strategySizing.maxProfitTotal,
+          max_loss_total: strategySizing.maxLossTotal,
+          breakevens: strategyPayoff.breakevens,
+          net_delta: strategyGreeks?.delta ?? null,
+          net_gamma: strategyGreeks?.gamma ?? null,
+          net_vega: strategyGreeks?.vega ?? null,
+          net_theta: strategyGreeks?.theta ?? null,
+          shares_represented: strategySizing.sharesRepresented,
+          live_position_shares: strategySizing.positionQuantity,
+          coverage_ratio: strategySizing.coverageRatio,
+          sizing_warnings: strategySizing.warnings,
+        }
+      : null,
+    realized_vs_implied: realizedRows.map((row) => ({
+      window_days: row.window,
+      realized_vol: row.realizedVol,
+      reference_iv: row.referenceIv,
+      reference_iv_expiry: row.referenceExpiry,
+      reference_iv_days: row.referenceDays,
+      spread: row.spreadToReferenceIv,
+    })),
+  });
+
+  onDestroy(() => ivWorkbenchState.set(null));
   $: strategyGreeks = deriveStrategyGreeks(strategyLegs, result);
   $: ivSmile = deriveIvSmile(
     chainRows,
@@ -590,8 +662,8 @@
       <div class="primary-column">
         <article class="panel kpi-panel">
           <div class="kpi-grid">
-            <div class="metric"><span>Front ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"}>{pct(surfaceStats.frontAtmIv)}</strong><small>{formatExpiry(surfaceStats.frontExpiry)}</small></div>
-            <div class="metric"><span>Back ATM IV</span><strong class:absent={pct(surfaceStats.backAtmIv) === "N/A"}>{pct(surfaceStats.backAtmIv)}</strong><small>{signedPct(surfaceStats.termSlope)} slope</small></div>
+            <div class="metric"><span>Front ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"} class:fitted={isFittedCell(surfaceStats.frontAtmIvSource)}>{pct(surfaceStats.frontAtmIv)}</strong><small>{formatExpiry(surfaceStats.frontExpiry)}{isFittedCell(surfaceStats.frontAtmIvSource) ? " · fitted" : ""}</small></div>
+            <div class="metric"><span>Back ATM IV</span><strong class:absent={pct(surfaceStats.backAtmIv) === "N/A"} class:fitted={isFittedCell(surfaceStats.backAtmIvSource)}>{pct(surfaceStats.backAtmIv)}</strong><small>{signedPct(surfaceStats.termSlope)} slope{isFittedCell(surfaceStats.backAtmIvSource) ? " · fitted" : ""}</small></div>
             <div class="metric"><span>ATM Strike</span><strong class:absent={fmt(surfaceStats.atmStrike, 2) === "N/A"}>{fmt(surfaceStats.atmStrike, 2)}</strong><small>Spot {money(result?.spot)}</small></div>
             <div class="metric"><span>Put / Call OI</span><strong class:absent={fmt(overview.putCallOpenInterestRatio, 2) === "N/A"}>{fmt(overview.putCallOpenInterestRatio, 2)}</strong><small>Volume {fmt(overview.putCallVolumeRatio, 2)}</small></div>
             <div class="metric"><span>Implied Move</span><strong class:absent={pct(overview.atmPair?.impliedMovePct) === "N/A"}>{pct(overview.atmPair?.impliedMovePct)}</strong><small>Straddle {money(overview.atmPair?.straddleMidpoint)}</small></div>
@@ -870,10 +942,18 @@
             <h3>Surface Grid</h3>
             {#if hoveredSurface && result}
               <span class="surface-readout">
-                {formatExpiry(result.expiries[hoveredSurface.row])} · {fmt(result.strikes[hoveredSurface.col], 1)} · {pct(result.iv_grid[hoveredSurface.row]?.[hoveredSurface.col])}
+                {formatExpiry(result.expiries[hoveredSurface.row])} · {fmt(result.strikes[hoveredSurface.col], 1)} · {cellSource(result, hoveredSurface.row, hoveredSurface.col) === "unavailable" ? "N/A" : pct(result.iv_grid[hoveredSurface.row]?.[hoveredSurface.col])}
+                <em>{cellSourceLabel(cellSource(result, hoveredSurface.row, hoveredSurface.col)) ?? "Source unknown"}</em>
               </span>
+            {:else if result?.cell_sources?.length}
+              <span class="fit-legend"><i></i>Observed <b></b>Fitted</span>
             {/if}
           </div>
+          {#if result?.surface_model_discontinuities?.length}
+            <ul class="surface-alert">
+              {#each result.surface_model_discontinuities as note}<li>{note}</li>{/each}
+            </ul>
+          {/if}
           {#if result?.expiries.length && result.strikes.length}
             <div class="surface-scroll">
               <table class="surface-table" on:mouseleave={() => (hoveredSurface = null)}>
@@ -894,8 +974,11 @@
                           style={heatStyle(value)}
                           class:cross={hoveredSurface?.row === rowIndex || hoveredSurface?.col === colIndex}
                           class:cell-hi={hoveredSurface?.row === rowIndex && hoveredSurface?.col === colIndex}
+                          class:fitted={isFittedCell(cellSource(result, rowIndex, colIndex))}
+                          class:absent={cellSource(result, rowIndex, colIndex) === "unavailable"}
+                          title={cellSourceLabel(cellSource(result, rowIndex, colIndex)) ?? ""}
                           on:mouseenter={() => (hoveredSurface = { row: rowIndex, col: colIndex })}
-                        >{pct(value)}</td>
+                        >{cellSource(result, rowIndex, colIndex) === "unavailable" ? "N/A" : pct(value)}</td>
                       {/each}
                     </tr>
                   {/each}
@@ -981,17 +1064,24 @@
   {:else if mode === "realized_implied"}
     <div class="workspace-grid">
       <article class="panel table-panel">
-        <div class="table-header"><h3>Realized vs IV</h3></div>
+        <div class="table-header">
+          <h3>Realized vs IV</h3>
+          <span class="tenor-note">
+            Front {formatExpiry(surfaceStats.frontExpiry)}{surfaceStats.frontExpiry ? ` (${daysToExpiry(surfaceStats.frontExpiry)}D)` : ""}
+            · Selected {formatExpiry(activeExpiry)}{activeExpiry ? ` (${daysToExpiry(activeExpiry)}D)` : ""}
+          </span>
+        </div>
         {#if realizedRows.some((row) => row.realizedVol != null)}
           <table>
-            <thead><tr><th>Window</th><th>Realized Vol</th><th>Front ATM IV</th><th>IV Premium</th><th>Obs</th></tr></thead>
+            <thead><tr><th>Window</th><th>Realized Vol</th><th>Front ATM IV</th><th>Selected ATM IV</th><th>IV Premium</th><th>Obs</th></tr></thead>
             <tbody>
               {#each realizedRows as row}
                 <tr>
                   <td>{row.window}D</td>
                   <td class:absent={pct(row.realizedVol) === "N/A"}>{pct(row.realizedVol)}</td>
                   <td class:absent={pct(surfaceStats.frontAtmIv) === "N/A"}>{pct(surfaceStats.frontAtmIv)}</td>
-                  <td class={rowClass(row.spreadToFrontIv)} class:absent={signedPct(row.spreadToFrontIv) === "N/A"}>{signedPct(row.spreadToFrontIv)}</td>
+                  <td class:absent={pct(row.referenceIv) === "N/A"}>{pct(row.referenceIv)}</td>
+                  <td class={rowClass(row.spreadToReferenceIv)} class:absent={signedPct(row.spreadToReferenceIv) === "N/A"}>{signedPct(row.spreadToReferenceIv)}</td>
                   <td>{row.observationCount}</td>
                 </tr>
               {/each}
@@ -1124,6 +1214,17 @@
                 <option value={expiry}>{formatExpiry(expiry)}</option>
               {/each}
             </select>
+            <label class="contracts-field">
+              Contracts
+              <input
+                type="number"
+                min="1"
+                step="1"
+                bind:value={strategyContracts}
+                on:change={() => (strategyContracts = Math.max(1, Math.round(Number(strategyContracts) || 1)))}
+                aria-label="Contracts per structure"
+              />
+            </label>
             <button type="button" on:click={clearStrategy} disabled={!strategyLegs.length}>Clear</button>
           </div>
         </div>
@@ -1224,6 +1325,9 @@
       <div class="support-column">
         <article class="panel">
           <h3>Strategy Summary</h3>
+          <p class="sizing-basis">
+            Per share · {strategySizing.contracts} contract{strategySizing.contracts === 1 ? "" : "s"} x {strategySizing.multiplier} shares
+          </p>
           <div class="metric-list">
             <div><span>Net Premium</span><strong class:absent={signedMoney(strategyPayoff.netPremium) === "N/A"}>{signedMoney(strategyPayoff.netPremium)}</strong></div>
             <div><span>Max Profit</span><strong>{strategyPayoff.maxProfit == null ? "Open" : signedMoney(strategyPayoff.maxProfit)}</strong></div>
@@ -1235,6 +1339,45 @@
             <div><span>Net Theta</span><strong class:absent={signedGreek(strategyGreeks?.theta, 3) === "N/A"}>{signedGreek(strategyGreeks?.theta, 3)}</strong></div>
             <div><span>Net Rho</span><strong class:absent={signedGreek(strategyGreeks?.rho, 3) === "N/A"}>{signedGreek(strategyGreeks?.rho, 3)}</strong></div>
           </div>
+        </article>
+
+        <article class="panel">
+          <h3>Position Sizing</h3>
+          {#if strategyLegs.length}
+            <div class="metric-list">
+              <div>
+                <span>Total {strategySizing.premiumDirection === "credit" ? "Credit" : "Debit"}</span>
+                <strong class:absent={signedMoney(strategySizing.netPremiumTotal) === "N/A"}>{signedMoney(strategySizing.netPremiumTotal)}</strong>
+              </div>
+              <div><span>Total Max Profit</span><strong>{strategySizing.maxProfitTotal == null ? "Open" : signedMoney(strategySizing.maxProfitTotal)}</strong></div>
+              <div><span>Total Max Loss</span><strong>{strategySizing.maxLossTotal == null ? "Open" : signedMoney(strategySizing.maxLossTotal)}</strong></div>
+              <div><span>Shares Delivered</span><strong>{strategySizing.sharesRepresented.toLocaleString()}</strong></div>
+              <div>
+                <span>Live Position</span>
+                <strong class:absent={strategySizing.positionQuantity == null}>
+                  {strategySizing.positionQuantity == null ? "N/A" : `${strategySizing.positionQuantity.toLocaleString()} sh`}
+                </strong>
+              </div>
+              <div>
+                <span>Coverage</span>
+                <strong
+                  class:absent={strategySizing.coverageRatio == null}
+                  class:over-hedged={strategySizing.coverageRatio != null && strategySizing.coverageRatio > 1.05}
+                >{strategySizing.coverageRatio == null ? "N/A" : pct(strategySizing.coverageRatio, 0)}</strong>
+              </div>
+              {#if strategySizing.maxWholeContractsWithinPosition != null}
+                <div><span>Fits Without Over-Hedge</span><strong>{strategySizing.maxWholeContractsWithinPosition} contract{strategySizing.maxWholeContractsWithinPosition === 1 ? "" : "s"}</strong></div>
+              {/if}
+            </div>
+            {#if strategySizing.warnings.length}
+              <ul class="sizing-warnings">
+                {#each strategySizing.warnings as warning}<li>{warning}</li>{/each}
+              </ul>
+            {/if}
+            <p class="sizing-note">Research sizing only. Gamma does not route, place, or stage orders.</p>
+          {:else}
+            <p class="muted">Add priced legs to size the structure against live exposure.</p>
+          {/if}
         </article>
         {@render DiagnosticsPanel(result, session, status, sessionLoading)}
       </div>
@@ -1582,6 +1725,82 @@
     font-weight: 600;
     color: var(--accent);
     letter-spacing: 0.02em;
+  }
+
+  .surface-readout em {
+    margin-left: var(--space-2);
+    color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    font-style: normal;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Fitted cells stay readable but never pass as quotes. */
+  .surface-table td.fitted {
+    color: var(--text-2);
+    font-style: italic;
+  }
+
+  .metric strong.fitted {
+    color: var(--text-1);
+  }
+
+  .contracts-field {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .contracts-field input {
+    width: 4.5ch;
+  }
+
+  .sizing-basis {
+    margin: 0 0 var(--space-2);
+    color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .sizing-warnings {
+    margin: var(--space-3) 0 0;
+    padding-left: var(--space-4);
+    color: var(--warning);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    line-height: 1.5;
+  }
+
+  .sizing-note {
+    margin: var(--space-2) 0 0;
+    color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+  }
+
+  .metric-list strong.over-hedged {
+    color: var(--warning);
+  }
+
+  .surface-alert {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--divider);
+    list-style: none;
+    color: var(--warning);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    line-height: 1.5;
   }
 
   .surface-table td {

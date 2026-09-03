@@ -66,6 +66,13 @@ class RiskMetricsModel(BaseModel):
     monte_carlo_var_total_estimate: float | None = None
     monte_carlo_cvar_total_estimate: float | None = None
     aligned_obs_count: int | None = None
+    requested_lookback_days: int | None = None
+    effective_start_date: str | None = None
+    effective_end_date: str | None = None
+    effective_span_calendar_days: int | None = None
+    raw_observation_count: int | None = None
+    dropped_observation_count: int | None = None
+    return_calendar_basis: str | None = None
     benchmark_overlap_count: int | None = None
     concentration_hhi: float | None = None
     top5_weight: float | None = None

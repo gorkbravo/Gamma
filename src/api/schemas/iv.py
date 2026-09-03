@@ -185,6 +185,7 @@ class IVSurfaceModelMetadataModel(BaseModel):
     label: str
     status: str = "applied"
     notes: list[str] = Field(default_factory=list)
+    discontinuities: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, row: IVSurfaceModelMetadata | None) -> "IVSurfaceModelMetadataModel":
@@ -268,6 +269,7 @@ class IVSurfaceResponseModel(BaseModel):
     expiries: list[str] = Field(default_factory=list)
     strikes: list[float] = Field(default_factory=list)
     iv_grid: list[list[float]] = Field(default_factory=list)
+    cell_sources: list[list[str]] = Field(default_factory=list)
     delayed: bool | None = None
     points: int = 0
     warnings: list[str] = Field(default_factory=list)
@@ -285,6 +287,7 @@ class IVSurfaceResponseModel(BaseModel):
     surface_model_label: str = "Line interpolation"
     surface_model_status: str = "applied"
     surface_model_notes: list[str] = Field(default_factory=list)
+    surface_model_discontinuities: list[str] = Field(default_factory=list)
     expiry_analytics: list[IVExpiryAnalyticsModel] = Field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsModel | None = None
 
@@ -315,6 +318,7 @@ class IVSurfaceResponseModel(BaseModel):
             expiries=list(snapshot.expiries),
             strikes=[float(strike) for strike in snapshot.strikes],
             iv_grid=[[float(value) for value in row] for row in snapshot.iv_grid.tolist()],
+            cell_sources=[[str(value) for value in row] for row in snapshot.cell_sources],
             delayed=bool(snapshot.delayed),
             points=int(snapshot.points),
             warnings=list(result.warnings),
@@ -331,6 +335,7 @@ class IVSurfaceResponseModel(BaseModel):
             surface_model_label=surface_model.label,
             surface_model_status=surface_model.status,
             surface_model_notes=list(surface_model.notes),
+            surface_model_discontinuities=list(surface_model.discontinuities),
             expiry_analytics=[IVExpiryAnalyticsModel.from_domain(item) for item in snapshot.expiry_analytics],
             pricing_assumptions=IVPricingAssumptionsModel.from_domain(snapshot.pricing_assumptions),
         )

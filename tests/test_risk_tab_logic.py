@@ -957,3 +957,49 @@ def test_compute_explains_frontier_unavailable_for_single_covered_asset():
     warning = next(warning for warning in payload.results.warnings if "Efficient frontier unavailable" in warning)
     assert "eligible 1" in warning
     assert "snapshot risky 1" in warning
+
+
+def test_trim_to_requested_lookback_reports_raw_rows_and_keeps_the_newest_window():
+    """GUA-20260903-4: a 252-observation request must not analyse 281 rows."""
+    import pandas as pd
+
+    from src.application.risk_service import RiskService
+
+    index = pd.date_range("2025-01-01", periods=281, freq="B")
+    frame = pd.DataFrame({"AAA": range(281)}, index=index)
+
+    trimmed, raw_count = RiskService._trim_to_requested_lookback(frame, 252)
+
+    assert raw_count == 281
+    assert len(trimmed) == 252
+    assert trimmed.index[-1] == index[-1]
+
+
+def test_analysis_window_fields_reconcile_requested_and_effective_windows():
+    import pandas as pd
+
+    from src.application.risk_service import RiskService
+
+    index = pd.date_range("2025-01-01", periods=252, freq="B")
+    port_ret = pd.Series(0.001, index=index)
+
+    fields = RiskService._analysis_window_fields(port_ret, raw_observation_count=281, lookback_days=252)
+
+    assert fields["requested_lookback_days"] == 252
+    assert fields["raw_observation_count"] == 281
+    assert fields["dropped_observation_count"] == 29
+    assert fields["effective_start_date"] == index[0].date().isoformat()
+    assert fields["effective_end_date"] == index[-1].date().isoformat()
+    assert fields["effective_span_calendar_days"] == (index[-1] - index[0]).days
+
+
+def test_analysis_window_fields_handle_an_empty_run():
+    import pandas as pd
+
+    from src.application.risk_service import RiskService
+
+    fields = RiskService._analysis_window_fields(pd.Series(dtype=float), raw_observation_count=0, lookback_days=126)
+
+    assert fields["requested_lookback_days"] == 126
+    assert fields["effective_start_date"] is None
+    assert fields["dropped_observation_count"] == 0

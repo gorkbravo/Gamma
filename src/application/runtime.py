@@ -403,7 +403,7 @@ def build_runtime(
         risk_free_service,
         benchmark_defaults=benchmark_defaults,
     )
-    iv_service = IVService(client, market_data_mode)
+    iv_service = IVService(client, market_data_mode, usage_ledger=provider_usage)
     research_script_service = ResearchScriptService(
         research_script_store,
         research_script_runtime,

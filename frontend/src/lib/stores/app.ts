@@ -573,6 +573,58 @@ export const riskResult = writable<RiskResult | null>(null);
 export const riskSnapshotBasis = writable<PortfolioSnapshot | null>(null);
 export const riskWorkspaceBasis = writable<"portfolio" | "research" | "research_book" | null>(null);
 export const riskWorkspaceMode = writable<string>("overview");
+
+/**
+ * What the Options workbench is actually showing right now. Copilot runs from
+ * Options were grounding on the front expiry and losing the built strategy
+ * entirely (GUA-20260903-2), so the view publishes its live state here and the
+ * context payload carries it verbatim.
+ */
+export interface IvWorkbenchState {
+  mode: string;
+  symbol: string | null;
+  selected_expiry: string | null;
+  selected_expiry_days: number | null;
+  contracts: number;
+  contract_multiplier: number;
+  legs: {
+    side: string;
+    option_type: string;
+    expiry: string;
+    days_to_expiry: number | null;
+    strike: number;
+    premium: number;
+    quantity: number;
+  }[];
+  strategy: {
+    net_premium_per_share: number | null;
+    net_premium_total: number | null;
+    premium_direction: string | null;
+    max_profit_per_share: number | null;
+    max_loss_per_share: number | null;
+    max_profit_total: number | null;
+    max_loss_total: number | null;
+    breakevens: number[];
+    net_delta: number | null;
+    net_gamma: number | null;
+    net_vega: number | null;
+    net_theta: number | null;
+    shares_represented: number | null;
+    live_position_shares: number | null;
+    coverage_ratio: number | null;
+    sizing_warnings: string[];
+  } | null;
+  realized_vs_implied: {
+    window_days: number;
+    realized_vol: number | null;
+    reference_iv: number | null;
+    reference_iv_expiry: string | null;
+    reference_iv_days: number | null;
+    spread: number | null;
+  }[];
+}
+
+export const ivWorkbenchState = writable<IvWorkbenchState | null>(null);
 const STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY = "gamma.strategyLab.latestResearchBook";
 
 function loadPersistedStrategyLabResearchBook(): StrategyLabResearchBook | null {
@@ -1305,13 +1357,24 @@ function buildCopilotContextFingerprint(
 
   const surface = resolvedIvSurface();
   const session = get(ivSession);
+  const workbench = get(ivWorkbenchState);
   return JSON.stringify({
     domain,
     workspaceMode,
     symbol: surface?.symbol ?? session?.active_symbol ?? null,
     expiries: surface?.expiries ?? [],
     strikeCount: surface?.strikes.length ?? 0,
-    marketDataMode: session?.market_data_mode ?? null
+    marketDataMode: session?.market_data_mode ?? null,
+    // The visible workbench state is part of the context identity: a card built
+    // against a different submode, expiry, or strategy is a different card.
+    mode: workbench?.mode ?? null,
+    selectedExpiry: workbench?.selected_expiry ?? null,
+    contracts: workbench?.contracts ?? null,
+    legs: (workbench?.legs ?? []).map(
+      (leg) => `${leg.side}:${leg.option_type}:${leg.expiry}:${leg.strike}:${leg.quantity}`
+    ),
+    netPremiumPerShare: workbench?.strategy?.net_premium_per_share ?? null,
+    realizedWindows: (workbench?.realized_vs_implied ?? []).map((row) => row.window_days)
   });
 }
 
@@ -3593,7 +3656,8 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         workspace_mode: workspaceMode,
         iv_state: {
           surface: resolvedIvSurface(),
-          session: get(ivSession)
+          session: get(ivSession),
+          workbench: get(ivWorkbenchState)
         }
       };
     case "synthesis":

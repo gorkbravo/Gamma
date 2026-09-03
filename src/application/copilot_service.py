@@ -8952,9 +8952,10 @@ class CopilotService:
         state = request.context.iv_state or {}
         surface = state.get("surface") if isinstance(state.get("surface"), dict) else None
         session = state.get("session") if isinstance(state.get("session"), dict) else None
+        workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else None
         active_surface = resolve_iv_surface(surface, session)
         target_symbol = self._iv_target_symbol_from_state(state, surface, session)
-        summary = summarize_iv_state(surface, session)
+        summary = summarize_iv_state(surface, session, workbench)
         if summary is None:
             summary = {
                 "symbol": target_symbol,
@@ -8969,6 +8970,25 @@ class CopilotService:
             else "unavailable"
         )
         warnings = dedupe_warnings(summary.get("warnings", []))
+        workbench_summary = summary.get("workbench") if isinstance(summary.get("workbench"), dict) else None
+        surface_model_state = summary.get("surface_model") if isinstance(summary.get("surface_model"), dict) else {}
+        # A fitted ATM cell that disagrees with its own expiry must reach the model
+        # as a caveat, not as a quoted volatility (GUA-20260903-1).
+        for discontinuity in (surface_model_state.get("discontinuities") or [])[:3]:
+            warnings.append(str(discontinuity))
+        if summary.get("selected_expiry") and not summary.get("selected_expiry_is_front"):
+            warnings.append(
+                f"Every IV figure in this context belongs to the selected expiry {summary.get('selected_expiry')}"
+                f" ({summary.get('selected_expiry_days')}D), not the front expiry {summary.get('front_expiry')}."
+            )
+        if workbench_summary and not workbench_summary.get("strategy"):
+            warnings.append(
+                "No strategy legs are built in the Options workbench, so no debit, payoff, or break-even is available "
+                "to cite."
+            )
+        for sizing_warning in ((workbench_summary or {}).get("strategy") or {}).get("sizing_warnings", [])[:3]:
+            warnings.append(str(sizing_warning))
+        warnings = dedupe_warnings(warnings)
         sources = []
         if isinstance(active_surface, dict):
             sources.append(
@@ -9003,6 +9023,46 @@ class CopilotService:
                     navigation_context={"symbol": target_symbol},
                 )
             )
+        if workbench_summary and workbench_summary.get("strategy"):
+            sources.append(
+                CopilotSourceRef(
+                    source_id="iv.strategy",
+                    label="Options strategy workbench",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.iv.strategy",
+                    description=(
+                        "Legs, contract size, net premium, payoff bounds, break-evens and greeks of the structure "
+                        "currently built in the Options workbench."
+                    ),
+                    retrieved_at=(active_surface or {}).get("timestamp"),
+                    provider_native_id=target_symbol,
+                    navigation_supported=True,
+                    navigation_tab="iv",
+                    navigation_mode="strategies",
+                    navigation_context={"symbol": target_symbol},
+                )
+            )
+        if workbench_summary and workbench_summary.get("realized_vs_implied"):
+            sources.append(
+                CopilotSourceRef(
+                    source_id="iv.realized_vs_implied",
+                    label="Realized vs implied volatility",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.iv.realized_vs_implied",
+                    description=(
+                        "Realized-volatility windows compared against the ATM implied volatility of the selected "
+                        "expiry."
+                    ),
+                    retrieved_at=(active_surface or {}).get("timestamp"),
+                    provider_native_id=target_symbol,
+                    navigation_supported=True,
+                    navigation_tab="iv",
+                    navigation_mode="realized_implied",
+                    navigation_context={"symbol": target_symbol},
+                )
+            )
         return CopilotContextBundle(
             domain="iv",
             current_tab=request.context.current_tab or "iv",
@@ -9014,6 +9074,7 @@ class CopilotService:
             tool_state={
                 "surface": surface,
                 "session": session,
+                "workbench": workbench,
                 "target_symbol": target_symbol,
             },
             sources=sources,
@@ -12430,7 +12491,7 @@ class CopilotService:
             retrieved_at=(active_surface or {}).get("timestamp"),
         )
         return CopilotToolExecution(
-            output=summarize_iv_state(surface, session) or {},
+            output=summarize_iv_state(surface, session, self._iv_workbench_from_bundle(context)) or {},
             trace=CopilotToolTrace(
                 tool_name="get_iv_surface_context",
                 summary="Expanded the active Options context into surface, front-slice, and term-structure summaries.",
@@ -14934,6 +14995,11 @@ class CopilotService:
     def _iv_session_from_bundle(context: CopilotContextBundle) -> dict[str, Any] | None:
         session = context.tool_state.get("session")
         return session if isinstance(session, dict) else None
+
+    @staticmethod
+    def _iv_workbench_from_bundle(context: CopilotContextBundle) -> dict[str, Any] | None:
+        workbench = context.tool_state.get("workbench")
+        return workbench if isinstance(workbench, dict) else None
 
     @staticmethod
     def _iv_target_symbol_from_state(

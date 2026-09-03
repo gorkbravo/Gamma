@@ -158,6 +158,7 @@ def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
                     for row in rows
                     if row.status in {"error", "refused", "incomplete", "cancelled", "timeout"}
                 ),
+                incomplete_count=sum(1 for row in rows if row.status == "incomplete"),
                 cache_hit_count=sum(1 for row in rows if row.cache_status == "hit"),
                 cache_miss_count=sum(1 for row in rows if row.cache_status == "miss"),
                 average_duration_ms=sum(durations) / call_count if call_count else 0.0,
@@ -218,12 +219,41 @@ def _health_for_summary(
     display_name: str,
     expected_when: str,
 ) -> ProviderUsageHealth:
-    if summary.last_status in {"error", "refused", "incomplete", "cancelled", "timeout"}:
+    """Health across the whole retained window, not just the last request.
+
+    GUA-20260903-5: a badge derived only from `last_status` reported IBKR as
+    Healthy with 86/86 successes while user-visible requests inside that window
+    had failed or come back partial. Session reachability and request outcomes
+    are now reported as separate facts.
+    """
+    session_status = "connected" if summary.last_status != "error" else "unstable"
+    failed = int(summary.error_count or 0)
+    partial = int(summary.incomplete_count or 0)
+    unavailable = int(summary.unavailable_count or 0)
+
+    if summary.last_status in {"error", "refused", "cancelled", "timeout"}:
         status = "degraded"
         reason = summary.last_error or summary.last_message or "Recent provider request failed."
+    elif summary.last_status == "incomplete":
+        status = "degraded"
+        reason = summary.last_message or "The most recent provider request returned incomplete data."
     elif summary.last_status == "unavailable":
         status = "unavailable"
         reason = summary.last_message or "Provider was requested but returned unavailable data."
+    elif failed or partial or unavailable:
+        # The last call succeeded, but requests inside this window did not.
+        status = "degraded"
+        parts = []
+        if failed:
+            parts.append(f"{failed} failed")
+        if partial:
+            parts.append(f"{partial} returned partial data")
+        if unavailable:
+            parts.append(f"{unavailable} returned no data")
+        reason = (
+            f"The last request succeeded, but {' and '.join(parts)} out of {summary.call_count} recent "
+            f"{display_name} requests."
+        )
     else:
         status = "healthy"
         reason = summary.last_message or "Recent provider requests succeeded."
@@ -238,6 +268,8 @@ def _health_for_summary(
         success_count=summary.success_count,
         unavailable_count=summary.unavailable_count,
         error_count=summary.error_count,
+        incomplete_count=partial,
+        session_status=session_status,
         last_called_at=summary.last_called_at,
     )
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRiskWorkspaceModel, type RiskMode } from "./risk-workspace";
+import { buildRiskWorkspaceModel, describeAnalysisWindow, type RiskMode } from "./risk-workspace";
 import type { PortfolioSnapshot, RiskResult } from "./api/types";
 
 const snapshot: PortfolioSnapshot = {
@@ -362,5 +362,39 @@ describe("risk workspace view-model", () => {
   it("declares the complete risk mode union", () => {
     const modes: RiskMode[] = ["overview", "exposures", "drawdowns", "correlation", "scenarios", "optimization"];
     expect(modes).toHaveLength(6);
+  });
+});
+
+describe("describeAnalysisWindow", () => {
+  const metrics = {
+    lookback_days: 252,
+    requested_lookback_days: 252,
+    aligned_obs_count: 252,
+    raw_observation_count: 281,
+    dropped_observation_count: 29,
+    effective_start_date: "2025-08-29",
+    effective_end_date: "2026-09-02",
+    return_calendar_basis: "trading days from the provider's daily bar calendar",
+  } as any;
+
+  it("states requested and effective windows with dates and row reconciliation", () => {
+    const line = describeAnalysisWindow({ metrics } as any);
+
+    expect(line).toContain("requested 252 observations");
+    expect(line).toContain("analysed 252");
+    expect(line).toContain("2025-08-29 to 2026-09-02");
+    expect(line).toContain("281 rows available, 29 outside the window");
+  });
+
+  it("omits the reconciliation clause when nothing was dropped", () => {
+    const line = describeAnalysisWindow({
+      metrics: { ...metrics, raw_observation_count: 252, dropped_observation_count: 0 },
+    } as any);
+
+    expect(line).not.toContain("outside the window");
+  });
+
+  it("handles a run with no analysed observations", () => {
+    expect(describeAnalysisWindow(null)).toContain("none were analysed yet");
   });
 });

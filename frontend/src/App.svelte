@@ -3172,6 +3172,7 @@
             underlyingHistory={$ivUnderlyingHistory}
             underlyingPricePoints={$researchResult?.primary_price_points ?? []}
             researchPrimarySymbol={$researchResult?.primary_symbol ?? null}
+            portfolioPositions={$portfolioSnapshot?.positions ?? []}
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
             errorMessage={$ivError}

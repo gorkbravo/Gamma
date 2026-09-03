@@ -22,6 +22,7 @@ class ProviderUsageSummary:
     success_count: int = 0
     unavailable_count: int = 0
     error_count: int = 0
+    incomplete_count: int = 0
     cache_hit_count: int = 0
     cache_miss_count: int = 0
     average_duration_ms: float = 0.0
@@ -45,6 +46,12 @@ class ProviderUsageHealth:
     success_count: int = 0
     unavailable_count: int = 0
     error_count: int = 0
+    # Requests the provider answered only in part (e.g. a surface that came back
+    # with fewer cells than requested). Counted separately from outright errors
+    # so a badge never reads 100% success while visible data is missing.
+    incomplete_count: int = 0
+    # Whether the transport/session is usable, independent of request outcomes.
+    session_status: str | None = None
     last_called_at: datetime | None = None
 
 

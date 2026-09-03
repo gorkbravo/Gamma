@@ -285,3 +285,52 @@ def test_provider_usage_system_api_reports_aisstream_idle_by_design(tmp_path, mo
         assert "Sealanes" in health["aisstream"]["action_label"]
     finally:
         runtime.shutdown()
+
+
+def test_health_reports_degraded_when_recent_requests_failed_even_if_the_last_one_succeeded():
+    """GUA-20260903-5: a badge must not read Healthy while visible requests failed."""
+    from src.services.provider_usage import ProviderUsageLedger
+
+    ledger = ProviderUsageLedger()
+    ledger.record(provider_id="ibkr", endpoint="iv.surface", status="error", message="contract request failed")
+    ledger.record(provider_id="ibkr", endpoint="iv.surface", status="success", message="ok")
+
+    health = {row.provider_id: row for row in ledger.snapshot().health}["ibkr"]
+
+    assert health.health_status == "degraded"
+    assert "1 failed" in health.reason
+    assert health.session_status == "connected"
+
+
+def test_partial_surface_delivery_is_counted_separately_from_outright_errors():
+    from src.services.provider_usage import ProviderUsageLedger
+
+    ledger = ProviderUsageLedger()
+    ledger.record(
+        provider_id="ibkr",
+        endpoint="iv.surface",
+        status="incomplete",
+        message="GOOGL options surface returned 71 of 104 requested cells; the remainder is fitted, not quoted.",
+    )
+
+    snapshot = ledger.snapshot()
+    summary = {row.provider_id: row for row in snapshot.providers}["ibkr"]
+    health = {row.provider_id: row for row in snapshot.health}["ibkr"]
+
+    assert summary.incomplete_count == 1
+    assert health.health_status == "degraded"
+    assert health.incomplete_count == 1
+    assert "71 of 104" in health.reason
+
+
+def test_clean_provider_history_still_reads_healthy():
+    from src.services.provider_usage import ProviderUsageLedger
+
+    ledger = ProviderUsageLedger()
+    for _ in range(3):
+        ledger.record(provider_id="yfinance", endpoint="history", status="success")
+
+    health = {row.provider_id: row for row in ledger.snapshot().health}["yfinance"]
+
+    assert health.health_status == "healthy"
+    assert health.incomplete_count == 0

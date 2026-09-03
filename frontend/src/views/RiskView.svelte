@@ -6,6 +6,7 @@
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import {
     buildRiskWorkspaceModel,
+    describeAnalysisWindow,
     type CandidateAllocationRow,
     type DrawdownEpisode,
     type ExposureBreakdownRow,
@@ -764,6 +765,9 @@
         </button>
       </div>
     </div>
+    {#if result?.metrics}
+      <p class="analysis-window">{describeAnalysisWindow(result)}</p>
+    {/if}
   </article>
 
   {#if activeMode === "overview"}
@@ -1368,6 +1372,14 @@
 {/snippet}
 
 <style>
+  .analysis-window {
+    margin: var(--space-2) 0 0;
+    color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.02em;
+  }
+
   .view,
   .mode-shell,
   .two-col,

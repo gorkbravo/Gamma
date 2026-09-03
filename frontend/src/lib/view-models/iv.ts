@@ -62,11 +62,40 @@ export function deriveIvSurfaceAlerts(input: IvSurfaceAlertInput): string[] {
   return [availabilityMessage, ...alerts.filter((message) => message !== availabilityMessage)];
 }
 
+/** Per-cell provenance codes emitted by the surface engine. */
+export const CELL_SOURCE_LABELS: Record<string, string> = {
+  observed: "Observed",
+  strike_interpolated: "Interpolated across strikes on this expiry",
+  strike_extended: "Extended from the nearest observed strike on this expiry",
+  term_interpolated: "Interpolated across expiries (this expiry had no observation)",
+  term_extended: "Extended across expiries (this expiry had no observation)",
+  model_fitted: "Model fit",
+  unavailable: "Unavailable",
+};
+
+export function cellSource(surface: IvSurface | null, row: number, col: number): string | null {
+  const code = surface?.cell_sources?.[row]?.[col];
+  return code ? String(code) : null;
+}
+
+export function cellSourceLabel(code: string | null | undefined): string | null {
+  if (!code) {
+    return null;
+  }
+  return CELL_SOURCE_LABELS[code] ?? code;
+}
+
+export function isFittedCell(code: string | null | undefined): boolean {
+  return code != null && code !== "observed";
+}
+
 export interface SurfaceStats {
   atmStrike: number | null;
   frontExpiry: string | null;
   frontAtmIv: number | null;
+  frontAtmIvSource: string | null;
   backAtmIv: number | null;
+  backAtmIvSource: string | null;
   termSlope: number | null;
   minIv: number | null;
   maxIv: number | null;
@@ -90,7 +119,18 @@ export interface RealizedVolatilityPoint {
   window: number;
   realizedVol: number | null;
   spreadToFrontIv: number | null;
+  /** IV of the expiry the user is actually looking at, when one is selected. */
+  referenceIv: number | null;
+  referenceExpiry: string | null;
+  referenceDays: number | null;
+  spreadToReferenceIv: number | null;
   observationCount: number;
+}
+
+export interface RealizedIvReference {
+  iv: number | null;
+  expiry: string | null;
+  days: number | null;
 }
 
 export interface DistributionBucket {
@@ -347,7 +387,9 @@ export function deriveSurfaceStats(surface: IvSurface | null): SurfaceStats {
     atmStrike: null,
     frontExpiry: null,
     frontAtmIv: null,
+    frontAtmIvSource: null,
     backAtmIv: null,
+    backAtmIvSource: null,
     termSlope: null,
     minIv: null,
     maxIv: null,
@@ -366,7 +408,9 @@ export function deriveSurfaceStats(surface: IvSurface | null): SurfaceStats {
     atmStrike: surface.strikes[atmIndex] ?? null,
     frontExpiry: surface.expiries[0] ?? null,
     frontAtmIv,
+    frontAtmIvSource: cellSource(surface, 0, atmIndex),
     backAtmIv,
+    backAtmIvSource: cellSource(surface, surface.iv_grid.length - 1, atmIndex),
     termSlope: frontAtmIv != null && backAtmIv != null ? backAtmIv - frontAtmIv : null,
     minIv: values.length ? Math.min(...values) : null,
     maxIv: values.length ? Math.max(...values) : null,
@@ -747,10 +791,16 @@ export function deriveStrategyPayoffMatrix(
   return { dteColumns, rows: matrixRows, maxAbsPl, riskBasis };
 }
 
+/**
+ * Realized volatility windows against implied. `reference` carries the ATM IV of
+ * the expiry actually selected, so a 79-day question is answered with 79-day IV
+ * instead of the front month (GUA-20260903-2).
+ */
 export function deriveRealizedVolatility(
   points: TimeSeriesPoint[] | null | undefined,
   frontAtmIv: number | null | undefined,
-  windows = [20, 60, 120]
+  windows = [20, 60, 120],
+  reference: RealizedIvReference | null = null
 ): RealizedVolatilityPoint[] {
   const prices = (points ?? [])
     .map((point) => Number(point.value))
@@ -764,10 +814,15 @@ export function deriveRealizedVolatility(
     const realizedVol = sample.length >= Math.max(5, Math.floor(window * 0.5))
       ? standardDeviation(sample) * Math.sqrt(252)
       : null;
+    const referenceIv = reference?.iv ?? null;
     return {
       window,
       realizedVol,
       spreadToFrontIv: realizedVol != null && frontAtmIv != null ? frontAtmIv - realizedVol : null,
+      referenceIv,
+      referenceExpiry: reference?.expiry ?? null,
+      referenceDays: reference?.days ?? null,
+      spreadToReferenceIv: realizedVol != null && referenceIv != null ? referenceIv - realizedVol : null,
       observationCount: sample.length,
     };
   });
@@ -1668,4 +1723,111 @@ function erf(value: number) {
   const t = 1 / (1 + p * x);
   const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
   return sign * y;
+}
+
+/** US equity options are quoted per share and delivered in 100-share contracts. */
+export const OPTION_CONTRACT_MULTIPLIER = 100;
+
+export interface StrategySizing {
+  contracts: number;
+  multiplier: number;
+  /** Signed per-share net premium: negative is a debit paid. */
+  netPremiumPerShare: number;
+  netPremiumTotal: number;
+  premiumDirection: "debit" | "credit" | "flat";
+  maxProfitTotal: number | null;
+  maxLossTotal: number | null;
+  sharesRepresented: number;
+  positionSymbol: string | null;
+  positionQuantity: number | null;
+  positionIsLong: boolean | null;
+  coverageRatio: number | null;
+  maxWholeContractsWithinPosition: number | null;
+  warnings: string[];
+}
+
+/**
+ * GUA-20260903-3: a payoff quoted per share says nothing about whether the
+ * structure fits the account. This converts the per-share payoff into contract
+ * totals and compares the shares it delivers against the live position, so an
+ * over-hedge is visible before the idea is written down. It stays read-only:
+ * nothing here sizes, routes, or places an order.
+ */
+export function deriveStrategySizing(
+  payoff: StrategyPayoffSummary,
+  legs: StrategyLeg[],
+  contracts: number,
+  position: { symbol: string; quantity: number } | null,
+  multiplier = OPTION_CONTRACT_MULTIPLIER
+): StrategySizing {
+  const cleanContracts = Math.max(1, Math.round(Number.isFinite(contracts) ? contracts : 1));
+  const netPremiumPerShare = Number.isFinite(payoff.netPremium) ? payoff.netPremium : 0;
+  const scale = cleanContracts * multiplier;
+  const sharesRepresented = legs.length ? scale : 0;
+  const rawQuantity = position && Number.isFinite(position.quantity) ? position.quantity : null;
+  const positionQuantity = rawQuantity != null ? Math.abs(rawQuantity) : null;
+  const coverageRatio =
+    positionQuantity != null && positionQuantity > 0 && sharesRepresented > 0
+      ? sharesRepresented / positionQuantity
+      : null;
+
+  const warnings: string[] = [];
+  if (legs.length) {
+    if (positionQuantity == null || positionQuantity === 0) {
+      warnings.push(
+        `No live ${position?.symbol ?? "underlying"} position is visible, so this size is per-contract only and carries no account coverage.`
+      );
+    } else if (positionQuantity < multiplier) {
+      warnings.push(
+        `One ${multiplier}-share contract already exceeds the live ${positionQuantity.toLocaleString()}-share position; no whole-contract size matches this exposure.`
+      );
+    } else if (coverageRatio != null && coverageRatio > 1.05) {
+      warnings.push(
+        `Over-hedged: ${cleanContracts} contract${cleanContracts === 1 ? "" : "s"} covers ${sharesRepresented.toLocaleString()} shares against ${positionQuantity.toLocaleString()} held (${Math.round(coverageRatio * 100)}%).`
+      );
+    } else if (coverageRatio != null && coverageRatio < 0.95) {
+      warnings.push(
+        `Partial coverage: ${sharesRepresented.toLocaleString()} of ${positionQuantity.toLocaleString()} shares (${Math.round(coverageRatio * 100)}%).`
+      );
+    }
+  }
+
+  return {
+    contracts: cleanContracts,
+    multiplier,
+    netPremiumPerShare,
+    netPremiumTotal: netPremiumPerShare * scale,
+    premiumDirection: netPremiumPerShare < 0 ? "debit" : netPremiumPerShare > 0 ? "credit" : "flat",
+    maxProfitTotal: payoff.maxProfit == null ? null : payoff.maxProfit * scale,
+    maxLossTotal: payoff.maxLoss == null ? null : payoff.maxLoss * scale,
+    sharesRepresented,
+    positionSymbol: position?.symbol ?? null,
+    positionQuantity,
+    positionIsLong: rawQuantity == null ? null : rawQuantity > 0,
+    coverageRatio,
+    maxWholeContractsWithinPosition:
+      positionQuantity != null ? Math.floor(positionQuantity / multiplier) : null,
+    warnings,
+  };
+}
+
+/** Live share position in `symbol`, aggregated across stock lines only. */
+export function livePositionForSymbol(
+  positions: { symbol: string; sec_type: string; quantity: number }[] | null | undefined,
+  symbol: string | null | undefined
+): { symbol: string; quantity: number } | null {
+  const target = String(symbol ?? "").trim().toUpperCase();
+  if (!target) {
+    return null;
+  }
+  const matches = (positions ?? []).filter(
+    (position) =>
+      String(position.symbol ?? "").trim().toUpperCase() === target &&
+      String(position.sec_type ?? "STK").toUpperCase() === "STK" &&
+      Number.isFinite(position.quantity)
+  );
+  if (!matches.length) {
+    return null;
+  }
+  return { symbol: target, quantity: matches.reduce((sum, position) => sum + position.quantity, 0) };
 }

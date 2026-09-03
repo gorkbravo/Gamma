@@ -271,6 +271,12 @@ class RiskService:
 
         price_df = align_prices(prices)
         returns_df = compute_returns(price_df)
+        returns_df, raw_observation_count = self._trim_to_requested_lookback(returns_df, request.lookback_days)
+        if raw_observation_count > len(returns_df):
+            warnings.append(
+                f"Providers returned {raw_observation_count} aligned rows for a {request.lookback_days}-observation "
+                f"request; the newest {len(returns_df)} were analysed."
+            )
         if returns_df.empty:
             warnings.append("No return history available")
             for instrument_id in prices.keys():
@@ -461,6 +467,7 @@ class RiskService:
             ),
             monte_carlo_sample_paths=monte_carlo_result.sample_paths if monte_carlo_result is not None else None,
             aligned_obs_count=int(len(port_ret)) if not port_ret.empty else 0,
+            **self._analysis_window_fields(port_ret, raw_observation_count, request.lookback_days),
             benchmark_overlap_count=benchmark.overlap_count,
             concentration_hhi=concentration_hhi,
             top5_weight=top5_weight,
@@ -583,6 +590,12 @@ class RiskService:
         total_portfolio_value = float(total_portfolio_value or 0.0)
 
         instrument_id = self._research_book_instrument_id(snapshot, request)
+        source_returns, raw_observation_count = self._trim_to_requested_lookback(source_returns, request.lookback_days)
+        if raw_observation_count > len(source_returns):
+            warnings.append(
+                f"The handed-off book carried {raw_observation_count} rows for a {request.lookback_days}-observation "
+                f"request; the newest {len(source_returns)} were analysed."
+            )
         returns_df = source_returns.to_frame(instrument_id) if not source_returns.empty else pd.DataFrame()
         weights = pd.Series({instrument_id: 1.0}, dtype=float) if not returns_df.empty else pd.Series(dtype=float)
         port_ret = source_returns.astype(float)
@@ -685,6 +698,7 @@ class RiskService:
             monte_carlo_fan_percentiles=monte_carlo_result.fan_percentiles if monte_carlo_result is not None else None,
             monte_carlo_sample_paths=monte_carlo_result.sample_paths if monte_carlo_result is not None else None,
             aligned_obs_count=int(len(port_ret)) if not port_ret.empty else 0,
+            **self._analysis_window_fields(port_ret, raw_observation_count, request.lookback_days),
             benchmark_overlap_count=benchmark.overlap_count,
             concentration_hhi=concentration_hhi,
             top5_weight=top5_weight,
@@ -2367,6 +2381,51 @@ class RiskService:
             context=context,
         )
         return result.series, result.warnings
+
+    @staticmethod
+    def _trim_to_requested_lookback(frame, lookback_days: int):
+        """Cut an over-fetched return sample back to the requested observation count.
+
+        Providers deliberately over-fetch calendar days to cover a trading-day
+        horizon, so a 252-observation request can arrive holding far more rows.
+        Analysing all of them makes the horizon control a lie (GUA-20260903-4);
+        the newest `lookback_days` rows are the ones the label promises.
+        """
+        if frame is None or len(frame) == 0:
+            return frame, 0
+        raw_count = int(len(frame))
+        limit = max(int(lookback_days or 0), 1)
+        if raw_count <= limit:
+            return frame, raw_count
+        return frame.iloc[-limit:], raw_count
+
+    @staticmethod
+    def _analysis_window_fields(port_ret: pd.Series, raw_observation_count: int, lookback_days: int) -> dict:
+        """Requested vs effective analysis identity, reconciled row by row."""
+        requested = int(lookback_days or 0)
+        aligned = int(len(port_ret)) if port_ret is not None and not port_ret.empty else 0
+        start_date = None
+        end_date = None
+        span_days = None
+        if aligned:
+            try:
+                start = pd.Timestamp(port_ret.index[0])
+                end = pd.Timestamp(port_ret.index[-1])
+                start_date = start.date().isoformat()
+                end_date = end.date().isoformat()
+                span_days = int((end.normalize() - start.normalize()).days)
+            except Exception:  # pragma: no cover - non-datetime index
+                start_date = str(port_ret.index[0])
+                end_date = str(port_ret.index[-1])
+        return {
+            "requested_lookback_days": requested,
+            "effective_start_date": start_date,
+            "effective_end_date": end_date,
+            "effective_span_calendar_days": span_days,
+            "raw_observation_count": int(max(raw_observation_count, aligned)),
+            "dropped_observation_count": int(max(raw_observation_count - aligned, 0)),
+            "return_calendar_basis": "trading days from the provider's daily bar calendar",
+        }
 
     @staticmethod
     def _concentration_metrics(weights: pd.Series) -> Tuple[float | None, float | None, float | None]:

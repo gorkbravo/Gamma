@@ -24,10 +24,12 @@ import {
   deriveStrategyPayoff,
   deriveStrategyPayoffMatrix,
   deriveStrategyGreeks,
+  deriveStrategySizing,
   deriveSurfaceStats,
   deriveTermCurve,
   deriveTermStructure,
   hasParametricIvFit,
+  livePositionForSymbol,
   nearestStrikeIndex,
 } from "./iv";
 
@@ -635,5 +637,77 @@ describe("options surface view models", () => {
     expect(daysToExpiry("20260501", new Date("2026-04-21T10:00:00Z"))).toBe(10);
     expect(daysToExpiry("2026-05-01", new Date("2026-04-21T10:00:00Z"))).toBe(10);
     expect(daysToExpiry("bad", new Date("2026-04-21T10:00:00Z"))).toBe(0);
+  });
+});
+
+describe("deriveStrategySizing", () => {
+  const payoff = {
+    points: [],
+    netPremium: -10.67,
+    maxProfit: 14.33,
+    maxLoss: -10.67,
+    breakevens: [329.33],
+  };
+  const legs = [
+    { id: "a", optionType: "put", side: "long", expiry: "20261120", strike: 340, premium: 18, quantity: 1 },
+    { id: "b", optionType: "put", side: "short", expiry: "20261120", strike: 315, premium: 7.33, quantity: 1 },
+  ] as any;
+
+  it("converts per-share payoff into contract totals with an explicit multiplier", () => {
+    const sizing = deriveStrategySizing(payoff as any, legs, 2, { symbol: "GOOGL", quantity: 400 });
+
+    expect(sizing.multiplier).toBe(100);
+    expect(sizing.contracts).toBe(2);
+    expect(sizing.netPremiumTotal).toBeCloseTo(-2134, 6);
+    expect(sizing.premiumDirection).toBe("debit");
+    expect(sizing.maxProfitTotal).toBeCloseTo(2866, 6);
+    expect(sizing.sharesRepresented).toBe(200);
+    expect(sizing.coverageRatio).toBeCloseTo(0.5, 6);
+  });
+
+  it("warns when a single contract already exceeds the live holding", () => {
+    const sizing = deriveStrategySizing(payoff as any, legs, 1, { symbol: "GOOGL", quantity: 60 });
+
+    expect(sizing.maxWholeContractsWithinPosition).toBe(0);
+    expect(sizing.warnings.join(" ")).toContain("exceeds the live 60-share position");
+  });
+
+  it("warns on over-hedge and reports the largest whole-contract size that fits", () => {
+    const sizing = deriveStrategySizing(payoff as any, legs, 5, { symbol: "GOOGL", quantity: 250 });
+
+    expect(sizing.coverageRatio).toBeCloseTo(2, 6);
+    expect(sizing.maxWholeContractsWithinPosition).toBe(2);
+    expect(sizing.warnings.join(" ")).toContain("Over-hedged");
+  });
+
+  it("says so when there is no live position to cover", () => {
+    const sizing = deriveStrategySizing(payoff as any, legs, 1, null);
+
+    expect(sizing.coverageRatio).toBeNull();
+    expect(sizing.warnings.join(" ")).toContain("no account coverage");
+  });
+
+  it("keeps a legless builder free of sizing warnings", () => {
+    const sizing = deriveStrategySizing({ ...payoff, netPremium: 0 } as any, [], 1, null);
+
+    expect(sizing.sharesRepresented).toBe(0);
+    expect(sizing.warnings).toEqual([]);
+  });
+});
+
+describe("livePositionForSymbol", () => {
+  const positions = [
+    { symbol: "GOOGL", sec_type: "STK", quantity: 120 },
+    { symbol: "GOOGL", sec_type: "OPT", quantity: 3 },
+    { symbol: "MSFT", sec_type: "STK", quantity: 40 },
+  ];
+
+  it("aggregates stock lines only and ignores option lines", () => {
+    expect(livePositionForSymbol(positions as any, "googl")).toEqual({ symbol: "GOOGL", quantity: 120 });
+  });
+
+  it("returns null when the symbol is not held", () => {
+    expect(livePositionForSymbol(positions as any, "AAPL")).toBeNull();
+    expect(livePositionForSymbol(positions as any, "")).toBeNull();
   });
 });

@@ -141,6 +141,8 @@ class IVSurfaceModelMetadata:
     label: str
     status: str = "applied"
     notes: list[str] = field(default_factory=list)
+    # Fitted cells that fall outside the observed IV range of their own expiry.
+    discontinuities: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

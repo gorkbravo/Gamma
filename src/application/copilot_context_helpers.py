@@ -256,20 +256,97 @@ def summarize_risk_result(
     }
 
 
+def summarize_iv_workbench(workbench: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The visible Options workbench state, tenor-tagged.
+
+    Copilot cards reported the debit, payoff and RV-IV state as missing while
+    those panels were on screen (GUA-20260903-2). Everything the user can see
+    about the active structure now travels with the context.
+    """
+    if not isinstance(workbench, dict) or not workbench:
+        return None
+    strategy = workbench.get("strategy") if isinstance(workbench.get("strategy"), dict) else None
+    legs = [leg for leg in (workbench.get("legs") or []) if isinstance(leg, dict)]
+    realized = [row for row in (workbench.get("realized_vs_implied") or []) if isinstance(row, dict)]
+    return {
+        "mode": workbench.get("mode"),
+        "symbol": workbench.get("symbol"),
+        "selected_expiry": workbench.get("selected_expiry"),
+        "selected_expiry_days": _as_int(workbench.get("selected_expiry_days")),
+        "contracts": _as_int(workbench.get("contracts")),
+        "contract_multiplier": _as_int(workbench.get("contract_multiplier")),
+        "legs": [
+            {
+                "side": leg.get("side"),
+                "option_type": leg.get("option_type"),
+                "expiry": leg.get("expiry"),
+                "days_to_expiry": _as_int(leg.get("days_to_expiry")),
+                "strike": _as_float(leg.get("strike")),
+                "premium": _as_float(leg.get("premium")),
+                "quantity": _as_int(leg.get("quantity")),
+            }
+            for leg in legs[:8]
+        ],
+        "strategy": (
+            {
+                "net_premium_per_share": _as_float(strategy.get("net_premium_per_share")),
+                "net_premium_total": _as_float(strategy.get("net_premium_total")),
+                "premium_direction": strategy.get("premium_direction"),
+                "max_profit_per_share": _as_float(strategy.get("max_profit_per_share")),
+                "max_loss_per_share": _as_float(strategy.get("max_loss_per_share")),
+                "max_profit_total": _as_float(strategy.get("max_profit_total")),
+                "max_loss_total": _as_float(strategy.get("max_loss_total")),
+                "breakevens": [
+                    value
+                    for value in (_as_float(item) for item in (strategy.get("breakevens") or []))
+                    if value is not None
+                ][:4],
+                "net_delta": _as_float(strategy.get("net_delta")),
+                "net_gamma": _as_float(strategy.get("net_gamma")),
+                "net_vega": _as_float(strategy.get("net_vega")),
+                "net_theta": _as_float(strategy.get("net_theta")),
+                "shares_represented": _as_int(strategy.get("shares_represented")),
+                "live_position_shares": _as_int(strategy.get("live_position_shares")),
+                "coverage_ratio": _as_float(strategy.get("coverage_ratio")),
+                "sizing_warnings": [str(item) for item in (strategy.get("sizing_warnings") or [])][:4],
+            }
+            if strategy
+            else None
+        ),
+        "realized_vs_implied": [
+            {
+                "window_days": _as_int(row.get("window_days")),
+                "realized_vol": _as_float(row.get("realized_vol")),
+                "reference_iv": _as_float(row.get("reference_iv")),
+                "reference_iv_expiry": row.get("reference_iv_expiry"),
+                "reference_iv_days": _as_int(row.get("reference_iv_days")),
+                "spread": _as_float(row.get("spread")),
+            }
+            for row in realized[:6]
+        ],
+    }
+
+
 def summarize_iv_state(
     surface: dict[str, Any] | None,
     session: dict[str, Any] | None,
+    workbench: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     active_surface = resolve_iv_surface(surface, session)
     if not active_surface:
         return None
+    workbench = workbench if isinstance(workbench, dict) else {}
     strikes = [_as_float(value) for value in active_surface.get("strikes", [])]
     clean_strikes = [value for value in strikes if value is not None]
     expiries = [str(value) for value in active_surface.get("expiries", [])]
     iv_grid = active_surface.get("iv_grid", []) or []
+    cell_sources = active_surface.get("cell_sources", []) or []
     spot = _as_float(active_surface.get("spot"))
     atm_index = nearest_strike_index(clean_strikes, spot)
-    selected_expiry_index = 0
+    # The expiry the user is looking at, not the front month. Defaulting to the
+    # front expiry silently answered 79-day questions with 2-day data.
+    requested_expiry = str(workbench.get("selected_expiry") or "").strip()
+    selected_expiry_index = expiries.index(requested_expiry) if requested_expiry in expiries else 0
     selected_expiry = expiries[selected_expiry_index] if expiries else None
     selected_slice = [
         {
@@ -286,6 +363,13 @@ def summarize_iv_state(
         for row_index, expiry in enumerate(expiries)
     ]
     front_slice = selected_slice
+    selected_atm_source = None
+    if cell_sources:
+        try:
+            selected_atm_source = str(cell_sources[selected_expiry_index][atm_index])
+        except (IndexError, TypeError):
+            selected_atm_source = None
+    front_expiry = expiries[0] if expiries else None
 
     return {
         "symbol": active_surface.get("symbol") or session.get("active_symbol") if session else None,
@@ -298,14 +382,35 @@ def summarize_iv_state(
         "strikes_count": len(clean_strikes),
         "atm_strike": clean_strikes[atm_index] if clean_strikes and atm_index < len(clean_strikes) else None,
         "selected_expiry": selected_expiry,
+        "selected_expiry_days": _as_int(workbench.get("selected_expiry_days")),
+        "selected_expiry_is_front": bool(selected_expiry is not None and selected_expiry == front_expiry),
+        "front_expiry": front_expiry,
+        "selected_slice": {
+            "expiry": selected_expiry,
+            "atm_iv": _surface_value(iv_grid, selected_expiry_index, atm_index),
+            "atm_iv_source": selected_atm_source,
+            "min_iv": min((row["iv"] for row in front_slice if row["iv"] is not None), default=None),
+            "max_iv": max((row["iv"] for row in front_slice if row["iv"] is not None), default=None),
+            "points": front_slice[:8],
+        },
+        # Kept under the historical key for existing consumers; every IV figure
+        # here belongs to the expiry named beside it.
         "front_slice": {
             "expiry": selected_expiry,
             "atm_iv": _surface_value(iv_grid, selected_expiry_index, atm_index),
+            "atm_iv_source": selected_atm_source,
             "min_iv": min((row["iv"] for row in front_slice if row["iv"] is not None), default=None),
             "max_iv": max((row["iv"] for row in front_slice if row["iv"] is not None), default=None),
             "points": front_slice[:8],
         },
         "atm_term_structure": term_structure[:8],
+        "surface_model": {
+            "model": active_surface.get("surface_model"),
+            "label": active_surface.get("surface_model_label"),
+            "status": active_surface.get("surface_model_status"),
+            "discontinuities": list(active_surface.get("surface_model_discontinuities") or []),
+        },
+        "workbench": summarize_iv_workbench(workbench),
         "session": {
             "running": bool((session or {}).get("running")),
             "status_text": (session or {}).get("status_text"),

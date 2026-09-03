@@ -107,6 +107,9 @@ class CopilotRiskStateModel(BaseModel):
 class CopilotIvStateModel(BaseModel):
     surface: IVSurfaceResponseModel | None = None
     session: IVSessionStatusResponseModel | None = None
+    # What the Options workbench is showing: submode, selected expiry, strategy
+    # legs and payoff, and the realized-vs-implied windows (GUA-20260903-2).
+    workbench: dict[str, object] | None = None
 
 
 class CopilotRequestContextModel(BaseModel):

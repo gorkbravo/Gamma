@@ -27,6 +27,30 @@ from src.services.ibkr_client import IBKRClient
 
 logger = logging.getLogger(__name__)
 
+# Per-cell provenance for the display surface. Every cell the UI draws carries one
+# of these so a fitted value can never be mistaken for a quoted one.
+CELL_OBSERVED = "observed"
+CELL_STRIKE_INTERPOLATED = "strike_interpolated"
+CELL_STRIKE_EXTENDED = "strike_extended"
+CELL_TERM_INTERPOLATED = "term_interpolated"
+CELL_TERM_EXTENDED = "term_extended"
+CELL_MODEL_FITTED = "model_fitted"
+CELL_UNAVAILABLE = "unavailable"
+
+CELL_SOURCE_LABELS = {
+    CELL_OBSERVED: "Observed",
+    CELL_STRIKE_INTERPOLATED: "Interpolated across strikes (same expiry)",
+    CELL_STRIKE_EXTENDED: "Extended from nearest observed strike (same expiry)",
+    CELL_TERM_INTERPOLATED: "Interpolated across expiries (no observation on this expiry)",
+    CELL_TERM_EXTENDED: "Extended across expiries (no observation on this expiry)",
+    CELL_MODEL_FITTED: "Model fit",
+    CELL_UNAVAILABLE: "Unavailable",
+}
+
+# A fitted cell more than this far outside its own expiry's observed IV range is
+# reported as a surface discontinuity rather than drawn silently.
+SURFACE_DISCONTINUITY_TOLERANCE = 0.02
+
 
 @dataclass(frozen=True)
 class OptionTickerSubscription:
@@ -69,6 +93,7 @@ class IVSurfaceSnapshot:
     surface_model: IVSurfaceModelMetadata = field(
         default_factory=lambda: IVSurfaceModelMetadata(model="linear", label="Line interpolation")
     )
+    cell_sources: list[list[str]] = field(default_factory=list)
     expiry_analytics: list[IVExpiryAnalyticsRecord] = field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsRecord | None = None
 
@@ -349,9 +374,11 @@ class IVSurfaceEngine:
             expected_surface_cells=raw_grid.size,
             pairs=pairs,
         )
-        display_grid, model_metadata = self._fit_surface_grid(raw_grid, expiries, strikes, spot)
+        display_grid, model_metadata, cell_lineage = self._fit_surface_grid(raw_grid, expiries, strikes, spot)
         if display_grid is None:
             display_grid = np.clip(raw_grid, 0.01, 5.0)
+            cell_lineage = None
+        mock_cell_sources = self._cell_source_rows(cell_lineage, display_grid)
         expiry_analytics = self._build_expiry_analytics(expiries=expiries, pairs=pairs, spot=spot)
         return IVSurfaceSnapshot(
             symbol=symbol,
@@ -359,6 +386,7 @@ class IVSurfaceEngine:
             expiries=list(expiries),
             strikes=list(strikes),
             iv_grid=display_grid,
+            cell_sources=mock_cell_sources,
             timestamp=now,
             delayed=True,
             points=int(np.isfinite(raw_grid).sum()),
@@ -847,9 +875,10 @@ class IVSurfaceEngine:
         if observed_cells < max(8, len(strikes) // 2):
             return None
 
-        display_grid, model_metadata = self._fit_surface_grid(raw_grid, expiries, strikes, self._spot)
+        display_grid, model_metadata, cell_lineage = self._fit_surface_grid(raw_grid, expiries, strikes, self._spot)
         if display_grid is None:
             return None
+        cell_sources = self._cell_source_rows(cell_lineage, display_grid)
 
         quality = self._build_quality_metrics(
             contracts=contracts,
@@ -871,6 +900,7 @@ class IVSurfaceEngine:
             expiries=list(expiries),
             strikes=list(strikes),
             iv_grid=display_grid,
+            cell_sources=cell_sources,
             timestamp=datetime.utcnow(),
             delayed=bool(delayed),
             points=observed_cells,
@@ -906,37 +936,207 @@ class IVSurfaceEngine:
         expiries: list[str],
         strikes: list[float],
         spot: float | None,
-    ) -> tuple[np.ndarray | None, IVSurfaceModelMetadata]:
+    ) -> tuple[np.ndarray | None, IVSurfaceModelMetadata, np.ndarray | None]:
         model = self.normalize_surface_model(self.surface_model)
         label = self.surface_model_label(model)
+        base_grid, base_lineage, base_notes = self._fill_grid_with_lineage(raw_grid, expiries, strikes)
+
         if model == "spline":
             grid, notes = self._spline_interpolate_grid(raw_grid, expiries, strikes)
         elif model == "ssvi":
             grid, notes = self._ssvi_fit_grid(raw_grid, expiries, strikes, spot)
         else:
-            grid = self._linear_interpolate_grid(raw_grid, expiries, strikes)
-            notes = ["Linear interpolation filled missing cells across expiry and strike axes."] if grid is not None else []
+            grid, notes = base_grid, list(base_notes)
 
         if grid is None:
-            fallback = self._linear_interpolate_grid(raw_grid, expiries, strikes)
-            status = "fallback" if fallback is not None else "unavailable"
+            status = "fallback" if base_grid is not None else "unavailable"
             fallback_notes = notes + ["Requested surface model could not be applied; linear interpolation was used instead."]
-            return fallback, IVSurfaceModelMetadata(model="linear", label=self.surface_model_label("linear"), status=status, notes=fallback_notes)
+            metadata = IVSurfaceModelMetadata(
+                model="linear",
+                label=self.surface_model_label("linear"),
+                status=status,
+                notes=fallback_notes,
+                discontinuities=self._detect_surface_discontinuities(
+                    base_grid, base_lineage, raw_grid, expiries, strikes
+                ),
+            )
+            return base_grid, metadata, base_lineage
+
+        lineage = self._lineage_for_model(model, base_lineage, raw_grid)
+        notes = list(notes)
+        discontinuities = self._detect_surface_discontinuities(grid, lineage, raw_grid, expiries, strikes)
 
         status = "applied"
-        if notes and any("fallback" in note.lower() for note in notes):
+        if any("fallback" in note.lower() for note in notes):
             status = "partial"
-        return grid, IVSurfaceModelMetadata(model=model, label=label, status=status, notes=notes)
+        metadata = IVSurfaceModelMetadata(
+            model=model,
+            label=label,
+            status=status,
+            notes=notes,
+            discontinuities=discontinuities,
+        )
+        return grid, metadata, lineage
+
+    @staticmethod
+    def _cell_source_rows(lineage: np.ndarray | None, grid: np.ndarray | None) -> list[list[str]]:
+        if grid is None:
+            return []
+        if lineage is None:
+            return [[CELL_MODEL_FITTED] * grid.shape[1] for _ in range(grid.shape[0])]
+        return [[str(value) for value in row] for row in lineage.tolist()]
+
+    @staticmethod
+    def _lineage_for_model(model: str, base_lineage: np.ndarray | None, raw_grid: np.ndarray) -> np.ndarray | None:
+        if base_lineage is None:
+            return None
+        if model == "linear":
+            return base_lineage
+        # Spline and SSVI replace every cell with a model value, including the
+        # observed ones, so the lineage has to say so instead of claiming quotes.
+        lineage = np.array(base_lineage, dtype=object, copy=True)
+        lineage[lineage != CELL_UNAVAILABLE] = CELL_MODEL_FITTED
+        return lineage
 
     def _linear_interpolate_grid(self, raw_grid: np.ndarray, expiries: list[str], strikes: list[float]) -> np.ndarray | None:
-        table = pd.DataFrame(raw_grid, index=expiries, columns=strikes)
-        table = table.interpolate(method="linear", axis=0, limit_direction="both")
-        table = table.interpolate(method="linear", axis=1, limit_direction="both")
-        table = table.bfill().ffill()
-        if table.isna().all().all():
-            return None
-        clean_grid = table.to_numpy(dtype=float)
-        return np.clip(clean_grid, 0.01, 5.0)
+        grid, _lineage, _notes = self._fill_grid_with_lineage(raw_grid, expiries, strikes)
+        return grid
+
+    def _fill_grid_with_lineage(
+        self,
+        raw_grid: np.ndarray,
+        expiries: list[str],
+        strikes: list[float],
+    ) -> tuple[np.ndarray | None, np.ndarray | None, list[str]]:
+        """Fill missing surface cells same-expiry first, bounded by observed neighbours.
+
+        A cell is only ever filled from another expiry when its own expiry has no
+        observation at all, and such a cell is clamped to the envelope of the
+        observations that produced it. That keeps a fitted cell from contradicting
+        the chain cells sitting next to it on the same expiry.
+        """
+        raw = np.array(raw_grid, dtype=float, copy=True)
+        if raw.size == 0 or not np.isfinite(raw).any():
+            return None, None, []
+
+        observed = np.isfinite(raw)
+        grid = np.array(raw, dtype=float, copy=True)
+        lineage = np.where(observed, CELL_OBSERVED, CELL_UNAVAILABLE).astype(object)
+
+        strike_axis = np.array([float(strike) for strike in strikes], dtype=float)
+        now = datetime.utcnow()
+        dte_axis = np.array([float(self._days_to_expiry(expiry, now)) for expiry in expiries], dtype=float)
+
+        # Pass 1: same-expiry (strike axis). np.interp clamps outside the observed
+        # hull, so wing fills flat-extend the nearest observed strike rather than
+        # importing a value from a different tenor.
+        for row_index in range(grid.shape[0]):
+            row_observed = observed[row_index]
+            observed_count = int(row_observed.sum())
+            if observed_count == 0:
+                continue
+            missing = ~row_observed
+            if not missing.any():
+                continue
+            if observed_count == 1:
+                grid[row_index, missing] = float(raw[row_index, row_observed][0])
+                lineage[row_index, missing] = CELL_STRIKE_EXTENDED
+                continue
+            filled = np.interp(strike_axis[missing], strike_axis[row_observed], raw[row_index, row_observed])
+            grid[row_index, missing] = filled
+            inside = (strike_axis[missing] >= strike_axis[row_observed].min()) & (
+                strike_axis[missing] <= strike_axis[row_observed].max()
+            )
+            missing_indices = np.flatnonzero(missing)
+            lineage[row_index, missing_indices[inside]] = CELL_STRIKE_INTERPOLATED
+            lineage[row_index, missing_indices[~inside]] = CELL_STRIKE_EXTENDED
+
+        # Pass 2: expiries with no observation at all fall back to the term axis,
+        # clamped to the observed envelope at that strike.
+        empty_rows = [index for index in range(grid.shape[0]) if not observed[index].any()]
+        for row_index in empty_rows:
+            for col_index in range(grid.shape[1]):
+                column_observed = observed[:, col_index]
+                if not column_observed.any():
+                    continue
+                source_dtes = dte_axis[column_observed]
+                source_values = raw[column_observed, col_index]
+                value = float(np.interp(dte_axis[row_index], source_dtes, source_values))
+                low = float(source_values.min())
+                high = float(source_values.max())
+                grid[row_index, col_index] = min(max(value, low), high)
+                inside = source_dtes.min() <= dte_axis[row_index] <= source_dtes.max()
+                lineage[row_index, col_index] = CELL_TERM_INTERPOLATED if inside else CELL_TERM_EXTENDED
+
+        notes: list[str] = []
+        remaining = ~np.isfinite(grid)
+        if remaining.any():
+            # Neither this cell's expiry nor its strike carried an observation, so
+            # there is nothing to ground it in. The grid stays finite so the mesh
+            # and every numeric consumer keep working, but the lineage says the
+            # value is unavailable and the UI renders it as absent rather than as
+            # a quoted volatility.
+            lineage[remaining] = CELL_UNAVAILABLE
+            grid[remaining] = float(np.median(raw[observed]))
+            notes.append(
+                f"{int(remaining.sum())} of {grid.size} surface cells are unavailable: neither their expiry nor "
+                "their strike carried an observation."
+            )
+
+        if not np.isfinite(grid).any():
+            return None, None, notes
+
+        fill_counts = {
+            CELL_STRIKE_INTERPOLATED: int((lineage == CELL_STRIKE_INTERPOLATED).sum()),
+            CELL_STRIKE_EXTENDED: int((lineage == CELL_STRIKE_EXTENDED).sum()),
+            CELL_TERM_INTERPOLATED: int((lineage == CELL_TERM_INTERPOLATED).sum()),
+            CELL_TERM_EXTENDED: int((lineage == CELL_TERM_EXTENDED).sum()),
+        }
+        notes.insert(
+            0,
+            "Linear interpolation filled missing cells along the strike axis of their own expiry "
+            f"({fill_counts[CELL_STRIKE_INTERPOLATED]} interpolated, {fill_counts[CELL_STRIKE_EXTENDED]} wing-extended); "
+            f"{fill_counts[CELL_TERM_INTERPOLATED] + fill_counts[CELL_TERM_EXTENDED]} cells on fully unobserved expiries "
+            "fell back to the term axis and were clamped to the observed envelope.",
+        )
+        return np.clip(grid, 0.01, 5.0), lineage, notes
+
+    def _detect_surface_discontinuities(
+        self,
+        grid: np.ndarray,
+        lineage: np.ndarray | None,
+        raw_grid: np.ndarray,
+        expiries: list[str],
+        strikes: list[float],
+        *,
+        tolerance: float = SURFACE_DISCONTINUITY_TOLERANCE,
+    ) -> list[str]:
+        """Flag fitted cells that sit far outside their own expiry's observed range."""
+        if lineage is None or grid is None:
+            return []
+        observed = np.isfinite(raw_grid)
+        offenders: list[str] = []
+        for row_index in range(grid.shape[0]):
+            row_observed = observed[row_index]
+            if int(row_observed.sum()) < 2:
+                continue
+            low = float(raw_grid[row_index, row_observed].min()) - tolerance
+            high = float(raw_grid[row_index, row_observed].max()) + tolerance
+            for col_index in range(grid.shape[1]):
+                if lineage[row_index, col_index] == CELL_OBSERVED:
+                    continue
+                value = float(grid[row_index, col_index])
+                if not np.isfinite(value) or low <= value <= high:
+                    continue
+                offenders.append(
+                    f"{expiries[row_index]} {strikes[col_index]:g} fitted {value:.1%} vs observed "
+                    f"{max(low, 0.0):.1%}-{high:.1%} on the same expiry"
+                )
+        if not offenders:
+            return []
+        preview = "; ".join(offenders[:3])
+        suffix = f" (+{len(offenders) - 3} more)" if len(offenders) > 3 else ""
+        return [f"{len(offenders)} fitted cells disagree with same-expiry observations: {preview}{suffix}."]
 
     def _spline_interpolate_grid(self, raw_grid: np.ndarray, expiries: list[str], strikes: list[float]) -> tuple[np.ndarray | None, list[str]]:
         base = self._linear_interpolate_grid(raw_grid, expiries, strikes)
@@ -946,6 +1146,9 @@ class IVSurfaceEngine:
         grid = np.array(raw_grid, dtype=float, copy=True)
         strike_axis = np.array([float(strike) for strike in strikes], dtype=float)
         dte_axis = np.array([float(self._days_to_expiry(expiry, datetime.utcnow())) for expiry in expiries], dtype=float)
+        # A term spline needs distinct tenors. Same-day or already-expired rows
+        # collapse the axis and would otherwise flatten every expiry onto one slice.
+        term_axis_usable = int(np.unique(dte_axis).size) >= 3
         row_spline_count = 0
         term_spline_count = 0
 
@@ -956,15 +1159,18 @@ class IVSurfaceEngine:
                 grid[row_index, :] = self._natural_cubic_interpolate(strike_axis[mask], row[mask], strike_axis)
                 row_spline_count += 1
 
-        for col_index in range(grid.shape[1]):
-            col = grid[:, col_index]
-            mask = np.isfinite(col)
-            if int(mask.sum()) >= 3:
-                grid[:, col_index] = self._natural_cubic_interpolate(dte_axis[mask], col[mask], dte_axis)
-                term_spline_count += 1
+        if term_axis_usable:
+            for col_index in range(grid.shape[1]):
+                col = grid[:, col_index]
+                mask = np.isfinite(col)
+                if int(mask.sum()) >= 3:
+                    grid[:, col_index] = self._natural_cubic_interpolate(dte_axis[mask], col[mask], dte_axis)
+                    term_spline_count += 1
 
         grid = np.where(np.isfinite(grid), grid, base)
         notes = [f"Spline interpolation used {row_spline_count} strike slices and {term_spline_count} term slices."]
+        if not term_axis_usable:
+            notes.append("Term-axis spline was skipped because fewer than three distinct days-to-expiry were available.")
         if int((~np.isfinite(raw_grid)).sum()) and (row_spline_count < grid.shape[0] or term_spline_count < grid.shape[1]):
             notes.append("Spline fallback used linear interpolation for sparse strike or term slices.")
         return np.clip(grid, 0.01, 5.0), notes

@@ -8,6 +8,12 @@ from src.models.iv import IVOptionContractRecord
 from src.services.iv_surface_engine import IVSurfaceEngine
 
 
+def _future_expiries(*offsets: int) -> list[str]:
+    """Expiry codes relative to today, so tenor-dependent fits stay time-independent."""
+    today = datetime.utcnow().date()
+    return [(today + timedelta(days=offset)).strftime("%Y%m%d") for offset in offsets]
+
+
 def test_choose_expiries_prefers_target_tenors_over_first_available_dates():
     engine = object.__new__(IVSurfaceEngine)
     engine.max_expiries = 4
@@ -94,7 +100,8 @@ def test_spline_surface_model_fills_missing_cells_with_metadata():
         dtype=float,
     )
 
-    grid, metadata = engine._fit_surface_grid(raw_grid, ["20260619", "20260717", "20260821"], [90, 95, 100, 105, 110], 100)
+    expiries = _future_expiries(30, 60, 90)
+    grid, metadata, lineage = engine._fit_surface_grid(raw_grid, expiries, [90, 95, 100, 105, 110], 100)
 
     assert grid is not None
     assert np.isfinite(grid).all()
@@ -114,10 +121,112 @@ def test_ssvi_surface_model_fits_dense_smile_slices():
         dtype=float,
     )
 
-    grid, metadata = engine._fit_surface_grid(raw_grid, ["20260619", "20260717"], strikes, 100)
+    grid, metadata, lineage = engine._fit_surface_grid(raw_grid, _future_expiries(30, 60), strikes, 100)
 
     assert grid is not None
     assert np.isfinite(grid).all()
     assert metadata.model == "ssvi"
     assert metadata.status == "applied"
     assert grid.shape == raw_grid.shape
+
+
+def test_missing_atm_cell_is_filled_from_same_expiry_neighbours_not_other_expiries():
+    """GUA-20260903-1: a missing ATM strike must not inherit another expiry's value."""
+    engine = object.__new__(IVSurfaceEngine)
+    engine.surface_model = "linear"
+    expiries = _future_expiries(15, 79, 135)
+    strikes = [330.0, 335.0, 337.5, 340.0, 345.0]
+    raw_grid = np.array(
+        [
+            [0.315, 0.305, np.nan, 0.300, 0.298],
+            [0.340, 0.333, np.nan, 0.327, 0.322],
+            [0.250, 0.248, 0.244, 0.243, 0.241],
+        ],
+        dtype=float,
+    )
+
+    grid, metadata, lineage = engine._fit_surface_grid(raw_grid, expiries, strikes, 337.76)
+
+    assert grid is not None
+    atm = grid[1][2]
+    assert 0.327 <= atm <= 0.333, f"ATM fill {atm} escaped its own expiry's observed range"
+    assert lineage[1][2] == "strike_interpolated"
+    assert lineage[1][1] == "observed"
+    assert metadata.status == "applied"
+
+
+def test_wing_fill_extends_nearest_observed_strike_on_the_same_expiry():
+    engine = object.__new__(IVSurfaceEngine)
+    engine.surface_model = "linear"
+    expiries = _future_expiries(15, 79)
+    strikes = [300.0, 330.0, 340.0, 400.0]
+    raw_grid = np.array(
+        [
+            [np.nan, 0.30, 0.29, np.nan],
+            [0.44, 0.34, 0.33, 0.45],
+        ],
+        dtype=float,
+    )
+
+    grid, _metadata, lineage = engine._fit_surface_grid(raw_grid, expiries, strikes, 335.0)
+
+    assert grid[0][0] == 0.30
+    assert grid[0][3] == 0.29
+    assert lineage[0][0] == "strike_extended"
+    assert lineage[0][3] == "strike_extended"
+
+
+def test_expiry_without_any_observation_falls_back_to_the_term_axis_and_is_clamped():
+    engine = object.__new__(IVSurfaceEngine)
+    engine.surface_model = "linear"
+    expiries = _future_expiries(15, 79, 135)
+    strikes = [330.0, 340.0]
+    raw_grid = np.array(
+        [
+            [0.30, 0.29],
+            [np.nan, np.nan],
+            [0.36, 0.35],
+        ],
+        dtype=float,
+    )
+
+    grid, _metadata, lineage = engine._fit_surface_grid(raw_grid, expiries, strikes, 335.0)
+
+    assert 0.30 <= grid[1][0] <= 0.36
+    assert lineage[1][0] == "term_interpolated"
+
+
+def test_discontinuity_detection_reports_fitted_cells_outside_observed_range():
+    engine = object.__new__(IVSurfaceEngine)
+    expiries = _future_expiries(79)
+    strikes = [335.0, 337.5, 340.0]
+    raw_grid = np.array([[0.333, np.nan, 0.327]], dtype=float)
+    grid = np.array([[0.333, 0.244, 0.327]], dtype=float)
+    lineage = np.array([["observed", "strike_interpolated", "observed"]], dtype=object)
+
+    notes = engine._detect_surface_discontinuities(grid, lineage, raw_grid, expiries, strikes)
+
+    assert notes
+    assert "disagree with same-expiry observations" in notes[0]
+
+
+def test_cells_with_no_observation_on_either_axis_stay_finite_but_are_marked_unavailable():
+    """The grid must stay JSON-serialisable while still admitting it has no data."""
+    engine = object.__new__(IVSurfaceEngine)
+    engine.surface_model = "linear"
+    expiries = _future_expiries(15, 79)
+    strikes = [300.0, 330.0, 340.0]
+    raw_grid = np.array(
+        [
+            [np.nan, 0.30, 0.29],
+            [np.nan, np.nan, np.nan],
+        ],
+        dtype=float,
+    )
+
+    grid, _metadata, lineage = engine._fit_surface_grid(raw_grid, expiries, strikes, 335.0)
+
+    assert np.isfinite(grid).all()
+    assert lineage[1][0] == "unavailable"
+    # Only one expiry carried observations, so the fill extends rather than interpolates.
+    assert lineage[1][1] == "term_extended"
