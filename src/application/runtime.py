@@ -333,21 +333,42 @@ def build_runtime(
     prediction_research_store = PredictionResearchStore(base_dir=resolved_history_dir / "prediction_markets")
     prediction_market_service = PredictionMarketService(
         adapters={
-            "polymarket": trace_provider(PolymarketAdapter(cache), provider_usage, endpoint_prefix="prediction_markets"),
-            "kalshi": trace_provider(KalshiAdapter(cache), provider_usage, endpoint_prefix="prediction_markets"),
+            "polymarket": trace_provider(
+                PolymarketAdapter(cache),
+                provider_usage,
+                endpoint_prefix="prediction_markets",
+                provider_id="polymarket",
+            ),
+            "kalshi": trace_provider(
+                KalshiAdapter(cache),
+                provider_usage,
+                endpoint_prefix="prediction_markets",
+                provider_id="kalshi",
+            ),
         },
         research_store=prediction_research_store,
     )
     macro_service = MacroService(
-        fred_adapter=trace_provider(FredMacroAdapter(cache), provider_usage, endpoint_prefix="macro"),
-        treasury_adapter=trace_provider(TreasuryCurveAdapter(cache), provider_usage, endpoint_prefix="macro"),
-        events_adapter=trace_provider(USMacroEventsAdapter(cache), provider_usage, endpoint_prefix="macro"),
-        fx_adapter=trace_provider(IBKRMacroFXAdapter(market_data), provider_usage, endpoint_prefix="macro"),
-        dbnomics_adapter=trace_provider(DBnomicsMacroAdapter(cache), provider_usage, endpoint_prefix="macro"),
+        fred_adapter=trace_provider(
+            FredMacroAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="fred"
+        ),
+        treasury_adapter=trace_provider(
+            TreasuryCurveAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="treasury"
+        ),
+        events_adapter=trace_provider(
+            USMacroEventsAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="us_macro_events"
+        ),
+        fx_adapter=trace_provider(
+            IBKRMacroFXAdapter(market_data), provider_usage, endpoint_prefix="macro", provider_id="ibkr"
+        ),
+        dbnomics_adapter=trace_provider(
+            DBnomicsMacroAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="dbnomics"
+        ),
         census_trade_adapter=trace_provider(
             CensusTradePartnerAdapter(cache, api_key=os.getenv("CENSUS_API_KEY", "")),
             provider_usage,
             endpoint_prefix="macro",
+            provider_id="census",
         ),
         prediction_market_service=prediction_market_service,
     )
@@ -366,11 +387,17 @@ def build_runtime(
         )
     )
     crypto_service = CryptoService(
-        market_adapter=trace_provider(CoinGeckoAdapter(cache), provider_usage, endpoint_prefix="crypto"),
-        dex_adapter=trace_provider(GeckoTerminalAdapter(cache), provider_usage, endpoint_prefix="crypto"),
+        market_adapter=trace_provider(
+            CoinGeckoAdapter(cache), provider_usage, endpoint_prefix="crypto", provider_id="coingecko"
+        ),
+        dex_adapter=trace_provider(
+            GeckoTerminalAdapter(cache), provider_usage, endpoint_prefix="crypto", provider_id="geckoterminal"
+        ),
     )
     fundamentals_service = FundamentalsService(
-        sec_adapter=trace_provider(SecFundamentalsAdapter(cache), provider_usage, endpoint_prefix="fundamentals"),
+        sec_adapter=trace_provider(
+            SecFundamentalsAdapter(cache), provider_usage, endpoint_prefix="fundamentals", provider_id="sec"
+        ),
         valuation_adapter=trace_provider(
             IbkrValuationAdapter(
                 research_provider=research_provider,
@@ -378,6 +405,7 @@ def build_runtime(
             ),
             provider_usage,
             endpoint_prefix="fundamentals",
+            provider_id="ibkr",
         ),
         store=FundamentalsResearchStore(base_dir=resolved_history_dir / "fundamentals"),
         treasury_adapter=macro_service.treasury_adapter,

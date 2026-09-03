@@ -77,6 +77,110 @@ def test_trace_provider_records_success_and_failure_without_swallowing_errors():
     assert snapshot.providers[0].last_error == "provider broke"
 
 
+class UnnamedMacroAdapter:
+    """An adapter that names neither itself nor its results, like most of the
+    macro, crypto and prediction adapters before GUA-20260903-10."""
+
+    def series(self, code: str) -> list[float]:
+        return [1.0, 2.0]
+
+
+class ComposedSnapshot:
+    """An IBKR-backed snapshot built on a reference provider, carrying that
+    provider's warnings alongside its own."""
+
+    source_provider = "ibkr"
+
+    def __init__(self, warnings: list[str]) -> None:
+        self.warnings = warnings
+
+
+class ComposedCommoditiesProvider:
+    def __init__(self, warnings: list[str]) -> None:
+        self._warnings = warnings
+
+    def get_snapshot(self) -> ComposedSnapshot:
+        return ComposedSnapshot(self._warnings)
+
+
+def test_traced_calls_are_attributed_to_the_named_provider_not_unknown():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    provider = trace_provider(
+        UnnamedMacroAdapter(), ledger, endpoint_prefix="macro", provider_id="fred"
+    )
+
+    provider.series("GOLDAMGBD228NLBM")
+
+    snapshot = ledger.snapshot()
+    assert [row.provider_id for row in snapshot.providers] == ["fred"]
+    assert snapshot.recent_calls[0].endpoint == "macro.series"
+
+
+def test_an_unnamed_provider_falls_back_to_its_adapter_name_before_unknown():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    provider = trace_provider(UnnamedMacroAdapter(), ledger, endpoint_prefix="macro")
+
+    provider.series("DGS10")
+
+    assert [row.provider_id for row in ledger.snapshot().providers] == ["unnamed_macro"]
+
+
+def test_a_provider_that_names_itself_wins_over_the_call_site():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    provider = trace_provider(FakeProvider(), ledger, endpoint_prefix="fake", provider_id="assumed_id")
+
+    provider.load("x")
+
+    assert [row.provider_id for row in ledger.snapshot().providers] == ["fake_provider"]
+
+
+def test_health_does_not_report_another_providers_failure_as_its_own():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    provider = trace_provider(
+        ComposedCommoditiesProvider(["FRED series GOLDAMGBD228NLBM failed."]),
+        ledger,
+        endpoint_prefix="commodities",
+    )
+
+    provider.get_snapshot()
+
+    snapshot = ledger.snapshot()
+    ibkr = next(row for row in snapshot.health if row.provider_id == "ibkr")
+    assert ibkr.health_status == "healthy"
+    assert "FRED" not in ibkr.reason
+    assert "none of them about ibkr" in ibkr.reason
+
+
+def test_health_still_reports_a_providers_own_warning():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    provider = trace_provider(
+        ComposedCommoditiesProvider(
+            ["FRED series GOLDAMGBD228NLBM failed.", "IBKR returned delayed quotes for 2 curve nodes."]
+        ),
+        ledger,
+        endpoint_prefix="commodities",
+    )
+
+    provider.get_snapshot()
+
+    ibkr = next(row for row in ledger.snapshot().health if row.provider_id == "ibkr")
+    assert ibkr.reason == "IBKR returned delayed quotes for 2 curve nodes."
+
+
+def test_a_generic_warning_is_still_attributable_to_the_calling_provider():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    provider = trace_provider(
+        ComposedCommoditiesProvider(["Curve analytics are first-pass heuristics."]),
+        ledger,
+        endpoint_prefix="commodities",
+    )
+
+    provider.get_snapshot()
+
+    ibkr = next(row for row in ledger.snapshot().health if row.provider_id == "ibkr")
+    assert ibkr.reason == "Curve analytics are first-pass heuristics."
+
+
 def test_provider_usage_health_distinguishes_idle_by_design_from_failure():
     ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
     ledger.register_activation_condition(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections import deque
 from collections.abc import Callable
@@ -74,10 +75,18 @@ class ProviderUsageLedger:
 
 
 class TraceableProvider:
-    def __init__(self, provider: Any, ledger: ProviderUsageLedger, *, endpoint_prefix: str | None = None) -> None:
+    def __init__(
+        self,
+        provider: Any,
+        ledger: ProviderUsageLedger,
+        *,
+        endpoint_prefix: str | None = None,
+        provider_id: str | None = None,
+    ) -> None:
         self._provider = provider
         self._ledger = ledger
         self._endpoint_prefix = endpoint_prefix
+        self._provider_id = _provider_id(provider, fallback=provider_id)
 
     def __getattr__(self, name: str) -> Any:
         value = getattr(self._provider, name)
@@ -91,20 +100,25 @@ class TraceableProvider:
                 result = value(*args, **kwargs)
             except Exception as exc:
                 self._ledger.record(
-                    provider_id=_provider_id(self._provider),
+                    provider_id=self._provider_id,
                     endpoint=self._endpoint(name),
                     status=_exception_status(exc),
                     duration_ms=(time.perf_counter() - started) * 1000,
                     message=_exception_message(exc, redact=self._endpoint_prefix == "copilot"),
                 )
                 raise
+            recorded_provider_id = _result_provider_id(result) or self._provider_id
             self._ledger.record(
-                provider_id=_result_provider_id(result) or _provider_id(self._provider),
+                provider_id=recorded_provider_id,
                 endpoint=self._endpoint(name),
                 status=_result_status(result),
                 cache_status=_result_cache_status(result),
                 duration_ms=(time.perf_counter() - started) * 1000,
-                message=_result_message(result, redact=self._endpoint_prefix == "copilot"),
+                message=_result_message(
+                    result,
+                    provider_id=recorded_provider_id,
+                    redact=self._endpoint_prefix == "copilot",
+                ),
             )
             return result
 
@@ -123,8 +137,17 @@ def trace_provider(
     ledger: ProviderUsageLedger,
     *,
     endpoint_prefix: str | None = None,
+    provider_id: str | None = None,
 ) -> Any:
-    return TraceableProvider(provider, ledger, endpoint_prefix=endpoint_prefix)
+    """Wrap a provider so its calls are recorded.
+
+    Pass `provider_id` for any adapter that does not name itself: without it the
+    call is attributed to whatever the result reports, and adapters that return
+    plain values report nothing, which is how most of a session ends up filed
+    under `unknown` (GUA-20260903-10).
+    """
+
+    return TraceableProvider(provider, ledger, endpoint_prefix=endpoint_prefix, provider_id=provider_id)
 
 
 def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
@@ -296,13 +319,35 @@ def _health_sort_rank(status: str) -> int:
     }.get(status, 9)
 
 
-def _provider_id(provider: Any) -> str:
-    return _clean(
+def _provider_id(provider: Any, *, fallback: str | None = None) -> str:
+    """A provider that names itself wins: only it knows whether it is the live
+    adapter, a mock, or a disabled stand-in."""
+
+    declared = _clean(
         getattr(provider, "provider_id", None)
         or getattr(provider, "source_name", None)
         or getattr(provider, "provider_name", None),
-        "unknown",
+        "",
     )
+    return declared or _clean(fallback, "") or _provider_id_from_class(provider)
+
+
+def _provider_id_from_class(provider: Any) -> str:
+    """Last resort before `unknown`: name the adapter that was called.
+
+    An adapter class name identifies the provider well enough to act on
+    (`FredMacroAdapter` -> `fred_macro`), which is more than `unknown` ever tells
+    the user about which source failed.
+    """
+
+    name = provider.__class__.__name__
+    for suffix in ("DataProvider", "Provider", "Adapter", "Client", "Service"):
+        if name.endswith(suffix) and len(name) > len(suffix):
+            name = name[: -len(suffix)]
+            break
+    snake = re.sub(r"(?<!^)(?=[A-Z][a-z])", "_", name).lower()
+    snake = re.sub(r"_+", "_", snake).strip("_")
+    return snake or "unknown"
 
 
 def _result_provider_id(result: Any) -> str | None:
@@ -336,14 +381,77 @@ def _result_cache_status(result: Any) -> str | None:
     return None
 
 
-def _result_message(result: Any, *, redact: bool = False) -> str | None:
+# Tokens that identify a provider inside free-text warnings. A composed result
+# legitimately carries other providers' warnings -- an IBKR commodities snapshot
+# is built on a reference provider -- so the first warning on a result is not
+# necessarily about the provider that was called.
+_PROVIDER_WARNING_TOKENS: dict[str, tuple[str, ...]] = {
+    "ibkr": ("ibkr", "tws", "interactive brokers"),
+    "fred": ("fred",),
+    "treasury": ("treasury",),
+    "dbnomics": ("dbnomics", "db.nomics"),
+    "census": ("census",),
+    "eia": ("eia",),
+    "sec": ("sec ", "edgar"),
+    "yfinance": ("yfinance", "yahoo"),
+    "polymarket": ("polymarket",),
+    "kalshi": ("kalshi",),
+    "coingecko": ("coingecko",),
+    "geckoterminal": ("geckoterminal",),
+    "aisstream": ("aisstream",),
+    "openai": ("openai",),
+    "rss": ("rss",),
+}
+
+
+def _warning_names_provider(warning: str, provider_id: str) -> bool:
+    text = warning.lower()
+    tokens = _PROVIDER_WARNING_TOKENS.get(provider_id)
+    if tokens:
+        return any(token in text for token in tokens)
+    return provider_id.replace("_", " ") in text or provider_id in text
+
+
+def _warning_names_another_provider(warning: str, provider_id: str) -> bool:
+    text = warning.lower()
+    for candidate, tokens in _PROVIDER_WARNING_TOKENS.items():
+        if candidate == provider_id:
+            continue
+        if any(token in text for token in tokens):
+            return True
+    return False
+
+
+def _attributable_warning(warnings: list[Any], provider_id: str) -> str | None:
+    """The first warning that belongs to this provider.
+
+    A warning that names this provider wins; a generic warning that names no
+    provider at all is still attributable; a warning that names someone else is
+    not, and reporting it as this provider's health is how a FRED failure ended
+    up under a healthy IBKR badge (GUA-20260903-10).
+    """
+
+    texts = [str(warning) for warning in warnings if str(warning).strip()]
+    for text in texts:
+        if _warning_names_provider(text, provider_id):
+            return text
+    for text in texts:
+        if not _warning_names_another_provider(text, provider_id):
+            return text
+    return None
+
+
+def _result_message(result: Any, *, provider_id: str = "unknown", redact: bool = False) -> str | None:
     if redact:
         status = _result_status(result)
         model = _clean(getattr(result, "model", None), "")
         return f"status={status}" + (f"; model={model}" if model else "")
     warnings = getattr(result, "warnings", None)
     if isinstance(warnings, list) and warnings:
-        return str(warnings[0])
+        own = _attributable_warning(warnings, provider_id)
+        if own is not None:
+            return own
+        return f"{len(warnings)} warning(s) on the result, none of them about {provider_id}."
     return None
 
 
