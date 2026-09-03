@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-09-01
+Last updated: 2026-09-04
 
 ## Start Here
 
@@ -193,6 +193,19 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-04 — Documentation Alignment
+
+- [Responses create reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create): application-defined custom tools retain typed input/output contracts, while tool choice and provider streaming remain separate from application execution and durable state ownership.
+- [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.5): the Responses API remains the recommended primitive for reasoning, tool use, and multi-turn work; custom tools connect an application to its own systems, and Agents SDK patterns remain available for agentic applications.
+- [Containers create reference](https://developers.openai.com/api/reference/cli/resources/containers/methods/create): hosted containers have explicit expiration and network-policy controls, including disabled or allowlisted egress.
+
+Resulting decision:
+
+- No architecture, framework, or model change is required by this documentation refresh. Keep Gamma's custom Responses loop as the default and the Agents SDK as a feature-flagged comparison under the same action registry.
+- Keep Gamma's server authoritative for tool exposure, validation, permissions, budgets, provider access, working state, approvals, persistence, materialization, and terminal truth. The model may choose only among the app-native tools Gamma authorizes.
+- The shipped Research Script Workspace remains consistent with current container controls: containers are ephemeral, outbound network stays disabled, inputs and exact source revisions are copied in, and Gamma immediately retains typed outputs and provenance outside provider state.
+- Continue using Gamma's evals, reliability, latency, cost, and permission invariants for any future framework or model migration; recency alone is not a migration reason.
+
 ### Official Guidance Re-Reviewed 2026-09-03 — Tool-Continuation Failure Diagnosis
 
 Context: the 2026-09-03 fix-verification audit saw both bounded Copilot attempts succeed on the initial Responses call, complete `run_options_realized_implied_comparison`, then fail with a 4xx on the continuation. Gamma runs with `GAMMA_COPILOT_STORE_RESPONSES=false`, so the working hypothesis was that replayed reasoning items were unresolvable without stored state.
@@ -371,7 +384,7 @@ Copilot is complete for the clarified Gamma pass when a user can do all of the f
 12. Get explicit `unavailable`, `degraded`, `refused`, `incomplete`, `cancelled`, and `error` states instead of a neutral empty card.
 13. Use the shelf for quick contextual work and promote that exact thread/context into the full workspace without losing state.
 
-Voice, unrestricted web browsing, unrestricted code execution, trading/account/wallet actions, and automatic durable mutations are not current-pass completion requirements. The separately approved Research Script Workspace is tracked in Roadmap Workstream 2A and is not a blocker for Copilot V2's current completion gate. Explicit long-running external deep research is a later opt-in extension, not the default answer path.
+Voice, unrestricted web browsing, unrestricted code execution, trading/account/wallet actions, and automatic durable mutations are not current-pass completion requirements. The completed Research Script Workspace is tracked in Roadmap Workstream 2A and remains a narrow isolated-computation capability rather than a blocker or a grant of general code authority. Explicit long-running external deep research is a later opt-in extension, not the default answer path.
 
 ### Final In-App Layout
 
@@ -552,7 +565,7 @@ Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint
 - The storage-recovery warning is now an in-flow status strip in the chat column with a `RECOVERY` badge, a plain-language explanation that originals were preserved, an inspectable list of safe record details (record type, recovery action, store-relative path, message), a session-scoped dismiss, and a `Storage` header control for rediscovery. It is statically positioned with no `z-index`, so it cannot cover the composer, artifact controls, or confirmation dialogs at desktop or narrow widths.
 - Checkpoint 6 adds schema-v4 fields for selected/resolved profile, provider/model, policy version, product-level routing reason, reasoning mode/effort, orchestration path, total/provider latency, available input/output/reasoning/cache tokens, provider/tool call counts, cancellation outcome/boundary, and safe provider error correlation. Legacy placeholders migrate to `null` when the provider never supplied a value; raw provider usage payloads are discarded.
 - `copilot.provider-storage.v1` keeps Gamma-local persistence distinct from provider response retention. When effective storage is disabled, OpenAI requests use `store: false`, omit `previous_response_id`, and include a bounded safe local continuation contract. Providers that cannot honor a requested storage mode return typed degradation.
-- The server policy resolves Auto, Quick, Standard, and Deep and records user selection separately from the final resolution. Unsupported provider/model/profile combinations return explicit safe states. The GPT-5.5 Agent baseline and Gamma-owned custom orchestration path remain defaults because the retained comparison showed no authorized live quality, latency, reliability, or cost advantage for switching to Agents SDK. After Checkpoint 7, that custom path is adaptive when the configured provider supports `stream_research_operator`, with deterministic execution retained for mock/disabled fallback fixtures.
+- The server policy resolves Auto, Quick, Standard, and Deep and records user selection separately from the final resolution. Unsupported provider/model/profile combinations return explicit safe states. The current `gpt-5.6-luna` model baseline and Gamma-owned custom orchestration path remain defaults; the model migration was explicitly requested and verified on 2026-08-31, while no authorized comparative evidence justified switching the default orchestrator to Agents SDK. After Checkpoint 7, the custom path is adaptive when the configured provider supports `stream_research_operator`, with deterministic execution retained for mock/disabled fallback fixtures.
 
 #### G. Shelf/full-workspace continuity — checkpoint 6 complete (97%)
 
@@ -601,7 +614,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Generalize the same contract to user-specified hypothetical portfolios and Risk, preserving exact legs, normalized weights, typed shocks, complete bounded outputs, provenance, restart/discard/expiry, and typed non-durable Risk materialization.
 - [x] Add the Checkpoint 8D Options vertical slice: explicit realized-versus-implied requests retain exact expiry comparisons, requested collection settings, quality, warnings, and provenance, then materialize non-durably into Options / Realized vs IV.
 - [ ] Continue the contract through option-set drafts, Strategy Lab inputs, temporary assumptions, and other cross-tool outputs.
-- [ ] Integrate the separately tracked Research Script Workspace only after its mock contracts, immutable revision store, and Script-mode materialization payload are stable; do not fold arbitrary source execution into `run_strategy_lab_backtest`.
+- [x] Integrate the separately tracked Research Script Workspace after its mock contracts, immutable revision store, and Script-mode materialization payload became stable. Completed and verified 2026-08-31 with Code Interpreter network disabled, retained typed outputs, and unchanged `run_strategy_lab_backtest`; Script execution remains isolated from general Operator authority.
 - [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
 
 Implementation note (2026-08-25, Checkpoint 8A):
@@ -660,10 +673,10 @@ Implementation note (2026-09-01, Checkpoint 8D):
 1. ~~Provider-native streaming, shared run lifecycle, bounded replay, and explicit provider state.~~ Completed 2026-07-17 at checkpoint 1 (76%).
 2. ~~Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.~~ Completed 2026-07-24 at checkpoint 2 (80%).
 3. ~~In-tab artifacts/memos and session lifecycle completion.~~ Completed 2026-07-25 at checkpoint 3 (86%).
-4. ~~Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.~~ Completed 2026-07-25 (see the note under workstream F).
+4. ~~Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in the archived `docs/archive/copilot_v2_checkpoint3_prompt.md`.~~ Completed 2026-07-25 (see the note under workstream F).
 5. ~~Live operator events, cancellation, and inline confirmations.~~ Completed 2026-07-25 at checkpoint 4 (91%).
 6. ~~Missing context/tool coverage and source navigation.~~ Completed 2026-07-25 at checkpoint 5 (94%).
-7. ~~Versioned, capability-aware model/storage policy and eval-backed routing decision.~~ Completed 2026-07-25 at checkpoint 6 (97%); retain GPT-5.5/custom Operator defaults because no authorized live evidence justified a switch.
+7. ~~Versioned, capability-aware model/storage policy and eval-backed routing decision.~~ Completed 2026-07-25 at checkpoint 6 (97%). The historical GPT-5.5 baseline was superseded by the explicitly requested and verified `gpt-5.6-luna` migration on 2026-08-31; the custom Operator remains the default orchestrator because no authorized live comparison justified a switch.
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
 10. ~~Build the closed-loop Operator and model-assisted, schema-validated argument path.~~ Completed 2026-07-30 at Checkpoint 7 (82%).
@@ -690,7 +703,7 @@ The percentages attached to completed Checkpoints 1 through 7 below are historic
 - Session replay after app restart reproduces the final transcript, trace, artifacts, context metadata, working-state references, observations, budgets, and pending interruption.
 - The dedicated tab supports full memo/report editing and export.
 - The shelf can promote a thread into the tab without context loss.
-- Model/profile/orchestrator routing is replayable and backed by recorded eval results against the retained GPT-5.5/custom-loop baseline; no default changes without measured evidence.
+- Model/profile/orchestrator routing is replayable and backed by recorded eval results against the current `gpt-5.6-luna`/custom-loop baseline plus retained historical comparisons; no future default changes without measured evidence.
 - Trace evals and live/frontend/backend suites cover entity acquisition, parameter fidelity, adaptation, stopping behavior, synthesis, approval/resume, and happy, degraded, unavailable, refused, incomplete, cancelled, and provider-error paths.
 - When Workstream 2A is present, Script evals additionally prove role separation, explicit-run intent, staged Operator revisions, immutable source/input hashes, output retention, and the absence of Gamma/host/credential/broker/wallet/network authority.
 
@@ -1234,7 +1247,7 @@ Future agents should update this section.
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
 | Copilot roles | Research Agent plus Research Operator, differentiated by authority. | Agent interprets attached context without operating Gamma; Operator acquires inputs and runs app-native research workflows. Authority changes are visible, never silent. |
 | Working analysis | Operator may create and modify explicit session-scoped ephemeral state automatically. | Hypothetical portfolios, DCFs, scenarios, assumptions, and intermediate outputs must not be confused with durable saved objects. |
-| Research Script Workspace | Approved as a narrow Strategy Lab mode behind a provider-neutral isolated runtime; mock first, then Code Interpreter if the exact-source/hash spike passes. | Operator may draft and explicitly run, but has no unrestricted code authority. Canonical post-materialization edits are user-controlled and later Operator changes are staged. See `research_script_workspace_plan.md`. |
+| Research Script Workspace | Complete as a narrow Strategy Lab mode behind a provider-neutral isolated runtime; mock and network-disabled Code Interpreter paths passed the exact-source/hash and retained-output gates. | Operator may draft and explicitly run, but has no unrestricted code authority. Canonical post-materialization edits are user-controlled and later Operator changes are staged. See `research_script_workspace_plan.md`. |
 | Local state changes | Allowed only for research state and confirmation-required when an existing durable object will be changed. | Approval pauses and resumes the same run. Never permit market/account/wallet execution. |
 | DCF | Important first confirmed-mutation use case, but not the agent's whole identity. | The agent should be domain-broad. |
 | Official OpenAI guidance | Refresh before material agentic work and record the review. | Current framework/model guidance informs the design but does not override Gamma's evals or product boundary. |

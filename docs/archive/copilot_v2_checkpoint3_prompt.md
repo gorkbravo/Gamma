@@ -1,5 +1,7 @@
 # Copilot V2 Checkpoint 3 Follow-up Regression Prompt
 
+_Archived 2026-09-04. The regression pass described below was completed on 2026-07-25; this file is retained only as implementation history and is not current execution guidance._
+
 Copy the text inside the block below into the AI agent that will implement the post-Checkpoint 3 regression fixes.
 
 ````text

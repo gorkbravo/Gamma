@@ -10,6 +10,7 @@ They are not the primary source of truth for current development.
 - [`roadmap_v1_phase_plan.md`](./roadmap_v1_phase_plan.md): archived original phase-based roadmap; use only for historical checkpoint context
 - [`roadmap_readiness_checklist.md`](./roadmap_readiness_checklist.md): pre-roadmap readiness checklist captured during the transition period
 - [`p1_refactor_handoff.md`](./p1_refactor_handoff.md): Phase 1 refactor and handoff notes from the readiness pass
+- [`copilot_v2_checkpoint3_prompt.md`](./copilot_v2_checkpoint3_prompt.md): completed post-Checkpoint 3 regression prompt for New Chat reconciliation, composer clearing, and storage-recovery diagnostics
 - [`prompts/`](./prompts/README.md): archived implementation prompts, including the first-pass Crypto and Fundamentals prompts
 
 ## Audit Documents

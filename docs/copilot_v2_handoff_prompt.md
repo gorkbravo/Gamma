@@ -1,4 +1,4 @@
-# Copilot V2 ~72% To 100% Execution Prompt
+# Copilot V2 ~87% To 100% Execution Prompt
 
 Copy the text inside the block below into the coding agent that will continue Copilot V2.
 
@@ -7,9 +7,9 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot from its approximately 72% clarified baseline to the desired end state and 100% acceptance gate defined in `roadmap.md` and `docs/copilot_v2_tab_plan.md`.
+Your objective is to take Copilot from its approximately 87% clarified baseline through the remaining Checkpoint 8 work, Checkpoint 9, and the desired 100% acceptance gate defined in `roadmap.md` and `docs/copilot_v2_tab_plan.md`.
 
-The former 97% figure measured a narrower chat, persistence, evidence, and bounded-workflow foundation. Historical checkpoints 1 through 6 remain verified and should be preserved, but they are not the current product-completion percentage. Do not treat this as release-hardening-only work. The central missing outcome is a genuine Research Operator that can operate Gamma's authorized research capabilities.
+The former 97% figure measured a narrower chat, persistence, evidence, and bounded-workflow foundation. Historical checkpoints 1 through 6, the Checkpoint 7 closed-loop Operator, Checkpoints 8A-8D, and the isolated Research Script Workspace are verified and should be preserved. The central remaining product work is to generalize temporary tab-owned analysis state beyond the completed Fundamentals, hypothetical Portfolio/Risk, Options realized-versus-implied, and Script slices; then complete same-run approval/recovery and the release gate.
 
 This is an implementation task, not a planning-only exercise. Work in coherent vertical slices, verify each exit criterion, update the active documentation, and continue until the desired end state is proven or a genuine external dependency blocks the remaining gate. Never claim a percentage merely because code was written.
 
@@ -18,7 +18,7 @@ This is an implementation task, not a planning-only exercise. Work in coherent v
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from ~72% to 100%`, sequencing rules, non-goals, and deliverable
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 82% to 100%`, sequencing rules, non-goals, and deliverable
 3. `docs/copilot_v2_tab_plan.md`, especially:
    - `Two Copilot Roles`
    - `Authority And Interaction Contract`
@@ -141,14 +141,16 @@ Preserve and build on:
 - automatic bounded read-only tools and the narrow confirmed DCF proposal/apply flow;
 - exact shelf-to-workspace promotion;
 - versioned model/storage policy, local continuation, usage/routing observability, and safe diagnostics;
-- deterministic custom Operator as current default and feature-flagged Agents SDK path;
+- adaptive Gamma-owned custom Responses Operator as the capable-provider default, deterministic mock/disabled fallbacks, and a feature-flagged Agents SDK comparison path;
 - the existing deterministic benchmark as legacy foundation evidence.
+- the completed Checkpoint 7 closed-loop model-tool-model contract and Checkpoints 8A-8D temporary Fundamentals, company-resolution, hypothetical Portfolio/Risk, and Options realized-versus-implied working analyses;
+- the completed Strategy Lab `Script` mode, with immutable source/input hashes, isolated no-network execution, retained typed outputs, and no general code authority.
 
 The current benchmark is insufficient for the clarified end state. It must be extended beyond predetermined tool-presence checks.
 
-## Checkpoint 7 — closed-loop Operator core (target 82%)
+## Completed Checkpoint 7 — closed-loop Operator core (82%; preserve)
 
-Required delivery:
+Verified delivery:
 
 - bounded model-tool-model continuation;
 - model-produced strict arguments with deterministic server validation;
@@ -165,20 +167,19 @@ Exit criteria:
 - generic execution summaries fail analytical acceptance;
 - custom Responses and Agents SDK variants, where maintained, use the same authoritative registry.
 
-## Checkpoint 8 — entity acquisition and working-analysis state (target 89%)
+## Checkpoint 8 — finish entity acquisition and working-analysis state (target 89%)
 
-Required delivery:
+Remaining delivery:
 
-- entity-addressable core tools that do not require an active UI tab;
-- Gamma-owned `ephemeral`, `draft`, and `durable` state semantics;
-- session-scoped temporary portfolios, DCFs, risk scenarios, options sets, strategy inputs, assumptions, and cross-tool observations;
+- preserve the completed entity-addressable Fundamentals, natural-company resolution, hypothetical Portfolio/Risk, Options realized-versus-implied, and Research Script contracts;
+- extend Gamma-owned `ephemeral`, `draft`, and `durable` state semantics to option-set drafts, Strategy Lab inputs, temporary assumptions, and the remaining representative tab-owned analyses;
 - typed owning-tab materialization/handoffs;
 - deterministic expiry, discard, promotion, persistence, provenance, and restart behavior.
 
 Exit criteria:
 
-- unloaded-LMT fair value completes without manual tab setup;
-- a user-specified hypothetical multi-asset portfolio and risk shock preserve the requested composition and scenario;
+- the already verified unloaded-LMT, natural-company, hypothetical multi-asset portfolio/risk-shock, Options comparison, and Script cases remain green;
+- option-set drafts, Strategy Lab inputs, and temporary assumptions preserve the user's exact requested values without manual tab setup;
 - temporary work is visible and never confused with saved state;
 - no save, rebalance, trade, or other prohibited effect occurs.
 
@@ -314,5 +315,5 @@ After each checkpoint report:
 - any live evidence or explicitly missing live evidence;
 - remaining blockers.
 
-Claim Copilot 100% only after checkpoints 7 through 10 and the full acceptance evidence pass. Keep historical checkpoints 1 through 6 as foundation history, identify optional post-V2 work separately, and confirm that Gamma's research-only boundary remains intact.
+Claim Copilot 100% only after the remainder of Checkpoint 8 plus Checkpoints 9 and 10 pass the full acceptance gate. Keep historical checkpoints 1 through 7 and completed Checkpoint 8 slices as foundation history, identify optional post-V2 work separately, and confirm that Gamma's research-only boundary remains intact.
 ```

@@ -36,7 +36,7 @@ Gamma does not:
 
 - place orders or execute strategies
 - act as a trading bot or portfolio rebalancer
-- run unrestricted or host-integrated user strategy code; the approved future Strategy Lab `Script` mode must use an isolated runtime with no Gamma, host, credential, broker, wallet, network, or execution authority
+- run unrestricted or host-integrated user strategy code; the shipped Strategy Lab `Script` mode runs only in an isolated ephemeral runtime with no Gamma, host, credential, broker, wallet, network, or execution authority
 - support IB Gateway yet; the live path is Trader Workstation
 - treat heuristic macro interpretation layers as causal models
 - treat commodity curve, roll-yield, spread, or inventory heuristics as execution signals
@@ -60,6 +60,9 @@ Within each workspace, tabs can be reordered in the sidebar. The default layout 
 The current desktop navigation model is part of the product, not an afterthought:
 
 - `Ctrl+1` ... `Ctrl+N` switches tabs in the user-defined order
+- `Ctrl+Left` / `Ctrl+Right` moves to the previous or next tab
+- `Shift+1` ... `Shift+N` switches registered modes inside the active tab
+- `Shift+Left` / `Shift+Right` moves to the previous or next registered mode
 - `Ctrl+Shift+P` switches to the Portfolio workspace
 - `Ctrl+Shift+R` switches to the Research workspace
 - `Ctrl+B` or backtick toggles the sidebar
@@ -193,7 +196,7 @@ deleting it.
 
 #### Portfolio tab
 
-This is Gamma's portfolio monitor. It combines broker snapshot fields, local history, and normalized historical returns.
+This is Gamma's portfolio monitor. It has no secondary mode bar; it combines broker snapshot fields, local history, and normalized historical returns in one surface.
 
 Main outputs:
 
@@ -251,7 +254,16 @@ Important caveats:
 
 #### Risk tab
 
-The Portfolio workspace Risk tab runs the same backend engine used by the Research workspace, but against the active portfolio snapshot.
+The cross-listed Risk tab uses the same backend engine in both workspaces. Portfolio mode analyzes the active account snapshot; Research can analyze a selected synthetic book or a Strategy Lab handoff, and the rendered source identity follows the result that was actually computed.
+
+Its registered modes are:
+
+- `Overview`
+- `Exposures`
+- `Drawdowns`
+- `Correlation`
+- `Scenarios`
+- `Optimization`
 
 It provides:
 
@@ -263,6 +275,7 @@ It provides:
 - Jensen alpha when the base currency is USD and the risk-free series is available
 - contribution-to-risk tables and rankings
 - risk coverage diagnostics and excluded assets
+- research-book handoff with idempotent automatic computation when Strategy Lab supplies a valid book
 
 Under the hood:
 
@@ -294,7 +307,7 @@ It provides:
 - max-depth IV surface snapshots as the primary UI workflow
 - a Python-owned session loop for explicit repeated refreshes
 - backend depth presets that trade expiry count and strike width against TWS market-data-line usage; the UI favors the `Max` preset so line budget goes toward strike breadth
-- registered modes for `Overview`, `Chain`, `Surface`, `Realized vs IV`, `Implied Probabilities`, and `Strategies`
+- registered modes for `Overview`, `Chain`, `Surface`, `Realized vs IV`, `Implied Distribution`, and `Strategies`
 - expiry/strike heatmap
 - selected expiry slice
 - ATM term structure
@@ -324,6 +337,20 @@ Important caveats:
 - if IBKR is disconnected, the live surface path is unavailable
 
 ### Research Workspace
+
+#### SITREP tab
+
+SITREP is the pinned Research home and cross-domain triage surface. It has no secondary mode bar; one backend-owned workspace request composes the current operating picture from Equity Research, Macro, Commodities, Prediction Markets, News, provider status, and the Bloomberg Television embed.
+
+It provides:
+
+- cross-domain change triage, equities, FX, yields, commodities, events, prediction markets, and news panels
+- per-section freshness, provenance, age, warnings, and independent degraded states
+- backend-persisted follow-ups with notes and open/resolved state
+- entity-, lens-, timeframe-, and market-preserving handoffs into the owning research tabs
+- a compact grounded Copilot context built from the same aggregate payload
+
+SITREP is intentionally an orientation layer rather than a replacement for specialist tabs. Paid/institutional news breadth and fresher provider coverage can expand later, while the current first-pass product contract is complete.
 
 #### Equity Research tab
 
@@ -377,14 +404,15 @@ Important caveats:
 This tab owns read-only strategy-object work. Its modes are:
 
 - `Composer`
+- `Script`
 - `Backtest / Analyze`
 - `Regime / Stress`
 - `Imports`
 - `Saved Runs`
 
-Current Strategy Lab flows can import CSV return streams, analyze normalized performance, compose return-bearing Gamma objects, inspect drawdown and rolling-risk stress windows, and reload saved normalized runs. It does not execute strategy code, connect to broker execution, or persist raw uploaded CSV rows by default.
+Current Strategy Lab flows can import CSV return streams, analyze normalized performance, compose return-bearing Gamma objects, inspect drawdown and rolling-risk stress windows, and reload saved normalized runs. It does not connect to broker execution or persist raw uploaded CSV rows by default.
 
-An isolated `Script` mode is approved as future Workstream 2A scope but is not implemented yet. Its contract is documented in [`docs/research_script_workspace_plan.md`](./docs/research_script_workspace_plan.md): Copilot Operator may draft transparent Python, the user controls the canonical source after materialization, and only an ephemeral no-network sandbox can run the visible revision over copied read-only data.
+The completed `Script` mode adds transparent, bounded Python research computation without turning Gamma into a local IDE. Copilot Operator may draft and materialize a temporary script, the user controls the canonical source after materialization, and only an ephemeral no-network Code Interpreter or mock runtime can run the visible immutable revision over copied read-only Gamma exports. Gamma retains typed logs, tables, images, files, hashes, provenance, usage, and lifecycle state; shell access, package installation, local files, credentials, Gamma APIs, TWS/IBKR, accounts, wallets, and order authority remain unavailable. The full contract and verification evidence are in [`docs/research_script_workspace_plan.md`](./docs/research_script_workspace_plan.md).
 
 #### Macro tab
 
@@ -518,6 +546,13 @@ Important caveats:
 
 This is Gamma's first roadmap tab completed at a first-pass level. It is multi-venue by design and currently supports Polymarket and Kalshi.
 
+Modes:
+
+- `Screener`
+- `Contract`
+- `Compare`
+- `Calibration`
+
 Main surfaces:
 
 - a screener
@@ -570,6 +605,12 @@ Important caveats:
 
 Crypto is paused at the roadmap's first-pass checkpoint. The current pass is a research-first vertical slice, not a trading terminal.
 
+Modes:
+
+- `Overview`
+- `Deep Dive`
+- `Flows & Liquidity`
+
 Main surfaces:
 
 - token screener with query, narrative, chain, market-cap, volume, and turnover filters
@@ -597,6 +638,15 @@ Important caveats:
 
 Fundamentals is complete for the current roadmap pass. It is a company-analysis workspace built around SEC-native data, Gamma-owned calculations, explicit provenance, and local model state.
 
+Modes:
+
+- `Overview`
+- `Financials`
+- `Peers`
+- `DCF`
+- `Reverse Valuation`
+- `Reference / Filings`
+
 Main surfaces:
 
 - exact-ticker company focus, keyboard/browser-drivable search, and explicit unsupported ETF/fund/non-US states
@@ -622,9 +672,23 @@ Important caveats:
 - market-price-aware fields depend on available market context
 - broader non-US filing/reference providers and consensus-estimate depth are optional future expansion rather than blockers for the current completion boundary
 
+#### Sealanes tab
+
+Sealanes is a paused maritime-intelligence prototype with five registered modes:
+
+- `Live Map`
+- `Chokepoints`
+- `Trade Flows`
+- `Fleet / Vessel`
+- `Event Replay`
+
+The current surface includes normalized vessel, position, port, chokepoint, track, event-window, and fleet-watchlist models; sample/static context; a MapLibre live map; a server-side AISstream websocket proxy that keeps credentials out of the browser; zoom-gated viewport subscriptions; route, port, chokepoint, fleet, and replay overlays; vessel detail; and explicit degradation when live or historical data is unavailable.
+
+The mode registry and navigation are shipped, but analytical depth is uneven. Live Map is the strongest mode. Chokepoint counts, trade-flow proxies, fleet context, and event replay remain limited by partial live AIS coverage and the absence of durable historical AIS, port-call, cargo, and enriched vessel data. Risk, sanctions, dark-activity, and shadow-fleet labels remain deliberately out of scope until their methodology and data quality are validated.
+
 #### Copilot layer
 
-Copilot now exists in two places: a shell shelf for quick active-context research cards, and a dedicated Research workspace tab for synthesis, active-tab focus, operator plans, session history, and memo-oriented workflows. Both surfaces remain read-only and grounded in loaded Gamma state.
+Copilot now exists in two places: a shell shelf for quick active-context research cards, and a dedicated Research workspace tab for synthesis, active-tab focus, operator plans, session history, and memo-oriented workflows. Copilot has no secondary mode bar; its visible authority control selects either the context-bounded `Research Agent` or the app-operating, still research-only `Research Operator`.
 
 Current behavior:
 
@@ -639,11 +703,15 @@ Current behavior:
 - clears the composer once a submission is accepted and keeps the draft when it is rejected before acceptance, with Retry driven by the persisted turn
 - reports non-destructive storage recovery in an in-flow, dismissible status strip that stays rediscoverable from the workspace `Storage` control
 - exposes a feature-flagged operator path for bounded read-only research actions
+- lets Research Operator resolve supported unloaded companies and create visibly temporary Fundamentals, hypothetical Portfolio/Risk, and Options realized-versus-implied working analyses through strict Gamma-owned tools
+- materializes supported temporary analyses into their owning tabs without silently saving durable user state
 
 Important caveats:
 
-- Copilot is read-only and should remain grounded in Gamma state, not external execution
-- provider-level streaming, richer archive/search/title handling, memo editing/export, stricter source-backed/inferred labeling, and voice interaction remain current-roadmap work
+- Research Agent only interprets attached/current context; it cannot load missing entities or run app workflows
+- Research Operator can acquire supported inputs and run authorized app-native research tools, but Gamma's server owns schemas, permissions, budgets, state, approvals, persistence, and terminal truth
+- Checkpoint 8 still needs option-set drafts, Strategy Lab inputs, temporary assumptions, and remaining tab-owned analyses; generalized approval/resume/recovery and the final live/accessibility/first-run release gate follow
+- voice and opt-in long-running external deep research remain later extensions, not current completion blockers
 
 ## Current Roadmap Position
 
@@ -652,13 +720,15 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 1 - Prediction Markets`: complete at a first-pass level
 - `Phase 2 - Macro`: paused around 84% in the archived phase roadmap, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes as the first-pass checkpoint; the current roadmap has since expanded the live tab to include Trade Partners and Country Compare
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
-- `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; the current roadmap has since added a dedicated Copilot workspace alongside the shell shelf, with local sessions, synthesis, memos, and bounded read-only operator actions
+- `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; current Workstream 7 is now approximately 87% toward the clarified end state, with the dedicated workspace, provider streaming, local sessions and artifacts, a closed-loop Operator, and temporary working analyses complete through Checkpoint 8D
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: archived phase checkpoint paused around 83%; current-roadmap Fundamentals V2 is complete for this pass with six modes, filing inspection, peer/DCF/reverse-valuation workflows, cross-tab handoffs, and reliability coverage
 - `Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
+- `Workstream 2A - Research Script Workspace`: complete for this pass with a no-network isolated runtime, immutable source/input binding, retained typed outputs, Copilot drafting/materialization, and verified mock/live/disabled paths
 - `Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
+- `Workstream 9 - Maritime Intelligence`: paused around 45% with all five Sealanes modes registered; Live Map and provider boundaries exist, while historical AIS and richer vessel/port/cargo data block deeper analysis
 
-That means the app already has meaningful portfolio/risk/IV capabilities, a first-pass SITREP entry surface, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus a live Copilot workspace and shell layer. Remaining deepening work is tracked as current-roadmap scope.
+That means the app already has meaningful portfolio/risk/options capabilities, a complete-for-this-pass SITREP entry surface, specialist research surfaces across Equity Research, Strategy Lab, Macro, Prediction Markets, Crypto, Fundamentals, Commodities, and the paused Sealanes prototype, plus a live Copilot workspace and shell layer. Remaining deepening work is tracked as current-roadmap scope.
 
 ## Current Roadmap Direction
 
@@ -668,19 +738,19 @@ The main roadmap buckets are:
 
 - cross-cutting platform work: provider adapters, read-only market-data boundaries, mode-level keybindings, shared cache/provenance behavior, and stronger cross-tab handoffs
 - existing-tab hardening passes: Equity Research, Strategy Lab, Macro, IV, Crypto, Fundamentals, and Copilot hardening / extension work
-- new research surfaces: a deep Commodities workspace and a Maritime Intelligence workspace if the data-provider path is viable
+- research-surface deepening: strengthen the existing Commodities and Sealanes workspaces instead of adding another broad domain
 - beta readiness: installer, tutorial, first-run setup, mock/demo flows, diagnostics, and friend/family testing polish
 
 The likely feature direction is:
 
-- `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, comparison workflows, and the approved isolated Research Script Workspace
+- `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, comparison workflows, and saved/reusable runs while preserving the completed Script isolation boundary
 - `Macro`: finish EU/global depth, official-event breadth, policy-path interpretation, and coherence / lead-lag refinement
-- `IV`: harden the shipped volatility lab around selectable surface models, skew / term views, Gamma-owned Greeks, realized-vs-implied overlays, implied-probability slices, strategy payoff flow, source transparency, history, and cross-tab handoffs
+- `IV`: harden the shipped volatility lab around selectable surface models, skew / term views, Gamma-owned Greeks, realized-vs-implied overlays, Implied Distribution slices, strategy payoff flow, source transparency, history, and cross-tab handoffs
 - `Crypto`: add real wallet analytics, stronger pool / transaction monitoring, richer peer and basket comparisons, and later derivatives overlays
-- `Fundamentals`: add reverse valuation, implied expectations, richer raw-vs-normalized inspection, better peer/reference depth, and eventually broader non-US coverage
-- `Copilot`: keep the shell shelf for quick context, but add a dedicated workspace for persistent sessions, saved memos, streaming, workflow handoffs, synthesis, and later voice interaction
-- `Commodities`: treat as a full research tab if it includes futures curves, calendar spreads, inter-commodity spreads, inventories, seasonal overlays, and macro / geopolitical links
-- `Maritime Intelligence`: treat AIS and shipping data as a trade-flow intelligence surface, with live map, chokepoints, route shifts, event replay, commodity-flow links, and possible later shadow-fleet analytics
+- `Fundamentals`: preserve the complete current pass and treat broader non-US filing/reference coverage and consensus-estimate depth as optional expansion
+- `Copilot`: finish the remaining temporary analysis families, generalized approval/resume/recovery, and the live/accessibility/first-run release gate; keep voice as a later extension
+- `Commodities`: deepen the shipped full research tab with historical futures curves, continuous/roll-adjusted mapping, provider-backed spread history, real metals warehouse data, seasonal inventory models, and cross-domain handoffs
+- `Maritime Intelligence`: deepen the shipped Sealanes prototype only after historical AIS, port-call/cargo context, durable caching, and provider-quality evidence are available
 
 The important boundary does not change: Gamma can study strategies, market data, vessels, commodities, wallets, options, and companies, and may run isolated research scripts over copied data, but it remains a read-only research environment with no trading, broker/account/wallet mutation, host-code, credential, or unrestricted execution authority.
 

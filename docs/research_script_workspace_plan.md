@@ -3,7 +3,7 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-08-29
-- Last reviewed: 2026-08-31
+- Last reviewed: 2026-09-04
 - Implementation status: Slices 1-5 implemented and verified; Workstream 2A completion gate satisfied
 - Roadmap owner: Workstream 2A in [`../roadmap.md`](../roadmap.md)
 - Primary product surface: `Strategy Lab / Script`
@@ -65,9 +65,9 @@ The existing Strategy Lab modes remain data-first and must continue to work with
 
 `Script` is additive. It does not replace imported return streams or Gamma-owned analytics.
 
-## Current Repository Starting Point
+## Historical Repository Starting Point
 
-No Script workspace application code existed when this plan was approved. The reusable foundations are:
+The following records the repository state when this plan was approved, before Slices 1-5 shipped. The current implementation and verification state is recorded in the delivery sections below.
 
 ### Strategy Lab UI and state
 
@@ -767,7 +767,7 @@ Resulting decisions:
 | Decision | Current stance | Resolution gate |
 |---|---|---|
 | Editor | CodeMirror 6 with the Python language extension | Implemented as a narrow accessible single-file editor; Monaco and IDE surfaces remain excluded. |
-| Runtime | OpenAI Code Interpreter adapter with mock default/fallback | Exact-source/hash and retained-output gates passed; unsupported configurations remain unavailable without changing the configured model. |
+| Runtime | Provider-neutral contract with a verified OpenAI Code Interpreter path and mock fallback | Exact-source/hash, network-disabled execution, and retained-output gates passed; unsupported configurations remain unavailable without silently changing the configured model. |
 | Shell | Excluded from v1 | Separate security review and explicit roadmap update required. |
 | Network | Disabled | Separate threat model, allowlist design, provider/data-governance review, and user need required. |
 | Persistence | Dedicated Script store | Do not overload Copilot artifact JSON or generic saved research. |
@@ -783,7 +783,7 @@ When continuing this work:
 
 1. Read the current roadmap, this entire document, the Copilot plan, provenance expectations, and Strategy Lab UI/state code before editing.
 2. Re-check official OpenAI guidance before changing the real runtime, container lifecycle, tool schemas, model routing, approvals, or storage policy; record the date, URLs, and decision here and in the Copilot plan.
-3. Start with Slice 1 and Slice 2 against the mock runtime. Do not jump directly to live code execution.
+3. Treat Slices 1-5 as completed baseline. Extend the provider-neutral contracts and deterministic mock coverage before broadening any live-runtime behavior.
 4. Keep source revisions immutable and runs hash-bound from the first slice.
 5. Keep routes thin and provider-neutral; no OpenAI SDK types in public/domain contracts.
 6. Preserve existing Strategy Lab modes and unrelated worktree changes.

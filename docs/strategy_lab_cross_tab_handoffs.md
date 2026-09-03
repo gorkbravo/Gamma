@@ -423,7 +423,7 @@ Validated on 2026-06-02:
 - Prediction Markets handoffs support `long_yes_probability_return` and `long_no_probability_return`; the detail view exposes a compact YES/NO side selector before `+ Strategy` or `Add & Open`.
 - Probability histories are resolved in the backend and enter the composer as `level`/probability histories; Strategy Lab converts them to returns for read-only composition.
 - For instrument-like rows, right-click `Add to Strategy` queues without navigating; right-click `Add and Open` queues, opens Strategy Lab composer mode, and resolves pending handoffs.
-- Existing visible `+ Strategy` / `Add & Open` buttons are fallback controls until the shared right-click menu is wired and verified across the supported row sources.
+- Existing visible `+ Strategy` / `Add & Open` buttons remain accessible alternatives for supported non-tabular/detail contexts alongside the implemented shared row context menu.
 - The shared row context menu uses the exact row object available in the source table/list: Prediction Markets screener market rows, Equity Research scope preview/constituent rows, and Commodities overview/deep market rows. The backend resolver remains responsible for history loading, transformations, provenance, and unsupported downgrades.
 - Pending handoffs persist in local storage across reloads until accepted, dismissed, or cleared.
 - Accepted handoff warnings remain visible near the editable composer row; computed-run warnings and provenance remain visible in the Strategy Lab rail.
