@@ -28,6 +28,7 @@ frontend/src-tauri/resources/backend/
 frontend/src-tauri/target/
 frontend/src-tauri/target-check/
 frontend/.playwright-cli/
+frontend/test-results/
 /.playwright-cli/
 output/playwright/
 .superpowers/

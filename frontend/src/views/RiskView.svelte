@@ -14,13 +14,18 @@
     type ReturnFrequency,
     type RiskMode,
     type RiskKpi,
-    type RiskSourceScope,
     type RiskContributionRow,
     type RiskCorrelationMatrixView,
     type RiskTableRow,
     type ScenarioImpactRow,
     type ScenarioResult,
   } from "../lib/risk-workspace";
+  import {
+    adoptRiskSourceFromResult,
+    resolveRiskSourceView,
+    riskSourceScopeFor,
+    type RiskSourceId,
+  } from "../lib/risk-source";
   import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
@@ -35,7 +40,6 @@
   export let onCompute: (options: RiskComputeOptions) => Promise<void> | void;
 
   type ComputeMethod = "core" | "monteCarlo";
-  type RiskSourceId = "portfolio" | "research" | "strategy_lab_book";
   type FrontierPlotPoint = {
     label: string;
     kind: string;
@@ -88,10 +92,12 @@
   let returnFrequency: ReturnFrequency = "daily";
   let selectedSource: RiskSourceId = "portfolio";
   let activeComputeMethod: ComputeMethod | null = null;
+  let adoptedResult: RiskResult | null = null;
 
-  let activeSnapshot: PortfolioSnapshot | null = snapshot;
-  let activeRiskSourceScope: RiskSourceScope = "portfolio";
-  let activeRiskSourceLabel = "Live account portfolio";
+  let computeSnapshot: PortfolioSnapshot | null = snapshot;
+  let renderSnapshot: PortfolioSnapshot | null = snapshot;
+  let selectedSourceLabel = "Live account portfolio";
+  let renderedSourceLabel = "Live account portfolio";
   let workspace = buildRiskWorkspaceModel(null, null, {
     sourceScope: "portfolio",
     benchmarkSymbol,
@@ -169,6 +175,23 @@
   const toneClass = (tone: string | undefined | null) => tone ?? "";
   const cellValue = (value: string | number | null) => value == null ? "N/A" : String(value);
 
+  function riskSnapshotFor(
+    id: RiskSourceId,
+    accountSnapshot: PortfolioSnapshot | null,
+    researchScopeSnapshot: PortfolioSnapshot | null,
+    book: StrategyLabResearchBook | null
+  ): PortfolioSnapshot | null {
+    if (id === "strategy_lab_book") return book?.snapshot ?? null;
+    if (id === "research") return researchScopeSnapshot;
+    return accountSnapshot;
+  }
+
+  function riskSourceLabelFor(id: RiskSourceId, book: StrategyLabResearchBook | null) {
+    if (id === "strategy_lab_book") return book?.sourceLabel ?? "Strategy Lab research book";
+    if (id === "research") return "Research scope snapshot";
+    return "Live account portfolio";
+  }
+
   $: availableRiskSources = [
     ...(snapshot ? [{ id: "portfolio" as const, label: "Live Account Portfolio" }] : []),
     ...(researchSnapshot ? [{ id: "research" as const, label: "Research Scope Snapshot" }] : []),
@@ -183,23 +206,22 @@
           ? "portfolio"
           : availableRiskSources[0]?.id ?? "portfolio";
   }
-  $: activeSnapshot =
-    selectedSource === "strategy_lab_book"
-      ? strategyLabResearchBook?.snapshot ?? null
-      : selectedSource === "research"
-        ? researchSnapshot
-        : snapshot;
-  $: activeRiskSourceScope =
-    selectedSource === "strategy_lab_book" ? "research_book" : selectedSource === "research" ? "research" : "portfolio";
-  $: activeRiskSourceLabel =
-    selectedSource === "strategy_lab_book"
-      ? strategyLabResearchBook?.sourceLabel ?? "Strategy Lab research book"
-      : selectedSource === "research"
-        ? "Research scope snapshot"
-        : "Live account portfolio";
-  $: workspace = buildRiskWorkspaceModel(activeSnapshot, result, {
-    sourceScope: activeRiskSourceScope,
-    sourceLabel: activeRiskSourceLabel,
+  // A handoff computes from one source and switches tab without touching this
+  // control, so adopt the source the arriving result was computed from. Without
+  // this the selector keeps its own opinion and the screen mixes two books.
+  $: if (result !== adoptedResult) {
+    adoptedResult = result;
+    const adopted = adoptRiskSourceFromResult({ selected: selectedSource, available: availableRiskSources, result });
+    if (adopted) selectedSource = adopted;
+  }
+  $: sourceView = resolveRiskSourceView({ selected: selectedSource, result });
+  $: computeSnapshot = riskSnapshotFor(selectedSource, snapshot, researchSnapshot, strategyLabResearchBook);
+  $: renderSnapshot = riskSnapshotFor(sourceView.rendered, snapshot, researchSnapshot, strategyLabResearchBook);
+  $: selectedSourceLabel = riskSourceLabelFor(selectedSource, strategyLabResearchBook);
+  $: renderedSourceLabel = riskSourceLabelFor(sourceView.rendered, strategyLabResearchBook);
+  $: workspace = buildRiskWorkspaceModel(renderSnapshot, result, {
+    sourceScope: sourceView.renderScope,
+    sourceLabel: renderedSourceLabel,
     benchmarkSymbol: benchmarkSymbol.trim().toUpperCase() || "SPY",
     returnFrequency,
   });
@@ -228,22 +250,18 @@
     return { normal, stress, delta: stress - normal };
   })();
 
-  async function submit(method: ComputeMethod) {
+  async function submit(method: ComputeMethod, sourceId: RiskSourceId = selectedSource) {
+    const book = sourceId === "strategy_lab_book" ? strategyLabResearchBook : null;
     activeComputeMethod = method;
     try {
       await onCompute({
-        snapshot: activeSnapshot,
-        sourceScope: activeRiskSourceScope,
-        researchBookReturnPoints:
-          selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.return_points ?? [] : [],
-        researchBookRiskLegs:
-          selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.risk_legs ?? [] : [],
-        riskSourceLabel: activeRiskSourceLabel,
-        riskSourceObjectId: selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.object_id ?? null : null,
-        riskSourceOrigin:
-          selectedSource === "strategy_lab_book"
-            ? String(strategyLabResearchBook?.object.provenance.origin ?? "strategy_lab")
-            : null,
+        snapshot: riskSnapshotFor(sourceId, snapshot, researchSnapshot, strategyLabResearchBook),
+        sourceScope: riskSourceScopeFor(sourceId),
+        researchBookReturnPoints: book?.object.return_points ?? [],
+        researchBookRiskLegs: book?.object.risk_legs ?? [],
+        riskSourceLabel: riskSourceLabelFor(sourceId, strategyLabResearchBook),
+        riskSourceObjectId: book?.object.object_id ?? null,
+        riskSourceOrigin: book ? String(book.object.provenance.origin ?? "strategy_lab") : null,
         alpha: confidence,
         lookbackDays,
         horizonDays,
@@ -257,6 +275,13 @@
     } finally {
       activeComputeMethod = null;
     }
+  }
+
+  // Selecting the book alone would leave the account-computed result on screen,
+  // so the shortcut selects and recomputes as one action.
+  function loadStrategyBook() {
+    selectedSource = "strategy_lab_book";
+    return submit("core", "strategy_lab_book");
   }
 
   function cumulativeSeries(points: TimeSeriesPoint[], id: string, label: string, color: string, lineStyle?: "solid" | "dashed"): ChartSeries | null {
@@ -753,18 +778,23 @@
       <label class="control"><span>Sims</span><select bind:value={mcNumSimulations}><option value={1000}>1k</option><option value={2000}>2k</option><option value={5000}>5k</option></select></label>
       <div class="actions">
         {#if strategyLabResearchBook && selectedSource !== "strategy_lab_book"}
-          <button class="action-btn" on:click={() => (selectedSource = "strategy_lab_book")}>
+          <button class="action-btn" on:click={loadStrategyBook} disabled={loading}>
             Load Strategy Book
           </button>
         {/if}
-        <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
+        <button class="action-btn" on:click={() => submit("core")} disabled={loading || !computeSnapshot}>
           {loading && activeComputeMethod === "core" ? "Computing" : "Compute Core"}
         </button>
-        <button class="action-btn primary" on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
+        <button class="action-btn primary" on:click={() => submit("monteCarlo")} disabled={loading || !computeSnapshot}>
           {loading && activeComputeMethod === "monteCarlo" ? "Running" : "Run MC"}
         </button>
       </div>
     </div>
+    {#if sourceView.pendingRecompute}
+      <p class="source-pending">
+        Showing {renderedSourceLabel}. Compute to analyze {selectedSourceLabel}.
+      </p>
+    {/if}
     {#if result?.metrics}
       <p class="analysis-window">{describeAnalysisWindow(result)}</p>
     {/if}
@@ -1375,6 +1405,14 @@
   .analysis-window {
     margin: var(--space-2) 0 0;
     color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.02em;
+  }
+
+  .source-pending {
+    margin: var(--space-2) 0 0;
+    color: var(--warning);
     font-family: var(--app-font);
     font-size: var(--text-2xs);
     letter-spacing: 0.02em;
