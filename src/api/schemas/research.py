@@ -559,6 +559,7 @@ class ResearchReturnMetricsModel(BaseModel):
     benchmark_correlation: float | None = None
     upside_capture: float | None = None
     downside_capture: float | None = None
+    rolling_window: int | None = None
 
     @classmethod
     def from_domain(cls, row) -> "ResearchReturnMetricsModel":

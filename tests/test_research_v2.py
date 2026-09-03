@@ -96,6 +96,34 @@ def test_strategy_lab_analyzes_imported_return_stream_with_benchmark(tmp_path):
     assert any("data inputs only" in warning for warning in result.warnings)
 
 
+def test_strategy_lab_reports_the_rolling_window_its_rolling_metrics_measure(tmp_path):
+    service = _service(tmp_path)
+    rows = [
+        {
+            "date": (datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=index)).date().isoformat(),
+            "strategy": 0.004 if index % 3 else -0.002,
+            "benchmark": 0.002 if index % 4 else -0.001,
+        }
+        for index in range(400)
+    ]
+
+    result = service.analyze_strategy_lab(
+        ImportedReturnStreamRequest(
+            rows=rows,
+            date_column="date",
+            value_column="strategy",
+            benchmark_column="benchmark",
+            name="Rolling Window Fixture",
+        )
+    )
+
+    # A rolling return, volatility, beta or correlation is unreadable without the
+    # horizon it covers (GUA-20260903-11).
+    assert result.metrics.rolling_window == 63
+    assert result.metrics.frequency == "daily"
+    assert result.rolling_points
+
+
 def test_strategy_lab_converts_level_stream_to_returns(tmp_path):
     service = _service(tmp_path)
     rows = [

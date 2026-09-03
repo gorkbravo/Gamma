@@ -124,8 +124,25 @@
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+  // Observation dates always carry the year: a multi-year sample rendered as
+  // "Jun 24" does not say which June (GUA-20260903-11).
+  const observationDate = (value: string | null | undefined) =>
+    value ? new Date(value).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "N/A";
   const signClass = (value: number | null | undefined) =>
     value == null || !Number.isFinite(value) || value === 0 ? "" : value > 0 ? "positive" : "negative";
+
+  function rollingWindowLabel(result: StrategyLabResult | StrategyLabCompositionResult | null) {
+    const window = result?.metrics?.rolling_window;
+    const frequency = result?.metrics?.frequency;
+    if (!window) {
+      return frequency ? `${frequency} observations` : "window unreported";
+    }
+    return `${window}-observation window over ${frequency ?? "unknown"} returns`;
+  }
+
+  function rollingMetricTitle(metric: string, result: StrategyLabResult | StrategyLabCompositionResult | null) {
+    return `${metric} over a ${rollingWindowLabel(result)}`;
+  }
 
   function selectResearchMode(nextMode: StrategyLabMode) {
     mode = nextMode;
@@ -1059,7 +1076,7 @@
         {#if mode === "regime_stress"}
           {#if rollingRiskSeries.length}
             <article class="panel">
-              <div class="table-panel-header">Rolling Beta &amp; Correlation</div>
+              <div class="table-panel-header">Rolling Beta &amp; Correlation &middot; {rollingWindowLabel(activeStrategyResult)}</div>
               <TimeSeriesChart series={rollingRiskSeries} height={200} showLegend emptyMessage="Analyze a benchmarked stream to populate rolling regime risk." />
             </article>
           {/if}
@@ -1072,7 +1089,7 @@
                   <tbody>
                     {#if stressDrawdownRows.length}
                       {#each stressDrawdownRows as point}
-                        <tr><td class:absent={shortDate(point.timestamp) === "N/A"}>{shortDate(point.timestamp)}</td><td class="num-cell {signClass(point.value)}" class:absent={pct(point.value) === "N/A"}>{pct(point.value)}</td></tr>
+                        <tr><td class:absent={observationDate(point.timestamp) === "N/A"}>{observationDate(point.timestamp)}</td><td class="num-cell {signClass(point.value)}" class:absent={pct(point.value) === "N/A"}>{pct(point.value)}</td></tr>
                       {/each}
                     {:else}
                       <tr><td colspan="2">No drawdown series yet.</td></tr>
@@ -1083,15 +1100,24 @@
             </article>
 
             <article class="panel table-panel">
-              <div class="panel-header tight-head"><h3>Recent Regime Read</h3><small>{rollingStressRows.length} windows</small></div>
+              <div class="panel-header tight-head">
+                <h3>Recent Regime Read</h3>
+                <small>{rollingStressRows.length} windows &middot; {rollingWindowLabel(activeStrategyResult)}</small>
+              </div>
               <div class="table-wrap compact-table">
                 <table>
-                  <thead><tr><th>Date</th><th class="num-cell">Roll Ret</th><th class="num-cell">Vol</th><th class="num-cell">Beta</th><th class="num-cell">Corr</th></tr></thead>
+                  <thead><tr>
+                    <th>Date</th>
+                    <th class="num-cell" title={rollingMetricTitle("Compounded return", activeStrategyResult)}>Roll Ret</th>
+                    <th class="num-cell" title={rollingMetricTitle("Annualized volatility", activeStrategyResult)}>Vol</th>
+                    <th class="num-cell" title={rollingMetricTitle("Beta versus benchmark", activeStrategyResult)}>Beta</th>
+                    <th class="num-cell" title={rollingMetricTitle("Correlation to benchmark", activeStrategyResult)}>Corr</th>
+                  </tr></thead>
                   <tbody>
                     {#if rollingStressRows.length}
                       {#each rollingStressRows as row}
                         <tr>
-                          <td class:absent={shortDate(row.timestamp) === "N/A"}>{shortDate(row.timestamp)}</td>
+                          <td class:absent={observationDate(row.timestamp) === "N/A"}>{observationDate(row.timestamp)}</td>
                           <td class="num-cell {signClass(row.rolling_return)}" class:absent={pct(row.rolling_return) === "N/A"}>{pct(row.rolling_return)}</td>
                           <td class="num-cell" class:absent={pct(row.rolling_volatility) === "N/A"}>{pct(row.rolling_volatility)}</td>
                           <td class="num-cell" class:absent={fmt(row.rolling_beta, 2) === "N/A"}>{fmt(row.rolling_beta, 2)}</td>

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import pandas as pd
@@ -39,6 +39,9 @@ class ReturnStreamMetrics:
     benchmark_correlation: float | None = None
     upside_capture: float | None = None
     downside_capture: float | None = None
+    # Observations per rolling window, so a rolling return, volatility, beta or
+    # correlation can state the horizon it measures (GUA-20260903-11).
+    rolling_window: int | None = None
 
 
 @dataclass(frozen=True)
@@ -258,6 +261,12 @@ def compute_return_stream_metrics(
     )
 
 
+def rolling_window_size(annual_factor: float, window: int | None = None) -> int:
+    """Observations per rolling window: about a quarter of a year, bounded."""
+
+    return int(window or min(max(round(float(annual_factor) / 4), 5), 63))
+
+
 def rolling_return_points(
     returns: pd.Series,
     *,
@@ -270,7 +279,7 @@ def rolling_return_points(
         return []
     frequency = infer_return_frequency(clean.index)
     annual_factor = float(periods_per_year or frequency.periods_per_year)
-    rolling_window = int(window or min(max(round(annual_factor / 4), 5), 63))
+    rolling_window = rolling_window_size(annual_factor, window)
     if len(clean) < rolling_window:
         return []
 
@@ -333,11 +342,14 @@ def analyze_return_stream(
         aligned = clean.to_frame("strategy").join(benchmark.to_frame("benchmark"), how="inner").dropna()
         clean = aligned["strategy"]
         benchmark = aligned["benchmark"]
-    metrics = compute_return_stream_metrics(
-        clean,
-        benchmark_returns=benchmark if not benchmark.empty else None,
-        periods_per_year=frequency.periods_per_year,
-        frequency_label=frequency.label,
+    metrics = replace(
+        compute_return_stream_metrics(
+            clean,
+            benchmark_returns=benchmark if not benchmark.empty else None,
+            periods_per_year=frequency.periods_per_year,
+            frequency_label=frequency.label,
+        ),
+        rolling_window=rolling_window_size(frequency.periods_per_year),
     )
     return ReturnStreamAnalysis(
         returns=clean,

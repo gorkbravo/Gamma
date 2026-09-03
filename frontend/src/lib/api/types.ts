@@ -821,6 +821,8 @@ export interface ResearchReturnMetrics {
   benchmark_correlation: number | null;
   upside_capture: number | null;
   downside_capture: number | null;
+  /** Observations per rolling window, so rolling columns can name their horizon. */
+  rolling_window?: number | null;
 }
 
 export interface ResearchRollingPoint {
