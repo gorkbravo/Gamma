@@ -1536,11 +1536,18 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         output_items = response.get("output", [])
         # Reasoning items returned alongside function calls must be supplied on
         # the next Responses request, including when provider storage is off.
-        return [
-            dict(item)
-            for item in output_items
-            if isinstance(item, dict)
-        ]
+        # The SDK response shape also includes the output-only top-level
+        # ``status`` field. Responses rejects that field when the same item is
+        # submitted as input, so normalize only that transport distinction and
+        # retain every other field (notably encrypted reasoning content).
+        continuation_items: list[dict[str, Any]] = []
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            continuation_item = dict(item)
+            continuation_item.pop("status", None)
+            continuation_items.append(continuation_item)
+        return continuation_items
 
     @staticmethod
     def _extract_refusal(response: dict[str, Any]) -> str | None:

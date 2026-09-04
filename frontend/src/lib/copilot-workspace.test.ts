@@ -140,6 +140,33 @@ describe("Copilot working-analysis materialization", () => {
     });
   });
 
+  it("resolves a non-durable Options strategy draft target", () => {
+    expect(
+      resolveWorkingAnalysisTarget(
+        workingAnalysis({
+          tool_id: "draft_options_strategy",
+          domain: "iv",
+          analysis_type: "options_strategy_draft",
+          entity: { entity_type: "option_set", symbol: "aapl" },
+          owning_tab: "iv",
+          owning_mode: "strategies",
+          materialization: {
+            contract_version: "copilot.materialization.v1",
+            payload_contract: "copilot.options-strategy-working-analysis.v1",
+            target_tab: "iv",
+            target_mode: "strategies",
+            durable: false
+          }
+        })
+      )
+    ).toEqual({
+      analysisId: "work-lmt",
+      symbol: "AAPL",
+      tab: "iv",
+      mode: "strategies"
+    });
+  });
+
   it("resolves a non-durable Strategy Lab Script target with immutable identities", () => {
     expect(
       resolveWorkingAnalysisTarget(
@@ -172,6 +199,31 @@ describe("Copilot working-analysis materialization", () => {
       revisionId: "revision-2",
       inputSnapshotId: "snapshot-3",
       selectedRunId: "run-4"
+    });
+  });
+
+  it("resolves a non-durable Strategy Lab Composer target", () => {
+    expect(
+      resolveWorkingAnalysisTarget(
+        workingAnalysis({
+          tool_id: "run_strategy_lab_portfolio_backtest",
+          domain: "strategy_lab",
+          analysis_type: "strategy_lab_portfolio_backtest",
+          entity: { entity_type: "strategy_lab_portfolio", normalized_id: "book-1" },
+          owning_tab: "strategy_lab",
+          owning_mode: "composer",
+          materialization: {
+            payload_contract: "copilot.strategy-lab-working-analysis.v1",
+            target_tab: "strategy_lab",
+            target_mode: "composer",
+            durable: false
+          }
+        })
+      )
+    ).toEqual({
+      analysisId: "work-lmt",
+      tab: "strategy_lab",
+      mode: "composer"
     });
   });
 });

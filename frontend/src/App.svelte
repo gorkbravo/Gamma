@@ -327,6 +327,7 @@
   let fundamentalsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let riskWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let optionsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
+  let strategyLabWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
   // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
@@ -1839,6 +1840,10 @@
         String(analysis.entity.label ?? target.symbol),
         "copilot"
       );
+    } else if (target.tab === "strategy_lab" && target.mode === "composer") {
+      strategyLabWorkingAnalysis = materialized;
+      strategyLabMode = "composer";
+      workspaceMode = "research";
     } else {
       await openMaterializedResearchScript({
         scriptId: target.scriptId,
@@ -1864,6 +1869,9 @@
     }
     if (discarded && optionsWorkingAnalysis?.analysis_id === discarded.analysis_id) {
       optionsWorkingAnalysis = null;
+    }
+    if (discarded && strategyLabWorkingAnalysis?.analysis_id === discarded.analysis_id) {
+      strategyLabWorkingAnalysis = null;
     }
   }
 
@@ -2959,6 +2967,7 @@
             result={$researchResult}
             strategyResult={$strategyLabResult}
             strategyComposition={$strategyLabComposition}
+            workingAnalysis={strategyLabWorkingAnalysis}
             savedItems={$savedResearchItems}
             strategyLoading={$loading.strategyLab}
             savedLoading={$loading.savedResearch}

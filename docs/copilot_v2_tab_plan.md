@@ -193,6 +193,28 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-04 — Checkpoint 8F Strategy Lab Inputs
+
+- [Compare the Responses API and Agents SDK](https://developers.openai.com/api/docs/guides/agents#compare-the-responses-api-and-agents-sdk): Responses remains the direct primitive for application-owned custom workflows and loops; the Agents SDK is the higher-level option when the application benefits from managed orchestration, handoffs, streaming, and traces.
+
+Resulting decision:
+
+- Keep Gamma's custom Responses loop as the default and the Agents SDK as the feature-flagged comparison. Exact Strategy Lab inputs and temporary assumptions are Gamma-owned analysis and materialization state, so this slice does not justify an orchestration or model migration.
+- Add one strict automatic read-only `run_strategy_lab_portfolio_backtest` action. The model may provide explicit signed listed-market legs, benchmark, lookback, and minimum overlap; Gamma validates them, resolves only exact identifiers, and runs the existing Strategy Lab composition service.
+- Persist exact inputs, metrics, alignment diagnostics, leg contributions, provenance, warnings, and explicit zero-cost/no-slippage/no-rebalancing assumptions in `copilot.working-analysis.v1`. Provider response state is not authoritative.
+- Materialize non-durably into Strategy Lab / Composer as `copilot.strategy-lab-working-analysis.v1`. The visible module and editable composer stay session-ephemeral and expose no save, rebalance, order, or trading authority.
+
+### Official Guidance Re-Reviewed 2026-09-04 — Checkpoint 8E Option-Set Drafts
+
+- [Compare the Responses API and Agents SDK](https://developers.openai.com/api/docs/guides/agents#compare-the-responses-api-and-agents-sdk): the Responses API remains appropriate when the application owns custom loops and branching; the Agents SDK adds a managed run lifecycle, resumable state, approvals, and built-in traces.
+
+Resulting decision:
+
+- Keep Gamma's custom Responses loop as the default and the Agents SDK as the feature-flagged comparison. Option-set drafting is an application-owned typed state/materialization problem and does not justify an orchestration migration.
+- Add one strict `draft_options_strategy` action under the existing sequential registry. The model may supply exact underlying, expiry, strike, side, ratio, and collection settings; Gamma validates them, resolves only exact normalized provider contracts, and refuses nearby-contract substitution.
+- Persist provider-priced legs, requested inputs, collection/quality metadata, pricing assumptions, warnings, and provenance in `copilot.working-analysis.v1`. Provider response state is not the authoritative option-set record.
+- Materialize only into Options / Strategies as `copilot.options-strategy-working-analysis.v1`. The visible draft is session-ephemeral and unsaved, and it exposes no save, order, staging, or trading authority.
+
 ### Official Guidance Re-Reviewed 2026-09-04 — Documentation Alignment
 
 - [Responses create reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create): application-defined custom tools retain typed input/output contracts, while tool choice and provider streaming remain separate from application execution and durable state ownership.
@@ -206,9 +228,22 @@ Resulting decision:
 - The shipped Research Script Workspace remains consistent with current container controls: containers are ephemeral, outbound network stays disabled, inputs and exact source revisions are copied in, and Gamma immediately retains typed outputs and provenance outside provider state.
 - Continue using Gamma's evals, reliability, latency, cost, and permission invariants for any future framework or model migration; recency alone is not a migration reason.
 
+### Official Guidance Re-Reviewed 2026-09-04 — Stateless Tool Continuation
+
+- [Function calling — handling function calls](https://developers.openai.com/api/docs/guides/function-calling#handling-function-calls): preserve the prior response output items in order, append `function_call_output` items keyed by `call_id`, and send the combined input back to Responses. The request examples represent `function_call` input with `type`, `id`, `call_id`, `name`, and `arguments`, without the response-only completion status.
+- [Responses create reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create): the response form of a function call can include a top-level `status`; the create-input schema is the authority when serializing a stateless continuation.
+
+Resulting decision:
+
+- The 2026-09-04 live diagnostic captured the previously missing provider parameter: `input[1].status`. Gamma had converted SDK response objects into plain dictionaries and replayed the output-only top-level `status`, which the create endpoint rejected.
+- Keep the stateless sequence and every output item, including encrypted reasoning content, but remove only the top-level response `status` while normalizing output items into create-input dictionaries. Keep `function_call_output` construction and Gamma-owned tool execution unchanged.
+- This is a transport-schema correction, not a reason to enable provider storage, switch orchestration frameworks, change models, or alter Gamma's server authority.
+
 ### Official Guidance Re-Reviewed 2026-09-03 — Tool-Continuation Failure Diagnosis
 
 Context: the 2026-09-03 fix-verification audit saw both bounded Copilot attempts succeed on the initial Responses call, complete `run_options_realized_implied_comparison`, then fail with a 4xx on the continuation. Gamma runs with `GAMMA_COPILOT_STORE_RESPONSES=false`, so the working hypothesis was that replayed reasoning items were unresolvable without stored state.
+
+_Historical diagnosis: the 2026-09-04 stateless-tool-continuation review above supersedes its replay-verbatim conclusion after the provider exposed the exact rejected parameter._
 
 - [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning): under `store: false` the Responses API returns `encrypted_content` on reasoning items **by default**, and the caller must preserve and replay every output item. The `include: ["reasoning.encrypted_content"]` request parameter is legacy back-compat and is no longer required.
 - [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state): `previous_response_id` is only valid against stored responses; a stateless exchange must replay the full item sequence in order.
@@ -353,13 +388,13 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is **approximately 87% complete** through Checkpoint 8D. This is a scope correction plus verified capability advances, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, Checkpoint 7 adds the bounded closed-loop Operator core, and Checkpoints 8A-8D prove unloaded-company Fundamentals, user-specified hypothetical portfolio/Risk, and explicit Options realized-versus-implied working-analysis/materialization contracts without yet generalizing them to every analytical family.
+The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is **approximately 90% complete** through Checkpoint 8F. This is a scope correction plus verified capability advances, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, Checkpoint 7 adds the bounded closed-loop Operator core, and Checkpoints 8A-8F prove unloaded-company Fundamentals, user-specified hypothetical portfolio/Risk, two explicit Options contracts, and exact Strategy Lab portfolio inputs/assumptions without yet generalizing working state to every analytical family.
 
 The material remaining gaps are product behavior, not only release hardening:
 
 - public-company names now have a model-assisted, SEC-validated ticker preflight, but entity and intent acquisition remain shallow for other asset classes and multi-entity workflows;
 - entity acquisition remains inconsistent across non-Fundamentals tools; several workflows still depend on already-active tab context or precomputed results;
-- the versioned session-scoped working-analysis contract now covers unloaded Fundamentals reverse valuation, user-specified hypothetical portfolio/Risk workflows, and explicit Options realized-versus-implied comparisons, but option-set drafts, Strategy Lab inputs, temporary assumptions, and remaining cross-tool outputs are not yet covered;
+- the versioned session-scoped working-analysis contract now covers unloaded Fundamentals reverse valuation, user-specified hypothetical portfolio/Risk workflows, explicit Options realized-versus-implied comparisons, exact provider-priced option-set drafts, and exact Strategy Lab portfolio inputs/temporary assumptions, but remaining representative tab-owned and cross-tool outputs are not yet covered;
 - Fundamentals reverse-valuation, Risk scenario, and Options realized-versus-implied results can now materialize temporarily in their owning tabs, but other tool results do not yet consistently materialize in the corresponding Gamma tab or working object;
 - the durable approval model is narrow and DCF-specific rather than a general pause/approve-or-reject/resume-the-same-run contract;
 - replayable events preserve history, but do not yet provide generalized workflow recovery, replanning, retries, or approval resumption;
@@ -604,7 +639,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - Verification: 31 focused Operator tests, 8 focused Checkpoint 7 contract tests, 2 Agents SDK smoke tests, the full 542-test backend suite, 368 frontend tests across 50 files, TypeScript typecheck, and the production frontend build passed. The installed `openai 2.38.0` / `agents 0.17.4` contract was exercised without dependency changes.
 - Authorized live smoke reached the real Responses transport on 2026-07-30 with provider storage disabled. The provider returned a streamed quota exhaustion before any tool call; Gamma persisted a safe `quota_exhausted`/`provider_error` `copilot.operator.loop.v1` terminal with zero tools and no fallback card. This validates the live error boundary, not a successful live model-tool-model result.
 
-#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8D complete)
+#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8F complete)
 
 - [x] Prove unloaded entity acquisition with `LMT` reverse valuation: the planned ticker hydrates Fundamentals context and remains the authoritative tool argument without requiring the tab to be preloaded.
 - [x] Add `copilot.working-analysis.v1` as Gamma-owned session-scoped state for Fundamentals reverse-valuation outputs, including entity, inputs, complete bounded output, provenance, context fingerprint, read-only safety, expiry, restart replay, discard, and recoverable session deletion.
@@ -613,7 +648,9 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Add the Checkpoint 8B public-company identity preflight: natural names may be proposed by the configured model, but Gamma validates them against SEC reference data, injects only a unique canonical ticker, records resolution provenance/usage, and stops with typed candidates on issuer or share-class ambiguity.
 - [x] Generalize the same contract to user-specified hypothetical portfolios and Risk, preserving exact legs, normalized weights, typed shocks, complete bounded outputs, provenance, restart/discard/expiry, and typed non-durable Risk materialization.
 - [x] Add the Checkpoint 8D Options vertical slice: explicit realized-versus-implied requests retain exact expiry comparisons, requested collection settings, quality, warnings, and provenance, then materialize non-durably into Options / Realized vs IV.
-- [ ] Continue the contract through option-set drafts, Strategy Lab inputs, temporary assumptions, and other cross-tool outputs.
+- [x] Add the Checkpoint 8E option-set vertical slice: explicit legs retain exact side, right, expiry, strike, ratio, contract count, provider price, quality, warnings, and provenance, then materialize non-durably into Options / Strategies without nearby-contract substitution.
+- [x] Add the Checkpoint 8F Strategy Lab vertical slice: explicit signed listed-market legs, benchmark, lookback, and minimum-overlap inputs retain exact identity and assumptions, execute through the existing portfolio-composition service, and materialize non-durably into Strategy Lab / Composer.
+- [ ] Continue the contract through the remaining representative tab-owned analyses and cross-tool outputs.
 - [x] Integrate the separately tracked Research Script Workspace after its mock contracts, immutable revision store, and Script-mode materialization payload became stable. Completed and verified 2026-08-31 with Code Interpreter network disabled, retained typed outputs, and unchanged `run_strategy_lab_backtest`; Script execution remains isolated from general Operator authority.
 - [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
 
@@ -651,6 +688,21 @@ Implementation note (2026-09-01, Checkpoint 8D):
 - Retained backend acceptance starts from an unprepared Copilot session, verifies exact `AAPL`, expiry, depth, and market-data arguments, complete stored output/source ids, restart replay, typed Options materialization, discard, and rejected reopen. Three focused backend regressions passed. All 392 frontend tests, TypeScript typecheck, and the production build passed; the build retains the pre-existing IV SVG-interaction and Surface3D unused-export warnings.
 - A mock browser acceptance opened the analysis through the run inspector and verified aligned AAPL context plus the temporary module at 1440, 1024, and 640 pixel widths with no console errors. No live-provider/model-tool-model acceptance is claimed for this checkpoint.
 
+Implementation note (2026-09-04, Checkpoint 8E):
+
+- `draft_options_strategy` is an automatic read-only registry action with one exact strict schema for the symbol, name, contract count, collection settings, and one to eight option legs. Gamma resolves only the requested expiry/strike/right combinations against its normalized provider-priced IV pairs; a missing contract or display price produces an explicit incomplete leg instead of a nearby substitution.
+- Successful explicit drafts create one seven-day `copilot.working-analysis.v1` record with `analysis_type=options_strategy_draft`, exact inputs, provider-priced legs, net debit/credit, collection/quality metadata, pricing assumptions, warnings, provenance, and `copilot.options-strategy-working-analysis.v1` materialization metadata. Supporting Options work in unrelated prompts does not create a draft.
+- Options / Strategies owns the non-durable materialization. The `TEMPORARY` module hydrates the exact strategy legs and contract count into the existing analysis controls while keeping the draft visibly unsaved and exposing no order, staging, save, or trading authority.
+- Retained acceptance starts from an unprepared Copilot session, verifies deterministic intent and the single exact tool call, provider-priced legs, restart replay, typed Strategies materialization, discard, and rejected reopen. A separate regression proves that an unavailable exact strike is not substituted. Verification on 2026-09-04: all 143 Copilot backend tests and all 427 frontend tests passed, along with TypeScript typecheck and the production frontend build. Mock browser checks at 1440, 1024, and 640 pixels preserved the exact retained legs across surrounding-surface refreshes, stayed within the viewport, and produced no application console errors; the production build retained only the pre-existing IV SVG-interaction and Surface3D unused-export warnings.
+- A bounded configured live diagnostic selected `draft_options_strategy`, preserved the exact requested SPY expiry/strikes, executed the provider-priced Gamma tool, and created the correct temporary Strategies record. Final model synthesis then failed because the stateless continuation replayed output-only `status`; the transport now strips that field while preserving encrypted reasoning and has deterministic regression coverage. Because the corrected continuation was not intentionally rerun against the live provider, this is tool-selection/argument/state and failure-diagnosis evidence, not successful live model-tool-model acceptance.
+
+Implementation note (2026-09-04, Checkpoint 8F):
+
+- `run_strategy_lab_portfolio_backtest` is an automatic read-only registry action with one strict schema for a name, benchmark, lookback, minimum shared observations, and one to 25 exact signed listed-market legs. Gamma rejects missing identifiers, zero/non-finite weights, unsupported asset classes, out-of-range assumptions, and insufficient history instead of inventing or substituting inputs.
+- The action uses `ResearchService.compose_strategy_lab_portfolio`, preserving requested signed weights in the authoritative inputs while the established analytics path gross-normalizes exposure for return composition. Output retains metrics, period coverage, alignment diagnostics, leg contributions, bounded Risk-leg summaries, provenance, warnings, and explicit temporary assumptions: zero risk-free rate, excluded costs/slippage, and no simulated rebalancing.
+- Successful explicit requests create one seven-day `copilot.working-analysis.v1` record with `analysis_type=strategy_lab_portfolio_backtest` and `copilot.strategy-lab-working-analysis.v1` materialization metadata. Strategy Lab / Composer displays a compact `TEMPORARY` module and hydrates the exact name, benchmark, lookback, minimum-overlap value, identifiers, classes, and signed weights into the existing editable draft; opening does not save, rebalance, or trade.
+- Deterministic acceptance starts from an unprepared Copilot session, requests `QQQ=+0.60`, `IWM=-0.40`, `SPY`, 504 days, and 100 minimum observations, verifies the exact provider lookups and tool arguments, then covers restart replay, materialization, discard, and rejected reopen. Focused backend and frontend coverage, the full 431-test frontend suite, TypeScript typecheck, and production build passed. Mock browser verification exercised the actual Copilot-run-inspector-to-Strategy-Lab handoff at 1800, 1024, and 640 CSS pixels: the exact draft and temporary module remained visible, no viewport overflow was introduced, and the application console stayed error-free. The build retained only the pre-existing IV SVG-interaction and Surface3D unused-export warnings. No live API call was needed or claimed; the configured key remained unchanged.
+
 #### K. Generalized interruptions, recovery, and role transition — open
 
 - Generalize the DCF proposal pattern into pause/approve-or-reject/resume-the-same-run for every future durable local research-state mutation.
@@ -680,14 +732,14 @@ Implementation note (2026-09-01, Checkpoint 8D):
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
 10. ~~Build the closed-loop Operator and model-assisted, schema-validated argument path.~~ Completed 2026-07-30 at Checkpoint 7 (82%).
-11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization. In progress: unloaded-company Fundamentals, hypothetical portfolio/Risk, and explicit Options realized-versus-implied vertical slices are complete through Checkpoint 8D; option-set drafts, Strategy Lab inputs, temporary assumptions, and the remaining owning surfaces are next.
+11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization. In progress: unloaded-company Fundamentals, hypothetical portfolio/Risk, explicit Options realized-versus-implied, exact option-set drafts, and exact Strategy Lab portfolio inputs/assumptions are complete through Checkpoint 8F; remaining representative owning surfaces are next.
 12. Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.
 13. Pass trace-level deterministic and live acceptance cases against the clarified completion boundary.
 14. Optional external deep research; later voice.
 
 Do not start with model-string replacement alone. Any future candidate-model rollout must use the Checkpoint 6 policy and land with provider streaming, capability validation, usage instrumentation, and recorded eval/live evidence so it improves the product rather than merely changing metadata.
 
-The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 87%** end-state baseline through Checkpoint 8D.
+The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 90%** end-state baseline through Checkpoint 8F.
 
 ### Definition Of Done
 
@@ -1222,6 +1274,7 @@ Current Research Operator state (foundation inventory, not the desired end state
 - `run_risk_scenario_analysis` is automatic read-only and now accepts typed, bounded shock inputs (`scenario_type`, `rate_shift_bps`, `equity_shock_pct`, `duration_proxy_years`, and explicit `symbol_shocks`). Gamma still computes VaR/contribution/frontier metrics through the existing risk engine; the new `shock_proxy` block is a transparent position-level estimate, not full curve or factor repricing.
 - `run_research_scope_analysis` is automatic read-only and runs Gamma's existing ResearchService scope analysis from an active single-name or synthetic research result, or explicit typed scope arguments. It returns scope metrics, structure, coverage, constituent diagnostics, warnings, and provider provenance without saving scopes, loading durable research objects, rebalancing, or modifying state.
 - `run_strategy_lab_backtest` is automatic read-only and summarizes the active normalized Strategy Lab imported result, composition, or comparison. It does not execute strategy code, restore raw uploaded CSV rows, save research objects, rebalance, or modify portfolios.
+- `run_strategy_lab_portfolio_backtest` is automatic read-only and resolves exact signed listed-market legs plus benchmark/lookback/minimum-overlap assumptions through the existing Strategy Lab portfolio-composition service. It persists a session-ephemeral Composer working analysis with explicit zero-cost/no-slippage/no-rebalancing assumptions and never saves, substitutes identifiers, rebalances, routes orders, or trades.
 - `run_hypothetical_portfolio_comparison` is automatic read-only and builds a temporary long-only synthetic research scope from typed legs/weights, compares its normalized return stream to a benchmark through the existing Compare/Scenario service path, and can optionally hand the temporary fixed-notional snapshot to Risk for bounded contribution analytics. It returns coverage, relative metrics, optional risk handoff output, warnings, and provenance without saving, rebalancing, or trading anything.
 - `run_options_realized_implied_comparison` is automatic read-only and uses Gamma's existing IVService surface path or active Options state to compare ATM implied volatility against available provider historical-volatility fields by expiry. It returns implied moves, vol premium/ratio rows where data is sufficient, missing-history or missing-IV statuses where it is not, surface quality/collection metadata, warnings, and provenance without direct Copilot provider calls or state changes.
 - `run_fundamentals_reverse_valuation` remains automatic read-only. DCF update proposals stop at draft/confirmation checkpoints; `fundamentals.apply_dcf_update` remains confirmation-required and is not run by automatic operator execution.
@@ -1229,7 +1282,7 @@ Current Research Operator state (foundation inventory, not the desired end state
 
 What remains for the next agents:
 
-1. Generalize `copilot.working-analysis.v1` beyond the completed Fundamentals, hypothetical-portfolio/Risk, and Options realized-versus-implied slices to option-set drafts, Strategy Lab inputs, temporary assumptions, and the remaining tab-owned analyses.
+1. Generalize `copilot.working-analysis.v1` beyond the completed Fundamentals, hypothetical-portfolio/Risk, Options realized-versus-implied, option-set draft, and Strategy Lab portfolio-input slices to the remaining representative tab-owned analyses.
 2. Generalize interruptions and recovery as described in workstream K. Do not broaden durable mutation families until pause/resume state, idempotency, diffs, rollback policy, and permission evals are reusable.
 3. Extend the Checkpoint 7 trace gate with degraded-result cross-domain replanning, unnecessary-tool, stale-context, remaining unloaded-entity families, working-state, and same-run approval-resume cases.
 4. Compare the custom Responses loop and Agents SDK as later end-state contracts enter the benchmark. Promote Agents SDK only if sessions, interruptions, traces, maintainability, quality, reliability, latency, or cost show a practical advantage without weakening permissions.

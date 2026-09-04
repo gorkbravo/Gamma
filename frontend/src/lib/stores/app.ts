@@ -693,6 +693,7 @@ export interface StrategyComposerDraft {
   name: string;
   benchmarkSymbol: string;
   lookbackDays: number;
+  minObservations: number;
   legs: StrategyPortfolioDraftLeg[];
   selection: Record<string, boolean>;
   weights: Record<string, number>;
@@ -703,6 +704,7 @@ export function defaultStrategyComposerDraft(): StrategyComposerDraft {
     name: "Strategy Lab Portfolio",
     benchmarkSymbol: "SPY",
     lookbackDays: 756,
+    minObservations: 5,
     legs: [
       {
         ...defaultStrategyPortfolioDraftLeg(1),

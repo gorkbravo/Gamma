@@ -1,11 +1,13 @@
 <script lang="ts">
   import { get } from "svelte/store";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import CopilotStrategyLabWorkingAnalysis from "../components/CopilotStrategyLabWorkingAnalysis.svelte";
   import StrategyScriptWorkspace from "../components/StrategyScriptWorkspace.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
     GammaResearchObject,
+    CopilotWorkingAnalysis,
     ResearchResult,
     SavedResearchItem,
     StrategyLabBookValidation,
@@ -33,6 +35,7 @@
     hydrateStrategyLabResultFromSaved,
     savedResearchCanReloadStrategy,
     savedResearchHasReturnStream,
+    strategyLabDraftFromWorkingAnalysis,
     strategyResolvedHandoffToDraftLeg,
     type StrategyLabMode,
     type StrategyPortfolioAssetClass,
@@ -43,6 +46,7 @@
   export let result: ResearchResult | null = null;
   export let strategyResult: StrategyLabResult | null = null;
   export let strategyComposition: StrategyLabCompositionResult | null = null;
+  export let workingAnalysis: CopilotWorkingAnalysis | null = null;
   export let savedItems: SavedResearchItem[] = [];
   export let strategyLoading = false;
   export let savedLoading = false;
@@ -99,7 +103,9 @@
   let portfolioName = restoredDraft.name;
   let portfolioBenchmarkSymbol = restoredDraft.benchmarkSymbol;
   let portfolioLookbackDays = restoredDraft.lookbackDays;
+  let portfolioMinObservations = restoredDraft.minObservations ?? 5;
   let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = restoredDraft.legs.map((leg) => ({ ...leg }));
+  let appliedWorkingAnalysisId = "";
   let showHandoffReview = true;
   let bookValidation: StrategyLabBookValidation | null = null;
   let bookValidationLoading = false;
@@ -343,7 +349,7 @@
       benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
       benchmarkObject: null,
       lookbackDays: portfolioLookbackDays,
-      minObservations: 5,
+      minObservations: portfolioMinObservations,
       validation: bookValidation
     });
     strategyComposition = result ?? null;
@@ -369,10 +375,15 @@
         benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
         benchmarkObject: null,
         lookbackDays: portfolioLookbackDays,
-        minObservations: 5
+        minObservations: portfolioMinObservations
       });
       bookValidation = result ?? null;
-      bookValidationFingerprint = JSON.stringify(built.legs);
+      bookValidationFingerprint = JSON.stringify({
+        legs: built.legs,
+        benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
+        lookbackDays: portfolioLookbackDays,
+        minObservations: portfolioMinObservations
+      });
     } finally {
       bookValidationLoading = false;
     }
@@ -424,10 +435,25 @@
     name: portfolioName,
     benchmarkSymbol: portfolioBenchmarkSymbol,
     lookbackDays: portfolioLookbackDays,
+    minObservations: portfolioMinObservations,
     legs: portfolioDraftLegs,
     selection: composerSelection,
     weights: composerWeights
   });
+  $: {
+    const copilotDraft = strategyLabDraftFromWorkingAnalysis(workingAnalysis);
+    if (copilotDraft && copilotDraft.analysisId !== appliedWorkingAnalysisId) {
+      portfolioName = copilotDraft.name;
+      portfolioBenchmarkSymbol = copilotDraft.benchmarkSymbol;
+      portfolioLookbackDays = copilotDraft.lookbackDays;
+      portfolioMinObservations = copilotDraft.minObservations;
+      portfolioDraftLegs = copilotDraft.legs.map((leg) => ({ ...leg }));
+      bookValidation = null;
+      bookValidationFingerprint = "";
+      strategyInputWarning = "Temporary Copilot inputs loaded exactly. Validate the signed book before composing.";
+      appliedWorkingAnalysisId = copilotDraft.analysisId;
+    }
+  }
   $: parsedStrategyCsv = parseResearchCsvText(strategyCsvText);
   $: {
     if (parsedStrategyCsv.columns.length) {
@@ -481,7 +507,14 @@
     ? (compositionDiagnostics.legs as Array<Record<string, unknown>>)
     : [];
   $: bookValidationStale =
-    bookValidation != null && bookValidationFingerprint !== JSON.stringify(portfolioDraftBuild.legs);
+    bookValidation != null &&
+    bookValidationFingerprint !==
+      JSON.stringify({
+        legs: portfolioDraftBuild.legs,
+        benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
+        lookbackDays: portfolioLookbackDays,
+        minObservations: portfolioMinObservations
+      });
   $: currentStrategyHandoffs = strategyLabHandoffs.filter((item) => !item.stale);
   $: staleStrategyHandoffs = strategyLabHandoffs.filter((item) => item.stale);
   $: bookValidationDiagnostics = (bookValidation?.alignment_diagnostics ?? {}) as Record<string, unknown>;
@@ -692,6 +725,10 @@
             </article>
           {/if}
 
+          {#if workingAnalysis}
+            <CopilotStrategyLabWorkingAnalysis analysis={workingAnalysis} />
+          {/if}
+
           <article class="panel table-panel">
             <div class="panel-header tight-head">
               <h3>Portfolio Composer</h3>
@@ -710,6 +747,7 @@
               <label><span>Name</span><input bind:value={portfolioName} /></label>
               <label><span>Benchmark</span><input bind:value={portfolioBenchmarkSymbol} /></label>
               <label><span>Lookback</span><input type="number" min="20" step="20" bind:value={portfolioLookbackDays} /></label>
+              <label><span>Min Overlap</span><input type="number" min="2" step="1" bind:value={portfolioMinObservations} /></label>
             </div>
 
             <div class="kpi-grid compact-kpis">
@@ -1698,7 +1736,7 @@
   }
 
   .compact-fields {
-    grid-template-columns: minmax(12rem, 1fr) minmax(7rem, 0.25fr) minmax(6rem, 0.2fr);
+    grid-template-columns: minmax(12rem, 1fr) repeat(3, minmax(6rem, 0.24fr));
   }
 
   .compact-kpis {

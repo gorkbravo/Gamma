@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../api/types";
+import type { CopilotWorkingAnalysis, IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../api/types";
 import {
   blackScholesPrice,
   blackScholesGreeks,
@@ -31,6 +31,7 @@ import {
   hasParametricIvFit,
   livePositionForSymbol,
   nearestStrikeIndex,
+  optionsStrategyStateFromWorkingAnalysis,
   reconcileStrategyToSymbol,
 } from "./iv";
 
@@ -759,5 +760,75 @@ describe("reconcileStrategyToSymbol", () => {
     expect(result.cleared).toBe(true);
     expect(result.strategySymbol).toBeNull();
     expect(result.legs).toEqual([]);
+  });
+});
+
+describe("optionsStrategyStateFromWorkingAnalysis", () => {
+  const analysis = {
+    analysis_id: "work-option-set",
+    session_id: "session-option-set",
+    run_id: "run-option-set",
+    tool_id: "draft_options_strategy",
+    domain: "iv",
+    analysis_type: "options_strategy_draft",
+    title: "AAPL call spread",
+    status: "active",
+    state_scope: "session_ephemeral",
+    entity: { symbol: "AAPL" },
+    inputs: {},
+    outputs: {
+      symbol: "AAPL",
+      contracts: 2,
+      legs: [
+        { side: "long", option_type: "call", expiry: "20260918", strike: 230, premium: 8.4, quantity: 1 },
+        { side: "short", option_type: "call", expiry: "20260918", strike: 240, premium: 3.2, quantity: 1 }
+      ]
+    },
+    source_ids: ["iv.option_set.AAPL"],
+    warnings: [],
+    context_fingerprint: "fp",
+    owning_tab: "iv",
+    owning_mode: "strategies",
+    materialization: {
+      payload_contract: "copilot.options-strategy-working-analysis.v1",
+      target_tab: "iv",
+      target_mode: "strategies",
+      durable: false
+    },
+    created_at: "2026-09-04T10:00:00Z",
+    updated_at: "2026-09-04T10:00:00Z",
+    expires_at: "2026-09-11T10:00:00Z",
+    materialized_at: null,
+    discarded_at: null,
+    read_only_safety: {},
+    source_provider: "ibkr",
+    origin: "gamma.iv.surface",
+    transformation_note: "Exact-match option legs.",
+    contract_version: "copilot.working-analysis.v1"
+  } satisfies CopilotWorkingAnalysis;
+
+  it("hydrates exact retained legs and sizing into the Strategies workbench", () => {
+    expect(optionsStrategyStateFromWorkingAnalysis(analysis)).toEqual({
+      analysisId: "work-option-set",
+      symbol: "AAPL",
+      contracts: 2,
+      selectedExpiry: "20260918",
+      legs: [
+        { id: "copilot-work-option-set-1", side: "long", optionType: "call", expiry: "20260918", strike: 230, premium: 8.4, quantity: 1 },
+        { id: "copilot-work-option-set-2", side: "short", optionType: "call", expiry: "20260918", strike: 240, premium: 3.2, quantity: 1 }
+      ],
+      notice: expect.stringContaining("Temporary Copilot option set")
+    });
+  });
+
+  it("rejects durable or partially priced payloads", () => {
+    expect(optionsStrategyStateFromWorkingAnalysis({
+      ...analysis,
+      materialization: { ...analysis.materialization, durable: true }
+    })).toBeNull();
+    expect(optionsStrategyStateFromWorkingAnalysis({
+      ...analysis,
+      outputs: { ...analysis.outputs, legs: [{ ...analysis.outputs.legs[0], premium: null }] }
+    })).toBeNull();
   });
 });

@@ -96,4 +96,75 @@ describe("CopilotOptionsWorkingAnalysis", () => {
     expect(body).toContain("place an order");
     expect(body).not.toMatch(/>Save option set<|>Place order<|>Trade</i);
   });
+
+  it("renders exact temporary option-set legs without save or order authority", () => {
+    const analysis: CopilotWorkingAnalysis = {
+      analysis_id: "work-options-strategy-aapl",
+      session_id: "session-options",
+      run_id: "oprun-options",
+      tool_id: "draft_options_strategy",
+      domain: "iv",
+      analysis_type: "options_strategy_draft",
+      title: "AAPL call spread",
+      status: "active",
+      state_scope: "session_ephemeral",
+      entity: { entity_type: "option_set", symbol: "AAPL" },
+      inputs: {},
+      outputs: {
+        symbol: "AAPL",
+        spot: 231.42,
+        contracts: 2,
+        requested: { depth_preset: "compact", market_data_mode: "delayed" },
+        legs: [
+          { side: "long", option_type: "call", expiry: "2026-09-18", strike: 230, quantity: 1, premium: 8.4, price_source: "midpoint" },
+          { side: "short", option_type: "call", expiry: "2026-09-18", strike: 240, quantity: 1, premium: 3.2, price_source: "midpoint" }
+        ],
+        summary: {
+          resolved_leg_count: 2,
+          net_premium_total: -1040,
+          premium_direction: "debit"
+        },
+        collection: { depth_preset: "compact", market_data_mode: "delayed" },
+        quality: { observed_surface_cells: 21 },
+        warnings: ["Delayed listed-market data."]
+      },
+      source_ids: ["iv.option_set.AAPL"],
+      warnings: [],
+      context_fingerprint: "fp-options",
+      owning_tab: "iv",
+      owning_mode: "strategies",
+      materialization: {
+        contract_version: "copilot.materialization.v1",
+        payload_contract: "copilot.options-strategy-working-analysis.v1",
+        target_tab: "iv",
+        target_mode: "strategies",
+        durable: false
+      },
+      created_at: "2026-09-04T10:00:00Z",
+      updated_at: "2026-09-04T10:01:00Z",
+      expires_at: "2026-09-11T10:00:00Z",
+      materialized_at: "2026-09-04T10:02:00Z",
+      discarded_at: null,
+      read_only_safety: {},
+      source_provider: "ibkr",
+      origin: "gamma.iv.surface",
+      transformation_note: "Exact-match option legs.",
+      contract_version: "copilot.working-analysis.v1"
+    };
+
+    const { body } = render(CopilotOptionsWorkingAnalysis, { props: { analysis } });
+
+    expect(body).toContain("AAPL call spread");
+    expect(body).toContain("LONG");
+    expect(body).toContain("SHORT");
+    expect(body).toContain("2026/09/18");
+    expect(body).toContain("230.00");
+    expect(body).toContain("240.00");
+    expect(body).toContain("8.40");
+    expect(body).toContain("3.20");
+    expect(body).toContain("midpoint");
+    expect(body).toContain("does not save an");
+    expect(body).toContain("place an order");
+    expect(body).not.toMatch(/>Save option set<|>Place order<|>Trade</i);
+  });
 });

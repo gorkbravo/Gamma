@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IvSurface, ResearchResult } from "../api/types";
+import type { CopilotWorkingAnalysis, IvSurface, ResearchResult } from "../api/types";
 import {
   buildCommodityStrategyHandoff,
   buildMacroStrategyLensHandoff,
@@ -32,10 +32,80 @@ import {
   savedResearchCanReloadStrategy,
   savedResearchScopeDraft,
   strategyResolvedHandoffToDraftLeg,
+  strategyLabDraftFromWorkingAnalysis,
   summarizeStrategyPortfolioDraft
 } from "./research";
 
 describe("research view model helpers", () => {
+  it("hydrates exact signed Strategy Lab inputs from the non-durable Copilot contract", () => {
+    const analysis: CopilotWorkingAnalysis = {
+      analysis_id: "work-strategy-1",
+      session_id: "session-1",
+      run_id: "run-1",
+      tool_id: "run_strategy_lab_portfolio_backtest",
+      domain: "strategy_lab",
+      analysis_type: "strategy_lab_portfolio_backtest",
+      title: "Temporary QQQ/IWM",
+      status: "active",
+      state_scope: "session_ephemeral",
+      entity: { entity_type: "strategy_lab_portfolio" },
+      inputs: {
+        name: "Temporary QQQ/IWM",
+        benchmark_symbol: "SPY",
+        lookback_days: 504,
+        min_observations: 100,
+        legs: [
+          { label: "Long QQQ", asset_class: "etf", identifier: "qqq", weight: 0.6 },
+          { label: "Short IWM", asset_class: "etf", identifier: "iwm", weight: -0.4 }
+        ]
+      },
+      outputs: {
+        metrics: { total_return: 0.12, observation_count: 503 },
+        temporary_assumptions: { transaction_costs_included: false }
+      },
+      source_ids: ["strategy_lab.portfolio.fixture"],
+      warnings: ["Temporary research only."],
+      context_fingerprint: "fp-1",
+      owning_tab: "strategy_lab",
+      owning_mode: "composer",
+      materialization: {
+        payload_contract: "copilot.strategy-lab-working-analysis.v1",
+        target_tab: "strategy_lab",
+        target_mode: "composer",
+        durable: false
+      },
+      created_at: "2026-09-04T10:00:00Z",
+      updated_at: "2026-09-04T10:00:00Z",
+      expires_at: "2026-09-11T10:00:00Z",
+      materialized_at: null,
+      discarded_at: null,
+      read_only_safety: { execution_enabled: false },
+      source_provider: "fixture",
+      origin: "tests",
+      transformation_note: null,
+      contract_version: "copilot.working-analysis.v1"
+    };
+
+    const draft = strategyLabDraftFromWorkingAnalysis(analysis);
+    expect(draft).toMatchObject({
+      analysisId: "work-strategy-1",
+      name: "Temporary QQQ/IWM",
+      benchmarkSymbol: "SPY",
+      lookbackDays: 504,
+      minObservations: 100
+    });
+    expect(draft?.legs.map((leg) => ({ identifier: leg.identifier, weight: leg.weight }))).toEqual([
+      { identifier: "QQQ", weight: 0.6 },
+      { identifier: "IWM", weight: -0.4 }
+    ]);
+    expect(
+      strategyLabDraftFromWorkingAnalysis({
+        ...analysis,
+        materialization: { ...analysis.materialization, durable: true }
+      })
+    ).toBeNull();
+  });
+
   it("builds normalized preview rows for synthetic drafts", () => {
     const previewRows = buildPreviewRows(
       "synthetic_portfolio",

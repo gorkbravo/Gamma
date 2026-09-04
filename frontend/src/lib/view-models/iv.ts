@@ -1,4 +1,4 @@
-import type { IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../api/types";
+import type { CopilotWorkingAnalysis, IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../api/types";
 
 export type OptionsMode =
   | "overview"
@@ -223,6 +223,78 @@ export interface StrategyLeg {
   strike: number;
   premium: number;
   quantity: number;
+}
+
+export interface OptionsStrategyWorkingState {
+  analysisId: string;
+  symbol: string;
+  contracts: number;
+  selectedExpiry: string;
+  legs: StrategyLeg[];
+  notice: string;
+}
+
+/**
+ * Accept only the exact non-durable Copilot option-set payload. Provider-priced
+ * legs are retained in the working record, so opening it never invents a mark
+ * from the freshly hydrated surface or silently substitutes a nearby contract.
+ */
+export function optionsStrategyStateFromWorkingAnalysis(
+  analysis: CopilotWorkingAnalysis | null | undefined
+): OptionsStrategyWorkingState | null {
+  if (
+    !analysis ||
+    analysis.status !== "active" ||
+    analysis.state_scope !== "session_ephemeral" ||
+    analysis.analysis_type !== "options_strategy_draft" ||
+    analysis.owning_tab !== "iv" ||
+    analysis.owning_mode !== "strategies" ||
+    analysis.materialization.durable !== false ||
+    analysis.materialization.payload_contract !== "copilot.options-strategy-working-analysis.v1"
+  ) {
+    return null;
+  }
+  const outputs = analysis.outputs;
+  const symbol = String(
+    analysis.entity.symbol ?? analysis.entity.ticker ?? outputs.symbol ?? ""
+  ).trim().toUpperCase();
+  const rawLegs = Array.isArray(outputs.legs) ? outputs.legs : [];
+  const legs: StrategyLeg[] = [];
+  for (const [index, value] of rawLegs.entries()) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const row = value as Record<string, unknown>;
+    const side = row.side === "long" || row.side === "short" ? row.side : null;
+    const optionType = row.option_type === "call" || row.option_type === "put" ? row.option_type : null;
+    const expiry = String(row.expiry ?? "").trim();
+    const strike = typeof row.strike === "number" && Number.isFinite(row.strike) ? row.strike : null;
+    const premium = typeof row.premium === "number" && Number.isFinite(row.premium) ? row.premium : null;
+    const quantity = typeof row.quantity === "number" && Number.isInteger(row.quantity) ? row.quantity : null;
+    if (!side || !optionType || !expiry || strike == null || strike <= 0 || premium == null || premium <= 0 || quantity == null || quantity <= 0) {
+      return null;
+    }
+    legs.push({
+      id: `copilot-${analysis.analysis_id}-${index + 1}`,
+      side,
+      optionType,
+      expiry,
+      strike,
+      premium,
+      quantity
+    });
+  }
+  const contracts =
+    typeof outputs.contracts === "number" && Number.isInteger(outputs.contracts) && outputs.contracts > 0
+      ? Math.min(100, outputs.contracts)
+      : 1;
+  if (!symbol || !legs.length) return null;
+  return {
+    analysisId: analysis.analysis_id,
+    symbol,
+    contracts,
+    selectedExpiry: legs[0].expiry,
+    legs,
+    notice: "Temporary Copilot option set loaded from retained provider marks. Unsaved; review quotes before relying on the payoff."
+  };
 }
 
 export interface StrategyPayoffPoint {

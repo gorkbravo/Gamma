@@ -14,6 +14,15 @@
     impliedMovePct: number | null;
     status: string;
   };
+  type DraftLeg = {
+    side: string;
+    optionType: string;
+    expiry: string | null;
+    strike: number | null;
+    quantity: number | null;
+    premium: number | null;
+    priceSource: string | null;
+  };
 
   const record = (value: unknown): JsonRecord =>
     value != null && typeof value === "object" && !Array.isArray(value)
@@ -53,6 +62,7 @@
   $: quality = record(outputs.quality);
   $: collection = record(outputs.collection);
   $: requested = record(outputs.requested);
+  $: isStrategyDraft = analysis.analysis_type === "options_strategy_draft";
   $: symbol = text(entity.symbol) ?? text(entity.ticker) ?? text(outputs.symbol) ?? "Options";
   $: rows = (Array.isArray(outputs.expiry_comparisons) ? outputs.expiry_comparisons : [])
     .map((value): ComparisonRow => {
@@ -66,6 +76,19 @@
         impliedToHistoricalRatio: number(row.implied_to_historical_ratio),
         impliedMovePct: number(row.implied_move_pct),
         status: text(row.comparison_status) ?? "unknown"
+      };
+    });
+  $: draftLegs = (Array.isArray(outputs.legs) ? outputs.legs : [])
+    .map((value): DraftLeg => {
+      const row = record(value);
+      return {
+        side: text(row.side) ?? "unknown",
+        optionType: text(row.option_type) ?? "unknown",
+        expiry: text(row.expiry),
+        strike: number(row.strike),
+        quantity: number(row.quantity),
+        premium: number(row.premium),
+        priceSource: text(row.price_source)
       };
     });
   $: warnings = Array.from(
@@ -90,46 +113,77 @@
   <div class="temporary-summary">
     <div><span>Symbol</span><strong>{symbol}</strong></div>
     <div><span>Spot</span><strong class:absent={money(outputs.spot) === "N/A"}>{money(outputs.spot)}</strong></div>
-    <div><span>Expiries</span><strong>{number(summary.expiry_count) ?? rows.length}</strong></div>
-    <div><span>Comparable</span><strong>{number(summary.ok_count) ?? 0}</strong></div>
-    <div><span>Avg IV premium</span><strong class:absent={pct(summary.average_volatility_premium) === "N/A"}>{pct(summary.average_volatility_premium)}</strong></div>
+    {#if isStrategyDraft}
+      <div><span>Legs</span><strong>{number(summary.resolved_leg_count) ?? draftLegs.length}</strong></div>
+      <div><span>Structures</span><strong>{number(outputs.contracts) ?? 1}</strong></div>
+      <div><span>Net {text(summary.premium_direction) ?? "premium"}</span><strong class:absent={money(summary.net_premium_total) === "N/A"}>{money(summary.net_premium_total)}</strong></div>
+    {:else}
+      <div><span>Expiries</span><strong>{number(summary.expiry_count) ?? rows.length}</strong></div>
+      <div><span>Comparable</span><strong>{number(summary.ok_count) ?? 0}</strong></div>
+      <div><span>Avg IV premium</span><strong class:absent={pct(summary.average_volatility_premium) === "N/A"}>{pct(summary.average_volatility_premium)}</strong></div>
+    {/if}
   </div>
 
-  <div class="comparison-table" role="region" aria-label={`${symbol} temporary realized versus implied comparison`}>
-    <table>
-      <thead>
-        <tr>
-          <th>Expiry</th>
-          <th>DTE</th>
-          <th>Historical vol</th>
-          <th>ATM IV</th>
-          <th>IV premium</th>
-          <th>IV / historical</th>
-          <th>Implied move</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each rows as row}
+  <div
+    class="comparison-table"
+    role="region"
+    aria-label={isStrategyDraft ? `${symbol} temporary option-set draft` : `${symbol} temporary realized versus implied comparison`}
+  >
+    {#if isStrategyDraft}
+      <table>
+        <thead><tr><th>Side</th><th>Type</th><th>Expiry</th><th>Strike</th><th>Ratio</th><th>Premium</th><th>Price source</th></tr></thead>
+        <tbody>
+          {#each draftLegs as leg}
+            <tr>
+              <td>{leg.side.toUpperCase()}</td>
+              <td>{leg.optionType.toUpperCase()}</td>
+              <td>{formatExpiry(leg.expiry)}</td>
+              <td class:absent={leg.strike == null}>{money(leg.strike)}</td>
+              <td class:absent={leg.quantity == null}>{leg.quantity ?? "N/A"}×</td>
+              <td class:absent={leg.premium == null}>{money(leg.premium)}</td>
+              <td class:absent={!leg.priceSource}>{leg.priceSource ?? "N/A"}</td>
+            </tr>
+          {:else}
+            <tr><td colspan="7" class="empty">No provider-priced option legs were retained.</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else}
+      <table>
+        <thead>
           <tr>
-            <td>{formatExpiry(row.expiry)}</td>
-            <td class:absent={row.daysToExpiry == null}>{row.daysToExpiry ?? "N/A"}</td>
-            <td class:absent={row.historicalVolatility == null}>{pct(row.historicalVolatility)}</td>
-            <td class:absent={row.impliedVolatility == null}>{pct(row.impliedVolatility)}</td>
-            <td
-              class:absent={row.volatilityPremium == null}
-              class:positive={(row.volatilityPremium ?? 0) > 0}
-              class:negative={(row.volatilityPremium ?? 0) < 0}
-            >{pct(row.volatilityPremium)}</td>
-            <td class:absent={row.impliedToHistoricalRatio == null}>{decimal(row.impliedToHistoricalRatio)}×</td>
-            <td class:absent={row.impliedMovePct == null}>{pct(row.impliedMovePct)}</td>
-            <td><span class="status-tag" data-status={row.status}>{statusLabel(row.status)}</span></td>
+            <th>Expiry</th>
+            <th>DTE</th>
+            <th>Historical vol</th>
+            <th>ATM IV</th>
+            <th>IV premium</th>
+            <th>IV / historical</th>
+            <th>Implied move</th>
+            <th>Status</th>
           </tr>
-        {:else}
-          <tr><td colspan="8" class="empty">No comparable expiry rows were retained.</td></tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each rows as row}
+            <tr>
+              <td>{formatExpiry(row.expiry)}</td>
+              <td class:absent={row.daysToExpiry == null}>{row.daysToExpiry ?? "N/A"}</td>
+              <td class:absent={row.historicalVolatility == null}>{pct(row.historicalVolatility)}</td>
+              <td class:absent={row.impliedVolatility == null}>{pct(row.impliedVolatility)}</td>
+              <td
+                class:absent={row.volatilityPremium == null}
+                class:positive={(row.volatilityPremium ?? 0) > 0}
+                class:negative={(row.volatilityPremium ?? 0) < 0}
+              >{pct(row.volatilityPremium)}</td>
+              <td class:absent={row.impliedToHistoricalRatio == null}>{decimal(row.impliedToHistoricalRatio)}×</td>
+              <td class:absent={row.impliedMovePct == null}>{pct(row.impliedMovePct)}</td>
+              <td><span class="status-tag" data-status={row.status}>{statusLabel(row.status)}</span></td>
+            </tr>
+          {:else}
+            <tr><td colspan="8" class="empty">No comparable expiry rows were retained.</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
   </div>
 
   <footer class="temporary-footer">

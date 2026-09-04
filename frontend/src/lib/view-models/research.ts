@@ -4,6 +4,7 @@ import type {
   CommodityMarketSummary,
   CommodityPriceHistory,
   CommodityWorkspaceResponse,
+  CopilotWorkingAnalysis,
   GammaResearchObject,
   IvSurface,
   MacroContextState,
@@ -82,6 +83,82 @@ export interface StrategyPortfolioDraftSummary {
   objectLegs: number;
   listedIdentifierLegs: number;
   warnings: string[];
+}
+
+export interface StrategyLabWorkingDraft {
+  analysisId: string;
+  name: string;
+  benchmarkSymbol: string;
+  lookbackDays: number;
+  minObservations: number;
+  legs: StrategyPortfolioDraftLeg[];
+  assumptions: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  warnings: string[];
+}
+
+/** Hydrate only the exact non-durable Strategy Lab Composer contract. */
+export function strategyLabDraftFromWorkingAnalysis(
+  analysis: CopilotWorkingAnalysis | null | undefined
+): StrategyLabWorkingDraft | null {
+  if (
+    !analysis ||
+    analysis.status !== "active" ||
+    analysis.state_scope !== "session_ephemeral" ||
+    analysis.owning_tab !== "strategy_lab" ||
+    analysis.owning_mode !== "composer" ||
+    analysis.materialization.payload_contract !== "copilot.strategy-lab-working-analysis.v1" ||
+    analysis.materialization.durable !== false
+  ) {
+    return null;
+  }
+  const rawLegs = Array.isArray(analysis.inputs.legs) ? analysis.inputs.legs : [];
+  const allowed = new Set<StrategyPortfolioAssetClass>(["equity", "etf", "commodity", "crypto"]);
+  const legs: StrategyPortfolioDraftLeg[] = [];
+  for (const [index, raw] of rawLegs.entries()) {
+    if (!raw || typeof raw !== "object") return null;
+    const item = raw as Record<string, unknown>;
+    const identifier = String(item.identifier ?? "").trim().toUpperCase();
+    const assetClass = String(item.asset_class ?? "") as StrategyPortfolioAssetClass;
+    const weight = Number(item.weight);
+    if (!identifier || !allowed.has(assetClass) || !Number.isFinite(weight) || weight === 0) {
+      return null;
+    }
+    legs.push({
+      ...defaultStrategyPortfolioDraftLeg(index + 1),
+      id: `copilot-${analysis.analysis_id}-${index + 1}`,
+      label: String(item.label ?? "").trim() || `${weight > 0 ? "Long" : "Short"} ${identifier}`,
+      assetClass,
+      identifier,
+      weight,
+      valueKind: "return",
+      historyText: "",
+      objectOptionId: ""
+    });
+  }
+  const lookbackDays = Number(analysis.inputs.lookback_days);
+  const minObservations = Number(analysis.inputs.min_observations);
+  if (!legs.length || !Number.isInteger(lookbackDays) || !Number.isInteger(minObservations)) {
+    return null;
+  }
+  const outputs = analysis.outputs && typeof analysis.outputs === "object" ? analysis.outputs : {};
+  return {
+    analysisId: analysis.analysis_id,
+    name: String(analysis.inputs.name ?? analysis.title ?? "Strategy Lab Portfolio").trim(),
+    benchmarkSymbol: String(analysis.inputs.benchmark_symbol ?? "SPY").trim().toUpperCase(),
+    lookbackDays,
+    minObservations,
+    legs,
+    assumptions:
+      outputs.temporary_assumptions && typeof outputs.temporary_assumptions === "object"
+        ? (outputs.temporary_assumptions as Record<string, unknown>)
+        : {},
+    metrics:
+      outputs.metrics && typeof outputs.metrics === "object"
+        ? (outputs.metrics as Record<string, unknown>)
+        : {},
+    warnings: Array.isArray(analysis.warnings) ? analysis.warnings.map(String) : []
+  };
 }
 
 export interface SavedScopeDraft {

@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
@@ -18,6 +19,7 @@ from src.application.copilot_context_contracts import (
 )
 from src.application.copilot_entity_resolution import extract_explicit_equity_tickers
 from src.application.copilot_model_policy import CopilotModelPolicy
+from src.application.iv_service import IVSurfaceRequest
 from src.application.research_action_registry import (
     ResearchActionArgumentError,
     ResearchActionPermissionError,
@@ -103,7 +105,9 @@ from src.models.macro import (
     MacroSnapshotPayload,
 )
 from src.models.portfolio import PortfolioSnapshot, PositionItem
+from src.models.provenance import FreshnessLabel
 from src.services.mock_copilot_provider import MockCopilotProvider
+from src.services.research_market_data import ResearchHistoryResult
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.copilot_store import (
     CURRENT_COPILOT_STORE_SCHEMA_VERSION,
@@ -3250,6 +3254,21 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert by_id["run_strategy_lab_backtest"]["action_type"] == "run_analysis"
         assert by_id["run_strategy_lab_backtest"]["read_only"] is True
         assert by_id["run_strategy_lab_backtest"]["mutates_local_state"] is False
+        strategy_portfolio_action = by_id["run_strategy_lab_portfolio_backtest"]
+        assert strategy_portfolio_action["permission_policy"] == "automatic"
+        assert strategy_portfolio_action["action_type"] == "run_analysis"
+        assert strategy_portfolio_action["read_only"] is True
+        assert strategy_portfolio_action["mutates_local_state"] is False
+        strategy_portfolio_schema = strategy_portfolio_action["input_schema"]
+        assert strategy_portfolio_schema["required"] == [
+            "name",
+            "benchmark_symbol",
+            "lookback_days",
+            "min_observations",
+            "legs",
+        ]
+        assert strategy_portfolio_schema["properties"]["legs"]["items"]["additionalProperties"] is False
+        assert "never substitutes" in " ".join(strategy_portfolio_action["failure_modes"]).lower()
         assert by_id["run_hypothetical_portfolio_comparison"]["permission_policy"] == "automatic"
         assert by_id["run_hypothetical_portfolio_comparison"]["action_type"] == "run_analysis"
         assert by_id["run_hypothetical_portfolio_comparison"]["read_only"] is True
@@ -3273,6 +3292,23 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert by_id["run_options_realized_implied_comparison"]["action_type"] == "run_analysis"
         assert by_id["run_options_realized_implied_comparison"]["read_only"] is True
         assert by_id["run_options_realized_implied_comparison"]["mutates_local_state"] is False
+        assert by_id["draft_options_strategy"]["permission_policy"] == "automatic"
+        assert by_id["draft_options_strategy"]["action_type"] == "run_analysis"
+        assert by_id["draft_options_strategy"]["read_only"] is True
+        assert by_id["draft_options_strategy"]["mutates_local_state"] is False
+        strategy_schema = by_id["draft_options_strategy"]["input_schema"]
+        assert strategy_schema["required"] == [
+            "symbol",
+            "name",
+            "contracts",
+            "depth_preset",
+            "market_data_mode",
+            "legs",
+        ]
+        assert strategy_schema["properties"]["legs"]["items"]["additionalProperties"] is False
+        assert "does not substitute nearby contracts" in " ".join(
+            by_id["draft_options_strategy"]["failure_modes"]
+        ).lower()
         iv_schema = by_id["run_options_realized_implied_comparison"]["input_schema"]
         assert iv_schema["required"] == ["symbol", "max_expiries", "depth_preset", "market_data_mode"]
         assert iv_schema["properties"]["market_data_mode"]["enum"] == ["live", "delayed", "auto", None]
@@ -4044,6 +4080,45 @@ def _checkpoint7_final_card(
         ],
         "stop_reason": "final_answer",
     }
+
+
+def test_responses_continuation_strips_output_only_status_and_preserves_reasoning():
+    provider = OpenAIResponsesCopilotProvider(
+        api_key="test-key",
+        model="gpt-test-operator",
+        reasoning_effort="low",
+        store_responses=False,
+    )
+
+    items = provider._continuation_output_items(
+        {
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_checkpoint7",
+                    "status": "completed",
+                    "summary": [],
+                    "encrypted_content": "encrypted-checkpoint7-reasoning",
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_checkpoint7",
+                    "call_id": "call_checkpoint7",
+                    "name": "run_risk_scenario_analysis",
+                    "arguments": json.dumps(_checkpoint7_rate_shock_arguments()),
+                    "status": "completed",
+                },
+            ]
+        }
+    )
+
+    assert len(items) == 2
+    assert all("status" not in item for item in items)
+    assert items[0]["encrypted_content"] == "encrypted-checkpoint7-reasoning"
+    assert items[1]["call_id"] == "call_checkpoint7"
+    assert items[1]["arguments"] == json.dumps(
+        _checkpoint7_rate_shock_arguments()
+    )
 
 
 def test_checkpoint7_responses_operator_closes_the_model_tool_model_loop(
@@ -5670,6 +5745,341 @@ def test_checkpoint8d_options_working_analysis_materializes_and_replays(tmp_path
             f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
         )
         assert blocked.status_code == 409
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8e_option_set_draft_materializes_exact_provider_priced_legs(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        iv_service = runtime.copilot_service.iv_service
+        assert iv_service is not None
+        fixed_surface = iv_service.get_surface(
+            IVSurfaceRequest(symbol="AAPL", market_data_mode="auto", depth_preset="compact")
+        )
+        assert fixed_surface.snapshot is not None
+        snapshot = fixed_surface.snapshot
+        expiry = snapshot.expiries[0]
+        expiry_pairs = [pair for pair in snapshot.pairs if pair.expiry == expiry]
+        assert len(expiry_pairs) >= 2
+        long_pair = expiry_pairs[len(expiry_pairs) // 2]
+        short_pair = expiry_pairs[-1]
+        # Freeze the provider result so the deterministic mock clock cannot move
+        # the generated strike grid between selection and Operator execution.
+        iv_service.get_surface = lambda request: fixed_surface  # type: ignore[method-assign]
+
+        session_id = "session_checkpoint8e_aapl_option_set"
+        assert client.post(
+            "/copilot/sessions",
+            json={"session_id": session_id, "title": "AAPL temporary call spread"},
+        ).status_code == 200
+        prompt = (
+            f"Draft an AAPL option strategy with 2 contracts: long {expiry} "
+            f"{long_pair.strike:g} call and short {expiry} {short_pair.strike:g} call."
+        )
+        request_payload = {
+            "domain": "synthesis",
+            "prompt": prompt,
+            "user_session_id": session_id,
+            "context": {"current_tab": "copilot", "workspace_mode": "research"},
+        }
+
+        plan = client.post("/copilot/operator-plan", json=request_payload)
+        assert plan.status_code == 200
+        assert plan.json()["intent"] == "options_strategy_draft"
+        assert [step["tool_id"] for step in plan.json()["steps"]] == ["draft_options_strategy"]
+
+        response = client.post("/copilot/operator-plan/execute", json=request_payload)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        trace = next(item for item in payload["tool_traces"] if item["tool_name"] == "draft_options_strategy")
+        assert trace["arguments"]["symbol"] == "AAPL"
+        assert trace["arguments"]["contracts"] == 2
+        assert "max_expiries" not in trace["arguments"]
+        assert trace["arguments"]["legs"] == [
+            {
+                "side": "long",
+                "option_type": "call",
+                "expiry": expiry,
+                "strike": float(long_pair.strike),
+                "quantity": 1,
+            },
+            {
+                "side": "short",
+                "option_type": "call",
+                "expiry": expiry,
+                "strike": float(short_pair.strike),
+                "quantity": 1,
+            },
+        ]
+        assert "temporary working analysis" in trace["summary"].lower()
+
+        detail = client.get(f"/copilot/sessions/{session_id}")
+        assert detail.status_code == 200
+        analyses = detail.json()["working_analyses"]
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis["analysis_type"] == "options_strategy_draft"
+        assert analysis["entity"]["entity_type"] == "option_set"
+        assert analysis["entity"]["symbol"] == "AAPL"
+        assert analysis["inputs"] == trace["arguments"]
+        assert analysis["outputs"]["status"] in {"ready", "degraded"}
+        assert analysis["outputs"]["unresolved_legs"] == []
+        assert [leg["premium"] for leg in analysis["outputs"]["legs"]] == [
+            long_pair.call_price,
+            short_pair.call_price,
+        ]
+        assert analysis["source_ids"] == ["iv.option_set.AAPL"]
+        assert analysis["owning_tab"] == "iv"
+        assert analysis["owning_mode"] == "strategies"
+        assert analysis["materialization"]["payload_contract"] == "copilot.options-strategy-working-analysis.v1"
+        assert analysis["materialization"]["durable"] is False
+        assert analysis["materialization"]["persistence_policy"] == "non_durable_only"
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.get_working_analysis(analysis["analysis_id"])
+        assert restored is not None
+        assert restored.inputs == analysis["inputs"]
+        assert restored.outputs == analysis["outputs"]
+
+        materialized = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert materialized.status_code == 200
+        assert materialized.json()["materialized_at"] is not None
+        assert materialized.json()["owning_mode"] == "strategies"
+
+        discarded = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/discard"
+        )
+        assert discarded.status_code == 200
+        assert discarded.json()["status"] == "discarded"
+        assert client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        ).status_code == 409
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8e_option_set_draft_never_substitutes_a_nearby_contract(tmp_path):
+    _client, runtime = _build_test_client(tmp_path)
+    try:
+        iv_service = runtime.copilot_service.iv_service
+        assert iv_service is not None
+        fixed_surface = iv_service.get_surface(
+            IVSurfaceRequest(symbol="AAPL", market_data_mode="auto", depth_preset="compact")
+        )
+        assert fixed_surface.snapshot is not None
+        snapshot = fixed_surface.snapshot
+        pair = snapshot.pairs[0]
+        iv_service.get_surface = lambda request: fixed_surface  # type: ignore[method-assign]
+        request = CopilotResearchCardRequest(
+            domain="iv",
+            prompt="Draft an AAPL option strategy.",
+            context=CopilotRequestContext(current_tab="iv", workspace_mode="strategies"),
+        )
+        context = runtime.copilot_service._build_plan_execution_context(request, "iv")
+
+        execution = runtime.copilot_service._execute_tool(
+            "draft_options_strategy",
+            {
+                "symbol": "AAPL",
+                "name": "Exact-contract check",
+                "contracts": 1,
+                "depth_preset": "compact",
+                "market_data_mode": "auto",
+                "legs": [
+                    {
+                        "side": "long",
+                        "option_type": "call",
+                        "expiry": pair.expiry,
+                        "strike": float(pair.strike) + 0.123456,
+                        "quantity": 1,
+                    }
+                ],
+            },
+            context,
+        )
+
+        assert execution.output["status"] == "incomplete"
+        assert execution.output["legs"] == []
+        assert execution.output["unresolved_legs"][0]["reason"] == "exact_contract_unavailable"
+        assert any("did not substitute a nearby contract" in warning for warning in execution.output["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8f_strategy_lab_portfolio_materializes_exact_signed_inputs(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        history_calls: list[tuple[str, int]] = []
+
+        def fixture_history(instrument, lookback_days: int):
+            symbol = str(instrument.symbol).upper()
+            history_calls.append((symbol, lookback_days))
+            dates = pd.date_range("2024-01-02", periods=520, freq="B")
+            symbol_bias = {"QQQ": 0.0009, "IWM": 0.0004, "SPY": 0.0006}[symbol]
+            returns = pd.Series(
+                [symbol_bias + (0.0007 if index % 5 == 0 else -0.0002) for index in range(520)],
+                index=dates,
+            )
+            prices = 100.0 * (1.0 + returns).cumprod()
+            return ResearchHistoryResult(
+                series=prices,
+                source_provider="fixture",
+                source_label="Fixture listed history",
+                origin="tests.copilot.strategy_lab_portfolio",
+                freshness_label=FreshnessLabel.HISTORICAL,
+            )
+
+        runtime.research_provider.load_instrument_history_result = fixture_history  # type: ignore[method-assign]
+        session_id = "session_checkpoint8f_strategy_lab_portfolio"
+        assert client.post(
+            "/copilot/sessions",
+            json={"session_id": session_id, "title": "Temporary QQQ IWM strategy"},
+        ).status_code == 200
+        prompt = (
+            "Run a Strategy Lab portfolio backtest of 60% long QQQ and 40% short IWM "
+            "against SPY over 2 years, minimum 100 observations."
+        )
+        request_payload = {
+            "domain": "synthesis",
+            "prompt": prompt,
+            "user_session_id": session_id,
+            "context": {"current_tab": "copilot", "workspace_mode": "research"},
+        }
+
+        plan = client.post("/copilot/operator-plan", json=request_payload)
+        assert plan.status_code == 200
+        assert plan.json()["intent"] == "strategy_lab_portfolio_backtest"
+        assert [step["tool_id"] for step in plan.json()["steps"]] == [
+            "run_strategy_lab_portfolio_backtest"
+        ]
+
+        response = client.post("/copilot/operator-plan/execute", json=request_payload)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        trace = next(
+            item
+            for item in payload["tool_traces"]
+            if item["tool_name"] == "run_strategy_lab_portfolio_backtest"
+        )
+        assert trace["arguments"] == {
+            "name": "Temporary QQQ/IWM",
+            "benchmark_symbol": "SPY",
+            "lookback_days": 504,
+            "min_observations": 100,
+            "legs": [
+                {
+                    "label": "Long QQQ",
+                    "asset_class": "etf",
+                    "identifier": "QQQ",
+                    "weight": 0.6,
+                },
+                {
+                    "label": "Short IWM",
+                    "asset_class": "etf",
+                    "identifier": "IWM",
+                    "weight": -0.4,
+                },
+            ],
+        }
+        assert history_calls == [("QQQ", 504), ("IWM", 504), ("SPY", 504)]
+
+        detail = client.get(f"/copilot/sessions/{session_id}")
+        assert detail.status_code == 200
+        analyses = detail.json()["working_analyses"]
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis["analysis_type"] == "strategy_lab_portfolio_backtest"
+        assert analysis["entity"]["entity_type"] == "strategy_lab_portfolio"
+        assert analysis["inputs"] == trace["arguments"]
+        assert analysis["outputs"]["inputs"] == trace["arguments"]
+        assert analysis["outputs"]["temporary_assumptions"] == {
+            "benchmark_symbol": "SPY",
+            "lookback_days": 504,
+            "min_observations": 100,
+            "weight_normalization": "gross_signed_exposure",
+            "risk_free_rate": 0.0,
+            "transaction_costs_included": False,
+            "slippage_included": False,
+            "rebalancing_simulated": False,
+        }
+        assert analysis["outputs"]["metrics"]["observation_count"] >= 100
+        assert analysis["outputs"]["risk_legs"]
+        assert analysis["owning_tab"] == "strategy_lab"
+        assert analysis["owning_mode"] == "composer"
+        assert (
+            analysis["materialization"]["payload_contract"]
+            == "copilot.strategy-lab-working-analysis.v1"
+        )
+        assert analysis["materialization"]["durable"] is False
+        assert analysis["materialization"]["persistence_policy"] == "non_durable_only"
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.get_working_analysis(analysis["analysis_id"])
+        assert restored is not None
+        assert restored.inputs == analysis["inputs"]
+        assert restored.outputs == analysis["outputs"]
+
+        materialized = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        )
+        assert materialized.status_code == 200
+        assert materialized.json()["materialized_at"] is not None
+        assert materialized.json()["owning_mode"] == "composer"
+
+        discarded = client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/discard"
+        )
+        assert discarded.status_code == 200
+        assert discarded.json()["status"] == "discarded"
+        assert client.post(
+            f"/copilot/working-analyses/{analysis['analysis_id']}/materialize"
+        ).status_code == 409
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8f_strategy_lab_portfolio_rejects_zero_or_missing_exact_legs(tmp_path):
+    _client, runtime = _build_test_client(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="finite non-zero weight"):
+            runtime.copilot_service._normalize_strategy_lab_portfolio_arguments(
+                {
+                    "name": "Invalid",
+                    "benchmark_symbol": "SPY",
+                    "lookback_days": 252,
+                    "min_observations": 20,
+                    "legs": [
+                        {
+                            "label": "Do not invent",
+                            "asset_class": "etf",
+                            "identifier": "QQQ",
+                            "weight": 0,
+                        }
+                    ],
+                }
+            )
+        with pytest.raises(ValueError, match="exact identifier"):
+            runtime.copilot_service._normalize_strategy_lab_portfolio_arguments(
+                {
+                    "name": "Invalid",
+                    "benchmark_symbol": "SPY",
+                    "lookback_days": 252,
+                    "min_observations": 20,
+                    "legs": [
+                        {
+                            "label": "Do not substitute",
+                            "asset_class": "etf",
+                            "identifier": "",
+                            "weight": 1,
+                        }
+                    ],
+                }
+            )
     finally:
         runtime.shutdown()
 

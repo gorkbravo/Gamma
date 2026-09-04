@@ -49,6 +49,7 @@
     isFittedCell,
     livePositionForSymbol,
     nearestStrikeIndex,
+    optionsStrategyStateFromWorkingAnalysis,
     optionsModes,
     reconcileStrategyToSymbol,
     selectedExpiryForSurface,
@@ -177,6 +178,7 @@
   let strategySymbol: string | null = null;
   let strategySizing: StrategySizing = deriveStrategySizing(strategyPayoff, strategyLegs, strategyContracts, null);
   let strategyGreeks: StrategyGreekSummary | null = null;
+  let appliedWorkingAnalysisId: string | null = null;
   let probabilitySurface: ImpliedProbabilitySurface | null = null;
   let probabilitySlice: ImpliedProbabilitySlice | null = null;
   let probabilitySelection: ImpliedProbabilitySelection | null = null;
@@ -212,6 +214,7 @@
   // underlying used to leave the previous symbol's spread rendered under the new
   // header (GUA-20260903-6), so the structure is dropped with a visible notice.
   $: syncStrategyToActiveSymbol(result?.symbol ?? null);
+  $: applyOptionsStrategyWorkingAnalysis(workingAnalysis);
 
   $: activeExpiry = selectedExpiryForSurface(result, selectedExpiry);
   $: chainRows = deriveChainRows(result, activeExpiry);
@@ -505,6 +508,19 @@
     strategyTemplateNotice = "";
   }
 
+  function applyOptionsStrategyWorkingAnalysis(analysis: CopilotWorkingAnalysis | null) {
+    const draft = optionsStrategyStateFromWorkingAnalysis(analysis);
+    if (!draft || draft.analysisId === appliedWorkingAnalysisId) {
+      return;
+    }
+    strategySymbol = draft.symbol;
+    strategyLegs = draft.legs;
+    strategyContracts = draft.contracts;
+    selectedExpiry = draft.selectedExpiry;
+    strategyTemplateNotice = draft.notice;
+    appliedWorkingAnalysisId = draft.analysisId;
+  }
+
   function syncStrategyToActiveSymbol(nextSymbol: string | null) {
     const reconciled = reconcileStrategyToSymbol(
       nextSymbol,
@@ -685,7 +701,7 @@
     </article>
   {/if}
 
-  {#if mode === "realized_implied" && workingAnalysis}
+  {#if workingAnalysis && workingAnalysis.owning_mode === mode}
     <CopilotOptionsWorkingAnalysis analysis={workingAnalysis} />
   {/if}
 

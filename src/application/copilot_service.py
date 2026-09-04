@@ -131,7 +131,12 @@ from src.models.prediction_markets import (
 )
 from src.models.research_script import ResearchScriptInputFileCreateRequest
 from src.models.provenance import FreshnessLabel
-from src.models.research_lab import ResearchComparisonLeg, ResearchComparisonRequest
+from src.models.research_lab import (
+    ResearchComparisonLeg,
+    ResearchComparisonRequest,
+    StrategyLabPortfolioCompositionRequest,
+    StrategyLabPortfolioLeg,
+)
 from src.services.copilot_provider import CopilotProvider, CopilotRunCancelled
 from src.utils.time import now_utc
 
@@ -551,6 +556,71 @@ class CopilotService:
                         "Raw uploaded CSV rows are not persisted by default, so this action summarizes the active normalized result.",
                         "Benchmark-relative fields are unavailable when the active Strategy Lab result has no benchmark overlap.",
                         "Compare/Scenario results are summarized as comparison analytics rather than rerun as a new backtest.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="run_strategy_lab_portfolio_backtest",
+                    description=(
+                        "Compose and analyze an exact temporary Strategy Lab portfolio from signed listed-market legs, "
+                        "a benchmark, lookback, and minimum-overlap assumption."
+                    ),
+                    domains=("strategy_lab",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": ["string", "null"],
+                                "description": "Optional name for the temporary Strategy Lab draft.",
+                            },
+                            "benchmark_symbol": {
+                                "type": ["string", "null"],
+                                "description": "Optional listed benchmark ticker. Defaults to SPY.",
+                            },
+                            "lookback_days": {
+                                "type": ["integer", "null"],
+                                "description": "Historical lookback in days, bounded to 20-2520.",
+                            },
+                            "min_observations": {
+                                "type": ["integer", "null"],
+                                "description": "Minimum shared return observations, bounded to 2-2520.",
+                            },
+                            "legs": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 25,
+                                "description": "Exact signed Strategy Lab legs. Positive is long; negative is short.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "label": {"type": ["string", "null"]},
+                                        "asset_class": {
+                                            "type": "string",
+                                            "enum": ["equity", "etf", "commodity", "crypto"],
+                                        },
+                                        "identifier": {"type": "string"},
+                                        "weight": {"type": "number"},
+                                    },
+                                    "required": ["label", "asset_class", "identifier", "weight"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["name", "benchmark_symbol", "lookback_days", "min_observations", "legs"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_strategy_lab_portfolio_backtest,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=30.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Resolves only the exact requested listed identifiers through Gamma's configured research provider, "
+                        "gross-normalizes signed weights, aligns shared history, and returns a session-ephemeral analysis."
+                    ),
+                    failure_modes=(
+                        "Every non-zero leg must identify an exact supported listed instrument; Gamma never substitutes another symbol.",
+                        "The action fails closed when shared history does not meet the requested minimum observations.",
+                        "Results are temporary research state and never save, rebalance, route orders, or mutate a portfolio.",
                     ),
                 ),
                 _CopilotToolDefinition(
@@ -1301,6 +1371,78 @@ class CopilotService:
                         "Shock parameters are bounded and may be clipped before execution.",
                         "Rate shock proxy uses transparent duration assumptions; it is not a full curve repricing model.",
                         "Positions without explicit shocks or supported proxies are left unchanged in the proxy impact block.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="draft_options_strategy",
+                    description=(
+                        "Resolve an explicit, bounded option-set draft against Gamma's normalized Options surface "
+                        "and retain provider-priced legs for temporary inspection in Options / Strategies."
+                    ),
+                    domains=("iv",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": ["string", "null"],
+                                "description": "Underlying ticker. Use null only when the active Options symbol is the intended underlying.",
+                            },
+                            "name": {
+                                "type": ["string", "null"],
+                                "description": "Optional concise label for the temporary option set.",
+                            },
+                            "contracts": {
+                                "type": ["integer", "null"],
+                                "minimum": 1,
+                                "maximum": 100,
+                                "description": "Number of complete structures to inspect, bounded to 1-100.",
+                            },
+                            "depth_preset": {
+                                "type": ["string", "null"],
+                                "enum": ["compact", "standard", "deep", "front_deep", "max", None],
+                                "description": "IV surface collection depth. Compact is the bounded default.",
+                            },
+                            "market_data_mode": {
+                                "type": ["string", "null"],
+                                "enum": ["live", "delayed", "auto", None],
+                                "description": "Optional market-data mode override. Null keeps the active IV service mode.",
+                            },
+                            "legs": {
+                                "type": "array",
+                                "description": "Exact option legs requested by the user. Gamma resolves marks but never changes strikes, expiries, sides, or ratios.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "side": {"type": "string", "enum": ["long", "short"]},
+                                        "option_type": {"type": "string", "enum": ["call", "put"]},
+                                        "expiry": {
+                                            "type": "string",
+                                            "pattern": r"^\d{4}-?\d{2}-?\d{2}$",
+                                        },
+                                        "strike": {"type": "number", "minimum": 0.01},
+                                        "quantity": {"type": "integer", "minimum": 1, "maximum": 100},
+                                    },
+                                    "required": ["side", "option_type", "expiry", "strike", "quantity"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["symbol", "name", "contracts", "depth_preset", "market_data_mode", "legs"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_draft_options_strategy,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=20.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Uses Gamma's normalized IVService surface to resolve exact requested option legs and provider marks. "
+                        "The result is session-ephemeral and cannot save an option set, place an order, or create trading authority."
+                    ),
+                    failure_modes=(
+                        "Every requested expiry and strike must exist exactly in the normalized surface; Gamma does not substitute nearby contracts.",
+                        "Every requested call or put must have a positive provider-backed display price before the draft can materialize.",
+                        "Sparse, delayed, or unavailable option data is preserved as an incomplete or degraded result with warnings.",
                     ),
                 ),
                 _CopilotToolDefinition(
@@ -5980,6 +6122,65 @@ class CopilotService:
                 ),
             }
 
+        if tool_id == "run_strategy_lab_portfolio_backtest":
+            if not self._prompt_requests_strategy_lab_portfolio(
+                str(request.prompt or ""),
+                request.context,
+            ):
+                return None
+            if output.get("status") not in {"ready", "degraded"}:
+                return None
+            trace_arguments = deepcopy(execution.trace.arguments)
+            requested_legs = list(trace_arguments.get("legs") or [])
+            output_inputs = output.get("inputs") if isinstance(output.get("inputs"), dict) else {}
+            output_legs = list(output_inputs.get("legs") or [])
+            if not requested_legs or output_legs != requested_legs:
+                return None
+            name = str(output.get("name") or trace_arguments.get("name") or "Strategy Lab Portfolio").strip()
+            identity = self._stable_working_identity(
+                {
+                    "legs": requested_legs,
+                    "benchmark_symbol": trace_arguments.get("benchmark_symbol"),
+                    "lookback_days": trace_arguments.get("lookback_days"),
+                    "min_observations": trace_arguments.get("min_observations"),
+                }
+            )
+            return {
+                "family_key": f"strategy_lab.portfolio:{identity}",
+                "domain": "strategy_lab",
+                "analysis_type": "strategy_lab_portfolio_backtest",
+                "title": name,
+                "entity": {
+                    "entity_type": "strategy_lab_portfolio",
+                    "normalized_id": f"strategy_lab_portfolio:{identity}",
+                    "label": name,
+                    "leg_count": len(requested_legs),
+                    "benchmark_symbol": trace_arguments.get("benchmark_symbol"),
+                },
+                "inputs": trace_arguments,
+                "outputs": deepcopy(output),
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "strategy_lab",
+                "owning_mode": "composer",
+                "materialization": self._working_analysis_materialization(
+                    tab="strategy_lab",
+                    mode="composer",
+                    payload_contract="copilot.strategy-lab-working-analysis.v1",
+                    navigation_context={
+                        "benchmark_symbol": trace_arguments.get("benchmark_symbol"),
+                        "leg_count": len(requested_legs),
+                    },
+                    persistence_policy="non_durable_only",
+                    save_target=None,
+                ),
+                "source_provider": str(output.get("source_provider") or "gamma_strategy_lab"),
+                "origin": str(output.get("origin") or "research_service.strategy_lab.portfolio_compose"),
+                "transformation_note": (
+                    "Created from an authorized read-only Strategy Lab Operator action. Opening this session-ephemeral "
+                    "analysis hydrates exact editable Composer inputs without saving, rebalancing, or trading."
+                ),
+            }
+
         if tool_id == "run_hypothetical_portfolio_comparison":
             portfolio = self._temporary_portfolio_from_tool_arguments(execution.trace.arguments)
             if portfolio is None:
@@ -6073,6 +6274,60 @@ class CopilotService:
                     "result does not save, rebalance, trade, or alter the source portfolio."
                 ),
             }
+        if tool_id == "draft_options_strategy":
+            if not self._prompt_requests_options_strategy_draft(
+                str(request.prompt or ""),
+                request.context,
+            ):
+                return None
+            if output.get("status") not in {"ready", "degraded"}:
+                return None
+            trace_arguments = deepcopy(execution.trace.arguments)
+            requested_legs = list(trace_arguments.get("legs") or [])
+            resolved_legs = list(output.get("legs") or [])
+            if not requested_legs or len(resolved_legs) != len(requested_legs):
+                return None
+            symbol = str(output.get("symbol") or trace_arguments.get("symbol") or "").strip().upper()
+            if not symbol:
+                return None
+            name = str(output.get("name") or trace_arguments.get("name") or f"{symbol} option set").strip()
+            return {
+                "family_key": f"options.strategy:{symbol}:{self._stable_working_identity(requested_legs)}",
+                "domain": "iv",
+                "analysis_type": "options_strategy_draft",
+                "title": name,
+                "entity": {
+                    "entity_type": "option_set",
+                    "normalized_id": f"option_set:{symbol}:{self._stable_working_identity(requested_legs)}",
+                    "symbol": symbol,
+                    "ticker": symbol,
+                    "label": name,
+                    "leg_count": len(resolved_legs),
+                },
+                "inputs": trace_arguments,
+                "outputs": deepcopy(output),
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "iv",
+                "owning_mode": "strategies",
+                "materialization": self._working_analysis_materialization(
+                    tab="iv",
+                    mode="strategies",
+                    payload_contract="copilot.options-strategy-working-analysis.v1",
+                    navigation_context={
+                        "symbol": symbol,
+                        "expiry": resolved_legs[0].get("expiry"),
+                    },
+                    persistence_policy="non_durable_only",
+                    save_target=None,
+                ),
+                "source_provider": str(output.get("source_provider") or "gamma"),
+                "origin": str(output.get("origin") or "gamma.iv.option_set_draft"),
+                "transformation_note": (
+                    "Created from an authorized read-only Options Operator action. Opening this session-ephemeral "
+                    "draft loads provider-priced legs into the strategy builder without saving an option set or creating trading authority."
+                ),
+            }
+
         if tool_id == "run_options_realized_implied_comparison":
             normalized_prompt = str(request.prompt or "").strip().lower()
             explicitly_requested = bool(
@@ -6593,6 +6848,8 @@ class CopilotService:
             return {"ticker": context.summary_data.get("ticker")}
         if tool_name == "run_strategy_lab_backtest":
             return {"result_kind": "auto"}
+        if tool_name == "run_strategy_lab_portfolio_backtest":
+            return self._default_strategy_lab_portfolio_arguments(context)
         if tool_name == "run_research_scope_analysis":
             return self._default_research_scope_analysis_arguments(context)
         if tool_name == "inspect_equity_research_context":
@@ -6608,6 +6865,8 @@ class CopilotService:
             return {"symbol": symbol, "max_rows": 8}
         if tool_name == "run_hypothetical_portfolio_comparison":
             return self._default_hypothetical_portfolio_arguments(context)
+        if tool_name == "draft_options_strategy":
+            return self._default_options_strategy_arguments(context)
         if tool_name == "run_options_realized_implied_comparison":
             return {
                 "symbol": context.summary_data.get("target_symbol"),
@@ -7112,6 +7371,12 @@ class CopilotService:
             ("risk", "overview", "copilot.risk-working-analysis.v1"),
             ("risk", "scenarios", "copilot.risk-working-analysis.v1"),
             ("iv", "realized_implied", "copilot.options-working-analysis.v1"),
+            ("iv", "strategies", "copilot.options-strategy-working-analysis.v1"),
+            (
+                "strategy_lab",
+                "composer",
+                "copilot.strategy-lab-working-analysis.v1",
+            ),
             (
                 "strategy_lab",
                 "script",
@@ -7444,6 +7709,10 @@ class CopilotService:
 
         if CopilotService._prompt_requests_script_workflow(prompt, context):
             return "research_script_workflow"
+        if CopilotService._prompt_requests_options_strategy_draft(prompt, context):
+            return "options_strategy_draft"
+        if CopilotService._prompt_requests_strategy_lab_portfolio(prompt, context):
+            return "strategy_lab_portfolio_backtest"
         if CopilotService._prompt_requests_hypothetical_portfolio(prompt):
             return "hypothetical_portfolio_comparison"
         if has_portfolio_context and has_rate_context:
@@ -7520,6 +7789,35 @@ class CopilotService:
                 ),
                 planned_tools=planned_tools,
                 required_context=["script_state", "authorized_input_references"],
+            )
+        elif intent == "strategy_lab_portfolio_backtest":
+            add(
+                "strategy_lab",
+                "deep",
+                (
+                    "The current turn explicitly requests a temporary Strategy Lab portfolio backtest; Gamma must preserve "
+                    "the exact signed legs, benchmark, lookback, and minimum-overlap assumptions."
+                ),
+                action_type="run_analysis",
+                planned_tools=["run_strategy_lab_portfolio_backtest"],
+                required_context=[
+                    "signed_listed_legs",
+                    "benchmark_symbol",
+                    "lookback_days",
+                    "min_observations",
+                ],
+            )
+        elif intent == "options_strategy_draft":
+            add(
+                "iv",
+                "deep",
+                (
+                    "The current turn explicitly requests a temporary option-set draft; Gamma must preserve "
+                    "the exact underlying, expiry, strike, side, and ratio while resolving provider marks."
+                ),
+                action_type="run_analysis",
+                planned_tools=["draft_options_strategy"],
+                required_context=["underlying_symbol", "option_legs", "provider_priced_surface"],
             )
         elif depth_profile == "user_directed":
             directed_domains = self._extract_user_directed_domains(prompt)
@@ -7797,6 +8095,26 @@ class CopilotService:
             "50/50",
         )
         return any(term in normalized for term in hypothetical_terms)
+
+    @staticmethod
+    def _prompt_requests_strategy_lab_portfolio(
+        prompt: str,
+        context: CopilotRequestContext | None = None,
+    ) -> bool:
+        normalized = str(prompt or "").lower()
+        has_portfolio_shape = bool(
+            re.search(r"\b(?:portfolio|book|long\s*/?\s*short|signed\s+legs?)\b", normalized)
+        )
+        has_analysis_verb = bool(
+            re.search(r"\b(?:backtest|compose|model|draft|build|construct|analy[sz]e)\b", normalized)
+        )
+        names_strategy_lab = bool(re.search(r"\bstrategy\s+lab\b", normalized))
+        active_composer = bool(
+            context is not None
+            and context.current_tab == "strategy_lab"
+            and context.workspace_mode in {None, "research"}
+        )
+        return has_portfolio_shape and has_analysis_verb and (names_strategy_lab or active_composer)
 
     @staticmethod
     def _prompt_requests_risk_scenario(prompt: str) -> bool:
@@ -8623,6 +8941,10 @@ class CopilotService:
             str(request.prompt or "").lower(),
             request.context,
         )
+        explicit_portfolio_request = self._prompt_requests_strategy_lab_portfolio(
+            str(request.prompt or ""),
+            request.context,
+        )
         if (
             not any(
                 isinstance(item, dict)
@@ -8630,6 +8952,7 @@ class CopilotService:
             )
             and not handoff_context.get("current_count")
             and not explicit_script_request
+            and not explicit_portfolio_request
         ):
             raise ValueError("Strategy Lab copilot requires an active import, composition, comparison, or current handoff.")
         summary_data = {
@@ -9076,6 +9399,7 @@ class CopilotService:
                 "session": session,
                 "workbench": workbench,
                 "target_symbol": target_symbol,
+                "prompt": request.prompt,
             },
             sources=sources,
             warnings=warnings,
@@ -10694,6 +11018,127 @@ class CopilotService:
                 tool_name="run_strategy_lab_backtest",
                 summary=f"Summarized the active Strategy Lab {result_kind.replace('_', ' ')} as a read-only backtest.",
                 arguments={"result_kind": result_kind},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_run_strategy_lab_portfolio_backtest(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del context
+        if self.research_provider is None:
+            raise ValueError("Research provider is unavailable to Copilot.")
+        normalized = self._normalize_strategy_lab_portfolio_arguments(arguments)
+        result = ResearchService(self.research_provider).compose_strategy_lab_portfolio(
+            StrategyLabPortfolioCompositionRequest(
+                name=normalized["name"],
+                legs=[
+                    StrategyLabPortfolioLeg(
+                        label=leg["label"],
+                        asset_class=leg["asset_class"],
+                        identifier=leg["identifier"],
+                        weight=leg["weight"],
+                        value_kind="return",
+                    )
+                    for leg in normalized["legs"]
+                ],
+                benchmark_symbol=normalized["benchmark_symbol"],
+                lookback_days=normalized["lookback_days"],
+                min_observations=normalized["min_observations"],
+            )
+        )
+        metrics = self._metrics_to_dict(result.metrics)
+        for key in ("start_date", "end_date"):
+            value = metrics.get(key)
+            if isinstance(value, datetime):
+                metrics[key] = value.isoformat()
+        public_inputs = {key: deepcopy(value) for key, value in normalized.items() if key != "warnings"}
+        output = {
+            "status": "ready",
+            "name": result.name,
+            "inputs": public_inputs,
+            "temporary_assumptions": {
+                "benchmark_symbol": normalized["benchmark_symbol"],
+                "lookback_days": normalized["lookback_days"],
+                "min_observations": normalized["min_observations"],
+                "weight_normalization": "gross_signed_exposure",
+                "risk_free_rate": 0.0,
+                "transaction_costs_included": False,
+                "slippage_included": False,
+                "rebalancing_simulated": False,
+            },
+            "metrics": metrics,
+            "coverage": {
+                "return_points": int(len(result.returns)),
+                "benchmark_points": int(len(result.benchmark_returns)),
+                "rolling_points": len(result.rolling_points),
+                "monthly_periods": len(result.monthly_returns),
+                "annual_periods": len(result.annual_returns),
+            },
+            "period_returns": {
+                "monthly": [asdict(item) for item in result.monthly_returns[-12:]],
+                "annual": [asdict(item) for item in result.annual_returns[-10:]],
+            },
+            "leg_contributions": dict(result.leg_contributions),
+            "risk_legs": [
+                {
+                    "leg_id": leg.leg_id,
+                    "label": leg.label,
+                    "symbol": leg.symbol,
+                    "instrument_id": leg.instrument_id,
+                    "weight": leg.weight,
+                    "return_point_count": len(leg.return_points),
+                    "source_provider": leg.source_provider,
+                    "warnings": list(leg.warnings),
+                }
+                for leg in result.risk_legs
+            ],
+            "alignment_diagnostics": deepcopy(result.alignment_diagnostics),
+            "source_provider": result.source_provider,
+            "retrieved_at": result.retrieved_at.isoformat(),
+            "origin": result.origin,
+            "transformation_note": result.transformation_note,
+            "freshness_label": result.freshness_label,
+            "warnings": dedupe_warnings(
+                normalized["warnings"],
+                result.warnings,
+                [
+                    "Temporary assumptions are session-ephemeral and editable in Strategy Lab Composer.",
+                    "No transaction costs, slippage, or rebalancing are simulated in this historical research run.",
+                ],
+            ),
+        }
+        source = CopilotSourceRef(
+            source_id=f"strategy_lab.portfolio.{self._safe_source_id(self._stable_working_identity(normalized))}",
+            label=f"{result.name} temporary Strategy Lab backtest",
+            kind="analytics",
+            provider=result.source_provider,
+            origin=result.origin,
+            description=(
+                "Exact signed listed-market legs resolved and composed as a read-only, session-ephemeral Strategy Lab run."
+            ),
+            retrieved_at=result.retrieved_at,
+            navigation_supported=True,
+            navigation_tab="strategy_lab",
+            navigation_mode="composer",
+            navigation_context={
+                "benchmark_symbol": normalized["benchmark_symbol"],
+                "leg_count": str(len(normalized["legs"])),
+            },
+        )
+        trace_arguments = {key: deepcopy(value) for key, value in normalized.items() if key != "warnings"}
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_strategy_lab_portfolio_backtest",
+                summary=(
+                    f"Composed {len(normalized['legs'])} exact signed leg(s) for a temporary Strategy Lab "
+                    f"backtest against {normalized['benchmark_symbol']}; status={output['status']}."
+                ),
+                arguments=trace_arguments,
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -12768,6 +13213,83 @@ class CopilotService:
             sources=[source],
         )
 
+    @staticmethod
+    def _prompt_requests_options_strategy_draft(
+        prompt: str,
+        context: CopilotRequestContext | None = None,
+    ) -> bool:
+        normalized = str(prompt or "").strip().lower()
+        has_draft_verb = bool(
+            re.search(r"\b(?:build|construct|create|draft|model|prepare|set\s+up)\b", normalized)
+        )
+        has_options_structure = bool(
+            re.search(
+                r"\b(?:option(?:s)?\s+(?:set|strategy|structure)|call\s+spread|put\s+spread|"
+                r"straddle|strangle|collar|risk\s+reversal|iron\s+condor|butterfly)\b",
+                normalized,
+            )
+        )
+        if has_draft_verb and has_options_structure:
+            return True
+        return bool(
+            has_draft_verb
+            and context is not None
+            and context.current_tab == "iv"
+            and re.search(r"\b(?:strategy|structure|legs?)\b", normalized)
+        )
+
+    def _tool_draft_options_strategy(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        normalized = self._normalize_options_strategy_arguments(arguments, context)
+        surface, service_warnings, service_messages = self._options_surface_for_operator(
+            normalized,
+            context,
+        )
+        output = self._options_strategy_draft_summary(
+            surface=surface,
+            normalized=normalized,
+            service_warnings=service_warnings,
+            service_messages=service_messages,
+        )
+        symbol = str(output.get("symbol") or normalized["symbol"]).strip().upper()
+        source = CopilotSourceRef(
+            source_id=f"iv.option_set.{self._safe_source_id(symbol)}",
+            label=f"{symbol} temporary option-set draft",
+            kind="analytics",
+            provider=str(output.get("source_provider") or "gamma"),
+            origin=str(output.get("origin") or "gamma.iv.option_set_draft"),
+            description=(
+                "Exact requested option legs resolved against Gamma's normalized provider-priced surface; "
+                "temporary research state only."
+            ),
+            retrieved_at=(
+                self._coerce_source_datetime(output.get("retrieved_at"))
+                or self._coerce_source_datetime(output.get("timestamp"))
+                or now_utc()
+            ),
+            provider_native_id=symbol,
+            navigation_supported=True,
+            navigation_tab="iv",
+            navigation_mode="strategies",
+            navigation_context={"symbol": symbol},
+        )
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="draft_options_strategy",
+                summary=(
+                    f"Resolved {len(output.get('legs') or [])} of {len(normalized['legs'])} exact "
+                    f"option leg(s) for the temporary {symbol} option set; status={output.get('status')}."
+                ),
+                arguments=normalized,
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
     def _tool_get_iv_session_status(
         self,
         arguments: dict[str, Any],
@@ -13895,6 +14417,154 @@ class CopilotService:
         }
 
     @classmethod
+    def _normalize_strategy_lab_portfolio_arguments(
+        cls,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_legs = arguments.get("legs")
+        if not isinstance(raw_legs, list) or not raw_legs:
+            raise ValueError("Strategy Lab portfolio backtest requires at least one exact signed leg.")
+        if len(raw_legs) > 25:
+            raise ValueError("Strategy Lab portfolio backtest supports at most 25 exact signed legs.")
+        allowed_asset_classes = {"equity", "etf", "commodity", "crypto"}
+        legs: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_legs, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"Strategy Lab leg {index} must be an object.")
+            identifier = str(item.get("identifier") or "").strip().upper()
+            if not identifier:
+                raise ValueError(f"Strategy Lab leg {index} requires an exact identifier.")
+            asset_class = str(item.get("asset_class") or "").strip().lower()
+            if asset_class not in allowed_asset_classes:
+                raise ValueError(
+                    f"Strategy Lab leg {identifier} has unsupported asset_class `{asset_class or 'missing'}`."
+                )
+            try:
+                weight = float(item.get("weight"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Strategy Lab leg {identifier} requires a finite non-zero weight.") from exc
+            if not math.isfinite(weight) or weight == 0:
+                raise ValueError(f"Strategy Lab leg {identifier} requires a finite non-zero weight.")
+            label = str(item.get("label") or "").strip() or (
+                f"Long {identifier}" if weight > 0 else f"Short {identifier}"
+            )
+            legs.append(
+                {
+                    "label": label[:128],
+                    "asset_class": asset_class,
+                    "identifier": identifier[:64],
+                    "weight": weight,
+                }
+            )
+        lookback_raw = 756 if arguments.get("lookback_days") is None else arguments.get("lookback_days")
+        min_observations_raw = 5 if arguments.get("min_observations") is None else arguments.get("min_observations")
+        try:
+            lookback_days = int(lookback_raw)
+            min_observations = int(min_observations_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Strategy Lab lookback_days and min_observations must be integers.") from exc
+        if not 20 <= lookback_days <= MAX_RISK_LOOKBACK_DAYS:
+            raise ValueError(f"Strategy Lab lookback_days must be between 20 and {MAX_RISK_LOOKBACK_DAYS}.")
+        if not 2 <= min_observations <= min(lookback_days, MAX_RISK_LOOKBACK_DAYS):
+            raise ValueError("Strategy Lab min_observations must be at least 2 and no greater than lookback_days.")
+        benchmark_symbol = str(arguments.get("benchmark_symbol") or "SPY").strip().upper() or "SPY"
+        name = str(arguments.get("name") or "").strip()
+        if not name:
+            name = "Temporary " + "/".join(leg["identifier"] for leg in legs[:4])
+        return {
+            "name": name[:128],
+            "benchmark_symbol": benchmark_symbol[:64],
+            "lookback_days": lookback_days,
+            "min_observations": min_observations,
+            "legs": legs,
+            "warnings": [],
+        }
+
+    @classmethod
+    def _default_strategy_lab_portfolio_arguments(
+        cls,
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        """Parse only explicit signed percentage legs for the deterministic fallback.
+
+        General natural-language translation remains the provider's job. The
+        fallback refuses incomplete books instead of inventing weights or symbols.
+        """
+        prompt = str(context.tool_state.get("prompt") or context.summary_data.get("prompt") or "")
+        legs: list[dict[str, Any]] = []
+        occupied: list[tuple[int, int]] = []
+        patterns = (
+            re.compile(
+                r"\b(\d+(?:\.\d+)?)\s*%\s*(long|short)\s+([A-Z]{1,8}(?:\.[A-Z])?)\b",
+                flags=re.IGNORECASE,
+            ),
+            re.compile(
+                r"\b(long|short)\s+([A-Z]{1,8}(?:\.[A-Z])?)(?:\s+(?:at|with))?\s+(\d+(?:\.\d+)?)\s*%",
+                flags=re.IGNORECASE,
+            ),
+            re.compile(
+                r"\b([A-Z]{1,8}(?:\.[A-Z])?)\s*([+-])\s*(\d+(?:\.\d+)?)\s*%",
+                flags=re.IGNORECASE,
+            ),
+        )
+        matches: list[tuple[int, int, str, str, float]] = []
+        for pattern_index, pattern in enumerate(patterns):
+            for match in pattern.finditer(prompt):
+                if any(match.start() < end and match.end() > start for start, end in occupied):
+                    continue
+                if pattern_index == 0:
+                    percentage, side, identifier = match.group(1), match.group(2), match.group(3)
+                elif pattern_index == 1:
+                    side, identifier, percentage = match.group(1), match.group(2), match.group(3)
+                else:
+                    identifier, sign, percentage = match.group(1), match.group(2), match.group(3)
+                    side = "long" if sign == "+" else "short"
+                occupied.append((match.start(), match.end()))
+                matches.append((match.start(), match.end(), side.lower(), identifier.upper(), float(percentage)))
+        for _, _, side, identifier, percentage in sorted(matches):
+            if percentage <= 0:
+                continue
+            weight = percentage / 100.0
+            if side == "short":
+                weight = -weight
+            legs.append(
+                {
+                    "label": f"{side.title()} {identifier}",
+                    "asset_class": "etf",
+                    "identifier": identifier,
+                    "weight": weight,
+                }
+            )
+        if not legs:
+            return None
+        benchmark_match = re.search(
+            r"\b(?:vs\.?|versus|against|relative\s+to)\s+([A-Z]{1,8}(?:\.[A-Z])?)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        benchmark_symbol = benchmark_match.group(1).upper() if benchmark_match else "SPY"
+        lookback_days = 756
+        years_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\b", prompt, flags=re.IGNORECASE)
+        days_match = re.search(r"\b(\d+)\s*(?:trading\s+)?days?\b", prompt, flags=re.IGNORECASE)
+        if years_match:
+            lookback_days = int(round(float(years_match.group(1)) * 252))
+        elif days_match:
+            lookback_days = int(days_match.group(1))
+        min_match = re.search(
+            r"\b(?:minimum|min(?:imum)?\s+overlap(?:\s+of)?|at\s+least)\s+(\d+)\s*(?:observations?|obs)?\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        min_observations = int(min_match.group(1)) if min_match else 5
+        return {
+            "name": "Temporary " + "/".join(leg["identifier"] for leg in legs[:4]),
+            "benchmark_symbol": benchmark_symbol,
+            "lookback_days": lookback_days,
+            "min_observations": min_observations,
+            "legs": legs,
+        }
+
+    @classmethod
     def _default_hypothetical_portfolio_arguments(
         cls,
         context: CopilotContextBundle,
@@ -13969,6 +14639,56 @@ class CopilotService:
             "lookback_days": default["lookback_days"],
             "min_observations": default["min_observations"],
             "legs": list(default["legs"]),
+        }
+
+    @classmethod
+    def _default_options_strategy_arguments(
+        cls,
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        """Deterministic fallback for explicit canonical option-leg phrasing.
+
+        Capable providers remain responsible for general natural-language to
+        strict-schema translation. The fallback accepts only unambiguous
+        `long|short [call|put] YYYY-MM-DD strike [call|put]` legs and otherwise
+        stops for more precise input instead of inventing contracts.
+        """
+        prompt = str(context.tool_state.get("prompt") or context.summary_data.get("prompt") or "")
+        symbol = str(context.summary_data.get("target_symbol") or "").strip().upper()
+        if not symbol:
+            tickers = re.findall(r"\b[A-Z]{1,6}(?:\.[A-Z])?\b", prompt)
+            symbol = tickers[0] if tickers else ""
+        leg_pattern = re.compile(
+            r"(?:(\d+)\s*x?\s+)?\b(long|short)\s+"
+            r"(?:(call|put)\s+)?(\d{4}-?\d{2}-?\d{2})\s+"
+            r"(\d+(?:\.\d+)?)\s*(call|put)?\b",
+            flags=re.IGNORECASE,
+        )
+        legs: list[dict[str, Any]] = []
+        for match in leg_pattern.finditer(prompt):
+            option_type = str(match.group(3) or match.group(6) or "").lower()
+            if option_type not in {"call", "put"}:
+                continue
+            legs.append(
+                {
+                    "side": match.group(2).lower(),
+                    "option_type": option_type,
+                    "expiry": match.group(4),
+                    "strike": float(match.group(5)),
+                    "quantity": int(match.group(1) or 1),
+                }
+            )
+        if not symbol or not legs:
+            return None
+        contracts_match = re.search(r"\b(\d+)\s+(?:contracts?|structures?)\b", prompt, flags=re.IGNORECASE)
+        contracts = int(contracts_match.group(1)) if contracts_match else 1
+        return {
+            "symbol": symbol,
+            "name": f"{symbol} temporary option set",
+            "contracts": max(1, min(100, contracts)),
+            "depth_preset": "compact",
+            "market_data_mode": None,
+            "legs": legs[:8],
         }
 
     @staticmethod
@@ -15048,6 +15768,220 @@ class CopilotService:
             "market_data_mode": market_data_mode,
         }
 
+    def _normalize_options_strategy_arguments(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> dict[str, Any]:
+        surface = self._iv_surface_from_bundle(context)
+        session = self._iv_session_from_bundle(context)
+        target_symbol = str(
+            context.summary_data.get("target_symbol")
+            or context.tool_state.get("target_symbol")
+            or ""
+        )
+        symbol = str(arguments.get("symbol") or target_symbol or "").strip().upper()
+        if not symbol:
+            symbol = self._iv_target_symbol_from_state({}, surface, session)
+        contracts = self._bounded_int(
+            arguments.get("contracts"),
+            default=1,
+            minimum=1,
+            maximum=100,
+            field_name="contracts",
+            warnings=[],
+        )
+        depth_preset = str(arguments.get("depth_preset") or "compact").strip().lower().replace("-", "_")
+        if depth_preset not in {"compact", "standard", "deep", "front_deep", "max"}:
+            depth_preset = "compact"
+        market_data_mode = str(arguments.get("market_data_mode") or "").strip().lower() or None
+        if self.iv_service is not None:
+            market_data_mode = self.iv_service.normalize_market_data_mode(
+                market_data_mode or self.iv_service.market_data_mode
+            )
+        elif market_data_mode not in {"live", "delayed", "auto"}:
+            market_data_mode = None
+
+        legs: list[dict[str, Any]] = []
+        for item in list(arguments.get("legs") or [])[:8]:
+            if not isinstance(item, dict):
+                continue
+            side = str(item.get("side") or "").strip().lower()
+            option_type = str(item.get("option_type") or "").strip().lower()
+            expiry = str(item.get("expiry") or "").strip()
+            strike = self._optional_float(item.get("strike"))
+            quantity = self._bounded_int(
+                item.get("quantity"),
+                default=1,
+                minimum=1,
+                maximum=100,
+                field_name="legs.quantity",
+                warnings=[],
+            )
+            if (
+                side not in {"long", "short"}
+                or option_type not in {"call", "put"}
+                or not re.fullmatch(r"\d{4}-?\d{2}-?\d{2}", expiry)
+                or strike is None
+                or strike <= 0
+            ):
+                continue
+            legs.append(
+                {
+                    "side": side,
+                    "option_type": option_type,
+                    "expiry": expiry,
+                    "strike": float(strike),
+                    "quantity": quantity,
+                }
+            )
+        if not legs:
+            raise ValueError("Option-set drafting requires at least one valid explicit option leg.")
+        name = str(arguments.get("name") or "").strip()[:128] or f"{symbol} option set"
+        return {
+            "symbol": symbol or "SPY",
+            "name": name,
+            "contracts": contracts,
+            "depth_preset": depth_preset,
+            "market_data_mode": market_data_mode,
+            "legs": legs,
+        }
+
+    @staticmethod
+    def _canonical_option_expiry(value: Any) -> str:
+        return re.sub(r"[^0-9]", "", str(value or ""))[:8]
+
+    def _options_strategy_draft_summary(
+        self,
+        *,
+        surface: dict[str, Any],
+        normalized: dict[str, Any],
+        service_warnings: list[str],
+        service_messages: list[str],
+    ) -> dict[str, Any]:
+        warnings = dedupe_warnings(
+            surface.get("warnings", []) if isinstance(surface.get("warnings"), list) else [],
+            service_warnings,
+            service_messages,
+        )
+        pairs = [item for item in surface.get("pairs", []) or [] if isinstance(item, dict)]
+        resolved_legs: list[dict[str, Any]] = []
+        unresolved_legs: list[dict[str, Any]] = []
+        for index, requested in enumerate(normalized["legs"], start=1):
+            requested_expiry = self._canonical_option_expiry(requested["expiry"])
+            requested_strike = float(requested["strike"])
+            pair = next(
+                (
+                    item
+                    for item in pairs
+                    if self._canonical_option_expiry(item.get("expiry")) == requested_expiry
+                    and self._optional_float(item.get("strike")) is not None
+                    and abs(float(item["strike"]) - requested_strike) <= 1e-6
+                ),
+                None,
+            )
+            option_type = str(requested["option_type"])
+            if pair is None:
+                unresolved_legs.append({**requested, "reason": "exact_contract_unavailable"})
+                warnings.append(
+                    f"Leg {index}: exact {requested['expiry']} {requested_strike:g} {option_type} is unavailable; Gamma did not substitute a nearby contract."
+                )
+                continue
+            prefix = "call" if option_type == "call" else "put"
+            premium = self._first_optional_float(
+                pair.get(f"{prefix}_price"),
+                pair.get(f"{prefix}_midpoint"),
+                pair.get(f"{prefix}_mark_price"),
+            )
+            if premium is None or premium <= 0:
+                unresolved_legs.append({**requested, "reason": "provider_price_unavailable"})
+                warnings.append(
+                    f"Leg {index}: exact {requested['expiry']} {requested_strike:g} {option_type} has no positive provider display price."
+                )
+                continue
+            resolved_legs.append(
+                {
+                    "leg_id": f"leg_{index:02d}",
+                    "side": requested["side"],
+                    "option_type": option_type,
+                    "requested_expiry": requested["expiry"],
+                    "expiry": str(pair.get("expiry") or requested["expiry"]),
+                    "requested_strike": requested_strike,
+                    "strike": float(pair.get("strike") or requested_strike),
+                    "quantity": int(requested["quantity"]),
+                    "premium": float(premium),
+                    "price_source": pair.get(f"{prefix}_price_source"),
+                    "contract_id": pair.get(f"{prefix}_contract_id"),
+                    "implied_volatility": pair.get(f"{prefix}_implied_volatility"),
+                    "delta": pair.get(f"{prefix}_delta"),
+                }
+            )
+
+        net_premium = sum(
+            (1.0 if leg["side"] == "short" else -1.0)
+            * float(leg["premium"])
+            * int(leg["quantity"])
+            for leg in resolved_legs
+        )
+        status = "ready"
+        if not surface.get("snapshot_available", True) or not pairs:
+            status = "unavailable"
+        elif unresolved_legs:
+            status = "incomplete"
+        elif surface.get("delayed") or warnings or str(surface.get("freshness_label") or "") in {
+            "delayed",
+            "stale",
+            "unknown",
+        }:
+            status = "degraded"
+        quality = surface.get("quality") if isinstance(surface.get("quality"), dict) else {}
+        collection = surface.get("collection") if isinstance(surface.get("collection"), dict) else {}
+        requested_payload = deepcopy(normalized)
+        return {
+            "status": status,
+            "symbol": str(surface.get("symbol") or normalized["symbol"]).strip().upper(),
+            "name": normalized["name"],
+            "timestamp": self._iso_or_value(surface.get("timestamp")),
+            "retrieved_at": self._iso_or_value(surface.get("retrieved_at")),
+            "snapshot_available": bool(surface.get("snapshot_available", True)),
+            "spot": self._optional_float(surface.get("spot")),
+            "contracts": normalized["contracts"],
+            "contract_multiplier": 100,
+            "requested": requested_payload,
+            "legs": resolved_legs,
+            "unresolved_legs": unresolved_legs,
+            "summary": {
+                "requested_leg_count": len(normalized["legs"]),
+                "resolved_leg_count": len(resolved_legs),
+                "net_premium_per_share": net_premium,
+                "net_premium_total": net_premium * normalized["contracts"] * 100,
+                "premium_direction": "credit" if net_premium > 0 else "debit" if net_premium < 0 else "flat",
+            },
+            "quality": {
+                "expected_surface_cells": quality.get("expected_surface_cells"),
+                "observed_surface_cells": quality.get("observed_surface_cells"),
+                "interpolated_surface_cells": quality.get("interpolated_surface_cells"),
+                "interpolation_ratio": quality.get("interpolation_ratio"),
+                "pairs_with_both_sides": quality.get("pairs_with_both_sides"),
+            },
+            "collection": {
+                "depth_preset": collection.get("depth_preset") or normalized["depth_preset"],
+                "market_data_mode": collection.get("market_data_mode") or normalized["market_data_mode"],
+                "selected_expiry_count": collection.get("selected_expiry_count"),
+                "selected_strike_count": collection.get("selected_strike_count"),
+                "contract_selection_note": collection.get("contract_selection_note"),
+            },
+            "pricing_assumptions": deepcopy(surface.get("pricing_assumptions")),
+            "warnings": dedupe_warnings(warnings),
+            "source_provider": surface.get("source_provider"),
+            "origin": surface.get("origin") or "gamma.iv.surface",
+            "transformation_note": (
+                "Gamma matched exact requested expiry/strike/right legs to normalized option pairs and retained provider display prices; no nearby-contract substitution was permitted."
+            ),
+            "freshness_label": surface.get("freshness_label"),
+            "delayed": surface.get("delayed"),
+        }
+
     def _options_surface_for_operator(
         self,
         normalized: dict[str, Any],
@@ -15332,6 +16266,8 @@ class CopilotService:
             }
         for list_key in (
             "warnings",
+            "legs",
+            "unresolved_legs",
             "expiry_comparisons",
             "top_contributions",
             "relative_metrics",

@@ -44,7 +44,7 @@ export type CopilotOptionsWorkingAnalysisTarget = {
   analysisId: string;
   symbol: string;
   tab: "iv";
-  mode: "realized_implied";
+  mode: "realized_implied" | "strategies";
 };
 
 export type CopilotResearchScriptWorkingAnalysisTarget = {
@@ -57,10 +57,17 @@ export type CopilotResearchScriptWorkingAnalysisTarget = {
   selectedRunId: string | null;
 };
 
+export type CopilotStrategyLabWorkingAnalysisTarget = {
+  analysisId: string;
+  tab: "strategy_lab";
+  mode: "composer";
+};
+
 export type CopilotWorkingAnalysisTarget =
   | CopilotFundamentalsWorkingAnalysisTarget
   | CopilotRiskWorkingAnalysisTarget
   | CopilotOptionsWorkingAnalysisTarget
+  | CopilotStrategyLabWorkingAnalysisTarget
   | CopilotResearchScriptWorkingAnalysisTarget;
 
 /** Accept only explicit non-durable materialization contracts supported by Gamma. */
@@ -117,6 +124,30 @@ export function resolveWorkingAnalysisTarget(
       symbol: ticker,
       tab: "iv",
       mode: "realized_implied"
+    };
+  }
+  if (
+    analysis.owning_tab === "iv" &&
+    analysis.owning_mode === "strategies" &&
+    materialization.payload_contract === "copilot.options-strategy-working-analysis.v1" &&
+    ticker
+  ) {
+    return {
+      analysisId: analysis.analysis_id,
+      symbol: ticker,
+      tab: "iv",
+      mode: "strategies"
+    };
+  }
+  if (
+    analysis.owning_tab === "strategy_lab" &&
+    analysis.owning_mode === "composer" &&
+    materialization.payload_contract === "copilot.strategy-lab-working-analysis.v1"
+  ) {
+    return {
+      analysisId: analysis.analysis_id,
+      tab: "strategy_lab",
+      mode: "composer"
     };
   }
   const scriptId = String(analysis.entity.script_id ?? analysis.entity.normalized_id ?? "").trim();
