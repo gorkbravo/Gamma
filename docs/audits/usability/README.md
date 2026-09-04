@@ -4,6 +4,8 @@ Live product workflow audits and research-thread evaluations.
 
 ## Audits
 
+- [`gamma_usability_findings_2026-09-04.md`](./gamma_usability_findings_2026-09-04.md) (current): IBKR-integrated QQQ-minus-SPY thesis audit focused on Research Operator and Strategy Lab Script; the live provider gate passed and Script safe preview retained immutable provenance, while a P1 invalid-tool-name defect blocked the Operator-to-Script loop.
+
 - [`gamma_usability_findings_2026-09-03-3.md`](./gamma_usability_findings_2026-09-03-3.md) (current): IBKR-integrated Gold-versus-duration audit; Strategy Lab Backtest/Regime Stress rejected the hedge thesis, while commodity-history loss and mixed Risk/account state exposed two P1 cross-tab trust defects.
 
 - [`gamma_usability_findings_2026-09-03-2.md`](./gamma_usability_findings_2026-09-03-2.md) (current): live IBKR verification of the 2026-09-03 fixes; four of five acceptance criteria passed, Strategy Lab supported a public QQQ-minus-SPY thesis, while Copilot workbench loss and cross-symbol stale strategy state remain P1 defects.
