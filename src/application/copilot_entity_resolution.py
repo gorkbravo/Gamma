@@ -153,6 +153,27 @@ def should_attempt_equity_resolution(prompt: str) -> bool:
     if not text:
         return False
     lowered = text.lower()
+    # Domain nouns and sentence capitalization are not company-name evidence.
+    # Keep explicit company requests (including mixed macro/equity research),
+    # but do not send plain macro/news/commodity requests through SEC search.
+    if (
+        re.search(r"\b(?:macro|cpi|fed|inflation|rates?|yields?|news|headlines|oil|crude|brent|wti|commodities|shipping|maritime)\b", lowered)
+        and not extract_explicit_equity_tickers(text)
+        and not re.search(r"\b(?:company|companies|dcf|earnings|equity|financials?|fundamentals?|peers?|revenue|shares?|stocks?|ticker|valuation)\b", lowered)
+        and not any(
+            word.lower() not in _QUERY_STOPWORDS
+            and word.upper() not in _NON_TICKER_ACRONYMS
+            and word.lower() not in {
+                "gamma", "domains", "macro", "news", "headlines", "oil", "crude",
+                "brent", "wti", "commodities", "shipping", "maritime", "inflation",
+                "yield", "yields", "use", "summarize", "explain", "assess", "how",
+                "only", "next", "decision", "relevant", "supply", "disruption",
+                "conditions", "setup", "impact", "latest", "policy", "trends",
+            }
+            for word in re.findall(r"\b[A-Za-z][A-Za-z0-9&'-]{2,}\b", text)
+        )
+    ):
+        return False
     if any(term in lowered for term in _ENTITY_TRIGGER_TERMS):
         return True
     words = re.findall(r"\b[A-Z][A-Za-z0-9&'-]{2,}\b", text)

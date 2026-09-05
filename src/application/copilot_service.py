@@ -2943,9 +2943,19 @@ class CopilotService:
         proposal: CopilotEquityEntityProposal | None = None
         warnings: list[str] = []
         usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
+        # These workflows own their input identities; choosing a single SEC
+        # issuer here would reject valid baskets or misread strategy labels.
         if (
             self._prompt_requests_script_workflow(prompt.lower(), request.context)
             or self._prompt_requests_prediction_comparison(prompt)
+            or self._prompt_requests_hypothetical_portfolio(prompt)
+            or self._prompt_requests_strategy_lab_portfolio(prompt, request.context)
+            or (
+                request.context.current_tab == "strategy_lab"
+                and request.context.strategy_lab_state
+                and re.search(r"\b(?:imported|backtest|composition|comparison)\b", prompt.lower())
+                and not re.search(r"\b(?:company|dcf|fundamentals?|valuation)\b", prompt.lower())
+            )
         ):
             return _CopilotEntityPreflight(
                 request=replace(request, entity_resolution=None),

@@ -193,6 +193,10 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-05 — Domain Routing Reliability
+
+Re-read the official [function-calling flow](https://developers.openai.com/api/docs/guides/function-calling#the-tool-calling-flow) and [Agents SDK versus Responses API](https://developers.openai.com/api/docs/guides/agents#agents-sdk-vs-responses-api) through the Developer Docs connector. Decision: fix the shared Gamma-owned company preflight, retaining the custom Responses default and optional SDK loop. A multi-leg portfolio or imported Strategy Lab result does not require one primary SEC issuer. Plain macro/news/commodity requests must not acquire an issuer from generic prompt words. Named-company and explicit equity requests retain identity validation and ambiguity stops. No framework, model, key, tool permission, or durable-state change is justified by this routing defect.
+
 ### Official Guidance Re-Reviewed 2026-09-05 — Checkpoint 8G Prediction Comparisons
 
 Reviewed the current official [Function calling](https://developers.openai.com/api/docs/guides/function-calling) and [Agents SDK / Responses comparison](https://developers.openai.com/api/docs/guides/agents) pages through the OpenAI Developer Docs connector.
@@ -657,6 +661,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Add the Checkpoint 8E option-set vertical slice: explicit legs retain exact side, right, expiry, strike, ratio, contract count, provider price, quality, warnings, and provenance, then materialize non-durably into Options / Strategies without nearby-contract substitution.
 - [x] Add the Checkpoint 8F Strategy Lab vertical slice: explicit signed listed-market legs, benchmark, lookback, and minimum-overlap inputs retain exact identity and assumptions, execute through the existing portfolio-composition service, and materialize non-durably into Strategy Lab / Composer.
 - [x] Add the Checkpoint 8G Prediction Markets slice: exact venue-prefixed baskets run without preloading a contract, retain comparison evidence, and open as a non-durable snapshot in Compare.
+- [x] Repair primary-company routing after 8G: multi-leg hypothetical/Strategy Lab workflows and imported strategy analyses bypass single-issuer preflight; plain macro/news requests retain their domain routing. Preserve named-company validation and ambiguity stops. See [routing regression acceptance](audits/copilot_domain_routing_2026-09-05.md).
 - [ ] Continue the contract through the remaining representative tab-owned analyses and cross-tool outputs.
 - [x] Integrate the separately tracked Research Script Workspace after its mock contracts, immutable revision store, and Script-mode materialization payload became stable. Completed and verified 2026-08-31 with Code Interpreter network disabled, retained typed outputs, and unchanged `run_strategy_lab_backtest`; Script execution remains isolated from general Operator authority.
 - [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.

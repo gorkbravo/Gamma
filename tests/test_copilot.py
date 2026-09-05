@@ -17,7 +17,7 @@ from src.application.copilot_context_contracts import (
     COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
     finalize_context_bundle,
 )
-from src.application.copilot_entity_resolution import extract_explicit_equity_tickers
+from src.application.copilot_entity_resolution import extract_explicit_equity_tickers, should_attempt_equity_resolution
 from src.application.copilot_model_policy import CopilotModelPolicy
 from src.application.iv_service import IVSurfaceRequest
 from src.application.research_action_registry import (
@@ -5363,6 +5363,56 @@ def test_explicit_ticker_bypasses_model_entity_proposal_and_ignores_dcf_acronym(
 def test_ticker_parser_requires_a_cue_for_finance_acronym_symbols():
     assert extract_explicit_equity_tickers("Run DCF for AAPL") == ["AAPL"]
     assert extract_explicit_equity_tickers("Research $AI and ticker DCF") == ["AI", "DCF"]
+
+
+def test_primary_company_preflight_preserves_domain_workflows(tmp_path, monkeypatch):
+    client, runtime = _build_test_client(tmp_path)
+    calls = []
+
+    def unexpected_lookup(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("This workflow does not need a primary SEC company.")
+
+    try:
+        service = runtime.copilot_service
+        monkeypatch.setattr(service.fundamentals_service, "search_companies", unexpected_lookup)
+        monkeypatch.setattr(service.provider, "propose_equity_entity", unexpected_lookup, raising=False)
+        cases = [
+            ("Compare a hypothetical 60/40 AAPL/MSFT research portfolio to SPY", {}),
+            ("Backtest a Strategy Lab long/short portfolio with AAPL and MSFT against SPY", {}),
+            ("Run a Strategy Lab backtest on the imported strategy", {
+                "current_tab": "strategy_lab",
+                "strategy_lab_state": {"imported_result": {"name": "Imported strategy"}},
+            }),
+            ("Research CPI and the next Fed decision using relevant Gamma domains.", {}),
+            ("Use only news for oil", {}),
+        ]
+        for prompt, context in cases:
+            request = CopilotResearchCardRequest(
+                domain="synthesis", prompt=prompt,
+                context=CopilotRequestContext(current_tab="copilot", workspace_mode="research")
+                if not context else CopilotRequestContext(**context),
+            )
+            preflight = service._prepare_operator_entity_preflight(request, allow_model_proposal=True)
+            assert preflight.resolution is None, prompt
+            assert preflight.usage.provider_calls == 0
+            plan = service.plan_research(preflight.request)
+            assert plan.intent != "entity_disambiguation", prompt
+            assert plan.entity_resolution is None
+        assert calls == []
+    finally:
+        runtime.shutdown()
+
+
+@pytest.mark.parametrize("prompt", [
+    "Research Apple and macro conditions",
+    "analyze apple and macro conditions",
+    "Research Apple's earnings after CPI",
+    "Research NVDA before the Fed decision",
+    "Run reverse valuation for an oil company",
+])
+def test_domain_routing_keeps_named_company_resolution(prompt):
+    assert should_attempt_equity_resolution(prompt)
 
 
 def test_openai_entity_proposal_uses_one_forced_strict_function_call():

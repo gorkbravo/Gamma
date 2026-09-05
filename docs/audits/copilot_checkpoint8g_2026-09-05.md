@@ -27,3 +27,5 @@ The broader Copilot and SDK smoke run returned 141 passed and seven failed with 
 - The CPI/Fed parameter of `test_checkpoint5_representative_plans_select_domains_and_explain_omissions`
 
 These are existing planning/entity-resolution or external-context failures, not new comparison failures. They remain open; the full backend suite is not green. Live provider acceptance and remaining Checkpoint 8 families are also open.
+
+Follow-up on September 5: the [domain routing reliability fix](copilot_domain_routing_2026-09-05.md) repairs all eight cases in focused regression runs. The results above record the original 8G acceptance baseline.
