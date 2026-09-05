@@ -328,6 +328,7 @@
   let riskWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let optionsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let strategyLabWorkingAnalysis: CopilotWorkingAnalysis | null = null;
+  let predictionWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
   // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
@@ -1840,6 +1841,10 @@
         String(analysis.entity.label ?? target.symbol),
         "copilot"
       );
+    } else if (target.tab === "prediction_markets") {
+      predictionWorkingAnalysis = materialized;
+      predictionMarketsMode = "compare";
+      workspaceMode = "research";
     } else if (target.tab === "strategy_lab" && target.mode === "composer") {
       strategyLabWorkingAnalysis = materialized;
       strategyLabMode = "composer";
@@ -1872,6 +1877,9 @@
     }
     if (discarded && strategyLabWorkingAnalysis?.analysis_id === discarded.analysis_id) {
       strategyLabWorkingAnalysis = null;
+    }
+    if (discarded && predictionWorkingAnalysis?.analysis_id === discarded.analysis_id) {
+      predictionWorkingAnalysis = null;
     }
   }
 
@@ -3022,6 +3030,8 @@
             history={$predictionMarketHistory}
             outcomeSeries={$predictionMarketOutcomeSeries}
             comparison={$predictionMarketComparison}
+            workingAnalysis={predictionWorkingAnalysis}
+            onCloseWorkingAnalysis={() => { predictionWorkingAnalysis = null; }}
             wallet={$predictionMarketWallet}
             related={$predictionMarketRelated}
             eventBook={$predictionMarketEventBook}

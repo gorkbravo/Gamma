@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 ## Start Here
 
@@ -192,6 +192,12 @@ UI navigation can still exist as a convenience action, such as opening the Funda
 Before any material Copilot architecture, orchestration, tool, approval, run-state, model-routing, or related documentation change, the implementing agent must refresh the current official OpenAI guidance. Prefer the OpenAI Developer Docs connector when available; otherwise use only official `developers.openai.com` pages. Record the review date, URLs, and resulting decision in this section or the decision log below. These notes are a dated snapshot, not permanent API truth.
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
+
+### Official Guidance Re-Reviewed 2026-09-05 — Checkpoint 8G Prediction Comparisons
+
+Reviewed the current official [Function calling](https://developers.openai.com/api/docs/guides/function-calling) and [Agents SDK / Responses comparison](https://developers.openai.com/api/docs/guides/agents) pages through the OpenAI Developer Docs connector.
+
+Decision: keep the existing custom Responses loop and optional Agents SDK runner. This slice adds an app-native strict-schema analytical action, not new orchestration. Gamma validates the exact venue-prefixed IDs, range, and nullable resolution, executes the existing read-only comparison service, and owns persistence and non-durable materialization. The model receives compact per-contract statistics, pair analytics, coverage and warnings; chart geometry stays in the seven-day working record so it cannot crowd useful evidence out of either runner's observation budget. No framework, model, credential or authority change is needed. The existing key was authorized for reuse and remains unchanged.
 
 ### Official Guidance Re-Reviewed 2026-09-04 — Checkpoint 8F Strategy Lab Inputs
 
@@ -639,7 +645,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - Verification: 31 focused Operator tests, 8 focused Checkpoint 7 contract tests, 2 Agents SDK smoke tests, the full 542-test backend suite, 368 frontend tests across 50 files, TypeScript typecheck, and the production frontend build passed. The installed `openai 2.38.0` / `agents 0.17.4` contract was exercised without dependency changes.
 - Authorized live smoke reached the real Responses transport on 2026-07-30 with provider storage disabled. The provider returned a streamed quota exhaustion before any tool call; Gamma persisted a safe `quota_exhausted`/`provider_error` `copilot.operator.loop.v1` terminal with zero tools and no fallback card. This validates the live error boundary, not a successful live model-tool-model result.
 
-#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8F complete)
+#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8G implemented)
 
 - [x] Prove unloaded entity acquisition with `LMT` reverse valuation: the planned ticker hydrates Fundamentals context and remains the authoritative tool argument without requiring the tab to be preloaded.
 - [x] Add `copilot.working-analysis.v1` as Gamma-owned session-scoped state for Fundamentals reverse-valuation outputs, including entity, inputs, complete bounded output, provenance, context fingerprint, read-only safety, expiry, restart replay, discard, and recoverable session deletion.
@@ -650,6 +656,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Add the Checkpoint 8D Options vertical slice: explicit realized-versus-implied requests retain exact expiry comparisons, requested collection settings, quality, warnings, and provenance, then materialize non-durably into Options / Realized vs IV.
 - [x] Add the Checkpoint 8E option-set vertical slice: explicit legs retain exact side, right, expiry, strike, ratio, contract count, provider price, quality, warnings, and provenance, then materialize non-durably into Options / Strategies without nearby-contract substitution.
 - [x] Add the Checkpoint 8F Strategy Lab vertical slice: explicit signed listed-market legs, benchmark, lookback, and minimum-overlap inputs retain exact identity and assumptions, execute through the existing portfolio-composition service, and materialize non-durably into Strategy Lab / Composer.
+- [x] Add the Checkpoint 8G Prediction Markets slice: exact venue-prefixed baskets run without preloading a contract, retain comparison evidence, and open as a non-durable snapshot in Compare.
 - [ ] Continue the contract through the remaining representative tab-owned analyses and cross-tool outputs.
 - [x] Integrate the separately tracked Research Script Workspace after its mock contracts, immutable revision store, and Script-mode materialization payload became stable. Completed and verified 2026-08-31 with Code Interpreter network disabled, retained typed outputs, and unchanged `run_strategy_lab_backtest`; Script execution remains isolated from general Operator authority.
 - [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
@@ -702,6 +709,13 @@ Implementation note (2026-09-04, Checkpoint 8F):
 - The action uses `ResearchService.compose_strategy_lab_portfolio`, preserving requested signed weights in the authoritative inputs while the established analytics path gross-normalizes exposure for return composition. Output retains metrics, period coverage, alignment diagnostics, leg contributions, bounded Risk-leg summaries, provenance, warnings, and explicit temporary assumptions: zero risk-free rate, excluded costs/slippage, and no simulated rebalancing.
 - Successful explicit requests create one seven-day `copilot.working-analysis.v1` record with `analysis_type=strategy_lab_portfolio_backtest` and `copilot.strategy-lab-working-analysis.v1` materialization metadata. Strategy Lab / Composer displays a compact `TEMPORARY` module and hydrates the exact name, benchmark, lookback, minimum-overlap value, identifiers, classes, and signed weights into the existing editable draft; opening does not save, rebalance, or trade.
 - Deterministic acceptance starts from an unprepared Copilot session, requests `QQQ=+0.60`, `IWM=-0.40`, `SPY`, 504 days, and 100 minimum observations, verifies the exact provider lookups and tool arguments, then covers restart replay, materialization, discard, and rejected reopen. Focused backend and frontend coverage, the full 431-test frontend suite, TypeScript typecheck, and production build passed. Mock browser verification exercised the actual Copilot-run-inspector-to-Strategy-Lab handoff at 1800, 1024, and 640 CSS pixels: the exact draft and temporary module remained visible, no viewport overflow was introduced, and the application console stayed error-free. The build retained only the pre-existing IV SVG-interaction and Surface3D unused-export warnings. No live API call was needed or claimed; the configured key remained unchanged.
+
+Implementation note (2026-09-05, Checkpoint 8G):
+
+- `run_prediction_market_comparison` accepts two to six exact, distinct normalized market IDs, one supported range, and an explicit nullable resolution. It never adds the current contract, discovers related alternatives, truncates the requested basket, or substitutes an unavailable contract. Prediction-comparison prompts bypass public-company identity resolution. The legacy selected-contract context tool remains available with its existing behavior.
+- The existing comparison service supplies per-contract statistics, aligned probability changes, pairwise spread/correlation analytics, basket framing, provider timestamps, coverage and methodology. Missing contracts remain explicit IDs and warnings. A result with fewer than two loaded contracts is unavailable and cannot materialize; a usable partial comparison is degraded. Retained charts are capped at 400 points per contract and 200 per pair, with a visible sampling warning when needed; full-observation statistics remain unchanged.
+- Seven-day `prediction_market_comparison` working records use `copilot.prediction-comparison-working-analysis.v1`. Compare displays their original evidence independently of live selections and saved sets. Opening and refreshing do not recompute the comparison or save a basket. The temporary banner shows the retained timestamp, requested range/resolution, expiry, and a return-to-live action. Expired evidence is withheld instead of replaced under the temporary heading.
+- Verification and baseline failures are recorded in [Checkpoint 8G acceptance](audits/copilot_checkpoint8g_2026-09-05.md). This is deterministic and simulated Responses acceptance, not a claim of successful live OpenAI or venue acceptance. The approximate 90% overall completion estimate stays unchanged while remaining representative analyses, generalized approval/resume and the release gate remain open.
 
 #### K. Generalized interruptions, recovery, and role transition — open
 

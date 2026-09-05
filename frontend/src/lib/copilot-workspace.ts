@@ -64,6 +64,7 @@ export type CopilotStrategyLabWorkingAnalysisTarget = {
 };
 
 export type CopilotWorkingAnalysisTarget =
+  | { analysisId: string; tab: "prediction_markets"; mode: "compare" }
   | CopilotFundamentalsWorkingAnalysisTarget
   | CopilotRiskWorkingAnalysisTarget
   | CopilotOptionsWorkingAnalysisTarget
@@ -89,6 +90,12 @@ export function resolveWorkingAnalysisTarget(
   )
     .trim()
     .toUpperCase();
+  if (
+    analysis.owning_tab === "prediction_markets" && analysis.owning_mode === "compare" &&
+    materialization.payload_contract === "copilot.prediction-comparison-working-analysis.v1"
+  ) {
+    return { analysisId: analysis.analysis_id, tab: "prediction_markets", mode: "compare" };
+  }
   if (
     analysis.owning_tab === "fundamentals" &&
     analysis.owning_mode === "reverse_valuation" &&

@@ -17,6 +17,7 @@
     buildOutcomeLadder,
     calibrationCurveFor,
     comparisonColor,
+    predictionComparisonFromWorkingAnalysis,
     describeCalibrationMethod,
     describeHistoryCoverage,
     formatResolution,
@@ -27,6 +28,7 @@
     type OutcomeLadderRow
   } from "../lib/prediction-markets";
   import type {
+    CopilotWorkingAnalysis,
     CrossTabHandoffEnvelope,
     PredictionCalibrationCurve,
     PredictionCalibrationSummary,
@@ -59,6 +61,17 @@
   export let history: PredictionProbabilityHistoryResponse | null = null;
   export let outcomeSeries: PredictionOutcomeSeriesResponse | null = null;
   export let comparison: PredictionMarketComparison | null = null;
+  export let workingAnalysis: CopilotWorkingAnalysis | null = null;
+  export let onCloseWorkingAnalysis: (() => void) | undefined = undefined;
+  let workingClock = Date.now();
+  onMount(() => {
+    const timer = setInterval(() => { workingClock = Date.now(); }, 1000);
+    return () => clearInterval(timer);
+  });
+  $: temporaryComparison = predictionComparisonFromWorkingAnalysis(workingAnalysis, workingClock);
+  $: activeComparison = workingAnalysis ? temporaryComparison?.comparison ?? null : comparison;
+  $: displayedSelection = workingAnalysis ? temporaryComparison?.marketIds ?? [] : compareSelection;
+  $: displayedRange = temporaryComparison?.range ?? historyRange;
   export let wallet: PredictionWalletSummary | null = null;
   export let related: RelatedPredictionMarketListResponse | null = null;
   export let eventBook: PredictionEventBook | null = null;
@@ -662,7 +675,12 @@
 
   // Contracts in the basket may come from the screener, the watchlist, or a
   // previous session, so resolve labels from whatever is currently loaded.
-  $: compareRows = compareSelection.map((marketId) => {
+  $: compareRows = displayedSelection.map((marketId) => {
+    if (workingAnalysis) {
+      const leg = activeComparison?.legs.find((item) => item.market_id === marketId);
+      return { market_id: marketId, venue: leg?.venue ?? marketId.split(":")[0],
+        title: leg?.title ?? `${marketId} (unavailable)`, current_probability: leg?.current_probability ?? null };
+    }
     const known =
       screener?.markets.find((market) => market.market_id === marketId) ??
       (detail?.market_id === marketId ? detail : null);
@@ -675,7 +693,7 @@
       };
     }
     const watched = watchlist.find((entry) => entry.market_id === marketId);
-    const leg = comparison?.legs.find((item) => item.market_id === marketId);
+    const leg = activeComparison?.legs.find((item) => item.market_id === marketId);
     return {
       market_id: marketId,
       venue: watched?.venue ?? leg?.venue ?? "",
@@ -684,7 +702,7 @@
     };
   });
 
-  $: comparisonSeries = (comparison?.legs ?? []).map((leg, index) => ({
+  $: comparisonSeries = (activeComparison?.legs ?? []).map((leg, index) => ({
     id: leg.market_id,
     label: `${leg.venue === "polymarket" ? "PM" : "KL"} ${truncName(leg.title, 34)}`,
     color: comparisonColor(index),
@@ -697,7 +715,7 @@
       .filter((point): point is { time: number; value: number } => point.time != null)
   }));
 
-  $: rankedPairs = sortPairsByDislocation(comparison?.pairs ?? []);
+  $: rankedPairs = sortPairsByDislocation(activeComparison?.pairs ?? []);
 
   $: spreadSeries = (() => {
     const pair = rankedPairs[0];
@@ -719,7 +737,7 @@
   })();
 
   $: compareKey = JSON.stringify({ ids: compareSelection, historyRange, historyResolution });
-  $: if (mode === "compare" && compareSelection.length >= 2 && compareKey !== lastComparedKey && onCompare) {
+  $: if (!workingAnalysis && mode === "compare" && compareSelection.length >= 2 && compareKey !== lastComparedKey && onCompare) {
     lastComparedKey = compareKey;
     void onCompare(compareSelection, { range: historyRange, resolutionMinutes: historyResolution });
   }
@@ -760,7 +778,7 @@
         </div>
         <div class="header-kpi">
           <span>In compare</span>
-          <strong>{compareSelection.length}/{MAX_COMPARE_LEGS}</strong>
+          <strong>{mode === "compare" ? displayedSelection.length : compareSelection.length}/{MAX_COMPARE_LEGS}</strong>
         </div>
       </div>
     </div>
@@ -1625,19 +1643,35 @@
       </aside>
     </div>
   {:else if mode === "compare"}
+    {#if workingAnalysis}
+      <article class="panel temporary-comparison" aria-label="Temporary Copilot prediction comparison">
+        <div class="table-header">
+          <span>TEMPORARY · {workingAnalysis.title}</span>
+          <button type="button" class="auto" on:click={() => onCloseWorkingAnalysis?.()}>Return to live comparison</button>
+        </div>
+        <div class="panel-notes">
+          {#if temporaryComparison}
+            <p>Retained {shortDate(activeComparison?.retrieved_at)} · {displayedRange.toUpperCase()} · Requested {formatResolution(temporaryComparison.resolutionMinutes)} bars · Expires {shortDate(workingAnalysis.expires_at)}</p>
+            <p>Unsaved research snapshot. Charts and statistics retain the original provider evidence.</p>
+          {:else}
+            <p>This temporary comparison has expired or is unavailable. Reopen an active analysis from Copilot.</p>
+          {/if}
+        </div>
+      </article>
+    {/if}
     <div class="compare-grid">
       <article class="panel table-panel">
         <div class="table-header">
           <span>Comparison Basket</span>
           <div class="header-actions">
-            <button type="button" class="ghost-button auto" on:click={clearCompare} disabled={!compareSelection.length}
+            <button type="button" class="ghost-button auto" on:click={clearCompare} disabled={!!workingAnalysis || !compareSelection.length}
               >Clear</button
             >
             <button
               type="button"
               class="auto"
               on:click={runComparison}
-              disabled={compareSelection.length < 2 || compareLoading}>Recompute</button
+              disabled={!!workingAnalysis || compareSelection.length < 2 || compareLoading}>Recompute</button
             >
           </div>
         </div>
@@ -1655,7 +1689,7 @@
             </thead>
             <tbody>
               {#each compareRows as row, index (row.market_id)}
-                {@const leg = comparison?.legs.find((item) => item.market_id === row.market_id)}
+                {@const leg = activeComparison?.legs.find((item) => item.market_id === row.market_id)}
                 <tr>
                   <td class="wrap-cell">
                     <span class="swatch" style={`background:${comparisonColor(index)}`}></span>
@@ -1666,7 +1700,7 @@
                   <td class="num {toneOf(leg?.stats?.change)}" class:absent={signedPct(leg?.stats?.change) === "N/A"}>{signedPct(leg?.stats?.change)}</td>
                   <td class="num">{leg?.stats?.point_count ?? 0}</td>
                   <td class="tick-col">
-                    <button type="button" class="tick" aria-label="Remove" on:click={() => toggleCompare(row.market_id)}
+                    <button type="button" class="tick" aria-label="Remove" disabled={!!workingAnalysis} on:click={() => toggleCompare(row.market_id)}
                       >✕</button
                     >
                   </td>
@@ -1687,6 +1721,7 @@
         {/if}
       </article>
 
+      {#if !workingAnalysis}
       <article class="panel table-panel">
         <div class="table-header">
           <span>Saved Sets</span>
@@ -1739,18 +1774,20 @@
         {/if}
       </article>
 
+      {/if}
+
       <article class="panel chart-panel">
         <div class="panel-header top-line">
           <div class="title-block">
             <p class="eyebrow">Aligned Probability</p>
-            <h2>{comparison?.legs.length ?? 0} contracts | {historyRange.toUpperCase()}</h2>
+            <h2>{activeComparison?.legs.length ?? 0} contracts | {displayedRange.toUpperCase()}</h2>
           </div>
           <div class="segmented" role="group" aria-label="History range">
             {#each HISTORY_RANGES as range}
               <button
                 type="button"
-                class:selected={historyRange === range.id}
-                disabled={compareLoading}
+                class:selected={displayedRange === range.id}
+                disabled={!!workingAnalysis || compareLoading}
                 on:click={() => applyRange(range.id)}
               >
                 {range.label}
@@ -1766,29 +1803,29 @@
         />
         <div class="chart-foot">
           <strong>
-            {comparison?.window_start ? `${dayStamp(comparison.window_start)} → ${dayStamp(comparison.window_end)}` : "—"}
+            {activeComparison?.window_start ? `${dayStamp(activeComparison.window_start)} → ${dayStamp(activeComparison.window_end)}` : "—"}
           </strong>
-          <small>{formatResolution(comparison?.effective_resolution_minutes)} bars</small>
+          <small>{formatResolution(activeComparison?.effective_resolution_minutes)} bars</small>
         </div>
       </article>
 
-      {#if comparison?.basket}
+      {#if activeComparison?.basket}
         <article class="panel basket-panel">
           <div class="kpi-grid four">
             <article class="metric">
               <span>Legs</span>
-              <strong>{comparison.basket.leg_count}</strong>
-              <small>{comparison.basket.venues.join(" / ") || "—"}</small>
+              <strong>{activeComparison.basket.leg_count}</strong>
+              <small>{activeComparison.basket.venues.join(" / ") || "—"}</small>
             </article>
             <article class="metric">
               <span>Prob Sum</span>
-              <strong class:absent={pct(comparison.basket.probability_sum) === "N/A"}>{pct(comparison.basket.probability_sum)}</strong>
-              <small>{comparison.basket.same_event ? "same venue event" : "cross-event"}</small>
+              <strong class:absent={pct(activeComparison.basket.probability_sum) === "N/A"}>{pct(activeComparison.basket.probability_sum)}</strong>
+              <small>{activeComparison.basket.same_event ? "same venue event" : "cross-event"}</small>
             </article>
             <article class="metric">
               <span>Vs 100%</span>
-              <strong class={toneOf(comparison.basket.implied_overround)}
-                >{signedPct(comparison.basket.implied_overround)}</strong
+              <strong class={toneOf(activeComparison.basket.implied_overround)}
+                >{signedPct(activeComparison.basket.implied_overround)}</strong
               >
               <small>descriptive only</small>
             </article>
@@ -1800,9 +1837,9 @@
               <small>{rankedPairs.length} pairs</small>
             </article>
           </div>
-          {#if comparison.basket.note}
+          {#if activeComparison.basket.note}
             <div class="notes-list">
-              <div class="note-row"><span class="note-tag">Method</span><p>{comparison.basket.note}</p></div>
+              <div class="note-row"><span class="note-tag">Method</span><p>{activeComparison.basket.note}</p></div>
             </div>
           {/if}
         </article>
@@ -1834,10 +1871,10 @@
                   <tr>
                     <td class="wrap-cell">
                       <strong
-                        >{truncName(comparison?.legs.find((leg) => leg.market_id === pair.left_market_id)?.title, 26)}
+                        >{truncName(activeComparison?.legs.find((leg) => leg.market_id === pair.left_market_id)?.title, 26)}
                         vs
                         {truncName(
-                          comparison?.legs.find((leg) => leg.market_id === pair.right_market_id)?.title,
+                          activeComparison?.legs.find((leg) => leg.market_id === pair.right_market_id)?.title,
                           26
                         )}</strong
                       >
@@ -1871,20 +1908,20 @@
         <article class="panel chart-panel">
           <div class="panel-header">
             <span class="eyebrow">Widest Pair Spread</span>
-            <small>{formatResolution(comparison?.effective_resolution_minutes)} bars</small>
+            <small>{formatResolution(activeComparison?.effective_resolution_minutes)} bars</small>
           </div>
           <TimeSeriesChart series={spreadSeries} height={200} emptyMessage="No aligned spread." />
         </article>
       {/if}
 
-      {#if comparison?.warnings?.length || comparison?.transformation_note}
+      {#if activeComparison?.warnings?.length || activeComparison?.transformation_note}
         <article class="panel">
           <div class="notes-list">
-            {#each comparison?.warnings ?? [] as warning}
+            {#each activeComparison?.warnings ?? [] as warning}
               <div class="note-row"><span class="note-tag">Warning</span><p>{warning}</p></div>
             {/each}
-            {#if comparison?.transformation_note}
-              <div class="note-row info"><span class="note-tag">Method</span><p>{comparison.transformation_note}</p></div>
+            {#if activeComparison?.transformation_note}
+              <div class="note-row info"><span class="note-tag">Method</span><p>{activeComparison.transformation_note}</p></div>
             {/if}
           </div>
         </article>
@@ -2128,6 +2165,9 @@
 </section>
 
 <style>
+  .temporary-comparison { margin-bottom: var(--space-4); }
+  .temporary-comparison .table-header { flex-wrap: wrap; gap: var(--space-4); }
+  .temporary-comparison p { margin: 0; overflow-wrap: anywhere; }
   /* Local: this view's panels lay their own children out and do not want the
      base panel's grid gap between them. */
   .panel {

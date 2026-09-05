@@ -6043,6 +6043,193 @@ def test_checkpoint8f_strategy_lab_portfolio_materializes_exact_signed_inputs(tm
         runtime.shutdown()
 
 
+def test_checkpoint8g_prediction_comparison_unloaded_exact_basket_and_lifecycle(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        markets = client.post("/prediction-markets/screener", json={}).json()["markets"]
+        ids = [row["market_id"] for row in markets[1:3]]
+        assert len(ids) == 2
+        service = runtime.copilot_service
+        original = runtime.prediction_market_service.compare_markets
+        calls = []
+
+        def compare(market_ids, *, range_key, resolution_minutes):
+            calls.append((market_ids, range_key, resolution_minutes))
+            return original(market_ids, range_key=range_key, resolution_minutes=resolution_minutes)
+
+        runtime.prediction_market_service.compare_markets = compare
+        session_id = "session_checkpoint8g_prediction"
+        client.post("/copilot/sessions", json={"session_id": session_id})
+        saved_before = client.get("/prediction-markets/saved").json()
+        payload = {
+            "domain": "synthesis", "user_session_id": session_id,
+            "prompt": f"Compare prediction markets {ids[0]} and {ids[1]} over 1w using 60 minute bars",
+            "context": {"current_tab": "copilot", "workspace_mode": "research"},
+        }
+        plan = client.post("/copilot/operator-plan", json=payload)
+        assert plan.status_code == 200
+        assert plan.json()["intent"] == "prediction_market_comparison"
+        assert [step["tool_id"] for step in plan.json()["steps"]] == ["run_prediction_market_comparison"]
+        result = client.post("/copilot/operator-plan/execute", json=payload)
+        assert result.status_code == 200
+        assert result.json()["status"] in {"ready", "degraded"}, result.json()
+        assert calls == [(ids, "1w", 60)]
+        analyses = client.get(f"/copilot/sessions/{session_id}").json()["working_analyses"]
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis["inputs"] == {"market_ids": ids, "range": "1w", "resolution_minutes": 60}
+        assert analysis["outputs"]["inputs"] == analysis["inputs"]
+        comparison = analysis["outputs"]["comparison"]
+        assert [leg["market_id"] for leg in comparison["legs"]] == ids
+        assert comparison["pairs"] and comparison["legs"][0]["points"]
+        assert comparison["transformation_note"] and analysis["source_ids"]
+        assert analysis["outputs"]["warnings"] == comparison["warnings"]
+        assert analysis["owning_tab"] == "prediction_markets"
+        assert analysis["owning_mode"] == "compare"
+        assert analysis["materialization"]["durable"] is False
+        assert analysis["materialization"]["payload_contract"] == "copilot.prediction-comparison-working-analysis.v1"
+        restored = CopilotStore(runtime.copilot_store.base_dir).get_working_analysis(analysis["analysis_id"])
+        assert restored.outputs == analysis["outputs"]
+        route = f"/copilot/working-analyses/{analysis['analysis_id']}"
+        assert client.post(f"{route}/materialize").status_code == 200
+        assert client.post(f"{route}/materialize").status_code == 200
+        assert calls == [(ids, "1w", 60)]  # Opening never re-fetches provider evidence.
+        assert client.get("/prediction-markets/saved").json() == saved_before
+        assert client.post(f"{route}/discard").status_code == 200
+        assert client.post(f"{route}/materialize").status_code == 409
+
+        # An unrelated selected contract must not change the explicit request.
+        context = service._build_prediction_market_context(CopilotResearchCardRequest(
+            domain="prediction_markets", prompt=payload["prompt"],
+            context=CopilotRequestContext(prediction_market_id=markets[0]["market_id"]),
+        ))
+        execution = service._execute_tool("run_prediction_market_comparison", analysis["inputs"], context)
+        assert execution.trace.arguments == analysis["inputs"]
+        assert calls[-1] == (ids, "1w", 60)
+        compact = service._compact_prediction_comparison_observation(execution, "run_prediction_market_comparison")
+        assert len(json.dumps(compact.output).encode()) < 50_000
+        assert "points" not in compact.output["comparison"]["legs"][0]
+        assert compact.output["comparison"]["pairs"][0]["correlation"] == comparison["pairs"][0]["correlation"]
+        assert "points" in execution.output["comparison"]["legs"][0]
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8g_prediction_comparison_responses_observes_statistics(tmp_path, monkeypatch):
+    from src.application.copilot_agents_operator import CopilotAgentsOperatorService
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        markets = client.post("/prediction-markets/screener", json={}).json()["markets"]
+        ids = [row["market_id"] for row in markets[:2]]
+        args = {"market_ids": ids, "range": "1w", "resolution_minutes": 60}
+
+        class ScriptedComparisonProvider(OpenAIResponsesCopilotProvider):
+            def __init__(self):
+                super().__init__(api_key="test-key", model="gpt-test-operator", reasoning_effort="low", store_responses=False)
+                self.calls = 0
+
+            def _post_json_stream(self, payload, emit, should_cancel):
+                self.calls += 1
+                if self.calls == 1:
+                    tool = next(tool for tool in payload["tools"] if tool["name"] == "run_prediction_market_comparison")
+                    assert tool["strict"] is True
+                    assert tool["parameters"]["additionalProperties"] is False
+                    return ({"id": "resp_comparison_tool", "model": self.model, "output": [{
+                        "type": "function_call", "id": "fc_comparison", "call_id": "call_comparison",
+                        "name": "run_prediction_market_comparison", "arguments": json.dumps(args),
+                    }]}, "completed")
+                observation = json.loads(next(item["output"] for item in payload["input"] if item.get("type") == "function_call_output"))
+                output = observation["output"]
+                assert not output.get("truncated")
+                assert output["inputs"] == args
+                assert output["comparison"]["legs"][0]["stats"]["point_count"] > 1
+                pair = output["comparison"]["pairs"][0]
+                assert pair["overlap_points"] > 1
+                assert "correlation" in pair and "current_spread" in pair
+                assert "points" not in output["comparison"]["legs"][0]
+                assert output["working_analysis"]["state_scope"] == "session_ephemeral"
+                assert CopilotAgentsOperatorService._bounded_observation(output) == output
+                rationale = f"The exact comparison has {pair['overlap_points']} shared observations and a current spread of {pair['current_spread']}; the spread is descriptive research."
+                return ({"id": "resp_comparison_final", "model": self.model, "output": [{
+                    "type": "message", "content": [{"type": "output_text", "text": json.dumps(_checkpoint7_final_card(rationale=rationale))}],
+                }]}, "completed")
+
+        provider = ScriptedComparisonProvider()
+        runtime.copilot_service.provider = provider
+        assert client.post("/copilot/sessions", json={"session_id": "checkpoint8g-responses"}).status_code == 200
+        response = client.post("/copilot/operator-plan/execute", json={
+            "domain": "synthesis", "user_session_id": "checkpoint8g-responses",
+            "prompt": f"Compare prediction markets {ids[0]} and {ids[1]} over 1w using 60 minute bars",
+            "context": {"current_tab": "copilot", "workspace_mode": "research"},
+        })
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready", response.json()
+        assert provider.calls == 2
+        assert "shared observations" in response.json()["card"]["rationale"]
+        assert len(client.get("/copilot/sessions/checkpoint8g-responses").json()["working_analyses"]) == 1
+        # Venue IDs must not be sent to the public-company identity resolver.
+        preflight = runtime.copilot_service._prepare_operator_entity_preflight(
+            CopilotResearchCardRequest(domain="synthesis", prompt="Compare prediction markets kalshi:AAPL-YES and kalshi:MSFT-NO over 1w"),
+            allow_model_proposal=False,
+        )
+        assert preflight.resolution is None
+        assert [(entity.kind, entity.id) for entity in runtime.copilot_service._extract_plan_entities(
+            "Compare prediction markets kalshi:AAPL-YES and kalshi:MSFT-NO over 1w", CopilotRequestContext(),
+        )] == [("prediction_market", "kalshi:AAPL-YES"), ("prediction_market", "kalshi:MSFT-NO")]
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8g_prediction_comparison_rejects_invalid_inputs_and_retains_partial_evidence(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        service = runtime.copilot_service
+        markets = client.post("/prediction-markets/screener", json={}).json()["markets"]
+        ids = [row["market_id"] for row in markets[:2]]
+        valid = {"market_ids": ids, "range": "1w", "resolution_minutes": 60}
+        assert service._explicit_prediction_comparison_arguments(
+            f"Compare prediction markets {ids[0]} and {ids[1]} over 1w with 1 hour bars"
+        ) == valid
+        assert service._explicit_prediction_comparison_arguments(
+            f"Compare prediction markets {ids[0]} and {ids[1]} over 1w with 30 second bars"
+        ) is None
+        for invalid in (
+            {**valid, "market_ids": [ids[0], ids[0]]}, {**valid, "market_ids": ids[:1]},
+            {**valid, "market_ids": ids * 4}, {**valid, "market_ids": [ids[0], "Fed rate cut"]},
+            {**valid, "range": "decade"}, {**valid, "resolution_minutes": 0},
+            {**valid, "resolution_minutes": True}, {**valid, "resolution_minutes": 2.5},
+            {"market_ids": ids, "range": "1w"}, {**valid, "save": True},
+        ):
+            with pytest.raises(ValueError):
+                service._normalize_prediction_comparison_arguments(invalid)
+        original = runtime.prediction_market_service.compare_markets
+        comparison = original(ids, range_key="1w", resolution_minutes=60)
+        runtime.prediction_market_service.compare_markets = lambda *args, **kwargs: comparison
+        context = CopilotContextBundle(domain="prediction_markets", current_tab="copilot", summary_data={})
+        execution = service._execute_tool("run_prediction_market_comparison", {
+            **valid, "market_ids": [*ids, "kalshi:UNAVAILABLE"]
+        }, context)
+        assert execution.output["status"] == "degraded"
+        assert execution.output["missing_market_ids"] == ["kalshi:UNAVAILABLE"]
+        assert any("UNAVAILABLE" in warning for warning in execution.output["warnings"])
+        runtime.prediction_market_service.compare_markets = lambda *args, **kwargs: replace(comparison, legs=comparison.legs[:1], pairs=[])
+        unavailable = service._execute_tool("run_prediction_market_comparison", valid, context)
+        assert unavailable.output["status"] == "unavailable"
+        assert service._operator_working_analysis_spec(
+            unavailable, tool_id="run_prediction_market_comparison", arguments=valid,
+            context=context, request=CopilotResearchCardRequest(domain="prediction_markets"),
+        ) is None
+        runtime.prediction_market_service.compare_markets = lambda *args, **kwargs: replace(
+            comparison, legs=[replace(comparison.legs[0], market_id="kalshi:SUBSTITUTE"), comparison.legs[1]],
+        )
+        with pytest.raises(ValueError, match="unexpected contract"):
+            service._tool_run_prediction_market_comparison(valid, context)
+    finally:
+        runtime.shutdown()
+
+
 def test_checkpoint8f_strategy_lab_portfolio_rejects_zero_or_missing_exact_legs(tmp_path):
     _client, runtime = _build_test_client(tmp_path)
     try:

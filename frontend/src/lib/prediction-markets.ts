@@ -1,4 +1,5 @@
 import type {
+  CopilotWorkingAnalysis,
   PredictionCalibrationCurve,
   PredictionCalibrationSummary,
   PredictionHistoryRange,
@@ -8,6 +9,28 @@ import type {
   PredictionPairAnalytics,
   PredictionProbabilityHistoryResponse
 } from "./api/types";
+import { resolveWorkingAnalysisTarget } from "./copilot-workspace";
+
+/** Retained evidence is independent of the tab's live basket and saved sets. */
+export function predictionComparisonFromWorkingAnalysis(analysis: CopilotWorkingAnalysis | null, now = Date.now()) {
+  if (!analysis || resolveWorkingAnalysisTarget(analysis)?.tab !== "prediction_markets") return null;
+  if (!analysis.expires_at || !Number.isFinite(Date.parse(analysis.expires_at)) || Date.parse(analysis.expires_at) <= now) return null;
+  const inputs = analysis.inputs;
+  const ids = inputs.market_ids;
+  const comparison = analysis.outputs.comparison as PredictionMarketComparison | undefined;
+  if (
+    !Array.isArray(ids) || ids.length < 2 || ids.length > MAX_COMPARE_LEGS ||
+    ids.some((id) => typeof id !== "string") || new Set(ids).size !== ids.length ||
+    !comparison || !Array.isArray(comparison.legs) || !Array.isArray(comparison.pairs) ||
+    comparison.legs.length < 2 || comparison.legs.some((leg) => !ids.includes(leg.market_id) || !Array.isArray(leg.points)) ||
+    comparison.pairs.some((pair) => !Array.isArray(pair.spread_series)) ||
+    !HISTORY_RANGES.some((range) => range.id === inputs.range) || comparison.requested_range !== inputs.range
+  ) return null;
+  return {
+    comparison, marketIds: ids as string[], range: inputs.range as PredictionHistoryRange,
+    resolutionMinutes: inputs.resolution_minutes as number | null,
+  };
+}
 
 // Retained only so the one-time migration can find what a previous build wrote.
 // Saved research now lives in the backend store.

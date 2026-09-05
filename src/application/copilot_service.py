@@ -990,6 +990,42 @@ class CopilotService:
                     ),
                 ),
                 _CopilotToolDefinition(
+                    name="run_prediction_market_comparison",
+                    description=(
+                        "Compare an exact basket of 2-6 normalized prediction market IDs without a selected contract. "
+                        "Retain a temporary comparison with history, spreads, warnings and provenance."
+                    ),
+                    domains=("prediction_markets",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "market_ids": {
+                                "type": "array", "minItems": 2, "maxItems": MAX_COMPARISON_LEGS,
+                                "items": {"type": "string"},
+                                "description": "Exact venue-prefixed IDs, e.g. polymarket:123 or kalshi:EVENT-CONTRACT. No substitutions.",
+                            },
+                            "range": {"type": "string", "enum": list(HISTORY_RANGE_KEYS)},
+                            "resolution_minutes": {
+                                "type": ["integer", "null"], "minimum": 1, "maximum": 1440,
+                                "description": "Requested minutes per bar; null uses the provider-supported resolution.",
+                            },
+                        },
+                        "required": ["market_ids", "range", "resolution_minutes"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_prediction_market_comparison,
+                    action_type="run_analysis",
+                    permission_policy="automatic",
+                    timeout_seconds=30.0,
+                    output_schema={"type": "object"},
+                    provenance_behavior="Retains exact requested IDs, provider coverage, comparison methodology and bounded chart samples without saving a basket.",
+                    failure_modes=(
+                        "Invalid, duplicate or excess IDs and unsupported window settings are rejected.",
+                        "Unavailable contracts remain explicit missing IDs; partial comparisons are labeled degraded.",
+                        "Spreads are descriptive research, not executable arbitrage prices.",
+                    ),
+                ),
+                _CopilotToolDefinition(
                     name="compare_prediction_markets",
                     description=(
                         "Align several prediction-market contracts onto one timeline and return read-only per-leg "
@@ -2907,7 +2943,10 @@ class CopilotService:
         proposal: CopilotEquityEntityProposal | None = None
         warnings: list[str] = []
         usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
-        if self._prompt_requests_script_workflow(prompt.lower(), request.context):
+        if (
+            self._prompt_requests_script_workflow(prompt.lower(), request.context)
+            or self._prompt_requests_prediction_comparison(prompt)
+        ):
             return _CopilotEntityPreflight(
                 request=replace(request, entity_resolution=None),
                 resolution=None,
@@ -5921,7 +5960,7 @@ class CopilotService:
             or not isinstance(execution.output, dict)
             or execution.output.get("error")
         ):
-            return execution
+            return self._compact_prediction_comparison_observation(execution, tool_id)
         spec = self._operator_working_analysis_spec(
             execution,
             tool_id=tool_id,
@@ -5930,7 +5969,7 @@ class CopilotService:
             request=request,
         )
         if spec is None:
-            return execution
+            return self._compact_prediction_comparison_observation(execution, tool_id)
         session_id = str(request.user_session_id).strip()
         resolved_run_id = str(run_id or "").strip() or new_copilot_id("oprun")
         seed = "|".join(
@@ -6002,7 +6041,7 @@ class CopilotService:
                 saved = self.store.save_working_analysis(analysis)
             except Exception:
                 logger.exception("Copilot working-analysis persistence failed")
-                return execution
+                return self._compact_prediction_comparison_observation(execution, tool_id)
 
         reference = {
             "analysis_id": saved.analysis_id,
@@ -6015,9 +6054,10 @@ class CopilotService:
             "expires_at": saved.expires_at.isoformat() if saved.expires_at else None,
             "materialization": saved.materialization,
         }
+        observation = self._compact_prediction_comparison_observation(execution, tool_id)
         return replace(
-            execution,
-            output={**execution.output, "working_analysis": reference},
+            observation,
+            output={**observation.output, "working_analysis": reference},
             trace=replace(
                 execution.trace,
                 summary=(
@@ -6026,6 +6066,23 @@ class CopilotService:
                 ),
             ),
         )
+
+    @staticmethod
+    def _compact_prediction_comparison_observation(
+        execution: CopilotToolExecution, tool_id: str,
+    ) -> CopilotToolExecution:
+        """Keep chart geometry in the working record, not the model's token budget."""
+        if tool_id != "run_prediction_market_comparison" or not isinstance(execution.output, dict):
+            return execution
+        output = deepcopy(execution.output)
+        comparison = output.get("comparison")
+        if isinstance(comparison, dict):
+            for leg in comparison.get("legs", []):
+                leg.pop("points", None)
+            for pair in comparison.get("pairs", []):
+                pair.pop("spread_series", None)
+            output["chart_retention"] = "Chart geometry omitted from this observation; all statistics, coverage and warnings are retained. Open the working analysis for charts when available."
+        return replace(execution, output=output)
 
     def _operator_working_analysis_spec(
         self,
@@ -6039,6 +6096,36 @@ class CopilotService:
         output = execution.output
         if not isinstance(output, dict):
             return None
+        if tool_id == "run_prediction_market_comparison":
+            if output.get("status") not in {"ready", "degraded"}:
+                return None
+            inputs = deepcopy(execution.trace.arguments)
+            identity = self._stable_working_identity(inputs)
+            return {
+                "family_key": f"prediction_markets.comparison:{identity}",
+                "domain": "prediction_markets",
+                "analysis_type": "prediction_market_comparison",
+                "title": f"{len(inputs['market_ids'])}-contract prediction comparison",
+                "entity": {
+                    "entity_type": "prediction_market_basket",
+                    "normalized_id": f"prediction_comparison:{identity}",
+                    "market_ids": list(inputs["market_ids"]),
+                },
+                "inputs": inputs,
+                "outputs": deepcopy(output),
+                "warnings": list(output.get("warnings") or []),
+                "owning_tab": "prediction_markets",
+                "owning_mode": "compare",
+                "materialization": self._working_analysis_materialization(
+                    tab="prediction_markets", mode="compare",
+                    payload_contract="copilot.prediction-comparison-working-analysis.v1",
+                    navigation_context={"market_ids": list(inputs["market_ids"])},
+                    persistence_policy="non_durable_only", save_target=None,
+                ),
+                "source_provider": output["source_provider"],
+                "origin": "gamma.prediction.comparison",
+                "transformation_note": "Retained read-only comparison. Opening does not recompute or save a comparison set.",
+            }
         if tool_id in {
             "strategy_lab.draft_research_script",
             "strategy_lab.run_research_script",
@@ -6850,6 +6937,8 @@ class CopilotService:
             return {"result_kind": "auto"}
         if tool_name == "run_strategy_lab_portfolio_backtest":
             return self._default_strategy_lab_portfolio_arguments(context)
+        if tool_name == "run_prediction_market_comparison":
+            return self._explicit_prediction_comparison_arguments(str(context.tool_state.get("prompt") or ""))
         if tool_name == "run_research_scope_analysis":
             return self._default_research_scope_analysis_arguments(context)
         if tool_name == "inspect_equity_research_context":
@@ -7367,6 +7456,7 @@ class CopilotService:
         if analysis is None:
             return self.store.materialize_working_analysis(analysis_id)
         supported_targets = {
+            ("prediction_markets", "compare", "copilot.prediction-comparison-working-analysis.v1"),
             ("fundamentals", "reverse_valuation", "copilot.fundamentals-working-analysis.v1"),
             ("risk", "overview", "copilot.risk-working-analysis.v1"),
             ("risk", "scenarios", "copilot.risk-working-analysis.v1"),
@@ -7577,6 +7667,12 @@ class CopilotService:
         prompt: str,
         context: CopilotRequestContext,
     ) -> list[CopilotResearchPlanEntity]:
+        if CopilotService._prompt_requests_prediction_comparison(prompt):
+            # Venue contract tokens are case-sensitive IDs, not public-company tickers.
+            return [
+                CopilotResearchPlanEntity(kind="prediction_market", id=market_id, label=market_id, confidence=1.0)
+                for market_id in dict.fromkeys(re.findall(r"\b(?:polymarket|kalshi):[A-Za-z0-9][A-Za-z0-9_.-]*", prompt))
+            ]
         entities: list[CopilotResearchPlanEntity] = []
         seen: set[tuple[str, str]] = set()
 
@@ -7709,6 +7805,8 @@ class CopilotService:
 
         if CopilotService._prompt_requests_script_workflow(prompt, context):
             return "research_script_workflow"
+        if CopilotService._prompt_requests_prediction_comparison(prompt):
+            return "prediction_market_comparison"
         if CopilotService._prompt_requests_options_strategy_draft(prompt, context):
             return "options_strategy_draft"
         if CopilotService._prompt_requests_strategy_lab_portfolio(prompt, context):
@@ -7789,6 +7887,13 @@ class CopilotService:
                 ),
                 planned_tools=planned_tools,
                 required_context=["script_state", "authorized_input_references"],
+            )
+        elif intent == "prediction_market_comparison":
+            add(
+                "prediction_markets", "deep",
+                "Compare the exact requested contracts and window without adding a selected or related contract.",
+                action_type="run_analysis", planned_tools=["run_prediction_market_comparison"],
+                required_context=["market_ids", "range", "resolution_minutes"],
             )
         elif intent == "strategy_lab_portfolio_backtest":
             add(
@@ -10142,6 +10247,13 @@ class CopilotService:
         }
 
     def _build_prediction_market_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        if self._prompt_requests_prediction_comparison(str(request.prompt or "")):
+            return CopilotContextBundle(
+                domain="prediction_markets",
+                current_tab=request.context.current_tab or "prediction_markets",
+                summary_data={"prompt": request.prompt, "status": "awaiting_exact_comparison"},
+                tool_state={"prompt": request.prompt}, sources=[], warnings=[],
+            )
         market_id = (request.context.prediction_market_id or "").strip()
         if not market_id:
             raise ValueError("Prediction Markets copilot requires a selected market.")
@@ -11926,6 +12038,120 @@ class CopilotService:
                 summary=f"Read {len(series)} outcome series for {market_id} over the {range_key} window.",
                 arguments={"range": range_key, "resolution_minutes": resolution},
                 source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    @staticmethod
+    def _prompt_requests_prediction_comparison(prompt: str) -> bool:
+        return bool(
+            re.search(r"\bcompar(?:e|ison)\b", prompt, re.IGNORECASE)
+            and re.search(r"\b(?:prediction|polymarket|kalshi)\b", prompt, re.IGNORECASE)
+        )
+
+    @staticmethod
+    def _normalize_prediction_comparison_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+        if set(arguments) != {"market_ids", "range", "resolution_minutes"}:
+            raise ValueError("Comparison requires exact market_ids, range and resolution_minutes.")
+        ids = arguments["market_ids"]
+        if not isinstance(ids, list) or not 2 <= len(ids) <= MAX_COMPARISON_LEGS:
+            raise ValueError(f"Specify 2-{MAX_COMPARISON_LEGS} exact prediction market IDs.")
+        if any(
+            not isinstance(item, str)
+            or len(item) > 200
+            or not re.fullmatch(r"(?:polymarket|kalshi):[A-Za-z0-9][A-Za-z0-9_.-]*", item)
+            for item in ids
+        ):
+            raise ValueError("Use exact venue-prefixed prediction market IDs; names and URLs are not IDs.")
+        if len(set(ids)) != len(ids):
+            raise ValueError("Duplicate comparison IDs are not allowed.")
+        if arguments["range"] not in HISTORY_RANGE_KEYS:
+            raise ValueError("Unsupported prediction comparison range.")
+        resolution = arguments["resolution_minutes"]
+        if resolution is not None and (type(resolution) is not int or not 1 <= resolution <= 1440):
+            raise ValueError("Comparison resolution must be null or an integer from 1 to 1440 minutes.")
+        return {"market_ids": list(ids), "range": arguments["range"], "resolution_minutes": resolution}
+
+    @classmethod
+    def _explicit_prediction_comparison_arguments(cls, prompt: str) -> dict[str, Any] | None:
+        # The deterministic fallback accepts explicit IDs and a range only.
+        # General language translation belongs to the model, never hidden defaults.
+        ids = re.findall(r"\b(?:polymarket|kalshi):[A-Za-z0-9][A-Za-z0-9_.-]*", prompt)
+        window = re.search(r"\b(?:range|over)\s+(1d|1w|1m|3m|6m|1y|max)\b", prompt, re.IGNORECASE)
+        resolution = re.search(r"\b(\d+)\s*(minutes?|mins?|hours?|hrs?)\b", prompt, re.IGNORECASE)
+        if not window:
+            return None
+        if resolution:
+            resolution_minutes = int(resolution.group(1)) * (60 if resolution.group(2).lower().startswith("h") else 1)
+        elif re.search(r"\bhourly\b", prompt, re.IGNORECASE):
+            resolution_minutes = 60
+        elif re.search(r"\bdaily\b", prompt, re.IGNORECASE):
+            resolution_minutes = 1440
+        elif re.search(r"\b(?:bars?|resolution|seconds?)\b", prompt, re.IGNORECASE):
+            # An explicit but unsupported cadence needs model translation or clarification.
+            return None
+        else:
+            resolution_minutes = None
+        try:
+            return cls._normalize_prediction_comparison_arguments({
+                "market_ids": ids, "range": window.group(1).lower(),
+                "resolution_minutes": resolution_minutes,
+            })
+        except ValueError:
+            return None
+
+    def _tool_run_prediction_market_comparison(
+        self, arguments: dict[str, Any], context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        inputs = self._normalize_prediction_comparison_arguments(arguments)
+        comparison = self.prediction_market_service.compare_markets(
+            inputs["market_ids"], range_key=inputs["range"],
+            resolution_minutes=inputs["resolution_minutes"],
+        )
+        returned_ids = [leg.market_id for leg in comparison.legs]
+        if len(set(returned_ids)) != len(returned_ids) or any(item not in inputs["market_ids"] for item in returned_ids):
+            raise ValueError("Provider comparison returned unexpected contract identities.")
+        missing_ids = [item for item in inputs["market_ids"] if item not in returned_ids]
+        warnings = dedupe_warnings(
+            comparison.warnings,
+            *[leg.warnings for leg in comparison.legs],
+            *[pair.warnings for pair in comparison.pairs],
+            [f"Requested contract unavailable: {item}." for item in missing_ids],
+        )
+        retained = asdict(comparison)
+        # Keep statistics from all observations; bound only retained chart geometry.
+        sampled = False
+        for rows, key, limit in ((retained["legs"], "points", 400), (retained["pairs"], "spread_series", 200)):
+            for row in rows:
+                points = row[key]
+                if len(points) > limit:
+                    row[key] = [points[round(index * (len(points) - 1) / (limit - 1))] for index in range(limit)]
+                    sampled = True
+        if sampled:
+            warnings.append("Retained charts are sampled to 400 points per contract and 200 per spread; statistics use the full provider observations.")
+        retained["warnings"] = warnings
+        retained = json.loads(json.dumps(retained, default=lambda value: value.isoformat()))
+        provider = ", ".join(sorted({leg.source_provider or leg.venue for leg in comparison.legs})) or "prediction_markets"
+        source_id = f"prediction.comparison.{self._stable_working_identity(inputs)}"
+        source = CopilotSourceRef(
+            source_id=source_id, label="Exact prediction-market comparison", kind="analytics",
+            provider=provider, origin="gamma.prediction.comparison",
+            description=comparison.transformation_note, retrieved_at=comparison.retrieved_at,
+        )
+        usable = len(comparison.legs) >= 2
+        output = {
+            "status": "unavailable" if not usable else "degraded" if missing_ids or warnings else "ready",
+            "inputs": inputs, "missing_market_ids": missing_ids, "comparison": retained,
+            "warnings": warnings, "source_provider": provider,
+            "retrieved_at": comparison.retrieved_at.isoformat() if comparison.retrieved_at else None,
+            "origin": "gamma.prediction.comparison", "transformation_note": comparison.transformation_note,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_prediction_market_comparison", arguments=inputs,
+                summary=f"Compared {len(comparison.legs)} of {len(inputs['market_ids'])} exact contracts over {inputs['range']}; {len(missing_ids)} unavailable.",
+                source_ids=[source_id],
             ),
             sources=[source],
         )
