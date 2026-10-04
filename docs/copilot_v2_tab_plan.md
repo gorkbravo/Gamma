@@ -203,6 +203,18 @@ Before any material Copilot architecture, orchestration, tool, approval, run-sta
 
 Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
+### Official Guidance Re-Reviewed 2026-09-06 — Checkpoint 8 Completion
+
+Revalidated on **2026-10-04** through the OpenAI Developer Docs connector: [Agents SDK](https://developers.openai.com/api/docs/guides/agents/sdk), [running agents](https://developers.openai.com/api/docs/guides/agents/running-agents), [results and state](https://developers.openai.com/api/docs/guides/agents/results), [guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), [orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration), [tracing](https://developers.openai.com/api/docs/guides/agents/integrations-observability), and [strict function calling](https://developers.openai.com/api/docs/guides/function-calling). Decision unchanged: Responses handles model/tool observations and streaming in the default runner; the optional SDK may manage the loop, but Gamma owns validation, permissions, local state and approvals. No framework, model, key or permission expansion is warranted by Checkpoint 8 retention or the pending Checkpoint 9 interruption work.
+
+Fetched the current official [Agents SDK / Responses comparison](https://developers.openai.com/api/docs/guides/agents) through the OpenAI Developer Docs connector. Responses is appropriate when the application owns the loop and state; the SDK can manage the loop while the server still owns tools, persistence and approval decisions.
+
+Decision: retain the custom Responses default and optional Agents SDK path. Finish app-native exact-input analyses and retain their typed evidence in Gamma; do not migrate frameworks, models, or provider conversation storage. Both runners must carry the current server-owned request/session to retained-evidence reads. Existing API configuration is authorized for reuse and unchanged. Durable promotion remains dependent on Checkpoint 9's reusable confirmation/resume contract. In-app visual testing is explicitly deferred at the user's request; automated backend, SSR component and contract checks remain required.
+
+### Official Guidance Re-Reviewed 2026-09-06 — Checkpoint 8H Research Scope
+
+Reviewed the current official [Agents SDK versus Responses API](https://developers.openai.com/api/docs/guides/agents#agents-sdk-vs-responses-api) through the Developer Docs connector. Decision: keep the custom Responses loop and optional SDK runner; Gamma owns exact input validation, provider execution, observation compaction, retention and materialization in both. The new strict `run_research_basket_analysis` action preserves the legacy active-scope tool's compatibility while rejecting implicit inputs, duplicate symbols, invalid weights and out-of-bounds windows. Exact-basket analytics remain in ResearchService; no SDK migration, model change, key change or additional authority is needed. Existing key reuse remains authorized.
+
 ### Official Guidance Re-Reviewed 2026-09-05 — Domain Routing Reliability
 
 Re-read the official [function-calling flow](https://developers.openai.com/api/docs/guides/function-calling#the-tool-calling-flow) and [Agents SDK versus Responses API](https://developers.openai.com/api/docs/guides/agents#agents-sdk-vs-responses-api) through the Developer Docs connector. Decision: fix the shared Gamma-owned company preflight, retaining the custom Responses default and optional SDK loop. A multi-leg portfolio or imported Strategy Lab result does not require one primary SEC issuer. Plain macro/news/commodity requests must not acquire an issuer from generic prompt words. Named-company and explicit equity requests retain identity validation and ambiguity stops. No framework, model, key, tool permission, or durable-state change is justified by this routing defect.
@@ -408,14 +420,14 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is **approximately 90% complete** through Checkpoint 8F. This is a scope correction plus verified capability advances, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation, Checkpoint 7 adds the bounded closed-loop Operator core, and Checkpoints 8A-8F prove unloaded-company Fundamentals, user-specified hypothetical portfolio/Risk, two explicit Options contracts, and exact Strategy Lab portfolio inputs/assumptions without yet generalizing working state to every analytical family.
+The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state, Copilot is **approximately 92% complete** with Checkpoint 8 complete on 2026-09-06. Checkpoints 1–7 remain the verified foundation. Checkpoints 8A–8H plus the final retained-evidence slice cover representative entity acquisition, temporary assumptions, owning-tab materialization and cross-tool evidence reuse. Generalized same-run approval/recovery (Checkpoint 9) and live/UI release acceptance (Checkpoint 10) remain open.
 
 The material remaining gaps are product behavior, not only release hardening:
 
-- public-company names now have a model-assisted, SEC-validated ticker preflight, but entity and intent acquisition remain shallow for other asset classes and multi-entity workflows;
-- entity acquisition remains inconsistent across non-Fundamentals tools; several workflows still depend on already-active tab context or precomputed results;
-- the versioned session-scoped working-analysis contract now covers unloaded Fundamentals reverse valuation, user-specified hypothetical portfolio/Risk workflows, explicit Options realized-versus-implied comparisons, exact provider-priced option-set drafts, and exact Strategy Lab portfolio inputs/temporary assumptions, but remaining representative tab-owned and cross-tool outputs are not yet covered;
-- Fundamentals reverse-valuation, Risk scenario, and Options realized-versus-implied results can now materialize temporarily in their owning tabs, but other tool results do not yet consistently materialize in the corresponding Gamma tab or working object;
+- public-company names have SEC-validated acquisition; Macro/Crypto use explicit provider/Gamma identifiers. Broader natural-language identity resolution is optional future depth beyond the representative checkpoint gate;
+- loaded account snapshots and imported Strategy Lab results remain explicit supplied inputs. Gamma does not invent broker/account state or reconstruct missing uploaded CSV rows;
+- the versioned session-scoped working-analysis contract now covers the representative owning surfaces and retained cross-tool reads; broader analytical depth remains owned by each tab, and durable promotion is still dependent on Checkpoint 9;
+- representative computed results now materialize non-durably in their owning tabs; additional specialized visualization and broader provider depth remain tab-owned follow-up work;
 - the durable approval model is narrow and DCF-specific rather than a general pause/approve-or-reject/resume-the-same-run contract;
 - replayable events preserve history, but do not yet provide generalized workflow recovery, replanning, retries, or approval resumption;
 - role escalation from Agent to Operator is not yet a complete, visible authority transition;
@@ -659,7 +671,7 @@ Implementation note (2026-07-30, checkpoint complete):
 - Verification: 31 focused Operator tests, 8 focused Checkpoint 7 contract tests, 2 Agents SDK smoke tests, the full 542-test backend suite, 368 frontend tests across 50 files, TypeScript typecheck, and the production frontend build passed. The installed `openai 2.38.0` / `agents 0.17.4` contract was exercised without dependency changes.
 - Authorized live smoke reached the real Responses transport on 2026-07-30 with provider storage disabled. The provider returned a streamed quota exhaustion before any tool call; Gamma persisted a safe `quota_exhausted`/`provider_error` `copilot.operator.loop.v1` terminal with zero tools and no fallback card. This validates the live error boundary, not a successful live model-tool-model result.
 
-#### J. Entity-addressable tools and working-analysis state — in progress (Checkpoints 8A-8G implemented)
+#### J. Entity-addressable tools and working-analysis state — checkpoint 8 complete (92%, 2026-09-06)
 
 - [x] Prove unloaded entity acquisition with `LMT` reverse valuation: the planned ticker hydrates Fundamentals context and remains the authoritative tool argument without requiring the tab to be preloaded.
 - [x] Add `copilot.working-analysis.v1` as Gamma-owned session-scoped state for Fundamentals reverse-valuation outputs, including entity, inputs, complete bounded output, provenance, context fingerprint, read-only safety, expiry, restart replay, discard, and recoverable session deletion.
@@ -671,10 +683,11 @@ Implementation note (2026-07-30, checkpoint complete):
 - [x] Add the Checkpoint 8E option-set vertical slice: explicit legs retain exact side, right, expiry, strike, ratio, contract count, provider price, quality, warnings, and provenance, then materialize non-durably into Options / Strategies without nearby-contract substitution.
 - [x] Add the Checkpoint 8F Strategy Lab vertical slice: explicit signed listed-market legs, benchmark, lookback, and minimum-overlap inputs retain exact identity and assumptions, execute through the existing portfolio-composition service, and materialize non-durably into Strategy Lab / Composer.
 - [x] Add the Checkpoint 8G Prediction Markets slice: exact venue-prefixed baskets run without preloading a contract, retain comparison evidence, and open as a non-durable snapshot in Compare.
+- [x] Add Checkpoint 8H exact Research basket working analyses: explicit fractional weights, benchmark and lookback run without preloading a scope, retain bounded charts and full-history statistics, and materialize into Equity Research / Scope without updating the live draft or saved research. Missing constituents prevent partial-basket materialization. See [8H acceptance](audits/copilot_checkpoint8h_2026-09-06.md).
 - [x] Repair primary-company routing after 8G: multi-leg hypothetical/Strategy Lab workflows and imported strategy analyses bypass single-issuer preflight; plain macro/news requests retain their domain routing. Preserve named-company validation and ambiguity stops. See [routing regression acceptance](audits/copilot_domain_routing_2026-09-05.md).
-- [ ] Continue the contract through the remaining representative tab-owned analyses and cross-tool outputs.
+- [x] Complete representative Research scope, imported Strategy Lab, Macro series, Crypto token and commodity evidence retention. Add exact-input Macro/Crypto acquisition and session/role/scope-checked `read_working_analysis`, verified through deterministic execution, simulated Responses and the SDK runner. See [Checkpoint 8 completion acceptance](audits/copilot_checkpoint8_completion_2026-09-06.md).
 - [x] Integrate the separately tracked Research Script Workspace after its mock contracts, immutable revision store, and Script-mode materialization payload became stable. Completed and verified 2026-08-31 with Code Interpreter network disabled, retained typed outputs, and unchanged `run_strategy_lab_backtest`; Script execution remains isolated from general Operator authority.
-- [ ] Add explicit promotion/persist workflows where product requirements call for them; expiration and discard are implemented for the first slice, while durable promotion remains confirmation-owned future work.
+- [x] Preserve the temporary-versus-durable boundary: all Checkpoint 8 results expire/discard and reopen non-durably. No additional durable promotion is required by these representative workflows. Existing memo/report persistence and the narrow confirmed DCF path remain available; new promotion families are explicitly owned by Checkpoint 9 after reusable approval/resume, rather than silently inferred from temporary-state support.
 
 Implementation note (2026-08-25, Checkpoint 8A):
 
@@ -734,7 +747,7 @@ Implementation note (2026-09-05, Checkpoint 8G):
 
 #### K. Generalized interruptions, recovery, and role transition — open
 
-- Generalize the DCF proposal pattern into pause/approve-or-reject/resume-the-same-run for every future durable local research-state mutation.
+- Generalize the DCF proposal pattern into pause/approve-or-reject/resume-the-same-run for every future durable local research-state mutation. Add explicit working-analysis promotion only where a product workflow requires it, with typed diffs, persistence/rollback and permission tests.
 - Persist the unfinished run snapshot, plan cursor, observations, budgets, working-state ids, context fingerprint, pending tool call, and approval decision.
 - Add bounded tool retry, replan, resume-after-restart, and stale-context behavior without replaying already committed side effects.
 - Make Agent-to-Operator escalation visible and intentional. The original Agent run may propose the workflow, but it cannot execute until Operator authority is selected.
@@ -761,14 +774,14 @@ Implementation note (2026-09-05, Checkpoint 8G):
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
 10. ~~Build the closed-loop Operator and model-assisted, schema-validated argument path.~~ Completed 2026-07-30 at Checkpoint 7 (82%).
-11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization. In progress: unloaded-company Fundamentals, hypothetical portfolio/Risk, explicit Options realized-versus-implied, exact option-set drafts, and exact Strategy Lab portfolio inputs/assumptions are complete through Checkpoint 8F; remaining representative owning surfaces are next.
+11. ~~Entity-addressable tools, session-scoped working analyses and owning-tab materialization.~~ Checkpoint 8 complete on 2026-09-06 (92%); the acceptance matrix covers representative domain families and exact retained evidence reuse in both runners.
 12. Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.
 13. Pass trace-level deterministic and live acceptance cases against the clarified completion boundary.
 14. Optional external deep research; later voice.
 
 Do not start with model-string replacement alone. Any future candidate-model rollout must use the Checkpoint 6 policy and land with provider streaming, capability validation, usage instrumentation, and recorded eval/live evidence so it improves the product rather than merely changing metadata.
 
-The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 90%** end-state baseline through Checkpoint 8F.
+The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 92%** end-state baseline after Checkpoint 8.
 
 ### Definition Of Done
 
@@ -1307,11 +1320,11 @@ Current Research Operator state (foundation inventory, not the desired end state
 - `run_hypothetical_portfolio_comparison` is automatic read-only and builds a temporary long-only synthetic research scope from typed legs/weights, compares its normalized return stream to a benchmark through the existing Compare/Scenario service path, and can optionally hand the temporary fixed-notional snapshot to Risk for bounded contribution analytics. It returns coverage, relative metrics, optional risk handoff output, warnings, and provenance without saving, rebalancing, or trading anything.
 - `run_options_realized_implied_comparison` is automatic read-only and uses Gamma's existing IVService surface path or active Options state to compare ATM implied volatility against available provider historical-volatility fields by expiry. It returns implied moves, vol premium/ratio rows where data is sufficient, missing-history or missing-IV statuses where it is not, surface quality/collection metadata, warnings, and provenance without direct Copilot provider calls or state changes.
 - `run_fundamentals_reverse_valuation` remains automatic read-only. DCF update proposals stop at draft/confirmation checkpoints; `fundamentals.apply_dcf_update` remains confirmation-required and is not run by automatic operator execution.
-- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. Checkpoint 7 adds retained argument-fidelity, validation-correction, observation-continuation, forbidden-action, budget-stop, and model-final tests plus the generic-summary eval rejection. The remaining benchmark gaps are unloaded-entity acquisition, generalized working state/materialization, degraded cross-domain replanning breadth, and same-run approval resumption.
+- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. Checkpoint 7 adds retained argument-fidelity, validation-correction, observation-continuation, forbidden-action, budget-stop, and model-final tests plus the generic-summary eval rejection. Checkpoint 8 adds retained lifecycle and cross-tool observations in both runner paths. Remaining release benchmark gaps are broader degraded cross-domain replanning, representative live-provider acceptance and same-run approval resumption.
 
 What remains for the next agents:
 
-1. Generalize `copilot.working-analysis.v1` beyond the completed Fundamentals, hypothetical-portfolio/Risk, Options realized-versus-implied, option-set draft, and Strategy Lab portfolio-input slices to the remaining representative tab-owned analyses.
+1. Preserve the completed Checkpoint 8 acceptance matrix and temporary-state contracts. Start Checkpoint 9: generalized same-run approval/recovery and explicit role transition.
 2. Generalize interruptions and recovery as described in workstream K. Do not broaden durable mutation families until pause/resume state, idempotency, diffs, rollback policy, and permission evals are reusable.
 3. Extend the Checkpoint 7 trace gate with degraded-result cross-domain replanning, unnecessary-tool, stale-context, remaining unloaded-entity families, working-state, and same-run approval-resume cases.
 4. Compare the custom Responses loop and Agents SDK as later end-state contracts enter the benchmark. Promote Agents SDK only if sessions, interruptions, traces, maintainability, quality, reliability, latency, or cost show a practical advantage without weakening permissions.

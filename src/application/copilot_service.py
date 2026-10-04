@@ -42,6 +42,7 @@ from src.application.copilot_entity_resolution import (
     should_attempt_equity_resolution,
 )
 from src.application.copilot_report_service import CopilotReportService
+from src.application.copilot_working_evidence import EVIDENCE_CONTRACT, EVIDENCE_TARGETS, retained_evidence_spec
 from src.application.commodities_service import CommoditiesService, CommodityWorkspaceRequest
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
@@ -424,6 +425,27 @@ class CopilotService:
                     ),
                 ),
                 _CopilotToolDefinition(
+                    name="run_research_basket_analysis",
+                    description="Analyze an exact temporary Research scope basket without loading or saving a scope. Supply positive fractional weights summing to one, an explicit benchmark and lookback. No substitutions or implicit inputs.",
+                    domains=("research", "equity_research"),
+                    parameters_schema={
+                        "type": "object", "additionalProperties": False,
+                        "properties": {
+                            "benchmark_symbol": {"type": "string"},
+                            "lookback_days": {"type": "integer", "minimum": 20, "maximum": MAX_RISK_LOOKBACK_DAYS},
+                            "positions": {"type": "array", "minItems": 1, "maxItems": 100, "items": {
+                                "type": "object", "additionalProperties": False,
+                                "properties": {"symbol": {"type": "string"}, "weight": {"type": "number"}},
+                                "required": ["symbol", "weight"],
+                            }},
+                        },
+                        "required": ["positions", "benchmark_symbol", "lookback_days"],
+                    },
+                    handler=self._tool_run_research_basket_analysis,
+                    action_type="run_analysis", output_schema={"type": "object"},
+                    timeout_seconds=30.0, permission_policy="automatic",
+                ),
+                _CopilotToolDefinition(
                     name="run_research_scope_analysis",
                     description="Run a bounded read-only Research scope analysis for the active single-name or synthetic research scope.",
                     domains=("research", "equity_research"),
@@ -708,6 +730,36 @@ class CopilotService:
                         "Optional Risk handoff is skipped when RiskService is unavailable or history coverage is too thin.",
                         "Weights are bounded, long-only, and normalized; this does not modify broker or saved research state.",
                     ),
+                ),
+                _CopilotToolDefinition(
+                    name="run_macro_series_analysis",
+                    description="Analyze an exact Gamma macro series, region and timeframe without a loaded tab. Retains dated evidence for reopening.",
+                    domains=("macro",),
+                    parameters_schema={"type": "object", "properties": {
+                        "series_id": {"type": "string", "minLength": 1, "maxLength": 100},
+                        "region": {"type": "string", "enum": ["US", "EU", "Global"]},
+                        "timeframe": {"type": "string", "enum": ["1M", "3M", "6M", "1Y"]},
+                    }, "required": ["series_id", "region", "timeframe"], "additionalProperties": False},
+                    handler=self._tool_run_macro_series_analysis, action_type="run_analysis",
+                ),
+                _CopilotToolDefinition(
+                    name="run_crypto_token_analysis",
+                    description="Analyze an exact provider token id and lookback without a loaded Crypto tab. Includes price history, DEX liquidity and comparison with independent coverage warnings.",
+                    domains=("crypto",),
+                    parameters_schema={"type": "object", "properties": {
+                        "token_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,99}$"},
+                        "days": {"type": "integer", "minimum": 1, "maximum": 365},
+                    }, "required": ["token_id", "days"], "additionalProperties": False},
+                    handler=self._tool_run_crypto_token_analysis, action_type="run_analysis",
+                ),
+                _CopilotToolDefinition(
+                    name="read_working_analysis",
+                    description="Read an exact active temporary analysis in the current Copilot session with original inputs, sources and dates. Does not refresh or promote it.",
+                    domains=("synthesis",),
+                    parameters_schema={"type": "object", "properties": {
+                        "analysis_id": {"type": "string", "pattern": "^work_[a-f0-9]{24}$"},
+                    }, "required": ["analysis_id"], "additionalProperties": False},
+                    handler=lambda arguments, context: self._read_working_analysis(arguments, None),
                 ),
                 _CopilotToolDefinition(
                     name="get_macro_workspace_drilldown",
@@ -2947,7 +2999,9 @@ class CopilotService:
         # issuer here would reject valid baskets or misread strategy labels.
         if (
             self._prompt_requests_script_workflow(prompt.lower(), request.context)
+            or self._working_evidence_intent(prompt)
             or self._prompt_requests_prediction_comparison(prompt)
+            or self._prompt_requests_research_basket(prompt)
             or self._prompt_requests_hypothetical_portfolio(prompt)
             or self._prompt_requests_strategy_lab_portfolio(prompt, request.context)
             or (
@@ -3102,6 +3156,8 @@ class CopilotService:
             request=request,
         )
         budget = self._execution_budget_for_depth(depth_profile)
+        if intent in {"macro_series_analysis", "crypto_token_analysis", "retained_analysis_research"}:
+            budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 60_000))
         if (
             intent == "hypothetical_portfolio_comparison"
             and self._prompt_requests_risk_scenario(normalized_prompt)
@@ -3968,6 +4024,8 @@ class CopilotService:
                             tool_id,
                             arguments,
                             context,
+                            request=request,
+                            run_id=run_id,
                         ),
                         tool_id=tool_id,
                         arguments=arguments,
@@ -4367,7 +4425,7 @@ class CopilotService:
                 )
                 continue
             execution = self._attach_operator_working_analysis(
-                self._execute_tool(step.tool_id, arguments, context),
+                self._execute_registered_operator_action(step.tool_id, arguments, context, request=request, run_id=resolved_run_id),
                 tool_id=step.tool_id,
                 arguments=arguments,
                 context=context,
@@ -5524,6 +5582,8 @@ class CopilotService:
                 context,
                 request=request,
             )
+        if tool_id == "read_working_analysis":
+            return self._read_working_analysis(arguments, request)
         return self._execute_tool(tool_id, arguments, context)
 
     def _tool_draft_research_script(
@@ -6051,7 +6111,13 @@ class CopilotService:
                 saved = self.store.save_working_analysis(analysis)
             except Exception:
                 logger.exception("Copilot working-analysis persistence failed")
-                return self._compact_prediction_comparison_observation(execution, tool_id)
+                observation = self._compact_prediction_comparison_observation(execution, tool_id)
+                return replace(observation, output={**observation.output,
+                    "working_analysis_status": "persistence_failed",
+                    "warnings": dedupe_warnings(observation.output.get("warnings", []), [
+                        "The analysis ran, but its temporary result could not be retained. Reopening or restarting cannot recover this result."
+                    ]),
+                })
 
         reference = {
             "analysis_id": saved.analysis_id,
@@ -6082,6 +6148,12 @@ class CopilotService:
         execution: CopilotToolExecution, tool_id: str,
     ) -> CopilotToolExecution:
         """Keep chart geometry in the working record, not the model's token budget."""
+        if tool_id == "run_research_basket_analysis" and isinstance(execution.output, dict):
+            output = deepcopy(execution.output)
+            output.pop("performance_points", None)
+            output.pop("benchmark_points", None)
+            output["chart_retention"] = "Charts are retained in the temporary working analysis; statistics use all observations."
+            return replace(execution, output=output)
         if tool_id != "run_prediction_market_comparison" or not isinstance(execution.output, dict):
             return execution
         output = deepcopy(execution.output)
@@ -6106,6 +6178,29 @@ class CopilotService:
         output = execution.output
         if not isinstance(output, dict):
             return None
+        if tool_id in EVIDENCE_TARGETS:
+            return retained_evidence_spec(execution, tool_id, self._stable_working_identity({
+                "inputs": execution.trace.arguments, "output": output,
+            }))
+        if tool_id == "run_research_basket_analysis":
+            if output.get("status") not in {"ready", "degraded"}:
+                return None
+            inputs = deepcopy(execution.trace.arguments)
+            identity = self._stable_working_identity(inputs)
+            return {
+                "family_key": f"research.basket:{identity}", "domain": "research",
+                "analysis_type": "research_basket_analysis", "title": f"{len(inputs['positions'])}-asset Research scope",
+                "entity": {"entity_type": "research_basket", "normalized_id": f"research_basket:{identity}"},
+                "inputs": inputs, "outputs": deepcopy(output), "warnings": list(output.get("warnings") or []),
+                "owning_tab": "equity_research", "owning_mode": "scope_analysis",
+                "materialization": self._working_analysis_materialization(
+                    tab="equity_research", mode="scope_analysis",
+                    payload_contract="copilot.research-scope-working-analysis.v1",
+                    navigation_context={}, persistence_policy="non_durable_only", save_target=None,
+                ),
+                "source_provider": output["provenance"]["source_provider"], "origin": "gamma.research.analyze",
+                "transformation_note": "Retained exact research basket. Opening does not recompute, load, or save a scope.",
+            }
         if tool_id == "run_prediction_market_comparison":
             if output.get("status") not in {"ready", "degraded"}:
                 return None
@@ -6860,6 +6955,13 @@ class CopilotService:
         request: CopilotResearchCardRequest,
         domain: str,
     ) -> CopilotContextBundle:
+        if (self._working_evidence_intent(str(request.prompt or ""))
+                and not self._prompt_requests_script_workflow(str(request.prompt or ""), request.context)):
+            # Explicit tools acquire their own inputs; avoid unrelated selected-tab loads.
+            return finalize_context_bundle(CopilotContextBundle(
+                domain=domain, current_tab=domain,
+                summary_data={"prompt": request.prompt}, tool_state={"prompt": request.prompt},
+            ), request)
         builder = self._context_builders.get(domain)
         if builder is None:
             raise ValueError(f"unsupported Copilot domain `{domain}`.")
@@ -6928,6 +7030,8 @@ class CopilotService:
         tool_name: str,
         context: CopilotContextBundle,
     ) -> dict[str, Any] | None:
+        if tool_name in {"run_macro_series_analysis", "run_crypto_token_analysis", "read_working_analysis"}:
+            return self._working_evidence_arguments(tool_name, str(context.tool_state.get("prompt") or ""))
         if tool_name == "get_macro_series_history_summary":
             for card in context.summary_data.get("snapshot_cards", []) or []:
                 for metric in card.get("metrics", []) if isinstance(card, dict) else []:
@@ -6951,6 +7055,8 @@ class CopilotService:
             return self._explicit_prediction_comparison_arguments(str(context.tool_state.get("prompt") or ""))
         if tool_name == "run_research_scope_analysis":
             return self._default_research_scope_analysis_arguments(context)
+        if tool_name == "run_research_basket_analysis":
+            return self._explicit_research_basket_arguments(str(context.tool_state.get("prompt") or ""))
         if tool_name == "inspect_equity_research_context":
             research = context.summary_data.get("research")
             operator = context.summary_data.get("research_operator")
@@ -7466,6 +7572,8 @@ class CopilotService:
         if analysis is None:
             return self.store.materialize_working_analysis(analysis_id)
         supported_targets = {
+            *((tab, mode, EVIDENCE_CONTRACT) for _, tab, mode, _ in EVIDENCE_TARGETS.values()),
+            ("equity_research", "scope_analysis", "copilot.research-scope-working-analysis.v1"),
             ("prediction_markets", "compare", "copilot.prediction-comparison-working-analysis.v1"),
             ("fundamentals", "reverse_valuation", "copilot.fundamentals-working-analysis.v1"),
             ("risk", "overview", "copilot.risk-working-analysis.v1"),
@@ -7484,6 +7592,13 @@ class CopilotService:
             ),
         }
         materialization = analysis.materialization
+        if materialization.get("payload_contract") == EVIDENCE_CONTRACT:
+            evidence_target = EVIDENCE_TARGETS.get(analysis.tool_id)
+            if (evidence_target is None or analysis.analysis_type != "retained_evidence"
+                    or evidence_target[1:3] != (analysis.owning_tab, analysis.owning_mode)
+                    or not isinstance(analysis.outputs.get("result"), dict)
+                    or not isinstance(analysis.outputs.get("sources"), list)):
+                raise ValueError("Copilot retained evidence does not match its owning analytical tool.")
         target = (
             str(materialization.get("target_tab") or analysis.owning_tab),
             str(materialization.get("target_mode") or analysis.owning_mode),
@@ -7815,8 +7930,13 @@ class CopilotService:
 
         if CopilotService._prompt_requests_script_workflow(prompt, context):
             return "research_script_workflow"
+        evidence_intent = CopilotService._working_evidence_intent(prompt)
+        if evidence_intent:
+            return evidence_intent
         if CopilotService._prompt_requests_prediction_comparison(prompt):
             return "prediction_market_comparison"
+        if CopilotService._prompt_requests_research_basket(prompt):
+            return "research_basket_analysis"
         if CopilotService._prompt_requests_options_strategy_draft(prompt, context):
             return "options_strategy_draft"
         if CopilotService._prompt_requests_strategy_lab_portfolio(prompt, context):
@@ -7877,7 +7997,21 @@ class CopilotService:
                 )
             )
 
-        if intent == "research_script_workflow":
+        if intent in {"macro_series_analysis", "crypto_token_analysis", "retained_analysis_research"}:
+            domain, tool = {
+                "macro_series_analysis": ("macro", "run_macro_series_analysis"),
+                "crypto_token_analysis": ("crypto", "run_crypto_token_analysis"),
+                "retained_analysis_research": ("synthesis", "read_working_analysis"),
+            }[intent]
+            add(domain, "deep", "Use exact requested identifiers and retain evidence without preloading a tab.",
+                action_type="read_context" if tool == "read_working_analysis" else "run_analysis", planned_tools=[tool])
+            if re.search(r"\bmacro series\b", prompt, re.I):
+                add("macro", "deep", "Compare the retained result with an exact requested macro series.",
+                    action_type="run_analysis", planned_tools=["run_macro_series_analysis"])
+            if re.search(r"\bcrypto token\b", prompt, re.I):
+                add("crypto", "deep", "Compare retained evidence with the requested token analysis.",
+                    action_type="run_analysis", planned_tools=["run_crypto_token_analysis"])
+        elif intent == "research_script_workflow":
             planned_tools: list[str] = []
             if self._prompt_requests_script_draft(prompt):
                 planned_tools.append("strategy_lab.draft_research_script")
@@ -7898,6 +8032,10 @@ class CopilotService:
                 planned_tools=planned_tools,
                 required_context=["script_state", "authorized_input_references"],
             )
+        elif intent == "research_basket_analysis":
+            add("research", "deep", "Analyze the exact requested research basket without active-scope substitution.",
+                action_type="run_analysis", planned_tools=["run_research_basket_analysis"],
+                required_context=["positions", "benchmark_symbol", "lookback_days"])
         elif intent == "prediction_market_comparison":
             add(
                 "prediction_markets", "deep",
@@ -8790,6 +8928,12 @@ class CopilotService:
         )
 
     def _build_research_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        if self._prompt_requests_research_basket(str(request.prompt or "")):
+            return CopilotContextBundle(
+                domain="research", current_tab=request.context.current_tab or "copilot",
+                summary_data={"prompt": request.prompt, "research": None},
+                tool_state={"prompt": request.prompt}, sources=[], warnings=[],
+            )
         state = request.context.research_state or {}
         result = state.get("result")
         if not isinstance(result, dict):
@@ -11058,6 +11202,105 @@ class CopilotService:
             return bool(missing)
         return False
 
+    @staticmethod
+    def _prompt_requests_research_basket(prompt: str) -> bool:
+        text = str(prompt or "").lower()
+        return bool(re.search(r"\bresearch\s+(?:scope|basket)\b", text) and re.search(r"\b(?:basket|weights?|weighted)\b", text))
+
+    @staticmethod
+    def _normalize_research_basket_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+        if set(arguments) != {"positions", "benchmark_symbol", "lookback_days"}:
+            raise ValueError("Research basket requires exact positions, benchmark_symbol and lookback_days.")
+        def symbol(value: Any) -> str:
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9.^=-]{0,31}", value.strip()):
+                raise ValueError("Research basket requires explicit listed-market symbols.")
+            return value.strip().upper()
+        benchmark = symbol(arguments["benchmark_symbol"])
+        days = arguments["lookback_days"]
+        if isinstance(days, bool) or not isinstance(days, int) or not 20 <= days <= MAX_RISK_LOOKBACK_DAYS:
+            raise ValueError(f"lookback_days must be an integer from 20 to {MAX_RISK_LOOKBACK_DAYS}.")
+        rows = arguments["positions"]
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
+            raise ValueError("Research basket requires 1 to 100 exact positions.")
+        positions = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {"symbol", "weight"}:
+                raise ValueError("Each research position requires only symbol and weight.")
+            ticker = symbol(row["symbol"])
+            weight = row["weight"]
+            if ticker in seen:
+                raise ValueError(f"Duplicate research symbol: {ticker}.")
+            if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight) or not 0 < weight <= 1:
+                raise ValueError("Research weights must be finite positive fractions no greater than one.")
+            seen.add(ticker)
+            positions.append({"symbol": ticker, "weight": float(weight)})
+        if not math.isclose(sum(row["weight"] for row in positions), 1.0, rel_tol=0, abs_tol=1e-9):
+            raise ValueError("Research weights must sum to one; Gamma will not silently reweight the basket.")
+        return {"positions": positions, "benchmark_symbol": benchmark, "lookback_days": days}
+
+    @classmethod
+    def _explicit_research_basket_arguments(cls, prompt: str) -> dict[str, Any] | None:
+        # Narrow offline fallback. General language translation belongs to the model.
+        basket = re.search(r"\[([^\[\]]+)\]", prompt)
+        benchmark = re.search(r"\b(?:benchmark|against)\s+([A-Za-z][A-Za-z0-9.^=-]*)\b", prompt, re.I)
+        window = re.search(r"\b(?:over|lookback)\s+(\d+)\s*(?:days?|d)\b", prompt, re.I)
+        if not basket or not benchmark or not window:
+            return None
+        positions = []
+        for text in basket.group(1).split(","):
+            match = re.fullmatch(r"\s*([A-Za-z][A-Za-z0-9.^=-]*)\s*[:=]\s*(\d+(?:\.\d+)?)\s*(%)?\s*", text)
+            if not match:
+                return None
+            positions.append({"symbol": match.group(1), "weight": float(match.group(2)) / (100 if match.group(3) else 1)})
+        try:
+            return cls._normalize_research_basket_arguments({"positions": positions, "benchmark_symbol": benchmark.group(1), "lookback_days": int(window.group(1))})
+        except ValueError:
+            return None
+
+    def _tool_run_research_basket_analysis(self, arguments: dict[str, Any], context: CopilotContextBundle) -> CopilotToolExecution:
+        inputs = self._normalize_research_basket_arguments(arguments)
+        if self.research_provider is None:
+            raise ValueError("Research provider is unavailable to Copilot.")
+        analysis = ResearchService(self.research_provider).analyze(ResearchAnalysisRequest(
+            scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO, primary_symbol="",
+            synthetic_positions=[SyntheticPosition(**row) for row in inputs["positions"]],
+            benchmark_symbol=inputs["benchmark_symbol"], lookback_days=inputs["lookback_days"],
+            enforce_observation_limit=True,
+        ))
+        normalized = {**inputs, "synthetic_positions": inputs["positions"]}
+        output = self._research_scope_analysis_operator_summary(analysis, normalized=normalized, constituent_limit=100)
+        output["status"] = "ready"
+        requested_symbols = {row["symbol"] for row in inputs["positions"]}
+        available_symbols = {str(symbol).upper() for symbol in analysis.available_symbols}
+        if analysis.missing_symbols or analysis.perf.empty or available_symbols != requested_symbols:
+            output["status"] = "unavailable"
+            output["metrics"] = {}
+            output["top_constituents"] = []
+            output["warnings"].append("The exact requested basket is unavailable; no partial-basket result is materialized.")
+        elif output["warnings"] or analysis.benchmark_returns.empty:
+            output["status"] = "degraded"
+        def points(series: Any) -> list[dict[str, Any]]:
+            if series.empty or output["status"] == "unavailable":
+                return []
+            cumulative = (1.0 + series).cumprod() - 1.0
+            indices = sorted({round(i * (len(cumulative) - 1) / max(1, min(400, len(cumulative)) - 1)) for i in range(min(400, len(cumulative)))})
+            return [{"time": int(cumulative.index[i].timestamp()), "value": float(cumulative.iloc[i]) * 100} for i in indices if math.isfinite(float(cumulative.iloc[i]))]
+        output["performance_points"] = points(analysis.perf)
+        output["benchmark_points"] = points(analysis.benchmark_returns)
+        if max(len(analysis.perf), len(analysis.benchmark_returns)) > 400:
+            output["warnings"].append("Charts are sampled to at most 400 points; statistics use all observations.")
+        source = CopilotSourceRef(
+            source_id=f"research.basket.{self._stable_working_identity(inputs)}", label="Exact Research basket analysis",
+            kind="analytics", provider=analysis.source_provider, origin="gamma.research.analyze",
+            retrieved_at=analysis.snapshot.timestamp if analysis.snapshot else now_utc(),
+            description="Read-only exact basket analytics from Gamma ResearchService.",
+        )
+        return CopilotToolExecution(output=output, trace=CopilotToolTrace(
+            tool_name="run_research_basket_analysis", arguments=inputs,
+            summary=f"Research basket analysis: {output['status']}.", source_ids=[source.source_id],
+        ), sources=[source])
+
     def _tool_run_research_scope_analysis(
         self,
         arguments: dict[str, Any],
@@ -11114,6 +11357,7 @@ class CopilotService:
                     "benchmark_symbol": normalized["benchmark_symbol"],
                     "lookback_days": normalized["lookback_days"],
                     "synthetic_position_count": len(normalized["synthetic_positions"]),
+                    "synthetic_positions": deepcopy(normalized["synthetic_positions"]),
                 },
                 source_ids=[source.source_id],
             ),
@@ -11389,6 +11633,148 @@ class CopilotService:
             sources=sources,
         )
 
+    @staticmethod
+    def _working_evidence_intent(prompt: str) -> str | None:
+        if re.search(r"\bwork_[a-f0-9]{24}\b", prompt):
+            return "retained_analysis_research"
+        if re.search(r"\bmacro series\b", prompt, re.I):
+            return "macro_series_analysis"
+        if re.search(r"\bcrypto token\b", prompt, re.I):
+            return "crypto_token_analysis"
+        return None
+
+    @staticmethod
+    def _working_evidence_arguments(tool_id: str, prompt: str) -> dict[str, Any] | None:
+        if tool_id == "read_working_analysis":
+            match = re.search(r"\bwork_[a-f0-9]{24}\b", prompt)
+            return {"analysis_id": match.group()} if match else None
+        if tool_id == "run_macro_series_analysis":
+            series = re.search(r"\bmacro series\s+([a-z0-9-]+)", prompt, re.I)
+            region = re.search(r"\b(US|EU|Global)\b", prompt, re.I)
+            timeframe = re.search(r"\b(1M|3M|6M|1Y)\b", prompt, re.I)
+            if series and region and timeframe:
+                return {"series_id": series[1].lower(), "region": "Global" if region[1].lower() == "global" else region[1].upper(), "timeframe": timeframe[1].upper()}
+        if tool_id == "run_crypto_token_analysis":
+            token = re.search(r"\bcrypto token\s+([a-z0-9-]+)", prompt, re.I)
+            days = re.search(r"\b(\d+)\s*days?\b", prompt, re.I)
+            if token and days:
+                return {"token_id": token[1].lower(), "days": int(days[1])}
+        return None
+
+    def _read_working_analysis(self, arguments: dict[str, Any], request: CopilotResearchCardRequest | None) -> CopilotToolExecution:
+        analysis = self.store.get_working_analysis(str(arguments.get("analysis_id") or "")) if self.store else None
+        if (request is None or request.role != "research_operator" or analysis is None
+                or analysis.session_id != request.user_session_id or analysis.status != "active"):
+            return CopilotToolExecution(output={"error": "Active temporary analysis unavailable in this Operator session."},
+                trace=CopilotToolTrace(tool_name="read_working_analysis", arguments=arguments, source_ids=[], summary="Retained evidence access stopped."))
+        if request.selected_scope_domains or request.synthesis is not None:
+            scopes = set(self._selected_scope_domains(request, request.domain))
+            if analysis.domain not in scopes:
+                return CopilotToolExecution(output={"error": "The analysis domain is outside the selected scopes."},
+                    trace=CopilotToolTrace(tool_name="read_working_analysis", arguments=arguments, source_ids=[], summary="Retained evidence scope access stopped."))
+        retained = self._compact_prediction_comparison_observation(
+            CopilotToolExecution(output=deepcopy(analysis.outputs), trace=CopilotToolTrace(tool_name=analysis.tool_id, summary="Retained result")),
+            analysis.tool_id,
+        ).output
+        source = CopilotSourceRef(source_id=f"working_analysis.{analysis.analysis_id}", label=analysis.title,
+            kind="analytics", provider=analysis.source_provider, origin=analysis.origin,
+            retrieved_at=analysis.created_at, description="Retained snapshot; original source dates remain in the outputs. No refresh was performed.")
+        # Namespace retained citations so a fresh fetch of the same provider id
+        # cannot overwrite the old observation's date or provenance in synthesis.
+        sources = [source]
+        for payload in analysis.outputs.get("sources", []):
+            if isinstance(payload, dict) and payload.get("source_id"):
+                original = CopilotStore._source_from_json(payload)
+                sources.append(replace(original,
+                    source_id=f"{source.source_id}.{original.source_id}",
+                    navigation_supported=False,
+                    navigation_reason="Source belongs to a retained snapshot; open the working analysis to inspect it.",
+                ))
+        output = {"analysis_id": analysis.analysis_id, "state_scope": analysis.state_scope,
+            "entity": deepcopy(analysis.entity), "inputs": deepcopy(analysis.inputs),
+            "outputs": retained, "warnings": list(analysis.warnings),
+            "original_source_ids": list(analysis.source_ids), "source_ids": [item.source_id for item in sources],
+            "created_at": analysis.created_at.isoformat(),
+            "expires_at": analysis.expires_at.isoformat() if analysis.expires_at else None,
+            "transformation_note": analysis.transformation_note}
+        return CopilotToolExecution(output=output, sources=sources, trace=CopilotToolTrace(
+            tool_name="read_working_analysis", arguments=arguments, source_ids=[item.source_id for item in sources],
+            summary=f"Read exact retained evidence {analysis.analysis_id}; no provider refresh or durable promotion."))
+
+    def _tool_run_macro_series_analysis(self, arguments: dict[str, Any], context: CopilotContextBundle) -> CopilotToolExecution:
+        inputs = self.action_registry.validate_arguments("run_macro_series_analysis", arguments)
+        history = self.macro_service.get_series_history(inputs["series_id"], region=inputs["region"],
+            timeframe=inputs["timeframe"], force_refresh=False)
+        if history is None or history.series_id != inputs["series_id"] or (inputs["region"] != "Global" and history.region != inputs["region"]):
+            raise ValueError("The exact requested macro series and region are unavailable; no substitute was used.")
+        # The provider can return a warm-cache window wider than requested.
+        # Summaries and retained points must refer to the same requested window.
+        from src.application.macro_service import TIMEFRAME_DAYS
+        cutoff = now_utc() - timedelta(days=TIMEFRAME_DAYS[inputs["timeframe"]])
+        points = [point for point in history.points if point.timestamp.replace(tzinfo=None) >= cutoff.replace(tzinfo=None)]
+        history = replace(history, points=points)
+        output = self._macro_series_summary(history)
+        output.update({"status": "ready" if points else "unavailable", "requested_timeframe": inputs["timeframe"],
+            "requested_region": inputs["region"],
+            "unit": history.unit, "frequency": history.frequency,
+            "warnings": list(history.warnings) if hasattr(history, "warnings") else []})
+        if not points:
+            output["warnings"].append("No provider observations in the requested window.")
+        if history.region != inputs["region"]:
+            output["warnings"].append(f"The {inputs['region']} lens uses this series' reported {history.region} data; it is not a global aggregate.")
+            if points:
+                output["status"] = "degraded"
+        output["transformation_note"] = "Window statistics use all available observations inside the requested calendar lookback; the retained table shows the last 12 observations."
+        source = CopilotSourceRef(source_id=f"macro.series.{history.series_id}:{history.region}:{inputs['timeframe']}",
+            label=history.title, kind="timeseries", provider=history.source_provider, origin=history.origin,
+            retrieved_at=history.retrieved_at, description=output["transformation_note"])
+        return CopilotToolExecution(output=output, sources=[source], trace=CopilotToolTrace(
+            tool_name="run_macro_series_analysis", arguments=inputs, source_ids=[source.source_id], summary=f"Analyzed {history.title} over {inputs['timeframe']}."))
+
+    def _tool_run_crypto_token_analysis(self, arguments: dict[str, Any], context: CopilotContextBundle) -> CopilotToolExecution:
+        inputs = self.action_registry.validate_arguments("run_crypto_token_analysis", arguments)
+        token_id = inputs["token_id"]
+        detail = self.crypto_service.get_token_detail(token_id)
+        if detail is None or detail.token_id != token_id:
+            raise ValueError("The exact requested crypto token is unavailable; no substitute was used.")
+        token_context = CopilotContextBundle(domain="crypto", current_tab="crypto", summary_data={"token_id": token_id})
+        output: dict[str, Any] = {"status": "ready", "token_id": token_id, "symbol": detail.symbol,
+            "name": detail.name, "days": inputs["days"], "warnings": []}
+        sources = [CopilotSourceRef(source_id=f"crypto.token.{token_id}", label=detail.name, kind="asset",
+            provider=detail.source_provider, origin=detail.origin, retrieved_at=detail.retrieved_at)]
+        try:
+            history = self.crypto_service.get_price_history(token_id, days=inputs["days"])
+            cutoff = now_utc().replace(tzinfo=None) - timedelta(days=inputs["days"])
+            history = sorted((point for point in history if point.timestamp.replace(tzinfo=None) >= cutoff), key=lambda point: point.timestamp)
+            output["history"] = self._crypto_price_history_summary(history)
+            if not history:
+                output["warnings"].append("Price history is unavailable for the requested lookback.")
+            else:
+                sources.append(CopilotSourceRef(source_id=f"crypto.history.{token_id}:{inputs['days']}",
+                    label=f"{detail.name} price history", kind="timeseries", provider=history[-1].source_provider,
+                    origin=history[-1].origin, retrieved_at=history[-1].retrieved_at))
+        except Exception:
+            output["history"] = None
+            output["warnings"].append("Price-history provider failed; no replacement history was used.")
+        for section, handler in (("liquidity", self._tool_get_crypto_liquidity_context), ("comparison", self._tool_get_crypto_comparison_context)):
+            try:
+                execution = handler({}, token_context)
+                output[section] = execution.output
+                output["warnings"].extend(execution.output.get("warnings", []))
+                sources.extend(execution.sources)
+            except Exception:
+                output[section] = None
+                output["warnings"].append(f"{section.title()} provider evidence is unavailable; other sections are retained.")
+        if output["warnings"]:
+            output["status"] = "degraded"
+        if not output.get("history", {}) or not (output.get("history") or {}).get("observations"):
+            if output.get("liquidity") is None and output.get("comparison") is None:
+                output["status"] = "unavailable"
+        sources = [replace(source, source_id=f"{source.source_id}:{token_id}") for source in sources]
+        return CopilotToolExecution(output=output, sources=sources, trace=CopilotToolTrace(
+            tool_name="run_crypto_token_analysis", arguments=inputs, source_ids=[source.source_id for source in sources],
+            summary=f"Analyzed exact crypto token {token_id} over {inputs['days']} days; status={output['status']}."))
+
     def _tool_get_macro_workspace_drilldown(
         self,
         arguments: dict[str, Any],
@@ -11493,7 +11879,7 @@ class CopilotService:
             trace=CopilotToolTrace(
                 tool_name="get_macro_series_history_summary",
                 summary=f"Loaded {history.title} history for {history.region} over {macro_context.timeframe}.",
-                arguments={"series_id": series_id, "region": region},
+                arguments={"series_id": series_id, "region": region, "timeframe": macro_context.timeframe},
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -12440,6 +12826,8 @@ class CopilotService:
         liquidity = self.crypto_service.get_dex_liquidity(token_id)
         if liquidity is None:
             raise ValueError(f"Crypto liquidity context is unavailable for: {token_id}")
+        if liquidity.token_id != token_id:
+            raise ValueError("Crypto liquidity provider returned a different token.")
         source = CopilotSourceRef(
             source_id="crypto.liquidity.drilldown",
             label="Crypto liquidity drilldown",
@@ -12496,6 +12884,8 @@ class CopilotService:
         comparison = self.crypto_service.get_comparison(token_id)
         if comparison is None:
             raise ValueError(f"Crypto comparison is unavailable for: {token_id}")
+        if comparison.subject_token_id != token_id:
+            raise ValueError("Crypto comparison provider returned a different subject token.")
         source = CopilotSourceRef(
             source_id="crypto.comparison.drilldown",
             label="Crypto comparison drilldown",
@@ -16721,6 +17111,8 @@ class CopilotService:
             "series_id": history.series_id,
             "title": history.title,
             "region": history.region,
+            "unit": history.unit,
+            "frequency": history.frequency,
             "timeframe_points": [
                 {"timestamp": point.timestamp.isoformat(), "value": point.value}
                 for point in points[-12:]

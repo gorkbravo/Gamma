@@ -6093,6 +6093,120 @@ def test_checkpoint8f_strategy_lab_portfolio_materializes_exact_signed_inputs(tm
         runtime.shutdown()
 
 
+def test_checkpoint8h_research_basket_unloaded_exact_inputs_and_lifecycle(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        session = "checkpoint8h-basket"
+        client.post("/copilot/sessions", json={"session_id": session})
+        payload = {
+            "domain": "synthesis", "user_session_id": session,
+            "prompt": "Analyze a Research scope basket [AAPL:60%, MSFT:40%] against SPY over 252 days",
+            "context": {"current_tab": "copilot", "workspace_mode": "research"},
+        }
+        saved_before = client.get("/research/saved").json()
+        plan = client.post("/copilot/operator-plan", json=payload).json()
+        assert plan["intent"] == "research_basket_analysis", plan
+        assert [step["tool_id"] for step in plan["steps"]] == ["run_research_basket_analysis"]
+        result = client.post("/copilot/operator-plan/execute", json=payload)
+        assert result.status_code == 200
+        assert result.json()["status"] in {"ready", "degraded"}, result.json()
+        analyses = client.get(f"/copilot/sessions/{session}").json()["working_analyses"]
+        assert len(analyses) == 1, result.json()
+        analysis = analyses[0]
+        assert analysis["inputs"] == {"positions": [{"symbol": "AAPL", "weight": 0.6}, {"symbol": "MSFT", "weight": 0.4}], "benchmark_symbol": "SPY", "lookback_days": 252}
+        assert analysis["outputs"]["performance_points"]
+        assert 20 < analysis["outputs"]["metrics"]["observations_count"] <= 252
+        assert analysis["source_ids"] and analysis["source_provider"]
+        assert analysis["owning_tab"] == "equity_research"
+        restored = CopilotStore(runtime.copilot_store.base_dir).get_working_analysis(analysis["analysis_id"])
+        assert restored.outputs == analysis["outputs"]
+        route = f"/copilot/working-analyses/{analysis['analysis_id']}"
+        assert client.post(f"{route}/materialize").status_code == 200
+        assert client.post(f"{route}/materialize").status_code == 200
+        assert client.get("/research/saved").json() == saved_before
+        assert client.post(f"{route}/discard").status_code == 200
+        assert client.post(f"{route}/materialize").status_code == 409
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8h_research_basket_responses_and_missing_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    args = {"positions": [{"symbol": "AAPL", "weight": 0.6}, {"symbol": "MSFT", "weight": 0.4}], "benchmark_symbol": "SPY", "lookback_days": 252}
+    class BasketProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(api_key="test-key", model="gpt-test-operator", reasoning_effort="low", store_responses=False)
+            self.calls = 0
+        def _post_json_stream(self, payload, emit, should_cancel):
+            self.calls += 1
+            if self.calls == 1:
+                tool = next(tool for tool in payload["tools"] if tool["name"] == "run_research_basket_analysis")
+                assert tool["strict"] is True
+                assert set(tool["parameters"]["required"]) == set(args)
+                return ({"id": "basket-call", "model": self.model, "output": [{
+                    "type": "function_call", "id": "fc-basket", "call_id": "basket-call",
+                    "name": "run_research_basket_analysis", "arguments": json.dumps(args),
+                }]}, "completed")
+            observation = json.loads(next(item["output"] for item in payload["input"] if item.get("type") == "function_call_output"))["output"]
+            assert "performance_points" not in observation
+            assert observation["metrics"]["observations_count"] > 20
+            assert observation["working_analysis"]["owning_tab"] == "equity_research"
+            assert CopilotAgentsOperatorService._bounded_observation(observation) == observation
+            return ({"id": "basket-final", "model": self.model, "output": [{"type": "message", "content": [{
+                "type": "output_text", "text": json.dumps(_checkpoint7_final_card(rationale=f"The requested basket has {observation['metrics']['observations_count']} observations. Its retained weights are 60% AAPL and 40% MSFT.")),
+            }]}]}, "completed")
+    try:
+        provider = BasketProvider()
+        service = runtime.copilot_service
+        service.provider = provider
+        client.post("/copilot/sessions", json={"session_id": "basket-responses"})
+        request = {"domain": "synthesis", "user_session_id": "basket-responses",
+                   "prompt": "Analyze a Research basket with 60 percent AAPL and 40 percent MSFT against SPY over 252 days",
+                   "context": {"current_tab": "copilot", "fundamentals_ticker": "NVDA"}}
+        response = client.post("/copilot/operator-plan/execute", json=request)
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready", response.json()
+        assert provider.calls == 2
+        retained = client.get("/copilot/sessions/basket-responses").json()["working_analyses"][0]
+        assert retained["inputs"] == args
+        assert retained["outputs"]["performance_points"]
+        from src.application.research_service import ResearchService
+        original = ResearchService.analyze
+        def missing(self, request):
+            result = original(self, request)
+            return replace(result, missing_symbols=["MSFT"], available_symbols=["AAPL"])
+        monkeypatch.setattr(ResearchService, "analyze", missing)
+        context = service._build_research_context(CopilotResearchCardRequest(domain="research", prompt=request["prompt"]))
+        execution = service._execute_tool("run_research_basket_analysis", args, context)
+        assert execution.output["status"] == "unavailable"
+        assert execution.output["metrics"] == {}
+        assert execution.output["performance_points"] == []
+        assert service._operator_working_analysis_spec(execution, tool_id="run_research_basket_analysis", arguments=args, context=context, request=CopilotResearchCardRequest(domain="research")) is None
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint8h_research_basket_rejects_substitutions_and_bounds():
+    valid = {"positions": [{"symbol": "AAPL", "weight": 0.6}, {"symbol": "MSFT", "weight": 0.4}], "benchmark_symbol": "SPY", "lookback_days": 252}
+    invalids = [
+        {**valid, "lookback_days": 19}, {**valid, "lookback_days": True},
+        {**valid, "benchmark_symbol": ""}, {**valid, "positions": []},
+        {**valid, "positions": [{"symbol": "AAPL", "weight": 0.5}]},
+        {**valid, "positions": [{"symbol": "AAPL", "weight": 0.5}] * 2},
+        {**valid, "positions": [{"symbol": "AAPL", "weight": float("nan")}]},
+        {**valid, "positions": [{"symbol": "AAPL", "weight": -1}]},
+        {**valid, "positions": [{"symbol": "AAPL", "weight": True}]},
+        {**valid, "positions": [{"symbol": "AAPL", "weight": 0.01}] * 101},
+        {**valid, "extra": "ignored?"},
+    ]
+    for inputs in invalids:
+        with pytest.raises(ValueError):
+            CopilotService._normalize_research_basket_arguments(inputs)
+    assert CopilotService._normalize_research_basket_arguments(valid) == valid
+    assert CopilotService._explicit_research_basket_arguments("Research basket [AAPL: 70%, MSFT: 20%] against SPY over 252 days") is None
+
+
 def test_checkpoint8g_prediction_comparison_unloaded_exact_basket_and_lifecycle(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

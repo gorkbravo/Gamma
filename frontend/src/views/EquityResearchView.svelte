@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import ResearchScopeWorkingAnalysis from "../components/ResearchScopeWorkingAnalysis.svelte";
+  import type { CopilotWorkingAnalysis } from "../lib/api/types";
   import { get } from "svelte/store";
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
@@ -63,6 +65,8 @@
   import { heroPricePointFromApiPoint, type HeroPricePoint } from "../lib/view-models/hero-price-chart";
 
   export let mode: EquityResearchMode = "overview";
+  export let workingAnalysis: CopilotWorkingAnalysis | null = null;
+  export let onCloseWorkingAnalysis: () => void = () => {};
   export let overview: ResearchOverviewResponse | null = null;
   export let result: ResearchResult | null = null;
   export let strategyResult: StrategyLabResult | null = null;
@@ -933,13 +937,13 @@
   let overviewRankingBars: Record<string, RankBarItem[]> = {};
 
   onMount(() => {
-    if (mode === "overview" && !overview) {
+    if (!workingAnalysis && mode === "overview" && !overview) {
       void loadOverview();
     }
   });
 
   $: parsedSynthetic = parseSyntheticText(syntheticText);
-  $: setResearchDraft({
+  $: if (!workingAnalysis) setResearchDraft({
     scopeType,
     primarySymbol,
     benchmarkSymbol,
@@ -950,7 +954,7 @@
   $: {
     const normalizedSelectedEquity = selectedEquitySymbol?.trim().toUpperCase() ?? "";
     if (
-      normalizedSelectedEquity &&
+      !workingAnalysis && normalizedSelectedEquity &&
       scopeType === "single_ticker" &&
       normalizedSelectedEquity !== primarySymbol.trim().toUpperCase()
     ) {
@@ -1238,6 +1242,9 @@
 </script>
 
 <section class="view">
+  {#if workingAnalysis}
+    <ResearchScopeWorkingAnalysis analysis={workingAnalysis} onClose={onCloseWorkingAnalysis} />
+  {:else}
   <article class="panel header-panel">
     <div class="header-top">
       <span class="title">Equity Research</span>
@@ -2105,6 +2112,7 @@
     onSelect={handleEquityStrategyMenuSelect}
     onClose={closeEquityStrategyMenu}
   />
+  {/if}
 </section>
 
 <style>

@@ -83,6 +83,7 @@ class ResearchAnalysisRequest:
     synthetic_positions: list[SyntheticPosition] = field(default_factory=list)
     benchmark_symbol: str = "SPY"
     lookback_days: int = 252
+    enforce_observation_limit: bool = False
 
 
 @dataclass
@@ -472,6 +473,10 @@ class ResearchService:
             )
 
         returns_df = compute_returns(align_prices(prices))
+        if request.enforce_observation_limit:
+            # Some providers return more history than requested. Explicit
+            # Operator baskets must compute every metric on the same bound.
+            returns_df = returns_df.tail(request.lookback_days)
         if returns_df.empty:
             warnings.append("No overlapping history across selected symbols")
             return self._empty_result(
@@ -526,6 +531,8 @@ class ResearchService:
             snapshot.base_currency,
             warnings,
         )
+        if request.enforce_observation_limit:
+            benchmark_returns = benchmark_returns.reindex(perf.index).dropna()
         default_source = self._overview_source_provider()
         source_summary = self._provider_history_source_summary(
             default_source,

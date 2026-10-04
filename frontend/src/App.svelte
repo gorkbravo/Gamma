@@ -23,6 +23,7 @@
     buildCopilotSourceHandoff,
     validatedExternalSourceUrl,
   } from "./lib/copilot-source-navigation";
+  import RetainedWorkingEvidence from "./components/RetainedWorkingEvidence.svelte";
   import { resolveWorkingAnalysisTarget } from "./lib/copilot-workspace";
   import { openMaterializedResearchScript } from "./lib/stores/research-script";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
@@ -330,6 +331,8 @@
   let optionsWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let strategyLabWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let predictionWorkingAnalysis: CopilotWorkingAnalysis | null = null;
+  let retainedWorkingEvidence: CopilotWorkingAnalysis | null = null;
+  let researchWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
   // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
@@ -1735,6 +1738,9 @@
       copilotContextTab = nextTab;
     }
 
+    // Retained snapshots do not hydrate or mutate the live owning-tab draft.
+    if (retainedWorkingEvidence?.owning_tab === nextTab) return;
+
     if (nextTab === "sitrep") {
       await loadSitrepContext();
     } else if (nextTab === "copilot") {
@@ -1820,7 +1826,23 @@
     if (!materialized) {
       return;
     }
-    if (target.tab === "fundamentals") {
+    if ("retainedEvidence" in target) {
+      retainedWorkingEvidence = materialized;
+      workspaceMode = "research";
+      if (target.tab === "macro") macroContext.update(current => ({ ...current, mode: "snapshot" }));
+      else if (target.tab === "crypto") cryptoMode = "deep_dive";
+      else if (target.tab === "commodities") commoditiesMode = "curves_spreads";
+      else if (target.tab === "equity_research") equityResearchMode = "scope_analysis";
+      else if (target.tab === "strategy_lab") strategyLabMode = "backtest_analyze";
+      await selectTab(target.tab);
+      return;
+    }
+    retainedWorkingEvidence = null;
+    if (target.tab === "equity_research") {
+      researchWorkingAnalysis = materialized;
+      equityResearchMode = "scope_analysis";
+      workspaceMode = "research";
+    } else if (target.tab === "fundamentals") {
       fundamentalsWorkingAnalysis = materialized;
       fundamentalsMode = target.mode;
       workspaceMode = "research";
@@ -1865,6 +1887,8 @@
 
   async function handleDiscardCopilotWorkingAnalysis(analysis: CopilotWorkingAnalysis) {
     const discarded = await discardCopilotWorkingAnalysis(analysis.analysis_id);
+    if (discarded && retainedWorkingEvidence?.analysis_id === discarded.analysis_id) retainedWorkingEvidence = null;
+    if (discarded && researchWorkingAnalysis?.analysis_id === discarded.analysis_id) researchWorkingAnalysis = null;
     if (
       discarded &&
       fundamentalsWorkingAnalysis?.analysis_id === discarded.analysis_id
@@ -2900,6 +2924,8 @@
           <div class="view-load-state" aria-live="polite">
             <strong>Loading workspace</strong>
           </div>
+        {:else if retainedWorkingEvidence && retainedWorkingEvidence.owning_tab === $activeTab}
+          <RetainedWorkingEvidence analysis={retainedWorkingEvidence} onClose={() => { retainedWorkingEvidence = null; void selectTab($activeTab); }} />
         {:else if $activeTab === "portfolio"}
           <svelte:component
             this={activeViewComponent}
@@ -2955,6 +2981,8 @@
           <svelte:component
             this={activeViewComponent}
             bind:mode={equityResearchMode}
+            workingAnalysis={researchWorkingAnalysis}
+            onCloseWorkingAnalysis={() => { researchWorkingAnalysis = null; }}
             overview={$researchOverview}
             result={$researchResult}
             strategyResult={$strategyLabResult}

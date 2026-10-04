@@ -1,3 +1,4 @@
+import { retainedEvidenceTarget, type RetainedEvidenceTarget } from "./retained-evidence";
 import type {
   CopilotSessionSummary,
   CopilotStorageStatus,
@@ -64,6 +65,8 @@ export type CopilotStrategyLabWorkingAnalysisTarget = {
 };
 
 export type CopilotWorkingAnalysisTarget =
+  | RetainedEvidenceTarget
+  | { analysisId: string; tab: "equity_research"; mode: "scope_analysis" }
   | { analysisId: string; tab: "prediction_markets"; mode: "compare" }
   | CopilotFundamentalsWorkingAnalysisTarget
   | CopilotRiskWorkingAnalysisTarget
@@ -75,6 +78,7 @@ export type CopilotWorkingAnalysisTarget =
 export function resolveWorkingAnalysisTarget(
   analysis: CopilotWorkingAnalysis
 ): CopilotWorkingAnalysisTarget | null {
+  if (analysis.analysis_type === "retained_evidence") return retainedEvidenceTarget(analysis);
   const materialization = analysis.materialization;
   if (
     analysis.status !== "active" ||
@@ -90,6 +94,10 @@ export function resolveWorkingAnalysisTarget(
   )
     .trim()
     .toUpperCase();
+  if (analysis.owning_tab === "equity_research" && analysis.owning_mode === "scope_analysis"
+    && materialization.payload_contract === "copilot.research-scope-working-analysis.v1") {
+    return { analysisId: analysis.analysis_id, tab: "equity_research", mode: "scope_analysis" };
+  }
   if (
     analysis.owning_tab === "prediction_markets" && analysis.owning_mode === "compare" &&
     materialization.payload_contract === "copilot.prediction-comparison-working-analysis.v1"
