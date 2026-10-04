@@ -69,6 +69,7 @@ import type {
   CommodityWorkspaceResponse,
   CopilotArtifact,
   CopilotBaseDomain,
+  CopilotContextSnapshot,
   CopilotDeleteResult,
   CopilotDraftMutation,
   CopilotDomain,
@@ -637,7 +638,8 @@ function createIvWorkbenchStore() {
   return {
     subscribe: inner.subscribe,
     set(value: IvWorkbenchState | null) {
-      inner.set(value ? { ...value, detached: false } : null);
+      detachedIvContext = null;
+      inner.set(value ? { ...structuredClone(value), detached: false } : null);
     },
     /**
      * The Options view unmounted. The snapshot is kept — handing off to Copilot
@@ -646,14 +648,19 @@ function createIvWorkbenchStore() {
      * it is flagged so consumers know it is no longer being refreshed.
      */
     markDetached() {
+      // Capture the surface and session together with the workbench before
+      // background polling can replace its marks, symbol or source timestamp.
+      detachedIvContext = structuredClone({ surface: resolvedIvSurface(), session: get(ivSession) });
       inner.update((current) => (current ? { ...current, detached: true } : current));
     },
     reset() {
+      detachedIvContext = null;
       inner.set(null);
     }
   };
 }
 
+let detachedIvContext: { surface: IvSurface | null; session: IvSessionStatus | null } | null = null;
 export const ivWorkbenchState = createIvWorkbenchStore();
 
 /**
@@ -1025,6 +1032,7 @@ function hasRenderableIvSurface(surface: IvSurface | null | undefined) {
 }
 
 function resolvedIvSurface() {
+  if (detachedIvContext) return detachedIvContext.surface;
   const directSurface = get(ivSurface);
   if (hasRenderableIvSurface(directSurface)) {
     return directSurface;
@@ -1491,7 +1499,7 @@ function buildCopilotContextFingerprint(
   }
 
   const surface = resolvedIvSurface();
-  const session = get(ivSession);
+  const session = detachedIvContext ? detachedIvContext.session : get(ivSession);
   const workbench = resolvedIvWorkbench();
   return JSON.stringify({
     domain,
@@ -1500,6 +1508,10 @@ function buildCopilotContextFingerprint(
     expiries: surface?.expiries ?? [],
     strikeCount: surface?.strikes.length ?? 0,
     marketDataMode: session?.market_data_mode ?? null,
+    surfaceTimestamp: surface?.timestamp ?? null,
+    surfaceEvidence: { spot: surface?.spot, ivGrid: surface?.iv_grid, cellSources: surface?.cell_sources,
+      model: surface?.surface_model, warnings: surface?.warnings },
+    workbenchEvidence: workbench ? { ...workbench, detached: undefined } : null,
     // The visible workbench state is part of the context identity: a card built
     // against a different submode, expiry, or strategy is a different card.
     mode: workbench?.mode ?? null,
@@ -3598,6 +3610,7 @@ function reconcileCopilotArtifacts(sessionId: string, artifacts: CopilotArtifact
 }
 
 type CopilotLoadOptions = {
+  retainedSnapshot?: CopilotContextSnapshot;
   workspaceMode?: WorkspaceMode | null;
   synthesisDomains?: CopilotBaseDomain[];
   activeTabId?: TabId | "research";
@@ -3792,7 +3805,7 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         workspace_mode: workspaceMode,
         iv_state: {
           surface: resolvedIvSurface(),
-          session: get(ivSession),
+          session: detachedIvContext ? detachedIvContext.session : get(ivSession),
           workbench: resolvedIvWorkbench()
         }
       };
@@ -4126,7 +4139,7 @@ export async function streamCopilotResearchCard(
   options: CopilotLoadOptions = {}
 ) {
   setLoading("copilot", true);
-  const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
+  const contextFingerprint = options.retainedSnapshot?.context_fingerprint ?? buildCopilotContextFingerprint(domain, options.workspaceMode, {
     synthesisDomains: options.synthesisDomains,
     activeTabId: options.activeTabId
   });
@@ -4138,7 +4151,7 @@ export async function streamCopilotResearchCard(
     activeThread.contextFingerprint != null &&
     activeThread.contextFingerprint === contextFingerprint &&
     activeThread.latestResponseId != null;
-  const previousResponseId = continuingThread ? activeThread.latestResponseId : null;
+  const previousResponseId = continuingThread && !options.retainedSnapshot ? activeThread.latestResponseId : null;
   let baseThread =
     continuingThread || !activeThread.entries.length
       ? activeThread
@@ -4146,7 +4159,7 @@ export async function streamCopilotResearchCard(
   const submission = beginCopilotSubmission("research_agent", prompt, getSelectedCopilotSessionId());
 
   try {
-    const validationError = validateCopilotContext(domain, options);
+    const validationError = options.retainedSnapshot ? null : validateCopilotContext(domain, options);
     if (validationError) {
       lastError.set(validationError);
       rejectCopilotSubmission(submission, validationError);
@@ -4154,7 +4167,9 @@ export async function streamCopilotResearchCard(
       appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
       return result;
     }
-    const context = buildCopilotContext(domain, options.workspaceMode);
+    const context = options.retainedSnapshot
+      ? structuredClone(options.retainedSnapshot.request_context.context) as ReturnType<typeof buildCopilotContext>
+      : buildCopilotContext(domain, options.workspaceMode);
     if (!context) {
       const message = "The active Copilot context is unavailable.";
       lastError.set(message);
@@ -4164,8 +4179,9 @@ export async function streamCopilotResearchCard(
       return result;
     }
 
-    const synthesis =
-      domain === "synthesis"
+    const synthesis = options.retainedSnapshot
+      ? structuredClone(options.retainedSnapshot.request_context.synthesis) as ReturnType<typeof buildCopilotSynthesisPayload>
+      : domain === "synthesis"
         ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
         : null;
     if (domain === "synthesis" && !synthesis) {
@@ -4374,7 +4390,7 @@ export async function executeCopilotOperatorPlan(
   options: CopilotLoadOptions = {}
 ) {
   setLoading("copilot", true);
-  const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
+  const contextFingerprint = options.retainedSnapshot?.context_fingerprint ?? buildCopilotContextFingerprint(domain, options.workspaceMode, {
     synthesisDomains: options.synthesisDomains,
     activeTabId: options.activeTabId
   });
@@ -4386,7 +4402,9 @@ export async function executeCopilotOperatorPlan(
   const submission = beginCopilotSubmission("research_operator", prompt, getSelectedCopilotSessionId());
 
   try {
-    const context = buildCopilotContext(domain, options.workspaceMode);
+    const context = options.retainedSnapshot
+      ? structuredClone(options.retainedSnapshot.request_context.context) as ReturnType<typeof buildCopilotContext>
+      : buildCopilotContext(domain, options.workspaceMode);
     if (!context) {
       const message = "The active Copilot context is unavailable.";
       lastError.set(message);
@@ -4403,8 +4421,9 @@ export async function executeCopilotOperatorPlan(
       );
       return result;
     }
-    const synthesis =
-      domain === "synthesis"
+    const synthesis = options.retainedSnapshot
+      ? structuredClone(options.retainedSnapshot.request_context.synthesis) as ReturnType<typeof buildCopilotSynthesisPayload>
+      : domain === "synthesis"
         ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
         : null;
     const runId = newCopilotRunId();
@@ -4479,6 +4498,29 @@ export async function executeCopilotOperatorPlan(
     copilotActiveRun.set(null);
     setLoading("copilot", false);
   }
+}
+
+export async function retryCopilotTurn(turnId: string) {
+  const detail = get(activeCopilotSession);
+  const turn = detail?.turns.find((candidate) => candidate.turn_id === turnId);
+  const snapshot = detail?.context_snapshots.find((candidate) => candidate.snapshot_id === turn?.context_snapshot_id);
+  if (!turn || !snapshot || turn.session_id !== getSelectedCopilotSessionId()
+    || !turn.prompt.trim() || ["ready", "awaiting_confirmation"].includes(turn.result.status)
+    || !snapshot.request_context.context || !["research_agent", "research_operator"].includes(turn.role)) {
+    lastError.set("The original request context is unavailable. Reopen the research context and submit a new request.");
+    return null;
+  }
+  // Retry is a new run of the same research request, never a new authority or
+  // a silent refresh to whatever symbol/scopes happen to be selected now.
+  const options: CopilotLoadOptions = {
+    retainedSnapshot: snapshot,
+    synthesisDomains: turn.selected_scope_domains as CopilotBaseDomain[],
+    selectedProfile: normalizeCopilotProfile(turn.selected_profile as CopilotProfile),
+    reasoningEffort: normalizeReasoningEffort(turn.reasoning_effort as CopilotReasoningEffort),
+  };
+  return turn.role === "research_operator"
+    ? executeCopilotOperatorPlan(turn.domain as CopilotDomain, turn.prompt, options)
+    : streamCopilotResearchCard(turn.domain as CopilotDomain, turn.prompt, options);
 }
 
 function normalizeCopilotProfile(profile: CopilotProfile | undefined) {

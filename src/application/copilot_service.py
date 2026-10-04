@@ -9409,6 +9409,8 @@ class CopilotService:
         )
         warnings = dedupe_warnings(summary.get("warnings", []))
         workbench_summary = summary.get("workbench") if isinstance(summary.get("workbench"), dict) else None
+        if workbench_summary and workbench_summary.get("detached"):
+            warnings.append("Options evidence is a retained workbench snapshot from before navigation, not a refreshed live strategy.")
         surface_model_state = summary.get("surface_model") if isinstance(summary.get("surface_model"), dict) else {}
         # A fitted ATM cell that disagrees with its own expiry must reach the model
         # as a caveat, not as a quoted volatility (GUA-20260903-1).

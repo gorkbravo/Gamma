@@ -85,6 +85,7 @@
   export let sessionCreateError: string | null = null;
   export let onCancelRun: () => Promise<unknown> | void = () => {};
   export let onGenerate: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void;
+  export let onRetryTurn: ((turnId: string) => Promise<unknown> | void) | undefined = undefined;
   export let onPlan: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
   export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
   export let onRunOperator: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
@@ -404,9 +405,12 @@
   $: inFlightPrompt = resolveInFlightPrompt(promptText, lastSubmission);
   $: lastTurn = chatTurns.length ? chatTurns[chatTurns.length - 1] : null;
   $: retryPrompt =
-    !runStreaming && !loading && lastTurn != null && lastTurn.result.status !== "ready" && lastTurn.prompt
+    !runStreaming && !loading && lastTurn != null && !["ready", "awaiting_confirmation"].includes(lastTurn.result.status) && lastTurn.prompt
       ? lastTurn.prompt
       : null;
+  $: retryTurn = persistedTurns.find((turn) => turn.turn_id === lastTurn?.id || (
+    turn.result.response_id != null && turn.result.response_id === lastTurn?.result.response_id
+  ));
   // Re-scroll to the bottom whenever the transcript or in-flight state changes.
   $: if (chatTurns || loading || hasPlanMessage || activeRun) {
     shouldScroll = true;
@@ -417,10 +421,14 @@
   }
 
   async function handleRetry() {
-    if (!retryPrompt || !surface.supported || !surface.domain || loading) {
+    if (!retryPrompt || loading) {
       return;
     }
-    const result = await onGenerate(surface.domain, retryPrompt, selectedProfile);
+    const result = onRetryTurn && retryTurn
+      ? await onRetryTurn(retryTurn.turn_id)
+      : roleMode === "operator"
+        ? await onRunOperator(surface.domain!, retryPrompt, selectedProfile)
+        : await onGenerate(surface.domain!, retryPrompt, selectedProfile);
     if (result != null) {
       await onLoadSessions();
     }
@@ -808,7 +816,7 @@
         <span class="composer-hint">{surface.selectionMessage ?? surface.guidance}</span>
         <div class="composer-buttons">
           {#if retryPrompt}
-            <button type="button" class="secondary" disabled={!surface.supported} on:click={handleRetry} title="Resend the last prompt">
+            <button type="button" class="secondary" disabled={onRetryTurn ? !retryTurn : !surface.supported} on:click={handleRetry} title="Retry the original research request">
               Retry
             </button>
           {/if}

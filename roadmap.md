@@ -102,6 +102,8 @@ This table tracks the visible app tabs as of 2026-09-04. Percentages are pragmat
 
 ### Completion Boundary For The Current Pass
 
+_2026-10-04 continuity follow-up: Options-to-Copilot evidence now freezes the surface, session and visible workbench together; editable expiry/legs/contract sizing survive the return to Options. The context fingerprint includes complete analytical evidence. Dedicated Copilot Retry uses the original persisted evidence and role rather than current selections. Deterministic browser acceptance is covered by `frontend/e2e/options-copilot-continuity.spec.ts`; live IBKR/OpenAI acceptance is still required. Existing tab percentages and the beta completion boundary remain unchanged._
+
 Gamma should not keep adding major tabs or broad new domains just to fill the roadmap. For the current pass, "complete for now" means the app is ready to be treated as a stable first-pass personal research environment and a candidate for controlled external testing. The bar is provider-backed/live behavior where Gamma has configured credentials or public provider access; mock/sample data is fallback, demo, and test support, not the definition of completeness.
 
 The current pass should be considered complete when:

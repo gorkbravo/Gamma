@@ -299,6 +299,7 @@ def summarize_iv_workbench(workbench: dict[str, Any] | None) -> dict[str, Any] |
     return {
         "mode": workbench.get("mode"),
         "symbol": workbench.get("symbol"),
+        "detached": bool(workbench.get("detached")),
         "selected_expiry": workbench.get("selected_expiry"),
         "selected_expiry_days": _as_int(workbench.get("selected_expiry_days")),
         "contracts": _as_int(workbench.get("contracts")),

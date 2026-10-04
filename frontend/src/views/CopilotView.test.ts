@@ -363,7 +363,7 @@ describe("CopilotView", () => {
     });
 
     expect(body).toContain("Retry");
-    expect(body).toContain('title="Resend the last prompt"');
+    expect(body).toContain('title="Retry the original research request"');
     expect(body).toContain("Map the active macro setup.");
     expect(body).toMatch(/<textarea[^>]*>\s*<\/textarea>/);
   });

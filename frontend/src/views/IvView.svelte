@@ -16,6 +16,8 @@
   } from "../lib/api/types";
   import { ivWorkbenchState, type IvLoadOptions } from "../lib/stores/app";
   import { onDestroy } from "svelte";
+  import { get } from "svelte/store";
+  import { optionsWorkspaceDraft, restoreOptionsWorkspaceDraft } from "../lib/options-workspace";
   import { buildOptionsStrategyHandoff } from "../lib/view-models/research";
   import {
     STRATEGY_TEMPLATES,
@@ -97,14 +99,15 @@
 
   let symbol = requestedSymbol || "";
   let lastRequestedSymbol = requestedSymbol;
-  let selectedExpiry: string | null = null;
+  const restoredDraft = restoreOptionsWorkspaceDraft(get(optionsWorkspaceDraft), result?.symbol ?? requestedSymbol);
+  let selectedExpiry: string | null = restoredDraft?.selectedExpiry ?? null;
   let selectedOptionType: StrategyOptionType = "call";
   let selectedSide: StrategySide = "long";
   // Neutral default: a straddle glance does not imply a directional recommendation.
   let payoffOptionType: PayoffGlanceType = "straddle";
-  let strategyTemplateNotice = "";
+  let strategyTemplateNotice = restoredDraft?.notice ?? "";
   let selectedGreekMetric: GreekMetric = "delta";
-  let strategyLegs: StrategyLeg[] = [];
+  let strategyLegs: StrategyLeg[] = restoredDraft?.legs ?? [];
   let surfaceModel: SurfaceModel = "linear";
   let probabilityRange: { lower: number; upper: number } | null = null;
   let probabilityDragStart: number | null = null;
@@ -173,12 +176,12 @@
   let realizedRows = deriveRealizedVolatility([], surfaceStats.frontAtmIv);
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   let strategyPayoffMatrix: StrategyPayoffMatrix | null = null;
-  let strategyContracts = 1;
+  let strategyContracts = restoredDraft?.contracts ?? 1;
   // The symbol the current strategy legs were priced against.
-  let strategySymbol: string | null = null;
+  let strategySymbol: string | null = restoredDraft?.strategySymbol ?? null;
   let strategySizing: StrategySizing = deriveStrategySizing(strategyPayoff, strategyLegs, strategyContracts, null);
   let strategyGreeks: StrategyGreekSummary | null = null;
-  let appliedWorkingAnalysisId: string | null = null;
+  let appliedWorkingAnalysisId: string | null = restoredDraft?.workingAnalysisId ?? null;
   let probabilitySurface: ImpliedProbabilitySurface | null = null;
   let probabilitySlice: ImpliedProbabilitySlice | null = null;
   let probabilitySelection: ImpliedProbabilitySelection | null = null;
@@ -271,6 +274,18 @@
   $: strategyPayoffMatrix = deriveStrategyPayoffMatrix(strategyLegs, chainRows, result?.spot);
   $: livePosition = livePositionForSymbol(portfolioPositions, result?.symbol ?? symbol);
   $: strategySizing = deriveStrategySizing(strategyPayoff, strategyLegs, strategyContracts, livePosition);
+
+  $: if (result?.symbol) {
+    optionsWorkspaceDraft.set({
+      symbol: result.symbol,
+      selectedExpiry: activeExpiry,
+      strategySymbol,
+      legs: strategyLegs.map((leg) => ({ ...leg })),
+      contracts: strategyContracts,
+      notice: strategyTemplateNotice,
+      workingAnalysisId: appliedWorkingAnalysisId,
+    });
+  }
 
   // Publish exactly what the workbench is showing so a Copilot run from Options
   // is grounded in the visible submode, expiry, legs, payoff and RV-IV state

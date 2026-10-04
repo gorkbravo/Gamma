@@ -30,6 +30,7 @@ import {
   loadCopilotSessions,
   renameCopilotSession,
   restoreCopilotSession,
+  retryCopilotTurn,
   selectCopilotArtifact,
   startNewCopilotSession,
   updateCopilotArtifact
@@ -204,6 +205,50 @@ describe("Copilot checkpoint 3 lifecycle stores", () => {
     expect(get(activeCopilotSession)?.session.session_id).toBe("fallback-session");
     expect(get(activeCopilotArtifact)?.artifact_id).toBe("artifact-fallback");
     expect(localStorage.getItem("gamma.copilot.session")).toBe("fallback-session");
+  });
+
+  it.each(["research_agent", "research_operator"])("retries a persisted %s request with its original Options evidence and authority", async (role) => {
+    const summary = session("retry-options", { active_domain: "iv" });
+    localStorage.setItem("gamma.copilot.session", summary.session_id);
+    const retained = detail(summary);
+    const context = { current_tab: "iv", workspace_mode: "research", iv_state: {
+      surface: { symbol: "GOOGL", timestamp: "2026-09-03T12:00:00Z" },
+      workbench: { selected_expiry: "20261120", legs: [{ strike: 340, premium: 18 }], detached: true }
+    } };
+    retained.turns = [{ turn_id: "failed-options", session_id: summary.session_id, domain: "iv",
+      prompt: "Evaluate my exact 340/315 put spread", role, selected_scope_domains: ["iv"],
+      selected_profile: "quick", context_snapshot_id: "snapshot-options", context_fingerprint: "original-options",
+      result: { ...cardResult("failed-response", "error"), domain: "iv" }
+    }] as CopilotSessionDetail["turns"];
+    retained.context_snapshots = [{ snapshot_id: "snapshot-options", context_fingerprint: "original-options",
+      domain: "iv", current_tab: "iv", workspace_mode: "research", summary: {}, source_ids: [], warnings: [],
+      created_at: "2026-09-03T12:00:00Z", read_only_safety: {}, context_contract: {},
+      request_context: { context, synthesis: null }, selected_scope_domains: ["iv"]
+    }];
+    activeCopilotSession.set(retained);
+    const requests: Array<{ path: string; payload: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(input).pathname;
+      if (path.endsWith("/stream")) {
+        requests.push({ path, payload: JSON.parse(String(init?.body)) });
+        return runStream({ ...cardResult("retry-response"), domain: "iv" }, init);
+      }
+      if (path.endsWith("/copilot/sessions")) return response([summary]);
+      return response(retained);
+    }));
+    await retryCopilotTurn("failed-options");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].path).toContain(role === "research_operator" ? "operator-plan/execute" : "research-card");
+    expect(requests[0].payload).toMatchObject({ role, prompt: retained.turns[0].prompt,
+      context_fingerprint: "original-options", selected_scope_domains: ["iv"], selected_profile: "quick", context });
+  });
+
+  it("refuses retry when the original context snapshot is missing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await retryCopilotTurn("missing-turn")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(get(lastError)).toContain("original request context is unavailable");
   });
 
   it("keeps selected-session continuity through search, rename, archive, and restore", async () => {

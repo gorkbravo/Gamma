@@ -138,6 +138,7 @@
     updateCopilotArtifact,
     executeCopilotOperatorPlan,
     streamCopilotResearchCard,
+    retryCopilotTurn,
     cancelCopilotRun,
     copilotActiveRun,
     macroDivergences,
@@ -348,6 +349,7 @@
   let selectedSynthesisDomains: CopilotBaseDomain[] = [];
   let lastDefaultCopilotDomain: CopilotBaseDomain | null | undefined = undefined;
   let latestCopilotHandoff: CrossTabHandoffEnvelope | null = null;
+  let preserveOptionsHandoffScope = false;
   let settingsOpen = false;
   let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
   let tabBarTabs: TabBarItem[] = [];
@@ -2270,6 +2272,7 @@
     if (created == null) {
       return null;
     }
+    preserveOptionsHandoffScope = false;
     await loadCopilotSessions();
     await loadCopilotStorageStatus();
     await loadCopilotDiagnostics();
@@ -2282,11 +2285,16 @@
 
   async function handleSelectCopilotSession(sessionId: string) {
     const detail = await loadCopilotSession(sessionId, { makeActive: true });
+    if (detail) preserveOptionsHandoffScope = false;
     restoreCopilotScopeFromSession(detail);
     return detail;
   }
 
   function restoreCopilotScopeFromSession(detail: typeof $activeCopilotSession) {
+    // An explicit Options handoff owns the next composer context. Loading or
+    // refreshing an older conversation must not silently replace that scope.
+    // Explicit conversation selection/New chat releases this override.
+    if (preserveOptionsHandoffScope) return;
     const latestTurn = detail?.turns[detail.turns.length - 1];
     if (!latestTurn?.selected_scope_domains.length) return;
     const available = new Set(
@@ -2308,6 +2316,8 @@
 
   async function handleSendToCopilot(handoff: CrossTabHandoffEnvelope) {
     const sourceTab = normalizeAppTabId(handoff.source_tab as TabId | "research");
+    preserveOptionsHandoffScope = sourceTab === "iv";
+    if (preserveOptionsHandoffScope) selectedSynthesisDomains = ["iv"];
     latestCopilotHandoff = handoff;
     if (isWorkspaceTab("research", sourceTab) || isWorkspaceTab("portfolio", sourceTab)) {
       copilotContextTab = sourceTab;
@@ -3142,6 +3152,7 @@
             sessionCreateError={$copilotSessionCreateError}
             onCancelRun={cancelCopilotRun}
             onGenerate={handleGenerateCopilotWorkspace}
+            onRetryTurn={retryCopilotTurn}
             onPlan={handlePlanCopilotWorkspace}
             onOperatorPlan={handleOperatorPlanCopilotWorkspace}
             onRunOperator={handleRunOperatorCopilotWorkspace}

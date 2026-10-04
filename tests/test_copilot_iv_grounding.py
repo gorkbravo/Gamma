@@ -200,3 +200,24 @@ def test_matching_symbols_keep_the_full_workbench():
     assert summary["workbench"]["strategy"] is not None
     assert len(summary["workbench"]["legs"]) == 2
     assert not any("Discarded" in warning for warning in summary["warnings"])
+
+
+def test_retained_options_context_keeps_strategy_sources_and_snapshot_warning(tmp_path):
+    from copy import deepcopy
+    from test_copilot import _build_test_client
+    from src.models.copilot import CopilotResearchCardRequest, CopilotRequestContext
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        workbench = deepcopy(WORKBENCH)
+        workbench.update(strategy_symbol="GOOGL", detached=True)
+        request = CopilotResearchCardRequest(domain="iv", prompt="Evaluate this exact spread",
+            context=CopilotRequestContext(current_tab="iv", iv_state={"surface": SURFACE, "workbench": workbench}))
+        bundle = runtime.copilot_service._build_iv_context(request)
+        strategy_source = next(source for source in bundle.sources if source.source_id == "iv.strategy")
+        assert strategy_source.navigation_context["symbol"] == "GOOGL"
+        assert bundle.summary_data["iv"]["workbench"]["strategy"]["net_premium_total"] == -1067
+        assert bundle.summary_data["iv"]["workbench"]["selected_expiry"] == "20261120"
+        assert any("retained workbench snapshot" in warning for warning in bundle.warnings)
+    finally:
+        runtime.shutdown()

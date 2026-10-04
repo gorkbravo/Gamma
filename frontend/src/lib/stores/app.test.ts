@@ -3458,4 +3458,38 @@ describe("Options workbench snapshot lifecycle", () => {
     expect(fingerprint).toContain("\"selectedExpiry\":\"20260320\"");
     expect(fingerprint).not.toContain("long:put:20260320:500:1");
   });
+
+  it("freezes the complete evidence at navigation despite later provider updates", async () => {
+    const surface = makeIvSurface();
+    const workbench = makeWorkbench();
+    ivSurface.set(surface);
+    ivWorkbenchState.set(workbench);
+    const before = previewCopilotContextFingerprint("iv");
+    ivWorkbenchState.markDetached();
+    surface.iv_grid[0][0] = 0.99;
+    ivSurface.set(makeIvSurface({ symbol: "AAPL" }));
+    expect(previewCopilotContextFingerprint("iv")).toBe(before);
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => copilotStreamOk(makeCopilotResult("iv", "options-response", "Options test"), init));
+    vi.stubGlobal("fetch", fetchMock);
+    await loadCopilotResearchCard("iv", "Evaluate this spread");
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(request.context.iv_state.surface.symbol).toBe("SPY");
+    expect(request.context.iv_state.surface.iv_grid[0][0]).toBe(0.2);
+    expect(request.context.iv_state.workbench.strategy.net_premium_total).toBe(-800);
+    expect(request.context.iv_state.workbench.detached).toBe(true);
+  });
+
+  it.each(["premium", "greeks", "realized", "multiplier"])("changes context identity when %s evidence changes", (field) => {
+    ivSurface.set(makeIvSurface());
+    const original = makeWorkbench() as unknown as import("./app").IvWorkbenchState;
+    ivWorkbenchState.set(original);
+    const before = previewCopilotContextFingerprint("iv");
+    const changed = structuredClone(original);
+    if (field === "premium") changed.legs[0].premium += 1;
+    if (field === "greeks") changed.strategy!.net_delta = -0.7;
+    if (field === "multiplier") changed.contract_multiplier = 10;
+    if (field === "realized") changed.realized_vs_implied = [{ window_days: 60, realized_vol: 0.3, reference_iv: 0.2, reference_iv_expiry: "20260320", reference_iv_days: 19, spread: -0.1 }];
+    ivWorkbenchState.set(changed);
+    expect(previewCopilotContextFingerprint("iv")).not.toBe(before);
+  });
 });

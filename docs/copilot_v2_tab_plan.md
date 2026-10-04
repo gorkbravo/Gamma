@@ -2,7 +2,17 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-09-05
+Last updated: 2026-10-04
+
+#### 2026-10-04 — Options continuity hardening
+
+Reviewed current official [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state) and [Agent runtime comparison](https://developers.openai.com/api/docs/guides/agents). Responses supports app-managed replay; SDK orchestration does not remove the application's obligation to preserve the evidence and authority of a request.
+
+Decision: retain Gamma's custom Responses default and optional SDK runner. Repair app-owned state continuity rather than migrating runtimes or provider storage. Options retains a session-local editable draft across view unmounts; navigation freezes the surface/session/workbench evidence together. Context identity includes marks, payoff, Greeks, sizing, RV/IV values and surface data, not just leg identifiers. Retained evidence is explicitly described as a snapshot. Dedicated-tab Retry replays the persisted request context, scopes, profile and Agent/Operator role in a new run; it does not resume an approval or silently switch to today's selected entity. Missing original evidence blocks Retry. Server validation, permissions and persistence remain authoritative.
+
+Browser regressions cover Options → Copilot → Options, symbol invalidation, background-provider updates and Operator retry. These use deterministic fixtures and the real Svelte views/store request path. Live IBKR/OpenAI certification remains open; this pass does not change the completion percentage or certify Checkpoints 9/10.
+
+Acceptance: 454 frontend tests, 17 focused IV-grounding/provider-diagnostics backend tests, TypeScript typecheck and production build passed. Eight browser checks passed, including the actual app shell restoring an older Macro conversation after an explicit Options handoff, and preserving user edits to a temporary Copilot option set rather than reapplying its initial inputs on remount. Options and Copilot screenshots were inspected at 1440, 1200 and 800 px; no page runtime errors occurred in those fixture journeys. Options handoff scope remains selected across automatic conversation refresh and is released by explicit conversation selection or New chat. Draft restoration is session-local, not app-restart persistence. No live broker/model calls were used. Existing Svelte accessibility/unused-export build warnings remain.
 
 ## Start Here
 
