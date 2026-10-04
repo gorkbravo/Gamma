@@ -2,12 +2,19 @@ import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CopilotArtifact,
+  CopilotDraftMutation,
   CopilotResearchCardResult,
   CopilotSessionDetail,
   CopilotSessionSummary
 } from "../api/types";
 import {
   activeCopilotArtifact,
+  confirmCopilotMutation,
+  rejectCopilotMutation,
+  cancelCopilotRun,
+  copilotActiveRun,
+  loading,
+  copilotOperatorResult,
   activeCopilotSession,
   archiveCopilotSession,
   copilotArtifactSaveState,
@@ -750,4 +757,132 @@ describe("Copilot composer submission acceptance", () => {
     // The settled turn belongs to its own session, not the one now on screen.
     expect(get(copilotThreads).macro.entries).toEqual([]);
   });
+});
+
+
+it.each(["pending", "applied"])("continues %s approvals with the original run and explicit Operator role", async (status) => {
+  const summary = session("session9");
+  localStorage.setItem("gamma.copilot.session", "session9");
+  activeCopilotSession.set(detail(summary));
+  const requests: Array<{url: string; body: Record<string, unknown>}> = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/runs/run9/decision/stream")) {
+      requests.push({ url, body: JSON.parse(String(init?.body)) });
+      return ndjson([
+        { run_id: "run9", sequence: 9, event: "run.resumed", data: {}, timestamp: "2026-10-04T12:00:00Z" },
+        { run_id: "run9", sequence: 10, event: "completed", data: {}, result: cardResult("response9"), timestamp: "2026-10-04T12:00:01Z" }
+      ]);
+    }
+    if (url.includes("/sessions/session9")) return response(detail(summary));
+    return response([summary]);
+  }));
+  const mutation = { mutation_id:"mutation9", run_id:"run9", workflow_id:"run9", session_id:"session9",
+    confirmation_token:"token9", context_fingerprint:"fingerprint9", proposal_hash:"hash9", status } as CopilotDraftMutation;
+  await confirmCopilotMutation(mutation);
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body).toEqual({ mutation_id:"mutation9", user_session_id:"session9", role:"research_operator",
+    decision:status === "pending" ? "approve" : "recover", confirmation_token:"token9",
+    context_fingerprint:"fingerprint9", proposal_hash:"hash9" });
+  expect(get(copilotOperatorResult)?.response_id).toBe("response9");
+});
+
+it.each(["approve", "reject"])("tracks %s continuation, Stop and session ownership without a new submission", async (decision) => {
+  const summary = session("session9");
+  localStorage.setItem("gamma.copilot.session", "session9");
+  activeCopilotSession.set(detail(summary));
+  const originalSubmission = get(copilotLastSubmission);
+  let finish!: (value: Response) => void;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/decision/stream")) return new Promise<Response>((resolve) => { finish = resolve; });
+    if (url.endsWith("/cancel")) return response({ run_id: "run9", cancelled: true });
+    if (url.includes("/sessions/other")) return response(detail(session("other")));
+    return response([summary]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const mutation = { mutation_id: "mutation9", run_id: "run9", workflow_id: "run9", session_id: "session9", status: "pending" } as CopilotDraftMutation;
+  const continuation = decision === "approve" ? confirmCopilotMutation(mutation) : rejectCopilotMutation(mutation);
+  expect(get(loading).copilot).toBe(true);
+  expect(get(copilotRunningSessionIds)).toContain("session9");
+  expect(get(copilotActiveRun)?.runId).toBe("run9");
+  await cancelCopilotRun();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/runs/run9/cancel"))).toBe(true);
+  const otherResult = cardResult("other-response");
+  copilotOperatorResult.set(otherResult);
+  localStorage.setItem("gamma.copilot.session", "other");
+  activeCopilotSession.set(detail(session("other")));
+  finish(ndjson([{ run_id: "run9", sequence: 12, event: "cancelled", data: {}, timestamp: "2026-10-04T12:00:01Z", result: cardResult("response9", "cancelled") }]));
+  await continuation;
+  expect(get(copilotOperatorResult)).toEqual(otherResult);
+  expect(get(copilotLastSubmission)).toEqual(originalSubmission);
+  expect(get(copilotRunningSessionIds)).not.toContain("session9");
+  expect(get(copilotActiveRun)).toBeNull();
+  expect(get(loading).copilot).toBe(false);
+});
+
+it("reconnects approval by event cursor without resubmitting its decision", async () => {
+  localStorage.setItem("gamma.copilot.session", "session9");
+  activeCopilotSession.set(detail(session("session9")));
+  const urls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input); urls.push(url);
+    if (url.endsWith("/decision/stream")) return ndjson([{ run_id: "run9", sequence: 9, event: "run.resumed", data: {}, timestamp: "2026-10-04T12:00:00Z" }]);
+    if (url.includes("/events?after_sequence=9")) return ndjson([{ run_id: "run9", sequence: 10, event: "completed", data: {}, result: cardResult("response9"), timestamp: "2026-10-04T12:00:01Z" }]);
+    if (url.includes("/sessions/session9")) return response(detail(session("session9")));
+    return response([session("session9")]);
+  }));
+  await confirmCopilotMutation({ mutation_id: "mutation9", run_id: "run9", workflow_id: "run9", session_id: "session9", status: "applied" } as CopilotDraftMutation);
+  expect(urls.filter(url => url.endsWith("/decision/stream"))).toHaveLength(1);
+  expect(urls.some(url => url.includes("/events?after_sequence=9"))).toBe(true);
+  expect(get(copilotOperatorResult)?.response_id).toBe("response9");
+});
+
+it("keeps persisted interrupted approval after reconnect exhaustion", async () => {
+  localStorage.setItem("gamma.copilot.session", "session9");
+  const persisted = { ...detail(session("session9")), turns: [{ turn_id: "original", result: cardResult("response9", "interrupted") }] } as CopilotSessionDetail;
+  activeCopilotSession.set(persisted);
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/runs/")) throw new Error("Transport unavailable");
+    if (url.includes("/sessions/session9")) return response(persisted);
+    return response([persisted.session]);
+  }));
+  expect(await confirmCopilotMutation({ mutation_id: "mutation9", run_id: "run9", workflow_id: "run9", session_id: "session9", status: "applied" } as CopilotDraftMutation)).toBeNull();
+  expect(get(activeCopilotSession)?.turns[0].turn_id).toBe("original");
+  expect(get(lastError)).toContain("Transport unavailable");
+  expect(get(loading).copilot).toBe(false);
+  expect(get(copilotActiveRun)).toBeNull();
+});
+
+it("reconnects after initial decision transport loss past the original pause cursor", async () => {
+  localStorage.setItem("gamma.copilot.session", "session9");
+  activeCopilotSession.set(detail(session("session9")));
+  const urls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input); urls.push(url);
+    if (url.includes("/recovery?")) return response({ last_sequence: 8, status: "awaiting_confirmation" });
+    if (url.endsWith("/decision/stream")) throw new Error("Connection lost before first event");
+    if (url.includes("/events?after_sequence=8")) return ndjson([
+      { run_id: "run9", sequence: 9, event: "run.resumed", data: {}, timestamp: "2026-10-04T12:00:00Z" },
+      { run_id: "run9", sequence: 10, event: "completed", data: {}, result: cardResult("response9"), timestamp: "2026-10-04T12:00:01Z" }
+    ]);
+    if (url.includes("/sessions/session9")) return response(detail(session("session9")));
+    return response([session("session9")]);
+  }));
+  await confirmCopilotMutation({ mutation_id: "mutation9", run_id: "run9", workflow_id: "run9", session_id: "session9", status: "pending" } as CopilotDraftMutation);
+  expect(urls.filter(url => url.endsWith("/decision/stream"))).toHaveLength(1);
+  expect(urls.some(url => url.includes("/events?after_sequence=8"))).toBe(true);
+  expect(get(copilotOperatorResult)?.response_id).toBe("response9");
+});
+
+it("refuses a new-run Retry for an interrupted approval", async () => {
+  const summary = session("session9");
+  const result = cardResult("response9", "interrupted");
+  result.operator_events = [{ payload: { mutation: { run_id: "run9", workflow_id: "run9" } } }] as unknown as CopilotResearchCardResult["operator_events"];
+  activeCopilotSession.set({ ...detail(summary), turns: [{ turn_id: "turn9", result }] } as CopilotSessionDetail);
+  const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+  expect(await retryCopilotTurn("turn9")).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(get(lastError)).toContain("original approval run");
 });

@@ -1,4 +1,4 @@
-# Copilot V2 ~87% To 100% Execution Prompt
+# Copilot V2 ~94% To 100% Execution Prompt
 
 Copy the text inside the block below into the coding agent that will continue Copilot V2.
 
@@ -7,9 +7,9 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot from its approximately 87% clarified baseline through the remaining Checkpoint 8 work, Checkpoint 9, and the desired 100% acceptance gate defined in `roadmap.md` and `docs/copilot_v2_tab_plan.md`.
+Your objective is to take Copilot from its approximately 94% clarified baseline through Checkpoint 10's required acceptance gate in `roadmap.md` and `docs/copilot_v2_tab_plan.md`. Checkpoint 8/8H is separately committed as bdce458; Checkpoint 9 passed deterministic acceptance on 2026-10-04. Read `docs/audits/copilot_checkpoint9_acceptance_2026-10-04.md` for the exact evidence boundary. Do not treat the interrupted earlier Checkpoint 9 chat as certification, or this deterministic completion as successful live-provider evidence.
 
-The former 97% figure measured a narrower chat, persistence, evidence, and bounded-workflow foundation. Historical checkpoints 1 through 6, the Checkpoint 7 closed-loop Operator, Checkpoints 8A-8D, and the isolated Research Script Workspace are verified and should be preserved. The central remaining product work is to generalize temporary tab-owned analysis state beyond the completed Fundamentals, hypothetical Portfolio/Risk, Options realized-versus-implied, and Script slices; then complete same-run approval/recovery and the release gate.
+The former 97% figure measured a narrower foundation. Preserve Checkpoints 1–9, exact temporary tab-owned analyses and retained reads, the isolated Script Workspace, same-run approval/recovery and Options continuity commit e1e1ead. Remaining work is the release gate: complete trace-level representative acceptance, intentionally authorized successful live Agent/Operator and approval-resume evidence, broader accessibility/first-run/degradation/restart verification and repository-wide release checks. No new authority or durable mutation family is implicitly authorized by that work.
 
 This is an implementation task, not a planning-only exercise. Work in coherent vertical slices, verify each exit criterion, update the active documentation, and continue until the desired end state is proven or a genuine external dependency blocks the remaining gate. Never claim a percentage merely because code was written.
 
@@ -167,9 +167,9 @@ Exit criteria:
 - generic execution summaries fail analytical acceptance;
 - custom Responses and Agents SDK variants, where maintained, use the same authoritative registry.
 
-## Checkpoint 8 — finish entity acquisition and working-analysis state (target 89%)
+## Checkpoint 8 — complete (92%, 2026-09-06; independently revalidated 2026-10-04)
 
-Remaining delivery:
+Preserve verified delivery:
 
 - preserve the completed entity-addressable Fundamentals, natural-company resolution, hypothetical Portfolio/Risk, Options realized-versus-implied, and Research Script contracts;
 - extend Gamma-owned `ephemeral`, `draft`, and `durable` state semantics to option-set drafts, Strategy Lab inputs, temporary assumptions, and the remaining representative tab-owned analyses;
@@ -183,7 +183,9 @@ Exit criteria:
 - temporary work is visible and never confused with saved state;
 - no save, rebalance, trade, or other prohibited effect occurs.
 
-## Checkpoint 9 — interruptions, recovery, and authority transition (target 94%)
+## Checkpoint 9 — interruptions, recovery, and authority transition (verified 94%, 2026-10-04)
+
+Preserve the deterministic acceptance report: 30 recovery cases; combined 206-test backend validation before final focused refinements; 460 frontend tests; 31 standalone deterministic Operator eval cases; 16 affected browser journeys at desktop/intermediate/narrow widths. The existing DCF consumer uses the shared run lifecycle, Stop, cursor reconnect and same-turn continuation. No new-run Retry may recreate an approval mutation. This gate did not certify successful live-provider operation or Checkpoint 10.
 
 Required delivery:
 

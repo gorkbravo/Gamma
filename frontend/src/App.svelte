@@ -3251,6 +3251,10 @@
       guidance={copilotSurface.guidance}
       thread={copilotSurface.thread}
       loading={$loading.copilot}
+      activeRun={$copilotActiveRun}
+      onCancelRun={cancelCopilotRun}
+      onConfirmMutation={handleConfirmCopilotMutation}
+      onRejectMutation={handleRejectCopilotMutation}
       placeholder={copilotSurface.placeholder}
       scopeOptions={copilotSurface.scopeOptions}
       selectedScopeDomains={copilotSurface.selectedScopeDomains}

@@ -3,11 +3,13 @@
   import CopilotTranscriptResult from "./CopilotTranscriptResult.svelte";
   import type {
     CopilotBaseDomain,
+    CopilotDraftMutation,
     CopilotProfile,
     CopilotSourceRef,
     CopilotThreadEntry,
     CopilotThreadState
   } from "../lib/api/types";
+  import type { CopilotRunState } from "../lib/copilot-run";
 
   type CopilotRoleMode = "agent" | "operator";
   type CopilotGroundingScopeOption = {
@@ -29,6 +31,10 @@
   export let guidance = "Grounded in the current Gamma context.";
   export let thread: CopilotThreadState | null = null;
   export let loading = false;
+  export let activeRun: CopilotRunState | null = null;
+  export let onCancelRun: () => Promise<unknown> | void = () => {};
+  export let onConfirmMutation: ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown) | null = null;
+  export let onRejectMutation: ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown) | null = null;
   export let placeholder = "Optional angle or research question...";
   export let scopeOptions: CopilotGroundingScopeOption[] = [];
   export let selectedScopeDomains: CopilotBaseDomain[] = [];
@@ -60,6 +66,7 @@
   let contextSummary = "Select context";
 
   function setRoleMode(nextMode: CopilotRoleMode) {
+    if (loading) return;
     roleMode = nextMode;
   }
 
@@ -216,6 +223,8 @@
                 compact
                 cardLabel={index === 0 ? (entry.result.domain === "synthesis" ? "Grounded Research" : "Research Card") : null}
                 {onOpenSource}
+                onConfirmMutation={roleMode === "operator" && !loading ? onConfirmMutation : null}
+                onRejectMutation={roleMode === "operator" && !loading ? onRejectMutation : null}
               />
             </div>
           </div>
@@ -226,13 +235,17 @@
 
   <footer class="composer">
     <div class="role-row" role="tablist" aria-label="Copilot role">
-      <button type="button" class:active={roleMode === "agent"} on:click={() => setRoleMode("agent")}>
+      <button type="button" role="tab" aria-selected={roleMode === "agent"} disabled={loading} class:active={roleMode === "agent"} on:click={() => setRoleMode("agent")}>
         Research Agent
       </button>
-      <button type="button" class:active={roleMode === "operator"} on:click={() => setRoleMode("operator")}>
+      <button type="button" role="tab" aria-selected={roleMode === "operator"} disabled={loading} class:active={roleMode === "operator"} on:click={() => setRoleMode("operator")}>
         Research Operator
       </button>
     </div>
+    <p class="authority-notice" role="status">{roleMode === "operator"
+      ? "Operator selected. Research tools may run in your selected scopes; saved changes require approval."
+      : "Agent uses attached evidence. Select Research Operator to run research tools or resolve an approval."}</p>
+    {#if loading && activeRun}<p class="authority-notice" role="status">{activeRun.statusDetail}</p>{/if}
 
     <div class="scope-row">
       {#if scopeOptions.length}
@@ -322,15 +335,20 @@
             <option value="deep">Deep</option>
           </select>
         </label>
+        {#if loading && activeRun}
+        <button class="generate-btn" type="button" on:click={() => onCancelRun()}>Stop</button>
+        {:else}
         <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
           {composerButtonLabel}
         </button>
+        {/if}
       </div>
     </div>
   </footer>
 </div>
 
 <style>
+  .authority-notice { margin: 0; color: var(--text-2); font-size: var(--text-xs); line-height: var(--leading-normal); }
   .backdrop {
     position: fixed;
     inset: 0;

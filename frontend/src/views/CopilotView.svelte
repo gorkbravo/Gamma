@@ -169,6 +169,7 @@
   }
 
   function setRoleMode(nextMode: CopilotRoleMode) {
+    if (loading) return;
     roleMode = nextMode;
   }
 
@@ -404,8 +405,12 @@
   $: runStreaming = activeRun != null && (activeRun.phase === "pending" || activeRun.phase === "streaming");
   $: inFlightPrompt = resolveInFlightPrompt(promptText, lastSubmission);
   $: lastTurn = chatTurns.length ? chatTurns[chatTurns.length - 1] : null;
+  $: approvalContinuation = lastTurn?.result.operator_events.some(event => {
+    const mutation = event.payload.mutation as CopilotDraftMutation | undefined;
+    return mutation?.run_id && mutation.workflow_id;
+  });
   $: retryPrompt =
-    !runStreaming && !loading && lastTurn != null && !["ready", "awaiting_confirmation"].includes(lastTurn.result.status) && lastTurn.prompt
+    !approvalContinuation && !runStreaming && !loading && lastTurn != null && !["ready", "awaiting_confirmation"].includes(lastTurn.result.status) && lastTurn.prompt
       ? lastTurn.prompt
       : null;
   $: retryTurn = persistedTurns.find((turn) => turn.turn_id === lastTurn?.id || (
@@ -633,6 +638,12 @@
       </div>
     </header>
 
+    {#if roleMode === "operator"}
+      <p class="role-authority" role="status">Operator selected. Gamma can run research tools in your selected scopes; saved-state changes pause for your approval.</p>
+    {:else if researchPlan}
+      <p class="role-authority">This Agent plan is a proposal. <button type="button" disabled={loading} on:click={() => setRoleMode("operator")}>Select Operator to run research</button></p>
+    {/if}
+
     {#if storageRecovery && (storageNoticeVisible || storageDetailsOpen)}
       <section
         id="copilot-storage-recovery"
@@ -709,8 +720,8 @@
                 <CopilotTranscriptResult
                   result={turn.result}
                   {onOpenSource}
-                  {onConfirmMutation}
-                  {onRejectMutation}
+                  onConfirmMutation={roleMode === "operator" ? onConfirmMutation : null}
+                  onRejectMutation={roleMode === "operator" ? onRejectMutation : null}
                 />
               </div>
             </div>
@@ -724,8 +735,8 @@
                   result={null}
                   {researchPlan}
                   {onOpenSource}
-                  {onConfirmMutation}
-                  {onRejectMutation}
+                  onConfirmMutation={roleMode === "operator" ? onConfirmMutation : null}
+                  onRejectMutation={roleMode === "operator" ? onRejectMutation : null}
                 />
               </div>
             </div>
@@ -737,8 +748,8 @@
                   result={operatorResult}
                   {operatorPlan}
                   {onOpenSource}
-                  {onConfirmMutation}
-                  {onRejectMutation}
+                  onConfirmMutation={roleMode === "operator" ? onConfirmMutation : null}
+                  onRejectMutation={roleMode === "operator" ? onRejectMutation : null}
                 />
               </div>
             </div>
@@ -749,8 +760,8 @@
                 <CopilotTranscriptResult
                   result={operatorResult}
                   {onOpenSource}
-                  {onConfirmMutation}
-                  {onRejectMutation}
+                  onConfirmMutation={roleMode === "operator" ? onConfirmMutation : null}
+                  onRejectMutation={roleMode === "operator" ? onRejectMutation : null}
                 />
               </div>
             </div>
@@ -889,6 +900,15 @@
 </section>
 
 <style>
+  .role-authority {
+    margin: 0;
+    padding: var(--space-3) var(--space-5);
+    border-bottom: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+  }
+
   .copilot {
     position: relative;
     display: grid;

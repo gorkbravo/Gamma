@@ -3866,6 +3866,8 @@ export interface CopilotDraftMutation {
 }
 
 export type CopilotRunEventType =
+  | "run.paused"
+  | "run.resumed"
   | "run.created"
   | "text.delta"
   | "function.arguments"

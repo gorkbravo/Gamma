@@ -31,6 +31,7 @@ from src.application.copilot_model_policy import (
     CopilotModelPolicy,
 )
 from src.application.copilot_confirmation_service import CopilotConfirmationService
+from src.application.copilot_run_recovery import CopilotRunRecovery
 from src.application.copilot_context_contracts import (
     COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
     aggregate_context_fingerprint,
@@ -295,6 +296,8 @@ class CopilotService:
         self.provider = provider
         self.model_policy = model_policy or CopilotModelPolicy.from_environment(provider)
         self.store = store
+        self.run_recovery = CopilotRunRecovery(store) if store is not None else None
+        self._approval_lock = threading.RLock()
         self.confirmation_service = (
             CopilotConfirmationService(store) if store is not None else None
         )
@@ -2366,6 +2369,13 @@ class CopilotService:
                 if existing.run_kind != run_kind or existing.request_fingerprint != fingerprint:
                     raise ValueError("Copilot run id is already attached to a different request.")
                 return existing, False
+            saved = self.run_recovery.get(resolved_run_id) if self.run_recovery else None
+            if saved is not None:
+                if saved.get("request_fingerprint") != fingerprint:
+                    raise ValueError("This persisted run must continue through its approval/recovery action.")
+                handle = self._restore_recovery_handle(saved)
+                self._runs[resolved_run_id] = handle
+                return handle, False
             handle = _CopilotRunHandle(
                 run_id=resolved_run_id,
                 run_kind=run_kind,
@@ -2407,8 +2417,15 @@ class CopilotService:
             if event.is_terminal:
                 handle.terminal = True
                 handle.status = "done"
+            elif event_type == "run.paused":
+                handle.status = "awaiting_confirmation"
             elif event_type == "run.created":
                 handle.status = "running"
+            if self.run_recovery is not None and event_type in {"run.paused", "run.resumed", "completed", "failed", "cancelled"}:
+                state = self.run_recovery.get(handle.run_id)
+                if state is not None:
+                    self.run_recovery.save({**state, "run_events": [asdict(item) for item in handle.events],
+                                            "request_fingerprint": handle.request_fingerprint})
             handle.condition.notify_all()
             return event
 
@@ -2422,7 +2439,7 @@ class CopilotService:
         while True:
             with handle.condition:
                 batch = [event for event in handle.events if event.sequence > cursor]
-                terminal = handle.terminal
+                terminal = handle.terminal or handle.status == "awaiting_confirmation"
                 if not batch and not terminal:
                     handle.condition.wait(timeout=1.0)
                     continue
@@ -2432,11 +2449,29 @@ class CopilotService:
             if terminal:
                 return
 
+    def _restore_recovery_handle(self, state: dict[str, Any]) -> _CopilotRunHandle:
+        handle = _CopilotRunHandle(run_id=state["run_id"], run_kind="operator",
+                                   request_fingerprint=state.get("request_fingerprint", ""))
+        handle.events = [self.store._run_event_from_json(item) for item in state.get("run_events", [])]
+        handle.next_sequence = max((event.sequence for event in handle.events), default=-1) + 1
+        paused = state["status"] in {"awaiting_confirmation", "resuming"}
+        handle.status = "awaiting_confirmation" if paused else "done"
+        handle.terminal = not paused
+        result = self.store._result_from_json(state["result"])
+        if state["status"] == "resuming":
+            result = replace(result, status="interrupted", message="Continue the interrupted run from its saved decision.")
+        boundary = "run.paused" if paused else "cancelled" if state["status"] == "cancelled" else "failed" if state["status"] in {"error", "recovery_required"} else "completed"
+        if not handle.events or state["status"] == "resuming" or handle.events[-1].event_type != boundary:
+            handle.events.append(CopilotRunEvent(run_id=state["run_id"], sequence=handle.next_sequence,
+                event_type=boundary, result=result))
+            handle.next_sequence += 1
+        return handle
+
     def has_run(self, run_id: str) -> bool:
         normalized = (run_id or "").strip()
         with self._runs_lock:
             self._prune_runs_locked()
-            return normalized in self._runs
+            return normalized in self._runs or bool(self.run_recovery and self.run_recovery.get(normalized))
 
     def stream_existing_run_events(
         self,
@@ -2448,18 +2483,49 @@ class CopilotService:
         with self._runs_lock:
             self._prune_runs_locked()
             handle = self._runs.get(normalized)
+        if handle is None and self.run_recovery is not None:
+            saved = self.run_recovery.get(normalized)
+            if saved is not None:
+                handle = self._restore_recovery_handle(saved)
+                with self._runs_lock:
+                    self._runs[normalized] = handle
         if handle is None:
             raise ValueError(f"Copilot run not found: {normalized}")
         return self._subscribe_run(handle, after_sequence=after_sequence)
+
+    def _cancel_paused_operator(self, state: dict[str, Any]) -> dict[str, Any]:
+        with self._approval_lock:
+            state = self.run_recovery.get(state["run_id"])
+            if state["status"] != "awaiting_confirmation":
+                return {"run_id": state["run_id"], "found": True, "cancelled": False, "status": state["status"]}
+            mutation = self.store.get_mutation(state["mutation_id"])
+            if mutation.status == "pending":
+                mutation = self.reject_copilot_mutation(mutation_id=mutation.mutation_id,
+                    session_id=state["session_id"], _from_resume=True)
+            result = replace(self.store._result_from_json(state["result"]), status="cancelled",
+                             message="Operator cancelled at the approval boundary. No change was applied.",
+                             observability=CopilotRunObservability(cancellation_outcome="user_cancelled", cancellation_boundary="approval_checkpoint"))
+            handle = self._runs.get(state["run_id"]) or self._restore_recovery_handle(state)
+            handle.terminal = False
+            self._append_run_event(handle, "cancelled", {"reason": "user_cancelled"}, result=result)
+            self.run_recovery.save({**state, "status": "cancelled", "decision": "cancel",
+                "result": self.store._result_to_json(result), "run_events": [asdict(event) for event in handle.events]})
+            self.store.update_run_result(state["session_id"], state["run_id"], result, list(handle.events))
+            self.store.sync_mutation_resolution(mutation)
+            return {"run_id": state["run_id"], "found": True, "cancelled": True, "status": "cancelled"}
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         """Request cancellation, including before the stream creates its run."""
         normalized = (run_id or "").strip()
         if not normalized:
             return {"run_id": normalized, "found": False, "cancelled": False, "status": "invalid"}
+        saved = self.run_recovery.get(normalized) if self.run_recovery else None
         with self._runs_lock:
             self._prune_runs_locked()
             handle = self._runs.get(normalized)
+        if saved is not None and saved["status"] == "awaiting_confirmation" and (handle is None or handle.status != "running"):
+            return self._cancel_paused_operator(saved)
+        with self._runs_lock:
             if handle is None:
                 self._pending_run_cancellations[normalized] = time.monotonic()
                 return {"run_id": normalized, "found": False, "cancelled": True, "status": "pending"}
@@ -2973,6 +3039,9 @@ class CopilotService:
 
         with handle.condition:
             handle.finalized = True
+        if result.status == "awaiting_confirmation":
+            self._append_run_event(handle, "run.paused", {"status": result.status}, result=result)
+            return
         if result.status in {"cancelled", "timeout"}:
             self._append_run_event(
                 handle,
@@ -3423,6 +3492,7 @@ class CopilotService:
         session_id: str | None = None,
         context_fingerprint: str | None = None,
         proposal_hash: str | None = None,
+        _from_resume: bool = False,
     ) -> CopilotMutationApplyResult:
         if self.store is None:
             raise ValueError("Copilot mutation application requires local Copilot persistence.")
@@ -3439,6 +3509,24 @@ class CopilotService:
             or existing.apply_tool_id != "fundamentals.apply_dcf_update"
         ):
             raise ValueError(f"Unsupported Copilot mutation: {existing.tool_id}")
+        recovery = self.run_recovery.get(existing.run_id) if self.run_recovery and existing.run_id else None
+        if existing.workflow_id and existing.run_id and recovery is None:
+            raise ValueError("This workflow has no valid recovery record; no mutation was applied.")
+        if recovery is not None and not _from_resume:
+            self.resolve_operator_approval(
+                run_id=existing.run_id, mutation_id=mutation_id, decision="approve",
+                session_id=session_id, role="research_operator", confirmation_token=confirmation_token,
+                context_fingerprint=context_fingerprint, proposal_hash=proposal_hash,
+            )
+            applied = self.store.get_mutation(mutation_id)
+            return CopilotMutationApplyResult(mutation=applied,
+                artifact={"ticker": applied.target_id.split(":", 1)[0], "rollback_snapshot_id": applied.rollback_snapshot_id},
+                warnings=list(applied.warnings))
+        if recovery is not None:
+            current_model = self.fundamentals_service.get_dcf_model(existing.target_id.split(":", 1)[0])
+            current_hash = self.confirmation_service.proposal_hash(self._dcf_payload_from_model(current_model))
+            if current_hash != recovery["base_state_hash"]:
+                raise ValueError("The saved DCF changed after this preview. Reject this proposal and draft a fresh update.")
         mutation = self.confirmation_service.consume(
             mutation_id=mutation_id,
             confirmation_token=confirmation_token,
@@ -3456,6 +3544,10 @@ class CopilotService:
                 ticker,
                 name=f"Pre-Copilot DCF update {mutation.mutation_id[-8:]}",
             )
+            if snapshot is None:
+                raise ValueError("DCF update requires a rollback snapshot; no model was changed.")
+            mutation = replace(mutation, rollback_snapshot_id=snapshot.snapshot_id)
+            self.store.save_mutation(mutation)
             model = self.fundamentals_service.save_dcf_model(ticker, mutation.proposed_payload)
             if model is None:
                 raise ValueError(f"Fundamentals DCF model could not be saved: {ticker}")
@@ -3512,15 +3604,201 @@ class CopilotService:
         *,
         mutation_id: str,
         session_id: str | None = None,
+        _from_resume: bool = False,
     ) -> CopilotDraftMutation:
         if self.confirmation_service is None or self.store is None:
             raise ValueError("Copilot confirmation service is unavailable.")
+        existing = self.store.get_mutation(mutation_id)
+        recovery = self.run_recovery.get(existing.run_id) if self.run_recovery and existing and existing.run_id else None
+        if recovery is not None and not _from_resume:
+            self.resolve_operator_approval(run_id=existing.run_id, mutation_id=mutation_id,
+                decision="reject", session_id=session_id, role="research_operator")
+            return self.store.get_mutation(mutation_id)
         mutation = self.confirmation_service.reject(
             mutation_id=mutation_id,
             session_id=str(session_id or "").strip() or None,
         )
         self.store.sync_mutation_resolution(mutation)
         return mutation
+
+    def stream_operator_approval_events(self, *, run_id: str, **decision: Any) -> Iterator[CopilotRunEvent]:
+        """Submit a decision once; reconnects only subscribe to this run's events."""
+        state = self.run_recovery.get(run_id) if self.run_recovery else None
+        if (state is None or state["session_id"] != decision.get("session_id")
+            or state["mutation_id"] != decision.get("mutation_id")
+            or decision.get("role") != "research_operator"):
+            raise ValueError("Approval requires the original run, session, mutation and Operator authority.")
+        if state["status"] not in {"awaiting_confirmation", "resuming"}:
+            raise ValueError("This run has settled or requires manual recovery; no decision was repeated.")
+        with self._runs_lock:
+            handle = self._runs.get(run_id) or self._restore_recovery_handle(state)
+            self._runs[run_id] = handle
+            with handle.condition:
+                cursor = handle.next_sequence - 1
+                if handle.status == "running":
+                    # A concurrent decision cannot start another continuation.
+                    return self._subscribe_run(handle, after_sequence=cursor)
+                handle.status = "running"
+                handle.terminal = False
+
+        def continue_run() -> None:
+            try:
+                self.resolve_operator_approval(run_id=run_id, **decision)
+            except Exception as exc:
+                logger.exception("Copilot approval continuation interrupted")
+                saved = self.run_recovery.get(run_id)
+                result = self.store._result_from_json(saved["result"])
+                pending = saved["status"] == "awaiting_confirmation"
+                result = replace(result, status="awaiting_confirmation" if pending else "interrupted",
+                    message=str(exc), warnings=dedupe_warnings(result.warnings, [
+                        "Reopen this approval to continue the original run. Committed changes will not be repeated."
+                    ]))
+                self.run_recovery.save({**saved, "result": self.store._result_to_json(result)})
+                self._append_run_event(handle, "run.paused" if pending else "failed", result=result)
+                self.store.update_run_result(saved["session_id"], run_id, result, list(handle.events))
+
+        threading.Thread(target=continue_run, daemon=True, name=f"copilot-approval-{run_id}").start()
+        return self._subscribe_run(handle, after_sequence=cursor)
+
+    def _emit_operator_run_event(self, handle: _CopilotRunHandle, event: CopilotOperatorProgressEvent) -> None:
+        mapped = {"plan": "plan", "step-start": "tool.call", "tool-result": "tool.result",
+            "warning": "warning", "provider-progress": "provider.progress",
+            "confirmation-needed": "confirmation.needed", "artifact-created": "artifact.created",
+            "final-report": "report"}.get(event.event_type, "warning")
+        self._append_run_event(handle, mapped, {
+            "operator_event_type": event.event_type, "event_id": event.event_id,
+            "step_id": event.step_id, "tool_name": event.tool_id, "title": event.title,
+            "message": event.message, "summary": event.message, "payload": event.payload,
+            "source_ids": list(event.source_ids), "warnings": list(event.warnings),
+        })
+
+    def resolve_operator_approval(
+        self, *, run_id: str, mutation_id: str, decision: str, session_id: str | None,
+        role: str, confirmation_token: str | None = None, context_fingerprint: str | None = None,
+        proposal_hash: str | None = None,
+    ) -> CopilotResearchCardResult:
+        """Resolve one exact interruption and continue its original plan and turn."""
+        if self.run_recovery is None or self.store is None:
+            raise ValueError("Operator recovery requires local persistence.")
+        if role != "research_operator" or decision not in {"approve", "reject", "recover"}:
+            raise ValueError("Select Operator authority and an explicit approval decision.")
+        with self._approval_lock:
+            state = self.run_recovery.get(run_id)
+            if state is None:
+                raise ValueError("The original Copilot run was deleted or is unavailable.")
+            if state["session_id"] != session_id or state["mutation_id"] != mutation_id:
+                raise ValueError("Approval is not bound to this run, session and pending action.")
+            if self.store.get_session(session_id) is None:
+                raise ValueError("The original Copilot session was deleted; this run cannot resume.")
+            request = self.run_recovery.request(state)
+            mutation = self.store.get_mutation(mutation_id)
+            if mutation is None or mutation.run_id != run_id:
+                raise ValueError("Pending mutation is unavailable.")
+            handle = self._runs.get(run_id)
+            if state["status"] == "awaiting_confirmation" and handle is not None and handle.cancel_event.is_set():
+                self._cancel_paused_operator(state)
+                return self.store._result_from_json(self.run_recovery.get(run_id)["result"])
+            if decision == "recover":
+                if state["status"] != "resuming" or mutation.status not in {"applied", "rejected"}:
+                    raise ValueError("This run cannot safely recover: the mutation outcome is not committed.")
+            else:
+                if state["status"] != "awaiting_confirmation":
+                    raise ValueError("This run has already accepted an approval decision.")
+                if decision == "approve" and state["context_fingerprint"] != context_fingerprint:
+                    raise ValueError("Copilot context changed after the approval preview.")
+                if decision == "approve" and int(state["elapsed_ms"]) >= int(state["plan"]["max_elapsed_ms"]):
+                    raise ValueError("The original run exhausted its execution-time budget.")
+                if decision == "approve" and int(state["remaining_tools"]) <= 0:
+                    raise ValueError("The original run has no tool budget left for this mutation.")
+                state = {**state, "status": "resuming", "decision": decision,
+                         "decision_at": now_utc().isoformat()}
+                self.run_recovery.save(state)
+                mutation_started_at = time.perf_counter()
+                try:
+                    if decision == "approve":
+                        self.apply_fundamentals_dcf_update(mutation_id=mutation_id,
+                            confirmation_token=confirmation_token or "", session_id=session_id,
+                            context_fingerprint=context_fingerprint, proposal_hash=proposal_hash, _from_resume=True)
+                    else:
+                        self.reject_copilot_mutation(mutation_id=mutation_id, session_id=session_id, _from_resume=True)
+                except Exception:
+                    current = self.store.get_mutation(mutation_id)
+                    # Unconsumed validation failures can still be rejected or corrected.
+                    # A consumed/uncertain write is never automatically repeated.
+                    self.run_recovery.save({**state, "status": "awaiting_confirmation" if current.status == "pending" else "recovery_required"})
+                    raise
+                state["elapsed_ms"] += int((time.perf_counter() - mutation_started_at) * 1000)
+                mutation = self.store.get_mutation(mutation_id)
+            previous = self.store._result_from_json(state["result"])
+            pending_read = state.get("pending_read")
+            if decision == "recover" and pending_read and pending_read["step_id"] not in state["visited_steps"]:
+                previous = replace(previous, tool_traces=[*previous.tool_traces,
+                    CopilotToolTrace(tool_name=pending_read["tool_id"], arguments=pending_read["arguments"],
+                        summary="Read interrupted before its observation was persisted; its reserved attempt remains charged.")])
+                state["pending_read"] = None
+            events = list(previous.operator_events)
+            if not any(event.payload.get("approval_decision") for event in events):
+                events.append(CopilotOperatorProgressEvent(
+                    run_id=run_id, event_id=new_copilot_id("opevent"), sequence=len(events) + 1,
+                    event_type="tool-result", timestamp=now_utc(), tool_id=mutation.apply_tool_id,
+                    title="Approval resolved; continuing the same run",
+                    message=f"{mutation.target_label}: {mutation.status}.",
+                    payload={"approval_decision": state["decision"], "mutation_id": mutation_id,
+                             "status": mutation.status, "rollback_snapshot_id": mutation.rollback_snapshot_id},
+                ))
+                traces = list(previous.tool_traces)
+                if mutation.status == "applied":
+                    traces.append(CopilotToolTrace(tool_name=mutation.apply_tool_id,
+                        summary=f"Applied the reviewed update to {mutation.target_label}.",
+                        arguments={"mutation_id": mutation_id}, source_ids=mutation.source_ids))
+                    state["remaining_tools"] -= 1
+                events = [replace(event, payload={**event.payload, "status": mutation.status,
+                    "mutation": self.store._mutation_to_json(mutation), "rollback_snapshot_id": mutation.rollback_snapshot_id})
+                    if event.payload.get("mutation_id") == mutation_id and not event.payload.get("approval_decision") else event
+                    for event in events]
+                previous = replace(previous, status="interrupted", operator_events=events, tool_traces=traces)
+            remaining_steps = []
+            omitted_steps = []
+            visited = set(state["visited_steps"])
+            for step in self.store._operator_plan_from_json(state["plan"]).steps:
+                if step.step_id in visited:
+                    continue
+                try:
+                    self.action_registry.authorize_automatic(step.tool_id or "")
+                    if request.selected_scope_domains and step.domain not in request.selected_scope_domains:
+                        raise ResearchActionPermissionError("The step is outside the retained scope selection.")
+                except (ResearchActionPermissionError, ValueError) as exc:
+                    omitted_steps.append({"step_id": step.step_id, "reason": str(exc)})
+                    visited.add(step.step_id)
+                else:
+                    remaining_steps.append(step.step_id)
+            revision = {"decision": state["decision"], "remaining_step_ids": remaining_steps,
+                        "omitted_steps": omitted_steps, "remaining_tools": state["remaining_tools"]}
+            previous = replace(previous, operator_events=[*previous.operator_events,
+                CopilotOperatorProgressEvent(run_id=run_id, event_id=new_copilot_id("opevent"),
+                    sequence=len(previous.operator_events) + 1, event_type="plan", timestamp=now_utc(),
+                    title="Remaining research plan", message="Rechecked remaining research against the saved scopes, current permissions and original budget.",
+                    payload=revision)])
+            state = {**state, "status": "resuming", "result": self.store._result_to_json(previous),
+                     "visited_steps": list(visited), "plan_revisions": [*state.get("plan_revisions", []), revision]}
+
+            self.run_recovery.save(state)
+            with self._runs_lock:
+                handle = self._runs.get(run_id) or self._restore_recovery_handle(state)
+                self._runs[run_id] = handle
+            with handle.condition:
+                handle.status = "running"
+                handle.terminal = False
+            self._append_run_event(handle, "run.resumed", {"decision": state["decision"]})
+            result = self.execute_research_operator_plan(request, run_id=run_id, _resume_state=state,
+                should_cancel=handle.cancel_event.is_set,
+                emit_event=lambda event: self._emit_operator_run_event(handle, event))
+            self._append_run_event(handle, "cancelled" if result.status == "cancelled" else "failed" if result.status == "error" else "completed", result=result)
+            completed = self.run_recovery.get(run_id)
+            self.run_recovery.save({**completed, "run_events": [asdict(event) for event in handle.events]})
+            self.store.update_run_result(session_id, run_id, result, list(handle.events))
+            self.store.sync_mutation_resolution(mutation)
+            return result
 
     def get_copilot_mutation(self, mutation_id: str) -> CopilotDraftMutation | None:
         return self.store.get_mutation(mutation_id) if self.store is not None else None
@@ -3805,8 +4083,19 @@ class CopilotService:
         run_id: str | None = None,
         emit_event: Callable[[CopilotOperatorProgressEvent], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        _resume_state: dict[str, Any] | None = None,
     ) -> CopilotResearchCardResult:
+        input_fingerprint = self._run_request_fingerprint(request, "operator")
+        if _resume_state is None and run_id and self.run_recovery is not None:
+            existing = self.run_recovery.get(run_id)
+            if existing is not None:
+                if existing.get("input_fingerprint") != input_fingerprint:
+                    raise ValueError("Copilot run id is already bound to a different persisted request.")
+                return self.store._result_from_json(existing["result"])
         started_at = time.perf_counter()
+        if self.store is not None and not request.user_session_id and self._prompt_requests_dcf_mutation(str(request.prompt or "").lower()):
+            request = replace(request, user_session_id=new_copilot_id("session"))
+
         if request.model_resolution is None:
             request, resolution = self._prepare_request(
                 replace(request, role="research_operator"),
@@ -3814,12 +4103,18 @@ class CopilotService:
             )
         else:
             resolution = request.model_resolution
-        entity_preflight = self._prepare_operator_entity_preflight(
-            request,
-            allow_model_proposal=resolution.status in {"ready", "degraded"},
-        )
-        request = entity_preflight.request
-        plan = self.plan_research_operator(request)
+        if _resume_state is not None:
+            entity_preflight = _CopilotEntityPreflight(request=request, resolution=request.entity_resolution,
+                                                     usage=CopilotUsageRecord(provider_calls=0, tool_calls=0))
+            plan = self.store._operator_plan_from_json(_resume_state["plan"])
+            if plan is None:
+                raise ValueError("Recovery plan is unavailable.")
+        else:
+            entity_preflight = self._prepare_operator_entity_preflight(
+                request, allow_model_proposal=resolution.status in {"ready", "degraded"},
+            )
+            request = entity_preflight.request
+            plan = self.plan_research_operator(request)
         entity_resolution = entity_preflight.resolution
         if entity_resolution is not None and entity_resolution.status in {"ambiguous", "not_found"}:
             resolved_run_id = (run_id or "").strip() or new_copilot_id("oprun")
@@ -3914,6 +4209,7 @@ class CopilotService:
         adaptive_custom_requested = (
             resolution.orchestration_path == CUSTOM_OPERATOR_PATH
             and not has_legacy_dcf_draft
+            and _resume_state is None
             and callable(adaptive_operator)
         )
         if (
@@ -3986,7 +4282,7 @@ class CopilotService:
                 plan,
                 result,
             )
-        if resolution.orchestration_path == AGENTS_SDK_PATH and not has_draft_change:
+        if resolution.orchestration_path == AGENTS_SDK_PATH and not has_draft_change and _resume_state is None:
             if should_cancel is not None and should_cancel():
                 result = CopilotResearchCardResult(
                     domain="synthesis",
@@ -4084,10 +4380,28 @@ class CopilotService:
         context_bytes_used = 0
         context_budget_omitted_domains: list[str] = []
         remaining_tools = plan.max_tool_calls
-        provider_calls_used = 0
+        provider_calls_used = entity_preflight.usage.provider_calls or 0
         cancelled_at_boundary = False
         pending_mutation: CopilotDraftMutation | None = None
         emitted_checkpoint_ids: set[str] = set()
+
+        if _resume_state is not None:
+            previous = self.store._result_from_json(_resume_state["result"])
+            response_id = previous.response_id
+            events = list(previous.operator_events)
+            sources = {item.source_id: item for item in previous.sources}
+            tool_traces = list(previous.tool_traces)
+            warnings = list(previous.warnings)
+            executed_steps = list(_resume_state["executed_steps"])
+            skipped_steps = list(_resume_state["skipped_steps"])
+            failed_steps = list(_resume_state["failed_steps"])
+            outputs = dict(_resume_state["outputs"])
+            output_summaries = dict(_resume_state["output_summaries"])
+            remaining_tools = int(_resume_state["remaining_tools"])
+            provider_calls_used = int(_resume_state["provider_calls_used"])
+            started_at -= int(_resume_state["elapsed_ms"]) / 1000
+            emitted_checkpoint_ids = set(_resume_state["emitted_checkpoint_ids"])
+            context_bytes_used = int(_resume_state.get("context_bytes_used", 0))
 
         def record_event(
             event_type: str,
@@ -4143,6 +4457,23 @@ class CopilotService:
             record_event("warning", title="Plan warning", message=warning, event_warnings=[warning])
 
         for step in plan.steps:
+            if _resume_state is not None and self.run_recovery is not None:
+                retained_outputs, _ = self._bounded_operator_outputs(outputs, output_summaries)
+                checkpoint_result = replace(previous, operator_events=list(events), sources=list(sources.values()),
+                                            tool_traces=list(tool_traces), warnings=list(warnings))
+                _resume_state = {**_resume_state, "result": self.store._result_to_json(checkpoint_result),
+                    "executed_steps": list(executed_steps), "skipped_steps": list(skipped_steps),
+                    "failed_steps": list(failed_steps), "outputs": retained_outputs, "pending_read": None,
+                    "output_summaries": dict(output_summaries), "remaining_tools": remaining_tools,
+                    "provider_calls_used": provider_calls_used, "context_bytes_used": context_bytes_used,
+                    "working_state_ids": [item.analysis_id for item in self.store.list_working_analyses(request.user_session_id) if item.run_id == resolved_run_id],
+                    "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+                    "visited_steps": list(dict.fromkeys([*_resume_state["visited_steps"], *executed_steps, *skipped_steps]))}
+                self.run_recovery.save(_resume_state)
+
+            if _resume_state is not None and step.step_id in set(_resume_state["visited_steps"]):
+                continue
+
             if should_cancel is not None and should_cancel():
                 cancelled_at_boundary = True
                 message = "Research Operator cancellation took effect before the next safe step."
@@ -4182,6 +4513,10 @@ class CopilotService:
                 )
                 break
             if step.action_type == "draft_change":
+                if request.selected_scope_domains and step.domain not in request.selected_scope_domains:
+                    skipped_steps.append(step.step_id)
+                    record_warning("The proposed change is outside the selected research scopes.", step=step)
+                    continue
                 try:
                     self.action_registry.authorize_draft(step.tool_id or "")
                 except ResearchActionPermissionError as exc:
@@ -4242,6 +4577,11 @@ class CopilotService:
                     continue
                 remaining_tools -= 1
                 pending_mutation = mutation
+                sources["fundamentals.dcf.model"] = CopilotSourceRef(
+                    source_id="fundamentals.dcf.model", label=f"{mutation.target_label} reviewed local model",
+                    kind="local_research_state", provider="gamma_fundamentals",
+                    origin=mutation.origin, retrieved_at=mutation.created_at,
+                    description="Exact local DCF model used for the reviewed before/after proposal.")
                 for source in context.sources:
                     sources[source.source_id] = source
                 trace = CopilotToolTrace(
@@ -4424,6 +4764,12 @@ class CopilotService:
                     payload={"status": "skipped", "arguments": {}},
                 )
                 continue
+            remaining_tools -= 1
+            if _resume_state is not None:
+                _resume_state = {**_resume_state, "remaining_tools": remaining_tools,
+                    "provider_calls_used": provider_calls_used,
+                    "pending_read": {"step_id": step.step_id, "tool_id": step.tool_id, "arguments": arguments}}
+                self.run_recovery.save(_resume_state)
             execution = self._attach_operator_working_analysis(
                 self._execute_registered_operator_action(step.tool_id, arguments, context, request=request, run_id=resolved_run_id),
                 tool_id=step.tool_id,
@@ -4432,13 +4778,35 @@ class CopilotService:
                 request=request,
                 run_id=resolved_run_id,
             )
-            remaining_tools -= 1
+            if (isinstance(execution.output, dict) and execution.output.get("retryable") is True
+                and remaining_tools > 0 and step.action_type in {"read_context", "run_analysis", "fetch_external_context"}
+                and (not definition.external_provider or provider_calls_used < plan.max_provider_calls)
+                and int((time.perf_counter() - started_at) * 1000) < plan.max_elapsed_ms
+                and not (should_cancel and should_cancel())):
+                remaining_tools -= 1
+                if definition.external_provider:
+                    provider_calls_used += 1
+                tool_traces.append(execution.trace)
+                record_event("warning", step=step, title="Retrying read-only tool once",
+                    message="A transient connection failure interrupted this read. Retrying within the original budget.",
+                    payload={"retry_attempt": 1, "previous_error": execution.output["error"]})
+                if _resume_state is not None:
+                    _resume_state = {**_resume_state, "remaining_tools": remaining_tools,
+                                     "provider_calls_used": provider_calls_used}
+                    self.run_recovery.save(_resume_state)
+                execution = self._attach_operator_working_analysis(
+                    self._execute_registered_operator_action(step.tool_id, arguments, context, request=request, run_id=resolved_run_id),
+                    tool_id=step.tool_id, arguments=arguments, context=context, request=request, run_id=resolved_run_id)
             tool_traces.append(execution.trace)
             outputs[step.step_id] = execution.output
             output_summaries[step.step_id] = self._compact_operator_output(execution.output)
             for source in execution.sources:
                 sources[source.source_id] = source
             if isinstance(execution.output, dict) and execution.output.get("error"):
+                if execution.output.get("retryable"):
+                    record_event("warning", step=step, title="Read retry exhausted",
+                        message="The bounded read retry could not obtain evidence. Continuing only with available observations.",
+                        payload={"stop_reason": "tool_retry_exhausted", "retry_exhausted": True})
                 skipped_steps.append(step.step_id)
                 failed_steps.append(step.step_id)
                 message = f"{step.tool_id} failed: {execution.output['error']}"
@@ -4474,7 +4842,7 @@ class CopilotService:
         if remaining_tools <= 0 and budget_warning not in warnings:
             record_warning(budget_warning)
 
-        if plan.confirmation_checkpoints and not cancelled_at_boundary:
+        if plan.confirmation_checkpoints and not cancelled_at_boundary and _resume_state is None:
             message = "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
             warnings.append(message)
             for checkpoint in plan.confirmation_checkpoints:
@@ -4498,7 +4866,7 @@ class CopilotService:
             if cancelled_at_boundary
             else "awaiting_confirmation"
             if pending_mutation is not None
-            else ("ready" if executed_steps else "error")
+            else ("degraded" if failed_steps and executed_steps else "ready" if executed_steps else "error")
         )
 
         warnings = dedupe_warnings(warnings)
@@ -4642,6 +5010,39 @@ class CopilotService:
             usage=self._merge_usage_records(entity_preflight.usage, result.usage),
         )
 
+        if _resume_state is not None:
+            result = replace(result, usage=replace(self._merge_usage_records(previous.usage, result.usage),
+                                                   tool_calls=len(tool_traces)))
+
+        if pending_mutation is not None and self.run_recovery is not None:
+            if not request.user_session_id:
+                request = replace(request, user_session_id=new_copilot_id("session"))
+                pending_mutation = replace(pending_mutation, session_id=request.user_session_id)
+                self.store.save_mutation(pending_mutation)
+            ticker = pending_mutation.target_id.split(":", 1)[0]
+            base_model = self.fundamentals_service.get_dcf_model(ticker)
+            state = {
+                "run_id": resolved_run_id, "session_id": request.user_session_id,
+                "input_fingerprint": input_fingerprint,
+                "status": "awaiting_confirmation", "request": asdict(request), "plan": asdict(plan),
+                "result": self.store._result_to_json(result), "mutation_id": pending_mutation.mutation_id,
+                "context_fingerprint": request.context_fingerprint,
+                "base_state_hash": self.confirmation_service.proposal_hash(self._dcf_payload_from_model(base_model)),
+                "executed_steps": executed_steps, "skipped_steps": skipped_steps, "failed_steps": failed_steps,
+                "visited_steps": [item.step_id for item in plan.steps[:plan.steps.index(step) + 1]],
+                "plan_cursor": plan.steps.index(step) + 1,
+                "outputs": final_outputs, "output_summaries": output_summaries,
+                "remaining_tools": remaining_tools, "provider_calls_used": provider_calls_used,
+                "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+                "context_bytes_used": context_bytes_used,
+                "emitted_checkpoint_ids": list(emitted_checkpoint_ids),
+                "working_state_ids": [item.analysis_id for item in self.store.list_working_analyses(request.user_session_id) if item.run_id == resolved_run_id],
+                "pending_tool_call": {"tool_id": pending_mutation.apply_tool_id, "mutation_id": pending_mutation.mutation_id,
+                                      "proposal_hash": pending_mutation.proposal_hash},
+                "decision": None,
+            }
+            self.run_recovery.save(state)
+
         if self.store is not None:
             try:
                 self.store.record_turn(
@@ -4698,6 +5099,7 @@ class CopilotService:
                     requested_provider=request.requested_provider,
                     requested_model=request.requested_model,
                     run_id=resolved_run_id,
+                    replace_run=_resume_state is not None,
                     terminal_status=result.status,
                     cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
                     cancellation_boundary=result.observability.cancellation_boundary,
@@ -4719,6 +5121,17 @@ class CopilotService:
                         ]
                     ),
                 )
+        if _resume_state is not None and self.run_recovery is not None:
+            if "Copilot executed the operator plan, but failed to persist this turn locally." in result.warnings:
+                raise ValueError("Continuation could not be persisted. Recover this same run; the approved change will not be repeated.")
+            self.run_recovery.save({**_resume_state, "status": result.status,
+                "result": self.store._result_to_json(result), "pending_tool_call": None, "pending_read": None,
+                "remaining_tools": remaining_tools, "provider_calls_used": provider_calls_used,
+                "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+                "executed_steps": executed_steps, "skipped_steps": skipped_steps, "failed_steps": failed_steps,
+                "visited_steps": list(dict.fromkeys([*_resume_state["visited_steps"], *executed_steps, *skipped_steps])),
+                "plan_cursor": len(plan.steps), "outputs": final_outputs, "output_summaries": output_summaries,
+                "working_state_ids": [item.analysis_id for item in self.store.list_working_analyses(request.user_session_id) if item.run_id == resolved_run_id]})
         return result
 
     def _execute_responses_operator_loop(
@@ -7678,7 +8091,18 @@ class CopilotService:
     def delete_session(self, session_id: str, *, confirmation: str) -> CopilotDeleteResult:
         if self.store is None:
             raise ValueError("Copilot persistence is not configured.")
-        return self.store.delete_session(session_id, confirmation=confirmation)
+        with self._approval_lock:
+            run_ids = {mutation.run_id for mutation in self.store.list_mutations(session_id) if mutation.run_id}
+            deleted = self.store.delete_session(session_id, confirmation=confirmation)
+            with self._runs_lock:
+                for run_id in run_ids:
+                    handle = self._runs.pop(run_id, None)
+                    if handle is not None:
+                        with handle.condition:
+                            handle.cancel_event.set()
+                            handle.terminal = True
+                            handle.condition.notify_all()
+            return deleted
 
     def create_artifact(
         self,
@@ -8705,7 +9129,7 @@ class CopilotService:
             return definition.handler(arguments, context)
         except Exception as exc:
             return CopilotToolExecution(
-                output={"error": str(exc)},
+                output={"error": str(exc), "retryable": isinstance(exc, (TimeoutError, ConnectionError))},
                 trace=CopilotToolTrace(
                     tool_name=tool_name,
                     summary=f"Gamma tool execution failed: {exc}",

@@ -27,6 +27,7 @@ from src.api.schemas.copilot import (
     CopilotResearchActionDefinitionModel,
     CopilotRunCancelResponseModel,
     CopilotRunEventModel,
+    CopilotRunDecisionRequestModel,
     CopilotResearchPlanModel,
     CopilotResearchReportModel,
     CopilotResearchReportRequestModel,
@@ -221,6 +222,49 @@ def cancel_copilot_run(run_id: str, request: Request) -> CopilotRunCancelRespons
     runtime = request.app.state.runtime
     outcome = runtime.copilot_service.cancel_run(run_id)
     return CopilotRunCancelResponseModel(**outcome)
+
+
+@router.post("/copilot/runs/{run_id}/decision", response_model=CopilotResearchCardResponseModel)
+def resolve_operator_approval(run_id: str, payload: CopilotRunDecisionRequestModel, request: Request):
+    try:
+        result = request.app.state.runtime.copilot_service.resolve_operator_approval(
+            run_id=run_id, mutation_id=payload.mutation_id, session_id=payload.user_session_id,
+            role=payload.role, decision=payload.decision, confirmation_token=payload.confirmation_token,
+            context_fingerprint=payload.context_fingerprint, proposal_hash=payload.proposal_hash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return CopilotResearchCardResponseModel.from_domain(result)
+
+
+@router.get("/copilot/runs/{run_id}/recovery")
+def get_operator_recovery(run_id: str, user_session_id: str, request: Request):
+    service = request.app.state.runtime.copilot_service
+    state = service.run_recovery.get(run_id) if service.run_recovery else None
+    if state is None or state["session_id"] != user_session_id:
+        raise HTTPException(status_code=404, detail="Copilot recovery record not found.")
+    return {"last_sequence": max((event["sequence"] for event in state.get("run_events", [])), default=-1), **{key: state.get(key) for key in (
+        "contract_version", "run_id", "session_id", "status", "mutation_id", "plan_cursor",
+        "remaining_tools", "provider_calls_used", "elapsed_ms", "decision", "working_state_ids",
+    )}}
+
+
+@router.post("/copilot/runs/{run_id}/decision/stream")
+def stream_operator_approval(run_id: str, payload: CopilotRunDecisionRequestModel, request: Request):
+    try:
+        events = request.app.state.runtime.copilot_service.stream_operator_approval_events(
+            run_id=run_id, mutation_id=payload.mutation_id, session_id=payload.user_session_id,
+            role=payload.role, decision=payload.decision, confirmation_token=payload.confirmation_token,
+            context_fingerprint=payload.context_fingerprint, proposal_hash=payload.proposal_hash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def iter_events():
+        for event in events:
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
+
+    return StreamingResponse(iter_events(), media_type="application/x-ndjson")
 
 
 @router.post("/copilot/mutations/fundamentals/dcf/propose", response_model=CopilotDraftMutationModel)

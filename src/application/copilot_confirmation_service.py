@@ -96,6 +96,8 @@ class CopilotConfirmationService:
                     "Copilot context changed after the mutation was drafted."
                 )
             expected_hash = mutation.proposal_hash or self.proposal_hash(mutation.proposed_payload)
+            if self.proposal_hash(mutation.proposed_payload) != expected_hash:
+                raise CopilotConfirmationError("Stored mutation payload does not match the reviewed proposal.")
             if proposal_hash is not None and proposal_hash != expected_hash:
                 raise CopilotConfirmationError(
                     "Mutation proposal changed after confirmation was requested."

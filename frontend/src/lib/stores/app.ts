@@ -4062,9 +4062,11 @@ async function consumeCopilotRun(
   runId: string,
   domain: CopilotDomain,
   signal: AbortSignal,
-  onAccepted: () => void = () => {}
+  onAccepted: () => void = () => {},
+  afterSequence = -1
 ): Promise<{ state: CopilotRunState; result: CopilotResearchCardResult }> {
   let runState = createCopilotRunState(runId);
+  runState.lastSequence = afterSequence;
   let finalResult: CopilotResearchCardResult | null = null;
   let attempt = 0;
   copilotActiveRun.set(runState);
@@ -4082,7 +4084,7 @@ async function consumeCopilotRun(
     if (!previouslyAccepted && runState.accepted) {
       onAccepted();
     }
-    if (finalResult == null && isTerminalCopilotRunEvent(event) && runState.rawResult != null) {
+    if (finalResult == null && (isTerminalCopilotRunEvent(event) || event.event === "run.paused") && runState.rawResult != null) {
       finalResult = normalizeCopilotResearchCardResult(domain, runState.rawResult);
     }
   };
@@ -4504,6 +4506,13 @@ export async function retryCopilotTurn(turnId: string) {
   const detail = get(activeCopilotSession);
   const turn = detail?.turns.find((candidate) => candidate.turn_id === turnId);
   const snapshot = detail?.context_snapshots.find((candidate) => candidate.snapshot_id === turn?.context_snapshot_id);
+  if (turn?.result.operator_events.some(event => {
+    const mutation = event.payload.mutation as CopilotDraftMutation | undefined;
+    return mutation?.run_id && mutation.workflow_id;
+  })) {
+    lastError.set("Select Operator and continue the original approval run. Its decision must not be retried as a new request.");
+    return null;
+  }
   if (!turn || !snapshot || turn.session_id !== getSelectedCopilotSessionId()
     || !turn.prompt.trim() || ["ready", "awaiting_confirmation"].includes(turn.result.status)
     || !snapshot.request_context.context || !["research_agent", "research_operator"].includes(turn.role)) {
@@ -4617,8 +4626,57 @@ function reconcileResolvedCopilotMutation(mutation: CopilotDraftMutation) {
   );
 }
 
+async function continueCopilotApproval(mutation: CopilotDraftMutation, decision: "approve" | "reject" | "recover") {
+  if (activeCopilotRunId) throw new Error("Wait for the active Copilot run to settle.");
+  const runId = mutation.run_id!;
+  const sessionId = mutation.session_id;
+  if (!sessionId) throw new Error("The original approval session is unavailable.");
+  const controller = new AbortController();
+  activeCopilotRunId = runId;
+  setLoading("copilot", true);
+  markCopilotSessionRunning(sessionId, true);
+  copilotActiveRun.set(createCopilotRunState(runId));
+  const timer = setTimeout(() => controller.abort(), COPILOT_OPERATOR_TIMEOUT_MS);
+  try {
+    const recovery = await getJson<{ last_sequence?: number }>(
+      `/copilot/runs/${encodeURIComponent(runId)}/recovery?user_session_id=${encodeURIComponent(sessionId)}`,
+      { signal: controller.signal }
+    );
+    const streamed = await consumeCopilotRun(`/copilot/runs/${encodeURIComponent(runId)}/decision/stream`, {
+      mutation_id: mutation.mutation_id,
+      user_session_id: mutation.session_id,
+      role: "research_operator",
+      decision,
+      confirmation_token: mutation.confirmation_token,
+      context_fingerprint: mutation.context_fingerprint,
+      proposal_hash: mutation.proposal_hash
+    }, runId, "synthesis", controller.signal, () => {}, recovery.last_sequence ?? -1);
+    const result = streamed.result;
+    if (getSelectedCopilotSessionId() === sessionId) {
+      copilotOperatorResult.set(result);
+    }
+    copilotThreads.update((threads) => Object.fromEntries(Object.entries(threads).map(([domain, thread]) => [domain, {
+      ...thread, entries: thread.entries.map((entry) => thread.sourceSessionId === sessionId && entry.result.response_id === result.response_id ? { ...entry, result } : entry)
+    }])) as Record<CopilotDomain, CopilotThreadState>);
+    await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
+    return result;
+  } finally {
+    clearTimeout(timer);
+    markCopilotSessionRunning(sessionId, false);
+    activeCopilotRunId = null;
+    copilotActiveRun.set(null);
+    setLoading("copilot", false);
+  }
+}
+
 export async function confirmCopilotMutation(mutation: CopilotDraftMutation) {
   try {
+    if (mutation.run_id && mutation.workflow_id) {
+      const result = await continueCopilotApproval(mutation, mutation.status === "pending" ? "approve" : "recover");
+      lastError.set("");
+      return result;
+    }
+
     const result = await postJson<CopilotMutationApplyResult>(
       `/copilot/mutations/${encodeURIComponent(mutation.mutation_id)}/apply`,
       {
@@ -4633,6 +4691,7 @@ export async function confirmCopilotMutation(mutation: CopilotDraftMutation) {
     lastError.set("");
     return result;
   } catch (error) {
+    await loadActiveCopilotSession();
     setError(error);
     return null;
   }
@@ -4640,6 +4699,12 @@ export async function confirmCopilotMutation(mutation: CopilotDraftMutation) {
 
 export async function rejectCopilotMutation(mutation: CopilotDraftMutation) {
   try {
+    if (mutation.run_id && mutation.workflow_id) {
+      const result = await continueCopilotApproval(mutation, "reject");
+      lastError.set("");
+      return result;
+    }
+
     const rejected = await postJson<CopilotDraftMutation>(
       `/copilot/mutations/${encodeURIComponent(mutation.mutation_id)}/reject`,
       { user_session_id: mutation.session_id ?? null }
@@ -4649,6 +4714,7 @@ export async function rejectCopilotMutation(mutation: CopilotDraftMutation) {
     lastError.set("");
     return rejected;
   } catch (error) {
+    await loadActiveCopilotSession();
     setError(error);
     return null;
   }

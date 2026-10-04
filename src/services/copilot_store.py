@@ -524,6 +524,7 @@ class CopilotStore:
         confirmations: list[CopilotConfirmationState] | None = None,
         artifact_refs: list[CopilotArtifactReference] | None = None,
         mutation_refs: list[CopilotArtifactReference] | None = None,
+        replace_run: bool = False,
     ) -> tuple[CopilotSession, CopilotContextSnapshot, CopilotTurn]:
         now = now_utc()
         result = resolve_result_evidence(result)
@@ -616,6 +617,10 @@ class CopilotStore:
                     warning_count=len(result.warnings),
                 ),
             )
+            prior_turn = next((item for item in existing_turns if replace_run and run_id and item.run_id == run_id), None)
+            if prior_turn is not None:
+                turn = replace(turn, turn_id=prior_turn.turn_id, turn_index=prior_turn.turn_index,
+                               created_at=prior_turn.created_at, context_snapshot_id=prior_turn.context_snapshot_id)
             artifacts = [
                 artifact
                 for artifact in self._load_artifacts_unlocked()
@@ -630,7 +635,7 @@ class CopilotStore:
                 updated_at=now,
                 active_domain=domain,
                 active_context_fingerprint=context_fingerprint,
-                turn_count=len(existing_turns) + 1,
+                turn_count=len(existing_turns) + (0 if prior_turn is not None else 1),
                 memo_count=memo_count,
                 report_count=report_count,
                 artifact_count=len(artifacts),
@@ -638,7 +643,8 @@ class CopilotStore:
                 archived_at=None,
             )
             self._write_json(self.sessions_dir / f"{safe_session_id}.json", self._session_to_json(next_session))
-            self._write_json(self.snapshots_dir / f"{snapshot.snapshot_id}.json", self._snapshot_to_json(snapshot))
+            if prior_turn is None:
+                self._write_json(self.snapshots_dir / f"{snapshot.snapshot_id}.json", self._snapshot_to_json(snapshot))
             self._write_json(self.turns_dir / safe_session_id / f"{turn.turn_id}.json", self._turn_to_json(turn))
         return next_session, snapshot, turn
 
@@ -925,6 +931,13 @@ class CopilotStore:
                         trash_root / "working_analyses" / analysis_path.name,
                     )
                     counts["working_analyses"] += 1
+            for directory, category in ((self.base_dir / "runs", "runs"), (self.mutations_dir, "mutations")):
+                counts[category] = 0
+                for record_path in directory.glob("*.json"):
+                    record = self._load_json(record_path, record_type="run_recovery" if category == "runs" else "mutation")
+                    if record and record.get("session_id") == safe_session_id:
+                        self._move_to_trash(record_path, trash_root / category / record_path.name)
+                        counts[category] += 1
         return CopilotDeleteResult(
             deleted_id=safe_session_id,
             deleted_type="session",
@@ -1121,6 +1134,19 @@ class CopilotStore:
             self._write_json(path, self._mutation_to_json(updated))
         return updated
 
+    def update_run_result(self, session_id: str, run_id: str, result: CopilotResearchCardResult,
+                          run_events: list[CopilotRunEvent]) -> None:
+        """Update the existing turn only; recovery cannot create a new user turn."""
+        with self._lock:
+            turn = next((item for item in self._load_turns_unlocked(session_id) if item.run_id == run_id), None)
+            if turn is None:
+                raise CopilotStoreNotFoundError("The original Copilot turn is unavailable.")
+            updated = replace(turn, result=result, terminal_status=result.status, run_events=run_events,
+                usage=result.usage, observability=result.observability,
+                trace_state=replace(turn.trace_state, event_count=len(run_events),
+                    operator_event_count=len(result.operator_events), tool_trace_count=len(result.tool_traces)))
+            self._write_json(self.turns_dir / self._safe_id(session_id) / f"{turn.turn_id}.json", self._turn_to_json(updated))
+
     def sync_mutation_resolution(self, mutation: CopilotDraftMutation) -> None:
         """Project a mutation's resolved state into persisted turn replay records."""
         resolved_at = (
@@ -1201,6 +1227,11 @@ class CopilotStore:
                         result_message = (
                             f"Mutation confirmation expired for {mutation.target_label}."
                         )
+                if mutation.run_id and result_status == "ready" and turn.result.status == "awaiting_confirmation":
+                    recovery = self._load_json(self.base_dir / "runs" / f"{self._safe_id(mutation.run_id)}.json", record_type="run_recovery")
+                    if recovery and recovery.get("status") == "resuming":
+                        result_status = "interrupted"
+                        result_message = f"{mutation.target_label}: {mutation.status}. Continue the remaining research in this run."
                 result = replace(
                     turn.result,
                     status=result_status,
@@ -3298,6 +3329,7 @@ class CopilotStore:
             self.mutations_dir: "mutation",
             self.promotions_dir: "promotion",
             self.working_analyses_dir: "working_analysis",
+            self.base_dir / "runs": "run_recovery",
         }
         for directory, record_type in mapping.items():
             if directory == path.parent or directory in path.parents:

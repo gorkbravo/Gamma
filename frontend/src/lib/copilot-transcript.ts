@@ -88,7 +88,7 @@ function operatorEventBlock(
     const mutation = mutationFromPayload(event.payload);
     const payload = Object.fromEntries(
       Object.entries(event.payload).filter(
-        ([key]) => !["confirmation_token", "mutation", "proposed_payload"].includes(key)
+        ([key]) => !["confirmation_token", "mutation", "proposed_payload", "proposal_hash", "context_fingerprint", "checkpoint_id", "after_step_id", "mutation_id", "required_for_tool_ids", "default_policy", "rollback_snapshot_id"].includes(key)
       )
     );
     return {
@@ -189,7 +189,6 @@ export function buildCopilotTranscriptBlocks(
 
     for (const event of operatorEvents) {
       const block = operatorEventBlock(event, sources);
-      blocks.push(block);
       if (block.kind === "confirmation" && block.mutation) {
         blocks.push({
           kind: "mutation-diff",
@@ -197,6 +196,7 @@ export function buildCopilotTranscriptBlocks(
           references: block.references
         });
       }
+      blocks.push(block);
     }
 
     if (sources.length || toolTraces.length || warnings.length) {
@@ -245,4 +245,16 @@ export function buildCopilotTranscriptBlocks(
   }
 
   return blocks;
+}
+
+
+/** Mutation percentages are stored as decimal fractions, just like the DCF model. */
+export function formatMutationValue(value: unknown, unit: string | null | undefined): string {
+  if (value == null) return "—";
+  if (Array.isArray(value)) return value.map((item) => formatMutationValue(item, unit)).join(", ");
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const number = unit === "percent" ? value * 100 : value;
+    return `${number.toLocaleString("en-US", { maximumFractionDigits: 6 })}${unit === "percent" ? "%" : unit ? ` ${unit}` : ""}`;
+  }
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }

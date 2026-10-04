@@ -349,3 +349,13 @@ describe("buildCopilotTranscriptBlocks", () => {
     });
   });
 });
+
+
+it("formats decimal-fraction DCF approval percentages accurately", async () => {
+  const { formatMutationValue } = await import("./copilot-transcript");
+  expect(formatMutationValue(0.10, "percent")).toBe("10%");
+  expect(formatMutationValue(0.09, "percent")).toBe("9%");
+  expect(formatMutationValue([0.05, -0.02], "percent")).toBe("5%, -2%");
+  expect(formatMutationValue(0, "percent")).toBe("0%");
+  expect(formatMutationValue(null, "percent")).toBe("—");
+});

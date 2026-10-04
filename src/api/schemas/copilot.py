@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -1528,6 +1529,16 @@ class CopilotFundamentalsDcfMutationRequestModel(BaseModel):
     run_id: str | None = None
     checkpoint_id: str | None = None
     context_fingerprint: str | None = None
+
+
+class CopilotRunDecisionRequestModel(BaseModel):
+    mutation_id: str = Field(min_length=1, max_length=160)
+    user_session_id: str = Field(min_length=1, max_length=160)
+    role: Literal["research_agent", "research_operator"]
+    decision: Literal["approve", "reject", "recover"]
+    confirmation_token: str | None = None
+    context_fingerprint: str | None = None
+    proposal_hash: str | None = None
 
 
 class CopilotMutationApplyRequestModel(BaseModel):

@@ -270,10 +270,27 @@ describe("CopilotTranscriptResult", () => {
     });
 
     expect(body).toContain("Confirm and apply");
+    expect(body.indexOf("Before")).toBeLessThan(body.indexOf("Confirm and apply"));
     expect(body).toContain("Reject");
     expect(body).toContain("Before");
     expect(body).toContain("After");
     expect(body).toContain("pre-change snapshot on apply");
+    expect(body).not.toContain("confirm-token");
+  });
+
+  it("offers continuation after a committed mutation and interrupted research", () => {
+    const interrupted = result();
+    interrupted.status = "interrupted";
+    const mutation = { ...typedMutation, status: "applied", run_id: "run_9" };
+    interrupted.operator_events = [{
+      run_id: "run_9", event_id: "approval_9", sequence: 1, event_type: "confirmation-needed",
+      timestamp: "2026-09-07T00:00:00Z", step_id: null, tool_id: "fundamentals.propose_dcf_update",
+      title: "Review DCF update", message: "Review the exact change.",
+      payload: { mutation_id: mutation.mutation_id, mutation }, source_ids: [], warnings: []
+    }];
+    const { body } = render(CopilotTranscriptResult, { props: { result: interrupted, onConfirmMutation: () => mutation } });
+    expect(body).toContain("Continue interrupted run");
+    expect(body).not.toContain("Approve and continue");
     expect(body).not.toContain("confirm-token");
   });
 

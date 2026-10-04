@@ -10,6 +10,7 @@
   import { canNavigateCopilotSource } from "../lib/copilot-source-navigation";
   import {
     buildCopilotTranscriptBlocks,
+    formatMutationValue,
     type CopilotTranscriptBlock
   } from "../lib/copilot-transcript";
 
@@ -322,7 +323,7 @@
 
     {:else if block.kind === "confirmation"}
       <section class="block confirmation" aria-label="Copilot confirmation checkpoint">
-        <header class="block-head"><h4>{block.title}</h4><span>Confirmation required</span></header>
+        <header class="block-head"><h4>{block.title}</h4><span>{block.mutation && block.mutation.status !== "pending" ? `Decision: ${block.mutation.status}` : "Confirmation required"}</span></header>
         <p>{block.message}</p>
         {#if payloadEntries(block.payload).length}
           <dl>
@@ -346,6 +347,13 @@
         {#if block.warnings.length}
           <ul class="warnings">{#each block.warnings as warning}<li>{warning}</li>{/each}</ul>
         {/if}
+        {#if block.mutation?.run_id && result?.status === "interrupted" && ["applied", "rejected"].includes(block.mutation.status)}
+          <div class="confirmation-actions">
+            <button type="button" disabled={resolvingMutationId != null || onConfirmMutation == null}
+              on:click={() => resolveMutation("confirm", block.mutation)}>Continue interrupted run</button>
+          </div>
+          {#if mutationResolutionError}<p class="mutation-error" role="alert">{mutationResolutionError}</p>{/if}
+        {/if}
         {#if block.mutation && block.mutation.status === "pending"}
           <div class="confirmation-actions" aria-label="Mutation confirmation actions">
             <button
@@ -354,7 +362,7 @@
               disabled={resolvingMutationId != null || onConfirmMutation == null}
               on:click={() => resolveMutation("confirm", block.mutation)}
             >
-              {resolvingMutationId === block.mutation.mutation_id ? "Applying…" : "Confirm and apply"}
+              {resolvingMutationId === block.mutation.mutation_id ? "Continuing…" : block.mutation.run_id ? "Approve and continue" : "Confirm and apply"}
             </button>
             <button
               type="button"
@@ -362,7 +370,7 @@
               disabled={resolvingMutationId != null || onRejectMutation == null}
               on:click={() => resolveMutation("reject", block.mutation)}
             >
-              Reject
+              {block.mutation.run_id ? "Reject and continue" : "Reject"}
             </button>
           </div>
           {#if mutationResolutionError}
@@ -377,15 +385,17 @@
           <h4>{block.mutation.target_label}</h4>
           <span>{block.mutation.status} · {rollbackLabel(block.mutation)}</span>
         </header>
-        <div class="table-wrap">
+        <p class="diff-scroll-hint">Scroll the comparison horizontally to inspect every before and after value.</p>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus is needed to scroll the full comparison.) -->
+        <div class="table-wrap" role="region" aria-label="DCF before-and-after comparison" tabindex="0">
           <table>
             <thead><tr><th>Field</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
             <tbody>
               {#each block.mutation.diff as entry}
                 <tr>
                   <td><strong>{entry.label}</strong><small>{entry.path}</small></td>
-                  <td>{formatValue(entry.before)}{entry.unit ? ` ${entry.unit}` : ""}</td>
-                  <td>{formatValue(entry.after)}{entry.unit ? ` ${entry.unit}` : ""}</td>
+                  <td>{formatMutationValue(entry.before, entry.unit)}</td>
+                  <td>{formatMutationValue(entry.after, entry.unit)}</td>
                   <td>{entry.change_type.replaceAll("_", " ")}</td>
                 </tr>
               {/each}
@@ -705,6 +715,8 @@
     color: var(--warning);
     font-size: var(--text-xs);
   }
+
+  .diff-scroll-hint { display: none; }
 
   .table-wrap {
     overflow-x: auto;
@@ -1028,6 +1040,7 @@
   }
 
   @media (max-width: 760px) {
+    .diff-scroll-hint { display: block; color: var(--text-2); font-size: var(--text-xs); }
     .block-head,
     .evidence-title {
       align-items: flex-start;

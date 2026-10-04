@@ -158,3 +158,20 @@ describe("reduceCopilotRunEvent", () => {
     expect(state.statusDetail).toBe("Provider transport failed.");
   });
 });
+
+
+it("pauses without a terminal and resumes the same event sequence", () => {
+  let state = createCopilotRunState("run_test");
+  const paused = event({ sequence: 3, event: "run.paused", result: { status: "awaiting_confirmation" } });
+  state = reduceCopilotRunEvent(state, paused);
+  expect(state.phase).toBe("paused");
+  expect(state.terminalEvent).toBeNull();
+  expect(state.rawResult).toEqual({ status: "awaiting_confirmation" });
+  expect(isTerminalCopilotRunEvent(paused)).toBe(false);
+  state = reduceCopilotRunEvent(state, event({ sequence: 4, event: "run.resumed" }));
+  expect(state.phase).toBe("streaming");
+  expect(state.rawResult).toBeNull();
+  state = reduceCopilotRunEvent(state, event({ sequence: 5, event: "completed", result: { status: "ready" } }));
+  expect(state.phase).toBe("completed");
+  expect(state.lastSequence).toBe(5);
+});

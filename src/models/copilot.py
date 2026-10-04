@@ -575,6 +575,8 @@ class CopilotResearchCardResult:
 
 COPILOT_RUN_EVENT_TYPES = {
     "run.created",
+    "run.paused",
+    "run.resumed",
     "text.delta",
     "function.arguments",
     "tool.call",

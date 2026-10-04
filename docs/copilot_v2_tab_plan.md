@@ -205,7 +205,7 @@ Do not switch frameworks or models solely because a newer option exists. Compare
 
 ### Official Guidance Re-Reviewed 2026-09-06 — Checkpoint 8 Completion
 
-Revalidated on **2026-10-04** through the OpenAI Developer Docs connector: [Agents SDK](https://developers.openai.com/api/docs/guides/agents/sdk), [running agents](https://developers.openai.com/api/docs/guides/agents/running-agents), [results and state](https://developers.openai.com/api/docs/guides/agents/results), [guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), [orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration), [tracing](https://developers.openai.com/api/docs/guides/agents/integrations-observability), and [strict function calling](https://developers.openai.com/api/docs/guides/function-calling). Decision unchanged: Responses handles model/tool observations and streaming in the default runner; the optional SDK may manage the loop, but Gamma owns validation, permissions, local state and approvals. No framework, model, key or permission expansion is warranted by Checkpoint 8 retention or the pending Checkpoint 9 interruption work.
+Revalidated on **2026-10-04** through the OpenAI Developer Docs connector: [Agents SDK](https://developers.openai.com/api/docs/guides/agents/sdk), [running agents](https://developers.openai.com/api/docs/guides/agents/running-agents), [results and state](https://developers.openai.com/api/docs/guides/agents/results), [guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), [orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration), [tracing](https://developers.openai.com/api/docs/guides/agents/integrations-observability), and [strict function calling](https://developers.openai.com/api/docs/guides/function-calling). Decision unchanged: Responses handles model/tool observations and streaming in the default runner; the optional SDK may manage the loop, but Gamma owns validation, permissions, local state and approvals. No framework, model, key or permission expansion is warranted by Checkpoint 8 retention or Checkpoint 9 interruption work. This review also governs the 2026-10-04 Checkpoint 9 completion: Gamma persists the original run checkpoint and approval state, streams continuation through the shared lifecycle, and prevents committed-effect replay independently of either runner.
 
 Fetched the current official [Agents SDK / Responses comparison](https://developers.openai.com/api/docs/guides/agents) through the OpenAI Developer Docs connector. Responses is appropriate when the application owns the loop and state; the SDK can manage the loop while the server still owns tools, persistence and approval decisions.
 
@@ -407,6 +407,12 @@ Checkpoint 7 decision from the 2026-07-30 review:
 
 This section is the authoritative remaining-work layout for completing the in-app Copilot. It reconciles the current roadmap, the shipped code, the June/July UI rebuild, and the current OpenAI model/API guidance. Older phase notes below remain useful implementation history, but this section owns priority and completion scope.
 
+#### 2026-09-07 — Checkpoint 9 approval/recovery review
+
+Reviewed current official [Guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals) and [Responses / Agents SDK comparison](https://developers.openai.com/api/docs/guides/agents#compare-the-responses-api-and-agents-sdk). Approval interrupts an unfinished run; delayed decisions serialize state and resume the same run rather than creating a new user turn. Validation belongs beside the side effect.
+
+Decision: preserve the custom Responses loop and optional SDK routing. Gamma owns versioned local interruption records, exact proposal validation, run identity, remaining budgets, continuation and rollback evidence. Keep the existing DCF mutation as the first consumer; do not expose new durable mutation families or provider-managed authority. Reuse the project's existing configured provider boundary for this authorized checkpoint; no credential/configuration changes are required.
+
 ### Current Reality
 
 Gamma already has more than a chat shell:
@@ -420,17 +426,17 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state, Copilot is **approximately 92% complete** with Checkpoint 8 complete on 2026-09-06. Checkpoints 1–7 remain the verified foundation. Checkpoints 8A–8H plus the final retained-evidence slice cover representative entity acquisition, temporary assumptions, owning-tab materialization and cross-tool evidence reuse. Generalized same-run approval/recovery (Checkpoint 9) and live/UI release acceptance (Checkpoint 10) remain open.
+The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state, Copilot is **approximately 94% complete**, with Checkpoint 8 complete on 2026-09-06 and Checkpoint 9 verified on 2026-10-04. Checkpoints 1–7 remain the foundation. Checkpoints 8A–8H cover representative acquisition, temporary assumptions, materialization and evidence reuse; Checkpoint 9 adds same-run approval/recovery and explicit authority transitions. Checkpoint 10 live/provider and broader release acceptance remains open. See [Checkpoint 9 acceptance](audits/copilot_checkpoint9_acceptance_2026-10-04.md).
 
 The material remaining gaps are product behavior, not only release hardening:
 
 - public-company names have SEC-validated acquisition; Macro/Crypto use explicit provider/Gamma identifiers. Broader natural-language identity resolution is optional future depth beyond the representative checkpoint gate;
 - loaded account snapshots and imported Strategy Lab results remain explicit supplied inputs. Gamma does not invent broker/account state or reconstruct missing uploaded CSV rows;
-- the versioned session-scoped working-analysis contract now covers the representative owning surfaces and retained cross-tool reads; broader analytical depth remains owned by each tab, and durable promotion is still dependent on Checkpoint 9;
+- the versioned session-scoped working-analysis contract covers the representative owning surfaces and retained cross-tool reads; broader analytical depth remains tab-owned, and future durable promotion must use the verified interruption/diff/rollback/permission contract;
 - representative computed results now materialize non-durably in their owning tabs; additional specialized visualization and broader provider depth remain tab-owned follow-up work;
-- the durable approval model is narrow and DCF-specific rather than a general pause/approve-or-reject/resume-the-same-run contract;
-- replayable events preserve history, but do not yet provide generalized workflow recovery, replanning, retries, or approval resumption;
-- role escalation from Agent to Operator is not yet a complete, visible authority transition;
+- the reusable same-run interruption/recovery record is verified with the existing DCF consumer; additional durable mutation families remain product decisions and must prove their own consumer validation;
+- bounded retries, permission-constrained remaining-plan revisions and restart recovery are verified deterministically; broader live adaptive/release evidence remains outstanding;
+- Agent-to-Operator selection and approval authority are explicit on the shelf and dedicated tab; broader accessibility certification remains part of Checkpoint 10;
 - accessibility, first-run, responsive, and representative live-provider release evidence also remains open after the Operator outcome work.
 
 ### Completion Boundary
@@ -745,13 +751,15 @@ Implementation note (2026-09-05, Checkpoint 8G):
 - Seven-day `prediction_market_comparison` working records use `copilot.prediction-comparison-working-analysis.v1`. Compare displays their original evidence independently of live selections and saved sets. Opening and refreshing do not recompute the comparison or save a basket. The temporary banner shows the retained timestamp, requested range/resolution, expiry, and a return-to-live action. Expired evidence is withheld instead of replaced under the temporary heading.
 - Verification and baseline failures are recorded in [Checkpoint 8G acceptance](audits/copilot_checkpoint8g_2026-09-05.md). This is deterministic and simulated Responses acceptance, not a claim of successful live OpenAI or venue acceptance. The approximate 90% overall completion estimate stays unchanged while remaining representative analyses, generalized approval/resume and the release gate remain open.
 
-#### K. Generalized interruptions, recovery, and role transition — open
+#### K. Generalized interruptions, recovery, and role transition — checkpoint 9 complete (94%, 2026-10-04)
 
-- Generalize the DCF proposal pattern into pause/approve-or-reject/resume-the-same-run for every future durable local research-state mutation. Add explicit working-analysis promotion only where a product workflow requires it, with typed diffs, persistence/rollback and permission tests.
-- Persist the unfinished run snapshot, plan cursor, observations, budgets, working-state ids, context fingerprint, pending tool call, and approval decision.
-- Add bounded tool retry, replan, resume-after-restart, and stale-context behavior without replaying already committed side effects.
-- Make Agent-to-Operator escalation visible and intentional. The original Agent run may propose the workflow, but it cannot execute until Operator authority is selected.
-- Keep all execution-capable families structurally absent from both roles.
+The [Checkpoint 9 acceptance report](audits/copilot_checkpoint9_acceptance_2026-10-04.md) certifies the deterministic exit criteria: original run/turn/context/observations/budgets survive approval and restart; confirmed DCF effects never repeat; stale context, rejection, cancellation, retry exhaustion and interruption are typed/tested; shared shelf/tab lifecycle supports progress, Stop, reconnect and recovery. Agent controls cannot approve or execute Operator work before explicit authority selection. No additional durable mutation family or permission was introduced. The final focused recovery suite has 30 cases, frontend has 460 tests, the standalone eval has 31 deterministic passing cases, and 16 browser journeys cover the affected flows and Options continuity. Broader live/release gates remain in L.
+
+- [x] Generalize the DCF proposal pattern into reusable pause/approve-or-reject/resume-the-same-run. Future durable local research-state consumers must supply typed diffs, persistence/rollback and permission tests; add explicit working-analysis promotion only where a product workflow requires it.
+- [x] Persist the unfinished run snapshot, plan cursor, observations, budgets, working-state ids, context fingerprint, pending tool call, and approval decision.
+- [x] Add bounded tool retry, replan, resume-after-restart, and stale-context behavior without replaying already committed side effects.
+- [x] Make Agent-to-Operator escalation visible and intentional. The original Agent run may propose the workflow, but it cannot execute until Operator authority is selected.
+- [x] Keep all execution-capable families structurally absent from both roles.
 
 #### L. End-state validation and release gate — blocker
 
@@ -775,13 +783,13 @@ Implementation note (2026-09-05, Checkpoint 8G):
 9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
 10. ~~Build the closed-loop Operator and model-assisted, schema-validated argument path.~~ Completed 2026-07-30 at Checkpoint 7 (82%).
 11. ~~Entity-addressable tools, session-scoped working analyses and owning-tab materialization.~~ Checkpoint 8 complete on 2026-09-06 (92%); the acceptance matrix covers representative domain families and exact retained evidence reuse in both runners.
-12. Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.
+12. ~~Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.~~ Checkpoint 9 verified 2026-10-04 (94%); existing DCF consumer, shared run lifecycle and deterministic recovery/authority acceptance.
 13. Pass trace-level deterministic and live acceptance cases against the clarified completion boundary.
 14. Optional external deep research; later voice.
 
 Do not start with model-string replacement alone. Any future candidate-model rollout must use the Checkpoint 6 policy and land with provider streaming, capability validation, usage instrumentation, and recorded eval/live evidence so it improves the product rather than merely changing metadata.
 
-The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 92%** end-state baseline after Checkpoint 8.
+The percentages attached to completed Checkpoints 1 through 7 below are historical gates under earlier completion boundaries. They document verified foundation work but do not override the current **approximately 94%** end-state estimate after Checkpoint 9.
 
 ### Definition Of Done
 
@@ -1320,12 +1328,12 @@ Current Research Operator state (foundation inventory, not the desired end state
 - `run_hypothetical_portfolio_comparison` is automatic read-only and builds a temporary long-only synthetic research scope from typed legs/weights, compares its normalized return stream to a benchmark through the existing Compare/Scenario service path, and can optionally hand the temporary fixed-notional snapshot to Risk for bounded contribution analytics. It returns coverage, relative metrics, optional risk handoff output, warnings, and provenance without saving, rebalancing, or trading anything.
 - `run_options_realized_implied_comparison` is automatic read-only and uses Gamma's existing IVService surface path or active Options state to compare ATM implied volatility against available provider historical-volatility fields by expiry. It returns implied moves, vol premium/ratio rows where data is sufficient, missing-history or missing-IV statuses where it is not, surface quality/collection metadata, warnings, and provenance without direct Copilot provider calls or state changes.
 - `run_fundamentals_reverse_valuation` remains automatic read-only. DCF update proposals stop at draft/confirmation checkpoints; `fundamentals.apply_dcf_update` remains confirmation-required and is not run by automatic operator execution.
-- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. Checkpoint 7 adds retained argument-fidelity, validation-correction, observation-continuation, forbidden-action, budget-stop, and model-final tests plus the generic-summary eval rejection. Checkpoint 8 adds retained lifecycle and cross-tool observations in both runner paths. Remaining release benchmark gaps are broader degraded cross-domain replanning, representative live-provider acceptance and same-run approval resumption.
+- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. Checkpoint 7 adds retained argument-fidelity, validation-correction, observation-continuation, forbidden-action, budget-stop, and model-final tests plus the generic-summary eval rejection. Checkpoint 8 adds retained lifecycle and cross-tool observations in both runner paths. Remaining release benchmark gaps are broader degraded cross-domain replanning and representative live-provider acceptance, including live same-run approval resumption. Deterministic interruption/recovery acceptance is certified by Checkpoint 9.
 
 What remains for the next agents:
 
-1. Preserve the completed Checkpoint 8 acceptance matrix and temporary-state contracts. Start Checkpoint 9: generalized same-run approval/recovery and explicit role transition.
-2. Generalize interruptions and recovery as described in workstream K. Do not broaden durable mutation families until pause/resume state, idempotency, diffs, rollback policy, and permission evals are reusable.
+1. Preserve the completed Checkpoints 8 and 9 contracts and acceptance matrices. Start Checkpoint 10: end-state trace, live-provider and release acceptance.
+2. Reuse workstream K's interruptions and recovery. Any future durable mutation consumer must independently prove its exact diff, rollback, persistence and permissions before exposure.
 3. Extend the Checkpoint 7 trace gate with degraded-result cross-domain replanning, unnecessary-tool, stale-context, remaining unloaded-entity families, working-state, and same-run approval-resume cases.
 4. Compare the custom Responses loop and Agents SDK as later end-state contracts enter the benchmark. Promote Agents SDK only if sessions, interruptions, traces, maintainability, quality, reliability, latency, or cost show a practical advantage without weakening permissions.
 5. Continue adding narrower read-only drilldowns only where they enable a representative end-to-end Operator goal. Tab-specific analytical depth remains owned by the corresponding Gamma service.

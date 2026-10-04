@@ -1,6 +1,6 @@
 import type { CopilotRunEvent } from "./api/types";
 
-export type CopilotRunPhase = "pending" | "streaming" | "completed" | "failed" | "cancelled";
+export type CopilotRunPhase = "paused" | "pending" | "streaming" | "completed" | "failed" | "cancelled";
 
 export interface CopilotRunToolNote {
   toolName: string;
@@ -166,6 +166,16 @@ export function reduceCopilotRunEvent(state: CopilotRunState, event: CopilotRunE
     case "provider.progress":
       next.phase = "streaming";
       next.statusDetail = asString(data.message) ?? "Copilot provider is working.";
+      return next;
+    case "run.paused":
+      next.phase = "paused";
+      next.rawResult = event.result ?? null;
+      next.statusDetail = "Paused for approval. Your decision continues this run.";
+      return next;
+    case "run.resumed":
+      next.phase = "streaming";
+      next.rawResult = null;
+      next.statusDetail = "Continuing the same Operator run.";
       return next;
     case "confirmation.needed":
       next.statusDetail = asString(data.message) ?? "Confirmation required before continuing.";
