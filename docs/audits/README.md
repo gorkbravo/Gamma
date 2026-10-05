@@ -6,6 +6,8 @@ Use this area for findings that should remain discoverable after the immediate b
 
 ## Categories
 
+- [Copilot Checkpoint 10 acceptance, 2026-10-05](./copilot_checkpoint10_acceptance_2026-10-05.md): current live outcomes, release checks, cost accounting limitations and remaining certification gates.
+
 - [`usability/`](./usability/): live workflow audits, trade-idea experiments, research-thread evaluations, and product friction reports.
 - [`codebase/`](./codebase/): repository, architecture, dependency, provider, security-boundary, and data-feed audits.
 - [`frontend/`](./frontend/): visual, interaction, design-system, accessibility, and frontend-specific implementation audits.

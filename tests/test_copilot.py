@@ -9495,7 +9495,9 @@ def test_checkpoint5_representative_plans_select_domains_and_explain_omissions(
         runtime.shutdown()
 
 
-def test_checkpoint7_model_policy_resolves_profiles_and_uses_adaptive_custom_operator():
+def test_checkpoint7_model_policy_resolves_profiles_and_uses_adaptive_custom_operator(monkeypatch):
+    # This baseline-policy fixture must not inherit the user's selected model.
+    monkeypatch.setenv("GAMMA_COPILOT_MODEL", "gpt-5.6-luna")
     provider = OpenAIResponsesCopilotProvider(
         api_key="test-key",
         model="gpt-5.6-luna",

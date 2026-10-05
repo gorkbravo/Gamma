@@ -3225,8 +3225,20 @@ class CopilotService:
             request=request,
         )
         budget = self._execution_budget_for_depth(depth_profile)
+        if (callable(getattr(self.provider, "stream_research_operator", None))
+                and not self._prompt_requests_dcf_mutation(normalized_prompt)
+                and len(domain_plan) > 1):
+            # A real multi-domain observation loop includes provider latency;
+            # the deterministic preview's 12-second guard is insufficient.
+            budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 90_000))
         if intent in {"macro_series_analysis", "crypto_token_analysis", "retained_analysis_research"}:
             budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 60_000))
+        if (intent == "single_company_research"
+                and re.search(r"\b(?:fair\s+value|valuation|dcf)\b", normalized_prompt)
+                ):
+            # Filing acquisition and valuation need more than the generic
+            # single-surface guard, including a model observation/continuation.
+            budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 90_000))
         if (
             intent == "hypothetical_portfolio_comparison"
             and self._prompt_requests_risk_scenario(normalized_prompt)
@@ -5013,6 +5025,56 @@ class CopilotService:
         if _resume_state is not None:
             result = replace(result, usage=replace(self._merge_usage_records(previous.usage, result.usage),
                                                    tool_calls=len(tool_traces)))
+            # Approval execution stays server-owned. A configured live model
+            # receives only the already observed evidence, with no tools or
+            # mutation authority, to synthesize the same run's final answer.
+            synthesize = getattr(self.provider, "stream_research_card", None)
+            if (callable(adaptive_operator) and callable(synthesize)
+                    and result.status in {"ready", "degraded"}
+                    and provider_calls_used < plan.max_provider_calls
+                    and int((time.perf_counter() - started_at) * 1000) < plan.max_elapsed_ms):
+                if should_cancel and should_cancel():
+                    result = replace(result, status="cancelled", card=None)
+                else:
+                    provider_calls_used += 1
+                    self.run_recovery.save({**_resume_state,
+                        "provider_calls_used": provider_calls_used,
+                        "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+                        "pending_synthesis": True})
+                    synthesis_context = CopilotContextBundle(
+                        domain="fundamentals", current_tab=request.context.current_tab or "copilot",
+                        summary_data={"approval_decision": _resume_state.get("decision"),
+                            "approval_effect": {
+                                key: value for key, value in asdict(self.store.get_mutation(_resume_state["mutation_id"])).items()
+                                if key in {"mutation_id", "status", "target_id", "target_label", "diff", "rendered_diff",
+                                           "rollback_snapshot_id", "applied_at", "rejected_at", "source_ids", "warnings"}
+                            },
+                            "operator_observations": final_outputs,
+                            "output_retention": output_retention,
+                            "instruction": "Explain the actual approval outcome and analytical observations. Do not claim any unobserved effect or repeat an action."},
+                        sources=list(sources.values()), warnings=warnings,
+                    )
+                    def no_synthesis_tool(*args, **kwargs):
+                        raise ValueError("Approval synthesis has no tool authority.")
+                    try:
+                        synthesized = synthesize(request=request, context=synthesis_context,
+                            tool_specs=[], execute_tool=no_synthesis_tool,
+                            emit=lambda kind, data: record_event("provider-progress",
+                                title="Approval result synthesis", payload={"event": kind, **data}),
+                            should_cancel=should_cancel or (lambda: False))
+                        result = replace(result, provider=synthesized.provider, model=synthesized.model,
+                            card=synthesized.card,
+                            status=result.status if synthesized.status == "ready" else synthesized.status,
+                            warnings=dedupe_warnings(result.warnings, synthesized.warnings),
+                            usage=replace(self._merge_usage_records(result.usage, synthesized.usage),
+                                tool_calls=len(tool_traces)), operator_events=list(events))
+                    except CopilotRunCancelled:
+                        result = replace(result, status="cancelled", card=None, operator_events=list(events))
+                    except Exception as exc:
+                        safe_error = self.model_policy.classify_error(exc, run_id=resolved_run_id, model=resolution.model)
+                        result = replace(result, status="error", card=None, safe_provider_error=safe_error,
+                            message=safe_error.message, warnings=dedupe_warnings(result.warnings, [safe_error.guidance]),
+                            operator_events=list(events))
 
         if pending_mutation is not None and self.run_recovery is not None:
             if not request.user_session_id:
@@ -8496,7 +8558,7 @@ class CopilotService:
                 planned_tools=["draft_options_strategy"],
                 required_context=["underlying_symbol", "option_legs", "provider_priced_surface"],
             )
-        elif depth_profile == "user_directed":
+        elif depth_profile == "user_directed" and intent != "hypothetical_portfolio_comparison":
             directed_domains = self._extract_user_directed_domains(prompt)
             if not directed_domains:
                 directed_domains = [self._resolve_domain(request)]
@@ -8740,22 +8802,12 @@ class CopilotService:
     def _prompt_requests_dcf_mutation(prompt: str) -> bool:
         if "dcf" not in prompt:
             return False
-        mutation_terms = (
-            "adjust",
-            "apply",
-            "change",
-            "edit",
-            "modify",
-            "raise",
-            "set",
-            "lower",
-            "update",
-            "cell",
-            "cells",
-            "assumption",
-            "assumptions",
-        )
-        return any(term in prompt for term in mutation_terms)
+        # Mentioning assumptions or sensitivity is read-only analysis. Only
+        # an explicit change verb should divert the run to saved-state approval.
+        return bool(re.search(
+            r"\b(?:adjust|apply|change|edit|modify|raise|set|lower|update)\b",
+            prompt,
+        ))
 
     @staticmethod
     def _prompt_requests_hypothetical_portfolio(prompt: str) -> bool:
@@ -11998,6 +12050,7 @@ class CopilotService:
                 ],
                 benchmark_symbol=normalized["benchmark_symbol"],
                 lookback_days=normalized["lookback_days"],
+                enforce_observation_limit=True,
             )
         )
         comparison = research_service.compare_research(
@@ -17363,6 +17416,13 @@ class CopilotService:
             }
             for step_id, output in outputs.items()
         }
+        # One oversized observation must not erase the analytical values in
+        # every smaller result. Retain exact smaller outputs under the shared
+        # bound; full mutations and working analyses have their own stores.
+        for step_id, output in sorted(outputs.items(), key=lambda item: cls._json_size_bytes(item[1])):
+            candidate = {**compact_outputs, step_id: output}
+            if cls._json_size_bytes(candidate) <= max_bytes:
+                compact_outputs = candidate
         retention["mode"] = "compact"
         retention["reason"] = "full_output_exceeded_payload_budget"
         return compact_outputs, retention

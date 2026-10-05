@@ -735,9 +735,7 @@ export function deriveStrategyPayoff(
     const signed = leg.side === "long" ? -leg.premium : leg.premium;
     return sum + signed * leg.quantity;
   }, 0);
-  const points = Array.from({ length: count }, (_, index) => {
-    const underlyingPrice = lower + step * index;
-    const payoff = cleanLegs.reduce((sum, leg) => {
+  const payoffAt = (underlyingPrice: number) => cleanLegs.reduce((sum, leg) => {
       const intrinsic =
         leg.optionType === "call"
           ? Math.max(0, underlyingPrice - leg.strike)
@@ -745,13 +743,15 @@ export function deriveStrategyPayoff(
       const signedIntrinsic = leg.side === "long" ? intrinsic - leg.premium : leg.premium - intrinsic;
       return sum + signedIntrinsic * leg.quantity;
     }, 0);
+  const points = Array.from({ length: count }, (_, index) => {
+    const underlyingPrice = lower + step * index;
+    const payoff = payoffAt(underlyingPrice);
     return {
       underlyingPrice,
       payoff,
       returnPct: Math.abs(netPremium) > 0 ? payoff / Math.abs(netPremium) : null,
     };
   });
-  const payoffs = points.map((point) => point.payoff);
   // Boundedness comes from the structure, not from any single short leg: only a
   // net-short/net-long call tail is open-ended (price has no upper bound), while
   // the downside extreme is the finite payoff at an underlying price of zero.
@@ -765,12 +765,19 @@ export function deriveStrategyPayoff(
     const signedIntrinsic = leg.side === "long" ? intrinsic - leg.premium : leg.premium - intrinsic;
     return sum + signedIntrinsic * leg.quantity;
   }, 0);
+  // Expiry payoff is piecewise linear, with kinks at strikes. Use those exact
+  // knots for extrema and roots; interpolating the chart grid can cross a kink.
+  const tailEnd = Math.max(upper, maxStrike + 1 + (rightTailSlope !== 0
+    ? Math.abs(payoffAt(maxStrike) / rightTailSlope) : 0));
+  const exactPoints = [...new Set([0, ...strikes, tailEnd])].sort((a, b) => a - b)
+    .map((underlyingPrice) => ({ underlyingPrice, payoff: payoffAt(underlyingPrice), returnPct: null }));
+  const payoffs = exactPoints.map((point) => point.payoff);
   return {
     points,
     netPremium,
     maxProfit: rightTailSlope > 0 ? null : Math.max(...payoffs, payoffAtZero),
     maxLoss: rightTailSlope < 0 ? null : Math.min(...payoffs, payoffAtZero),
-    breakevens: cleanLegs.length ? deriveBreakevens(points) : [],
+    breakevens: cleanLegs.length ? deriveBreakevens(exactPoints) : [],
   };
 }
 

@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import timedelta
 
 import pytest
+from types import SimpleNamespace
 
 from src.application.copilot_run_recovery import CopilotRunRecovery
 from src.models.copilot import CopilotResearchCardRequest, CopilotRequestContext
@@ -33,6 +34,37 @@ def decide(service, mutation, decision="approve", **overrides):
         "confirmation_token": mutation.confirmation_token, "context_fingerprint": "context_9",
         "proposal_hash": mutation.proposal_hash, **overrides,
     })
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_live_capable_resume_synthesizes_observations_without_tool_authority(setup, decision):
+    client, service, _, mutation = setup
+    from src.models.copilot import CopilotResearchCardResult, CopilotUsageRecord, ResearchCard
+    calls = []
+    def synthesize(**kwargs):
+        assert kwargs["tool_specs"] == []
+        assert kwargs["context"].summary_data["operator_observations"]
+        assert kwargs["context"].sources
+        assert kwargs["context"].summary_data["approval_effect"]["status"] == ("applied" if decision == "approve" else "rejected")
+        assert kwargs["context"].summary_data["approval_effect"]["diff"]
+        with pytest.raises(ValueError, match="no tool authority"):
+            kwargs["execute_tool"]("fundamentals.apply_dcf_update", {}, kwargs["context"])
+        calls.append(kwargs)
+        return CopilotResearchCardResult(domain="fundamentals", current_tab="copilot",
+            status="ready", provider="live-capable-stub", model="gpt-test",
+            card=ResearchCard(title="Observed DCF outcome", hypothesis="Observed only", rationale="Retained evidence"),
+            usage=CopilotUsageRecord(provider_calls=1, input_tokens=100, output_tokens=20))
+    service.provider = SimpleNamespace(stream_research_operator=lambda **kwargs: None,
+                                      stream_research_card=synthesize)
+    result = decide(service, mutation, decision)
+    assert len(calls) == 1
+    assert result.card.title == "Observed DCF outcome"
+    assert result.usage.provider_calls == 1
+    assert result.response_id == client.get("/copilot/sessions/session_9").json()["turns"][0]["result"]["response_id"]
+    assert len(service.fundamentals_service.saved_snapshots) == (1 if decision == "approve" else 0)
+    with pytest.raises(ValueError, match="already accepted"):
+        decide(service, mutation, decision)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("decision", ["approve", "reject"])

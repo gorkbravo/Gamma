@@ -2,7 +2,17 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-04
+Last updated: 2026-10-05
+
+#### 2026-10-05 — Checkpoint 10 live acceptance; certification remains open
+
+Reviewed current official documentation through the OpenAI Developer Docs connector: [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [function calling](https://developers.openai.com/api/docs/guides/function-calling), [agent runtime comparison](https://developers.openai.com/api/docs/guides/agents), [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching), [pricing](https://developers.openai.com/api/docs/pricing), and [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter). Review date: **2026-10-05**.
+
+Decision: preserve the user's `gpt-6.1-sol` Copilot configuration and the custom Responses default. The model selects strict authorized Gamma tools; Gamma validates arguments and owns permissions, observations, persisted recovery, approval effects and audit state. Keep the SDK comparison flag without a migration. After a DCF approval/rejection, synthesize from the persisted observations and authoritative effect with **no exposed tools**; reserve the provider-call budget before synthesis, and never reapply an effect on replay. Sol supports low/medium/high reasoning; do not route it to unsupported none/minimal profiles. Cache reads, writes and reasoning-output tokens require separate accounting. Script retains its independently configured model and network-disabled immutable-execution contract.
+
+Live verification now covers unloaded LMT, exact 60% SPY / 40% TLT versus SPY over 252 observations, exact +100 bp / −10% risk shock, degraded Options → Macro adaptation, useful oil synthesis, Agent reviews, Options handoff/Stop/Retry with retained evidence, reconnect, and same-run DCF approve/reject after restart. Approval creates one rollback snapshot; rejection creates none; duplicate decisions return 409. Fixes address false assumption-edit detection, hypothetical routing, observation-window fidelity, bounded-output loss, approval final synthesis, sampled Options breakevens and M1–M6 indexing. Final backend **772 passed / 1 opt-in skipped**; frontend **461 passed**, typecheck/build/desktop checks and **31 browser journeys** pass. A separately invoked live isolated Script acceptance passes.
+
+**Checkpoint 10 remains open (~94%).** Direct Options-tool historical-volatility fields remain unavailable; retained price-history RV/IV review succeeds but does not replace that tool acceptance. Native screen-reader acceptance is unverified. Copilot and Script usage is measured, but one cancelled request and a separate Fundamentals filing-summary call prevent exact total-charge reconciliation. Provider contract-label/inventory warnings and bounded latency limitations remain documented. See [Checkpoint 10 acceptance, 2026-10-05](audits/copilot_checkpoint10_acceptance_2026-10-05.md) for the complete passed/failed/blocked matrix, spend bounds and remaining certification actions. Fixtures and historical live failures are not counted as live success.
 
 #### 2026-10-04 — Options continuity hardening
 
@@ -762,6 +772,8 @@ The [Checkpoint 9 acceptance report](audits/copilot_checkpoint9_acceptance_2026-
 - [x] Keep all execution-capable families structurally absent from both roles.
 
 #### L. End-state validation and release gate — blocker
+
+2026-10-05 acceptance: backend/frontend/eval and bounded live outcomes are verified as recorded in the [dated acceptance report](audits/copilot_checkpoint10_acceptance_2026-10-05.md). **Do not mark this gate complete:** the direct Options comparison, native screen-reader certification and complete charge reconciliation remain open. Reduced-motion, responsive/keyboard, migration/replay, mock/disabled-provider contracts and the isolated Script contract have current evidence; provider-specific limitations retain their warnings.
 
 - Backend: provider event parsing, structured output/refusal/incomplete handling, closed-loop continuation, cancellation, working-state persistence/replay, migrations, permission/confirmation invariants, and model-policy tests.
 - Frontend: streamed reducer, transcript blocks, source navigation, app materialization, temporary-versus-durable state, artifact editing, error states, Stop/Retry, responsive inspector, keyboard navigation, and accessibility tests.

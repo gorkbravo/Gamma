@@ -522,7 +522,7 @@
     </div>
   </aside>
 
-  <main class="chat">
+  <section class="chat" aria-label="Copilot conversation">
     <div class="chat-top">
     <header class="chat-head">
       <div class="context-picker" bind:this={contextEl}>
@@ -852,7 +852,7 @@
         </div>
       </div>
     </footer>
-  </main>
+  </section>
 
   {#if artifactInspectorOpen}
     <CopilotArtifactsPanel

@@ -384,6 +384,18 @@ describe("options surface view models", () => {
     expect(payoff.breakevens[0]).toBeCloseTo(103, 0);
   });
 
+  it("calculates exact spread roots across coarse chart samples", () => {
+    const leg = buildStrategyLegFromChainRow(deriveChainRows(makeSurface(), "20260515")[1], "call", "long")!;
+    const payoff = deriveStrategyPayoff([
+      { ...leg, strike: 770, premium: 2.01955 },
+      { ...leg, strike: 804, premium: 0, side: "short" },
+    ], 769.9, 7);
+    expect(payoff.breakevens).toHaveLength(1);
+    expect(payoff.breakevens[0]).toBeCloseTo(772.01955, 8);
+    expect(payoff.maxLoss).toBeCloseTo(-2.01955, 8);
+    expect(payoff.maxProfit).toBeCloseTo(31.98045, 8);
+  });
+
   it("reports defined risk for spreads and open-ended tails only for net call exposure", () => {
     const rows = deriveChainRows(makeSurface(), "20260515");
 

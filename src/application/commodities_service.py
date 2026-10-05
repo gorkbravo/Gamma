@@ -134,7 +134,9 @@ class CommoditiesService:
         second = float(nodes[1].price or 0.0)
         far = float(nodes[-1].price or 0.0)
         front_spread = front - second
-        m1_m6_spread = front - far if len(nodes) >= 6 else None
+        sixth = curve.nodes[5].price if len(curve.nodes) >= 6 else None
+        m1_m6_spread = (float(curve.nodes[0].price) - float(sixth)
+                        if curve.nodes[0].price is not None and sixth is not None else None)
         curve_slope = far - front
         front_spread_pct = front_spread / front if front else None
         roll_yield_proxy = (front_spread / front) * 12.0 if front else None

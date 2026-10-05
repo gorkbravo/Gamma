@@ -36,6 +36,18 @@ from src.services.market_data import QuoteSnapshot
 from src.utils.time import now_utc
 
 
+def test_curve_m1_m6_uses_sixth_contract_not_last_priced_contract():
+    provider = SampleCommoditiesDataProvider()
+    service = CommoditiesService(provider=provider)
+    curve = provider.get_snapshot().curve_snapshots[0]
+    nodes = [replace(curve.nodes[0], price=100.0 - index) for index in range(9)]
+    enriched = service._enrich_curve(replace(curve, nodes=nodes))
+    assert enriched.m1_m6_spread == 5.0
+    assert enriched.curve_slope == -8.0
+    nodes[5] = replace(nodes[5], price=None)
+    assert service._enrich_curve(replace(curve, nodes=nodes)).m1_m6_spread is None
+
+
 def test_commodity_coverage_rejects_unknown_status():
     with pytest.raises(ValueError, match="Unsupported commodities coverage status"):
         CommodityCoverageMetadata(
