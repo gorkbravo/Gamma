@@ -1,18 +1,95 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+import json
+import math
+import re
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import ValidationError
 
 from src.api.schemas.iv import (
     IVSessionRequestModel,
     IVSessionStatusResponseModel,
     IVSurfaceResponseModel,
     IVUnderlyingHistoryResponseModel,
+    IVSnapshotModel,
+    IVSnapshotSurfaceModel,
+    IVSnapshotSummaryModel,
+    IVSnapshotListModel,
 )
 from src.application.iv_service import IVSurfaceRequest
 from src.models.instruments import InstrumentReference
 
 
 router = APIRouter(tags=["iv"])
+
+
+def _validate_capture(surface: IVSurfaceResponseModel) -> None:
+    if not re.fullmatch(r"[A-Z0-9.^-]{1,32}", surface.symbol):
+        raise ValueError("Capture requires a normalized underlying symbol.")
+    if not surface.snapshot_available or surface.points <= 0 or not surface.spot or surface.spot <= 0:
+        raise ValueError("Load an available Options surface before capturing it.")
+    if not 1 <= len(surface.expiries) <= 60 or not 1 <= len(surface.strikes) <= 1000:
+        raise ValueError("Options capture has invalid expiry or strike dimensions.")
+    if (len(set(surface.expiries)) != len(surface.expiries)
+            or surface.strikes != sorted(set(surface.strikes))
+            or any(not math.isfinite(s) or s <= 0 for s in surface.strikes)):
+        raise ValueError("Options capture requires unique expiries and sorted positive strikes.")
+    if (len(surface.iv_grid) != len(surface.expiries)
+            or any(len(row) != len(surface.strikes) for row in surface.iv_grid)):
+        raise ValueError("Options capture grid does not match its expiry and strike axes.")
+    if surface.cell_sources and (len(surface.cell_sources) != len(surface.expiries)
+            or any(len(row) != len(surface.strikes) for row in surface.cell_sources)):
+        raise ValueError("Options capture cell sources do not match its grid.")
+    if len(surface.contracts) > 5000 or len(surface.pairs) > 5000:
+        raise ValueError("Options capture exceeds contract limits.")
+    json.dumps(surface.model_dump(mode="json"), allow_nan=False)
+
+
+@router.post("/iv/snapshots", response_model=IVSnapshotModel)
+def capture_iv_snapshot(payload: IVSnapshotSurfaceModel, request: Request) -> IVSnapshotModel:
+    try:
+        _validate_capture(payload)
+        record = request.app.state.runtime.iv_snapshot_store.save(payload.model_dump(mode="json"))
+        return IVSnapshotModel.model_validate(record)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    except OSError as error:
+        raise HTTPException(503, "Could not save the Options capture. Check local storage and retry.") from error
+
+
+@router.get("/iv/snapshots", response_model=IVSnapshotListModel)
+def list_iv_snapshots(request: Request, symbol: str = Query(min_length=1, max_length=32)) -> IVSnapshotListModel:
+    records, warnings = request.app.state.runtime.iv_snapshot_store.records()
+    summaries = []
+    for record in records:
+        try:
+            capture = IVSnapshotModel.model_validate(record)
+            _validate_capture(capture.surface)
+        except (ValidationError, ValueError, TypeError):
+            warnings.append("An invalid Options capture was skipped; original file retained.")
+            continue
+        surface = capture.surface
+        if surface.symbol == symbol.strip().upper():
+            summaries.append(IVSnapshotSummaryModel(
+                snapshot_id=capture.snapshot_id, captured_at=capture.captured_at,
+                symbol=surface.symbol, timestamp=surface.timestamp,
+                source_provider=surface.source_provider, freshness_label=surface.freshness_label,
+                points=surface.points))
+    summaries.sort(key=lambda row: row.captured_at.timestamp(), reverse=True)
+    return IVSnapshotListModel(snapshots=summaries, warnings=warnings)
+
+
+@router.get("/iv/snapshots/{snapshot_id}", response_model=IVSnapshotModel)
+def read_iv_snapshot(snapshot_id: str, request: Request) -> IVSnapshotModel:
+    try:
+        result = IVSnapshotModel.model_validate(request.app.state.runtime.iv_snapshot_store.load(snapshot_id))
+        _validate_capture(result.surface)
+        return result
+    except FileNotFoundError as error:
+        raise HTTPException(404, "Options capture not found.") from error
+    except (ValueError, TypeError, KeyError, OSError) as error:
+        raise HTTPException(503, "Options capture is unreadable; original file retained.") from error
 
 
 @router.get("/iv/surface", response_model=IVSurfaceResponseModel)

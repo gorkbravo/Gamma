@@ -18,6 +18,7 @@ from src.application.commodities_service import CommoditiesService
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService
+from src.services.iv_snapshot_store import IVSnapshotStore
 from src.application.macro_service import MacroService
 from src.application.maritime_service import MaritimeService
 from src.application.news_service import NewsService
@@ -145,6 +146,7 @@ class ApplicationRuntime:
     copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
+    iv_snapshot_store: IVSnapshotStore
     desktop: DesktopRuntimeState | None = None
 
     @property
@@ -504,6 +506,7 @@ def build_runtime(
         risk_service=risk_service,
         iv_service=iv_service,
         desktop=desktop,
+        iv_snapshot_store=IVSnapshotStore(resolved_history_dir / "options_snapshots"),
     )
 
 

@@ -350,6 +350,33 @@ class IVSessionRequestModel(BaseModel):
     surface_model: str | None = None
 
 
+class IVSnapshotSurfaceModel(IVSurfaceResponseModel):
+    # Live responses serialize unavailable grid cells as null. Keep those holes
+    # rather than rejecting partial surfaces or manufacturing zero volatility.
+    iv_grid: list[list[float | None]] = Field(default_factory=list)
+
+
+class IVSnapshotModel(BaseModel):
+    snapshot_id: str
+    captured_at: datetime
+    surface: IVSnapshotSurfaceModel
+
+
+class IVSnapshotSummaryModel(BaseModel):
+    snapshot_id: str
+    captured_at: datetime
+    symbol: str
+    timestamp: datetime
+    source_provider: str
+    freshness_label: str
+    points: int
+
+
+class IVSnapshotListModel(BaseModel):
+    snapshots: list[IVSnapshotSummaryModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class IVSessionStatusResponseModel(BaseModel):
     running: bool
     status_text: str

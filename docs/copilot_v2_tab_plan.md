@@ -22,6 +22,12 @@ Live verification now covers unloaded LMT, exact 60% SPY / 40% TLT versus SPY ov
 
 **Checkpoint 10 remains open (~94%).** Direct Options-tool historical-volatility fields remain unavailable; retained price-history RV/IV review succeeds but does not replace that tool acceptance. Native screen-reader acceptance is unverified. Copilot and Script usage is measured, but one cancelled request and a separate Fundamentals filing-summary call prevent exact total-charge reconciliation. Provider contract-label/inventory warnings and bounded latency limitations remain documented. See [Checkpoint 10 acceptance, 2026-10-05](audits/copilot_checkpoint10_acceptance_2026-10-05.md) for the complete passed/failed/blocked matrix, spend bounds and remaining certification actions. Fixtures and historical live failures are not counted as live success.
 
+#### 2026-10-04 — User-selected Copilot model
+
+Reviewed the official [GPT-6.1 Sol model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol). The exact API identifier is `gpt-6.1-sol`; Responses tool calling, streaming and structured outputs are supported, including Gamma's low/medium/high reasoning profiles.
+
+Decision: at the user's explicit request, set `GAMMA_COPILOT_MODEL=gpt-6.1-sol` in the local configuration and `.env.example`. Keep the existing Responses runner, optional SDK path, server permissions and approval contract. This is a user-selected configuration override, not an eval-certified baseline migration. No live API request was made; Checkpoint 10 remains open. Restart the backend to load the model setting.
+
 #### 2026-10-04 — Options continuity hardening
 
 Reviewed current official [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state) and [Agent runtime comparison](https://developers.openai.com/api/docs/guides/agents). Responses supports app-managed replay; SDK orchestration does not remove the application's obligation to preserve the evidence and authority of a request.

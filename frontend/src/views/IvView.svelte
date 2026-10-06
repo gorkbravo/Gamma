@@ -1,5 +1,6 @@
 <script lang="ts">
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import IvSnapshotComparison from "../components/IvSnapshotComparison.svelte";
   import CopilotOptionsWorkingAnalysis from "../components/CopilotOptionsWorkingAnalysis.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
@@ -978,6 +979,7 @@
       </div>
     </div>
   {:else if mode === "surface"}
+    <IvSnapshotComparison surface={result} symbol={result?.symbol ?? requestedSymbol} />
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel surface-hero">

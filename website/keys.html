@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API keys — Gamma</title>
+<meta name="description" content="Every provider Gamma talks to, where to get your own key, what it costs, and exactly which surface degrades without it.">
+<link rel="icon" href="assets/img/mark.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/jetbrainsmono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
+<a class="skip" href="#required">Skip to the keys</a>
+<div class="graticule" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+    </span>
+    <span class="brand-name">GAMMA</span>
+    <span class="brand-sub">Research Terminal</span>
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="index.html#session">Session</a>
+    <a href="index.html#plane">Surfaces</a>
+    <a href="index.html#boundary">Boundary</a>
+    <a href="keys.html" aria-current="page">API keys</a>
+    <a href="setup.html">Setup</a>
+    <a href="faq.html">FAQ</a>
+    <a class="ghost-cta" href="https://github.com/gorkbravo/Gamma">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="hero" style="padding-bottom:var(--s8)">
+  <div class="page">
+    <h1 class="reveal" style="font-size:clamp(2.1rem,4.6vw,3.6rem)">Every provider, and how to get in.</h1>
+    <p class="hero-lede reveal">
+      Gamma has no hosted backend and no shared credentials. It talks to providers as
+      <strong>you</strong>, using keys you obtain yourself and paste into a local
+      <code style="color:var(--accent-2)">.env</code>. Keys are read server-side; the frontend never
+      receives one. Most of what Gamma uses is free, and the app runs end-to-end with none of them.
+    </p>
+  </div>
+</section>
+
+<!-- ── Nothing required ── -->
+<section class="section-tight band">
+  <div class="page">
+    <div class="table-wrap reveal">
+      <table class="data">
+        <caption>Works with zero keys</caption>
+        <thead>
+          <tr><th scope="col">Provider</th><th scope="col">Powers</th><th scope="col">Why no key</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">Yahoo Finance</td><td>Listed-market history for Equity Research and Sitrep</td><td>Unofficial public endpoints. Rate-limited, so Gamma retries with backoff and opens a circuit breaker.</td></tr>
+          <tr><td class="k">Polymarket</td><td>Prediction-market screener, detail, probability history</td><td>Public Gamma API, Data API and CLOB history endpoints.</td></tr>
+          <tr><td class="k">Kalshi</td><td>Prediction markets, calibration, taker-flow rows</td><td>Public market, event, history and trade endpoints.</td></tr>
+          <tr><td class="k">CoinGecko</td><td>Crypto screener, token profiles, narrative baskets</td><td>Public tier covers Gamma's first-pass usage.</td></tr>
+          <tr><td class="k">GeckoTerminal</td><td>DEX liquidity, pool search, network metadata</td><td>Public API.</td></tr>
+          <tr><td class="k">US Treasury</td><td>Treasury curve snapshots in the US rates view</td><td>Open fiscal data XML/JSON.</td></tr>
+          <tr><td class="k">SEC EDGAR</td><td>Fundamentals: filings, company facts, statements</td><td>No key — but the SEC requires a declared identity. See below.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── Required-ish ── -->
+<section id="required" class="section">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>The ones worth getting</h2>
+      <p>Free, quick, and each one lights up a specific surface. Ordered by how much they change the app.</p>
+    </div>
+
+    <div class="keys">
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>Interactive Brokers</h3>
+          <span class="badge badge-live">Broker</span>
+        </div>
+        <p>
+          The live path for Portfolio, FX history, IV surfaces, options Greeks, futures curves and
+          fundamentals price context. Not an API key — an IBKR account with Trader Workstation running
+          and the API enabled.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Free API · account required</dd></div>
+          <div><dt>Needs</dt><dd>TWS running locally</dd></div>
+          <div><dt>Gateway</dt><dd>Not supported yet</dd></div>
+        </dl>
+        <p class="env">IB_HOST=127.0.0.1 · IB_PORT=7497 · IB_ACCOUNT=U…</p>
+        <p class="degrade">
+          <b>Without it:</b> Portfolio, live IV surfaces and IBKR futures curves are unavailable.
+          Everything else still runs. Set <code>MOCK_DATA=true</code> for the full offline tour.
+        </p>
+        <div class="key-actions">
+          <a class="btn" href="https://www.interactivebrokers.com/en/trading/tws.php">
+            Download TWS
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+          <a class="btn" href="https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/">API docs</a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>FRED</h3>
+          <span class="badge badge-accent">Free</span>
+        </div>
+        <p>
+          St. Louis Fed economic data. Drives the whole Macro tab — raw series, derived YoY, spread
+          series like 10Y–2Y in basis points — and enriches Commodities with spot and metal proxy
+          histories.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Free</dd></div>
+          <div><dt>Signup</dt><dd>Email account, instant key</dd></div>
+          <div><dt>Unlocks</dt><dd>Macro · Commodities proxies</dd></div>
+        </dl>
+        <p class="env">FRED_API_KEY=…</p>
+        <p class="degrade">
+          <b>Without it:</b> Macro falls back to cached or unavailable series. A single failing series
+          does not blank the snapshot — Gamma keeps the rest and returns a warning naming what is missing.
+        </p>
+        <div class="key-actions">
+          <a class="btn btn-primary" href="https://fredaccount.stlouisfed.org/apikeys">
+            Get a FRED key
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+          <a class="btn" href="https://fred.stlouisfed.org/docs/api/fred/">Docs</a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>OpenAI</h3>
+          <span class="badge badge-accent">Paid</span>
+        </div>
+        <p>
+          Powers Copilot, Fundamentals company summaries, and the Strategy Lab Script runtime. Gamma
+          keeps its own AI service boundary, so the provider is swappable and the mock provider needs
+          no key or credits at all.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Usage-based</dd></div>
+          <div><dt>Default model</dt><dd>Configurable</dd></div>
+          <div><dt>Offline</dt><dd><code>GAMMA_COPILOT_PROVIDER=mock</code></dd></div>
+        </dl>
+        <p class="env">OPENAI_API_KEY=sk-…</p>
+        <p class="degrade">
+          <b>Without it:</b> Copilot reports itself unavailable rather than pretending. Set the provider
+          to <code>mock</code> for deterministic offline responses while you evaluate the rest of the app.
+        </p>
+        <div class="key-actions">
+          <a class="btn btn-primary" href="https://platform.openai.com/api-keys">
+            Get an OpenAI key
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+          <a class="btn" href="https://platform.openai.com/docs/overview">Docs</a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>EIA</h3>
+          <span class="badge badge-accent">Free</span>
+        </div>
+        <p>
+          US Energy Information Administration. Turns the Commodities tab from generated sample curves
+          into official energy fundamentals — crude, gasoline and distillate stocks, natural-gas storage,
+          production, imports, exports, refinery inputs and utilisation.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Free</dd></div>
+          <div><dt>Signup</dt><dd>Email registration, instant key</dd></div>
+          <div><dt>Coverage</dt><dd>US energy, release-lagged</dd></div>
+        </dl>
+        <p class="env">COMMODITIES_PROVIDER=eia · EIA_API_KEY=…</p>
+        <p class="degrade">
+          <b>Without it:</b> Commodities stays on the sample provider and returns explicit coverage
+          warnings. Sample rows are marked as sample, never presented as official.
+        </p>
+        <div class="key-actions">
+          <a class="btn btn-primary" href="https://www.eia.gov/opendata/register.php">
+            Register for EIA
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+          <a class="btn" href="https://www.eia.gov/opendata/documentation.php">Docs</a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>AISstream</h3>
+          <span class="badge badge-accent">Free tier</span>
+        </div>
+        <p>
+          Live vessel AIS over a websocket. Gamma proxies it <strong>server-side</strong> so the key
+          never reaches the browser, samples only your configured chokepoint bounding boxes, and
+          gates subscriptions by map zoom.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Free tier available</dd></div>
+          <div><dt>Coverage</dt><dd>Genuinely regional — gaps are normal</dd></div>
+          <div><dt>Unlocks</dt><dd>Sealanes live map</dd></div>
+        </dl>
+        <p class="env">MARITIME_PROVIDER=aisstream · AISSTREAM_API_KEY=…</p>
+        <p class="degrade">
+          <b>Without it:</b> Sealanes shows lanes, ports and chokepoints from bundled static reference
+          data with no live vessels. An empty vessel count with a key attached usually means
+          <b>coverage</b>, not a bug.
+        </p>
+        <div class="key-actions">
+          <a class="btn btn-primary" href="https://aisstream.io/">
+            Get an AISstream key
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+          <a class="btn" href="https://aisstream.io/documentation">Docs</a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>US Census</h3>
+          <span class="badge badge-accent">Free</span>
+        </div>
+        <p>
+          Country-level goods-trade data behind Macro's Trade Partners mode. With a key, US
+          trade-partner rows are live; without one, Gamma falls back to curated rows and labels them.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Free</dd></div>
+          <div><dt>Signup</dt><dd>Email, key by return mail</dd></div>
+          <div><dt>Unlocks</dt><dd>Macro · Trade Partners (US)</dd></div>
+        </dl>
+        <p class="env">CENSUS_API_KEY=…</p>
+        <p class="degrade">
+          <b>Without it:</b> curated placeholder rows, marked as such. EU and global trade-partner rows
+          remain read-only scaffolds either way until those adapters ship.
+        </p>
+        <div class="key-actions">
+          <a class="btn btn-primary" href="https://api.census.gov/data/key_signup.html">
+            Request a Census key
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+          <a class="btn" href="https://www.census.gov/data/developers/data-sets/international-trade.html">Docs</a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>SEC EDGAR</h3>
+          <span class="badge">Identity, not a key</span>
+        </div>
+        <p>
+          Fundamentals reads company facts and filings from data.sec.gov through EdgarTools. The SEC
+          requires every automated client to identify itself with a real name and email in the
+          User-Agent — it is not authentication, it is their fair-access policy.
+        </p>
+        <dl>
+          <div><dt>Cost</dt><dd>Free</dd></div>
+          <div><dt>Requires</dt><dd>Your name and email</dd></div>
+          <div><dt>Rate limit</dt><dd>10 requests / second</dd></div>
+        </dl>
+        <p class="env">GAMMA_SEC_USER_NAME=… · GAMMA_SEC_USER_EMAIL=…</p>
+        <p class="degrade">
+          <b>Set it to your own details.</b> <code>.env.example</code> ships placeholders; fill them in
+          before using Fundamentals. Whatever you put here is sent to data.sec.gov on every request.
+        </p>
+        <div class="key-actions">
+          <a class="btn" href="https://www.sec.gov/os/webmaster-faq#developers">
+            SEC access policy
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+          </a>
+        </div>
+      </article>
+
+      <article class="key reveal">
+        <div class="key-top">
+          <h3>Planned macro depth</h3>
+          <span class="badge badge-plan">Not live</span>
+        </div>
+        <p>
+          BLS, BEA, ECB, Eurostat, IMF, OECD, UN Comtrade and WTO have reserved environment slots and
+          appear in Gamma's provider-capability metadata as <strong>planned</strong>. The adapters are
+          not written yet.
+        </p>
+        <dl>
+          <div><dt>Status</dt><dd>Env slots only</dd></div>
+          <div><dt>Target</dt><dd>Country compare · trade depth</dd></div>
+          <div><dt>Today</dt><dd>Curated placeholders</dd></div>
+        </dl>
+        <p class="env">BLS_API_KEY= · BEA_API_KEY= · ECB_API_KEY= · …</p>
+        <p class="degrade">
+          <b>Setting these does nothing yet.</b> They are listed so the roadmap is legible, not so the
+          feature list looks longer.
+        </p>
+        <div class="key-actions">
+          <a class="btn" href="https://github.com/gorkbravo/Gamma/blob/main/roadmap.md">Roadmap</a>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Handling ── -->
+<section class="section-tight band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>How Gamma handles them</h2>
+      <p>Four rules that hold across every provider.</p>
+    </div>
+
+    <div class="plane reveal">
+      <div class="cell">
+        <div class="cell-top"><h3>Server-side only</h3></div>
+        <p>Keys are read by the FastAPI process from your local <code>.env</code>. No key is compiled into the frontend or sent to the browser — AISstream is proxied through the backend precisely for this reason.</p>
+      </div>
+      <div class="cell">
+        <div class="cell-top"><h3>Never in an error</h3></div>
+        <p>Provider exception text and credentials are not copied into user-facing warnings. A failed FRED call names the series, not your key.</p>
+      </div>
+      <div class="cell">
+        <div class="cell-top"><h3>Absence is a state</h3></div>
+        <p>A missing key produces an explicit unavailable or degraded label. Gamma does not silently substitute sample data for a provider it could not reach.</p>
+      </div>
+      <div class="cell">
+        <div class="cell-top"><h3>Local, not shared</h3></div>
+        <p>There is no Gamma account, no telemetry back to a vendor, and no server holding your credentials. The app runs on your machine.</p>
+      </div>
+    </div>
+
+    <div class="code reveal" style="margin-top:var(--s8)">
+      <div class="code-head">
+        <span>.env</span>
+        <span class="right"><button class="copy" type="button">Copy</button></span>
+      </div>
+<pre><span class="c"># Copy .env.example to .env, then fill in what you have.</span>
+<span class="c"># Everything below is optional — Gamma runs with none of it.</span>
+
+<span class="p">FRED_API_KEY</span>=<span class="v">your-fred-key</span>
+<span class="p">EIA_API_KEY</span>=<span class="v">your-eia-key</span>
+<span class="p">CENSUS_API_KEY</span>=<span class="v">your-census-key</span>
+<span class="p">AISSTREAM_API_KEY</span>=<span class="v">your-aisstream-key</span>
+<span class="p">OPENAI_API_KEY</span>=<span class="v">sk-your-openai-key</span>
+
+<span class="c"># Identify yourself to the SEC — use your own name and address.</span>
+<span class="p">GAMMA_SEC_USER_NAME</span>=<span class="v">Your Name</span>
+<span class="p">GAMMA_SEC_USER_EMAIL</span>=<span class="v">you@example.com</span>
+
+<span class="c"># Switch providers on once their keys are present.</span>
+<span class="p">COMMODITIES_PROVIDER</span>=<span class="v">eia</span>
+<span class="p">MARITIME_PROVIDER</span>=<span class="v">aisstream</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="closer">
+  <div class="page">
+    <h2 class="reveal">Keys in place? Get it running.</h2>
+    <p class="reveal">The setup guide covers the venv, the backend, the frontend, the desktop shell, and the mock-mode path that needs no credentials at all.</p>
+    <div class="hero-actions reveal">
+      <a class="btn btn-primary" href="setup.html">
+        Setup guide
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      </a>
+      <a class="btn" href="faq.html">Read the FAQ</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="page">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="index.html" style="margin-bottom:var(--s6)">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+          </span>
+          <span class="brand-name">GAMMA</span>
+        </a>
+        <p class="foot-blurb">
+          A read-only market research terminal. Built as a FastAPI backend, a Svelte frontend and a
+          Tauri desktop shell. It runs on your machine, on your credentials, and it never places an order.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="index.html#session">The session</a></li>
+          <li><a href="index.html#plane">Surfaces</a></li>
+          <li><a href="index.html#boundary">Read-only boundary</a></li>
+          <li><a href="index.html#data">Data sources</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Get running</h4>
+        <ul>
+          <li><a href="setup.html">Setup guide</a></li>
+          <li><a href="keys.html">API keys</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma">GitHub</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/README.md">README</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/docs/design_principles.md">Design principles</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/roadmap.md">Roadmap</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/tree/main/docs/audits">Audits</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <span>Gamma is research software. It is not investment advice, and it does not execute trades.</span>
+      <span>Provider names and links belong to their owners.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/site.js" defer></script>
+</body>
+</html>

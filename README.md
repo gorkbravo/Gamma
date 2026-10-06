@@ -306,6 +306,10 @@ Important caveats:
 
 #### IV tab
 
+In `Options → Surface`, use **Capture displayed surface** to save the currently loaded surface without making another provider request. Capture again later, then select **Baseline** and **Comparison** to inspect observed IV by expiry and put/call wing-skew changes. Captures survive application restarts in `PORTFOLIO_HISTORY_DIR/options_snapshots` (default `data/options_snapshots`). History begins with your first manual capture; it is not backfilled or collected automatically.
+
+Comparisons hold the baseline's near-ATM reference strike and outer observed wing strikes fixed at common expiry dates. Changes are percentage points; missing exact observations show `N/A`, and fitted cells are excluded from changes. Expand **Capture evidence and pricing assumptions** for capture/surface times, provider and freshness labels at capture, collection mode/depth, observed/fitted coverage, Greeks counts, rates, dividends, and retained warnings. Partial surfaces preserve unavailable grid cells. Storage uses atomic, checksummed records and retains unreadable originals with visible warnings; it is bounded to 1,000 captures and 8 MB per capture.
+
 The IV explorer is a surface and scenario-inspection tool, not a broker pricer or execution surface.
 
 It provides:
@@ -339,7 +343,7 @@ Important caveats:
 
 - this tab shows returned surface data, contract rows, display-grid fit, local Greeks, implied probability proxies, and payoff scenarios; it does not route orders or manage option positions
 - Gamma-owned Greeks and payoff matrices depend on the current fitted IV grid, selected chain rows, and simplified Black-Scholes assumptions
-- historical IV/skew persistence, deeper source inspection, richer expiry/strike controls, and durable Realized vs IV history remain current-roadmap hardening work
+- broader use of the live-verified manual IV/skew captures, deeper source inspection, richer expiry/strike controls, and durable Realized vs IV history remain current-roadmap hardening work
 - if IBKR is disconnected, the live surface path is unavailable
 
 ### Research Workspace

@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup — Gamma</title>
+<meta name="description" content="Clone Gamma, create the venv, run the backend and frontend, and open the desktop shell. Mock mode needs no credentials at all.">
+<link rel="icon" href="assets/img/mark.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/jetbrainsmono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
+<a class="skip" href="#steps">Skip to the steps</a>
+<div class="graticule" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+    </span>
+    <span class="brand-name">GAMMA</span>
+    <span class="brand-sub">Research Terminal</span>
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="index.html#session">Session</a>
+    <a href="index.html#plane">Surfaces</a>
+    <a href="index.html#boundary">Boundary</a>
+    <a href="keys.html">API keys</a>
+    <a href="setup.html" aria-current="page">Setup</a>
+    <a href="faq.html">FAQ</a>
+    <a class="ghost-cta" href="https://github.com/gorkbravo/Gamma">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="hero" style="padding-bottom:var(--s8)">
+  <div class="page">
+    <h1 class="reveal" style="font-size:clamp(2.1rem,4.6vw,3.6rem)">Running in about five minutes.</h1>
+    <p class="hero-lede reveal">
+      Start in <strong>mock mode</strong>. It runs the entire application, all thirteen surfaces,
+      against bundled sample providers with no broker, no keys and no network. Once you have seen the
+      shape of it, swap providers on one at a time.
+    </p>
+    <div class="hero-actions reveal">
+      <a class="btn btn-primary" href="#steps">Start here</a>
+      <a class="btn" href="keys.html">Get your API keys</a>
+      <a class="btn" href="https://github.com/gorkbravo/Gamma">
+        Repository
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section id="steps" class="section">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>Mock mode, end to end</h2>
+      <p>Three terminals: one for the backend, one for the frontend, and the one you started in. Nothing here contacts a broker or a paid provider.</p>
+    </div>
+
+    <div class="steps">
+
+      <div class="step reveal">
+        <div>
+          <h3>Clone and create the environment</h3>
+          <p>Gamma installs as an editable package with its dev extras, which brings in pytest and the desktop build tooling.</p>
+          <div class="code">
+            <div class="code-head"><span>PowerShell</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre>git clone https://github.com/gorkbravo/Gamma.git
+cd Gamma
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -e .[dev]
+copy .env.example .env</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Start the backend</h3>
+          <p>
+            <code>MOCK_DATA=true</code> selects sample providers for every domain.
+            <code>GAMMA_SESSION_TOKEN</code> is a shared secret between the API and the frontend. The
+            API rejects any request without it, so pick anything random and use the same value in both places.
+          </p>
+          <div class="code">
+            <div class="code-head"><span>PowerShell · terminal 1</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="p">$env:MOCK_DATA</span>=<span class="v">"true"</span>
+<span class="p">$env:GAMMA_SESSION_TOKEN</span>=<span class="v">"dev-only-random-token"</span>
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app <span class="c">`</span>
+  --host 127.0.0.1 --port 8000 --reload</pre>
+          </div>
+          <p style="margin-top:var(--s5)">
+            Check it answered: <code>http://127.0.0.1:8000/health</code> is the one route that needs no token.
+          </p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Start the frontend</h3>
+          <p>The Vite dev server reads the API base and session token from the environment at start-up. The token must match the backend exactly.</p>
+          <div class="code">
+            <div class="code-head"><span>PowerShell · terminal 2</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre>cd frontend
+npm install
+<span class="p">$env:VITE_API_BASE</span>=<span class="v">"http://127.0.0.1:8000"</span>
+<span class="p">$env:VITE_GAMMA_SESSION_TOKEN</span>=<span class="v">"dev-only-random-token"</span>
+npm run dev -- --host 127.0.0.1 --port 5173</pre>
+          </div>
+          <p style="margin-top:var(--s5)">
+            Open <code>http://127.0.0.1:5173</code>. You should land on the connection screen with a
+            <span class="badge badge-mock">Mock</span> badge, then pick Research View or Portfolio View.
+          </p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Or run the desktop shell</h3>
+          <p>Tauri is the primary desktop path. The Python launcher starts the backend and the shell together.</p>
+          <div class="code">
+            <div class="code-head"><span>PowerShell</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="c"># Packaged desktop launcher</span>
+<span class="p">$env:MOCK_DATA</span>=<span class="v">"true"</span>
+.\.venv\Scripts\python.exe -m src.desktop_launcher
+
+<span class="c"># Or Tauri in development</span>
+cd frontend
+npm run tauri:dev</pre>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>Going live, one provider at a time</h2>
+      <p>Each switch is independent. Turn one on, confirm the tab reports the provider you expect, then move to the next.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal">
+        <div>
+          <h3>Interactive Brokers</h3>
+          <p>
+            Start Trader Workstation, enable the API in its settings, and confirm the socket port.
+            IB Gateway is <strong>not supported yet</strong>; the live path is TWS. Set
+            <code>MOCK_DATA=false</code> and leave <code>IB_MARKET_DATA_MODE=delayed</code> unless you
+            hold real-time subscriptions.
+          </p>
+          <div class="code">
+            <div class="code-head"><span>.env</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="p">MOCK_DATA</span>=<span class="v">false</span>
+<span class="p">IB_HOST</span>=<span class="v">127.0.0.1</span>
+<span class="p">IB_PORT</span>=<span class="v">7497</span>
+<span class="p">IB_CLIENT_ID</span>=<span class="v">1</span>
+<span class="p">IB_ACCOUNT</span>=<span class="v">U1234567</span>
+<span class="p">IB_MARKET_DATA_MODE</span>=<span class="v">delayed</span>
+<span class="p">BASE_CURRENCY</span>=<span class="v">USD</span></pre>
+          </div>
+          <p style="margin-top:var(--s5)">
+            Base currency matters more than it looks: changing it starts a new currency-specific
+            portfolio-history trail and archives the previous one rather than deleting it.
+          </p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Macro on live FRED</h3>
+          <p>One key turns the entire Macro tab from cached to live. If an individual series fails, Gamma keeps the rest of the snapshot and returns a warning naming that series.</p>
+          <div class="code">
+            <div class="code-head"><span>.env</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="p">FRED_API_KEY</span>=<span class="v">your-fred-key</span>
+<span class="p">CENSUS_API_KEY</span>=<span class="v">your-census-key</span>  <span class="c"># optional: live US trade partners</span></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Commodities on official data</h3>
+          <p>
+            <code>eia</code> gives you official US energy fundamentals. <code>ibkr</code> builds read-only
+            futures curves from discovered contracts. That path needs a connected TWS session and
+            futures market-data entitlements, and gets expensive in market-data lines, so keep the
+            enabled universe tight.
+          </p>
+          <div class="code">
+            <div class="code-head"><span>.env</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="c"># Official US energy fundamentals</span>
+<span class="p">COMMODITIES_PROVIDER</span>=<span class="v">eia</span>
+<span class="p">EIA_API_KEY</span>=<span class="v">your-eia-key</span>
+
+<span class="c"># Or Gamma-constructed IBKR futures curves</span>
+<span class="p">COMMODITIES_PROVIDER</span>=<span class="v">ibkr</span>
+<span class="p">IBKR_COMMODITIES_ENABLED</span>=<span class="v">wti,henry_hub,gold,copper</span>
+<span class="p">IBKR_COMMODITIES_STARTUP_ENABLED</span>=<span class="v">wti</span>
+<span class="p">IBKR_COMMODITIES_CONTRACT_DEPTH</span>=<span class="v">12</span></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Sealanes on live AIS</h3>
+          <p>The key stays server-side. Gamma opens a short sampling window over your configured bounding boxes rather than holding an open firehose.</p>
+          <div class="code">
+            <div class="code-head"><span>.env</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="p">MARITIME_PROVIDER</span>=<span class="v">aisstream</span>
+<span class="p">AISSTREAM_API_KEY</span>=<span class="v">your-aisstream-key</span>
+<span class="p">AISSTREAM_SAMPLE_SECONDS</span>=<span class="v">6</span>
+<span class="c"># Optional JSON: [[[min_lat, min_lon], [max_lat, max_lon]]]</span>
+<span class="p">AISSTREAM_BOUNDING_BOXES</span>=</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div>
+          <h3>Copilot</h3>
+          <p>Leave the provider on <code>mock</code> for offline deterministic output, or point it at OpenAI. Fundamentals summaries and the Strategy Lab Script runtime reuse the same key with their own model settings.</p>
+          <div class="code">
+            <div class="code-head"><span>.env</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre><span class="p">OPENAI_API_KEY</span>=<span class="v">sk-your-key</span>
+<span class="p">GAMMA_COPILOT_PROVIDER</span>=<span class="v">openai</span>   <span class="c"># or: mock</span>
+<span class="p">GAMMA_COPILOT_REASONING_EFFORT</span>=<span class="v">medium</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>Verify it</h2>
+      <p>The backend suite forces mock listed-market providers before runtime import, so tests cannot accidentally reach Yahoo Finance or TWS.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:var(--s6)">
+      <div class="code reveal">
+        <div class="code-head"><span>Backend</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre>.\.venv\Scripts\python.exe -m pytest</pre>
+      </div>
+      <div class="code reveal">
+        <div class="code-head"><span>Frontend &amp; desktop</span><span class="right"><button class="copy" type="button">Copy</button></span></div>
+<pre>cd frontend
+npm run test
+npm run build
+npm run desktop:check
+npm run backend:smoke
+npm run desktop:smoke</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>Getting around</h2>
+      <p>Gamma is keyboard-first. Tabs are reorderable in the sidebar, and the shortcuts follow your order, not a fixed one.</p>
+    </div>
+
+    <div class="table-wrap reveal">
+      <table class="data">
+        <caption>Navigation</caption>
+        <thead><tr><th scope="col">Keys</th><th scope="col">Does</th></tr></thead>
+        <tbody>
+          <tr><td class="k"><code>Ctrl</code> + <code>1…N</code></td><td>Switch tabs in your own order</td></tr>
+          <tr><td class="k"><code>Ctrl</code> + <code>←</code> / <code>→</code></td><td>Previous or next tab</td></tr>
+          <tr><td class="k"><code>Shift</code> + <code>1…N</code></td><td>Switch modes inside the active tab</td></tr>
+          <tr><td class="k"><code>Shift</code> + <code>←</code> / <code>→</code></td><td>Previous or next mode</td></tr>
+          <tr><td class="k"><code>Ctrl</code> + <code>Shift</code> + <code>P</code></td><td>Portfolio workspace</td></tr>
+          <tr><td class="k"><code>Ctrl</code> + <code>Shift</code> + <code>R</code></td><td>Research workspace</td></tr>
+          <tr><td class="k"><code>Ctrl</code> + <code>B</code> or <code>`</code></td><td>Toggle the sidebar</td></tr>
+          <tr><td class="k"><code>Ctrl</code> + <code>R</code> or <code>F5</code></td><td>Refresh the active surface</td></tr>
+          <tr><td class="k"><code>Ctrl</code> + <code>,</code></td><td>Settings</td></tr>
+          <tr><td class="k"><code>Esc</code></td><td>Dismiss the sidebar and light overlays</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="closer">
+  <div class="page">
+    <h2 class="reveal">Stuck on something?</h2>
+    <p class="reveal">The FAQ covers the failure modes people actually hit: TWS refusing the connection, empty vessel counts, sample data appearing where you expected live rows.</p>
+    <div class="hero-actions reveal">
+      <a class="btn btn-primary" href="faq.html">
+        Read the FAQ
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      </a>
+      <a class="btn" href="https://github.com/gorkbravo/Gamma/blob/main/README.md">Full README</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="page">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="index.html" style="margin-bottom:var(--s6)">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+          </span>
+          <span class="brand-name">GAMMA</span>
+        </a>
+        <p class="foot-blurb">
+          A read-only market research terminal. Built as a FastAPI backend, a Svelte frontend and a
+          Tauri desktop shell. It runs on your machine, on your credentials, and it never places an order.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="index.html#session">The session</a></li>
+          <li><a href="index.html#plane">Surfaces</a></li>
+          <li><a href="index.html#boundary">Read-only boundary</a></li>
+          <li><a href="index.html#data">Data sources</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Get running</h4>
+        <ul>
+          <li><a href="setup.html">Setup guide</a></li>
+          <li><a href="keys.html">API keys</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma">GitHub</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/README.md">README</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/docs/design_principles.md">Design principles</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/roadmap.md">Roadmap</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/tree/main/docs/audits">Audits</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <span>Gamma is research software. It is not investment advice, and it does not execute trades.</span>
+      <span>Commands shown for Windows PowerShell.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/site.js" defer></script>
+</body>
+</html>

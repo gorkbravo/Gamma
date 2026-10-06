@@ -1,0 +1,72 @@
+{
+  "before": "2026-10-06T16:13:10.409343",
+  "after": "2026-10-06T16:13:37.984238",
+  "source_provider": "ibkr",
+  "common_expiries": 4,
+  "observed_iv_changes": 2,
+  "rows": [
+    {
+      "expiry": "20261006",
+      "strike": 782,
+      "putStrike": 770,
+      "callStrike": 792,
+      "before": 0.11555377641880361,
+      "after": 0.1164984726889014,
+      "change": 0.0009446962700977862,
+      "putSkewBefore": 0.17923358237128428,
+      "putSkewAfter": 0.17828888610118648,
+      "putSkewChange": -0.0009446962700978001,
+      "callSkewBefore": 0.07657503298042538,
+      "callSkewAfter": -0.008401371048200101,
+      "callSkewChange": -0.08497640402862548
+    },
+    {
+      "expiry": "20261013",
+      "strike": 782,
+      "putStrike": 770,
+      "callStrike": 792,
+      "before": 0.09504418957978486,
+      "after": 0.09420573741442881,
+      "change": -0.0008384521653560517,
+      "putSkewBefore": 0.014487380559536342,
+      "putSkewAfter": 0.013985905054180903,
+      "putSkewChange": -0.0005014755053554393,
+      "callSkewBefore": -0.008577430383861079,
+      "callSkewAfter": -0.005186596601640309,
+      "callSkewChange": 0.00339083378222077
+    },
+    {
+      "expiry": "20261020",
+      "strike": 780,
+      "putStrike": 770,
+      "callStrike": null,
+      "before": 0.10977700165398419,
+      "after": null,
+      "change": null,
+      "putSkewBefore": 0.012938846523687236,
+      "putSkewAfter": null,
+      "putSkewChange": null,
+      "callSkewBefore": null,
+      "callSkewAfter": null,
+      "callSkewChange": null
+    },
+    {
+      "expiry": "20261106",
+      "strike": 775,
+      "putStrike": 770,
+      "callStrike": null,
+      "before": 0.1517279966246337,
+      "after": null,
+      "change": null,
+      "putSkewBefore": -0.008613110322318984,
+      "putSkewAfter": null,
+      "putSkewChange": null,
+      "callSkewBefore": null,
+      "callSkewAfter": null,
+      "callSkewChange": null
+    }
+  ],
+  "warnings": [
+    "Some exact observed strikes are missing. Their changes are unavailable; fitted cells are excluded."
+  ]
+}

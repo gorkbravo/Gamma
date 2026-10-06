@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gamma — a read-only market research terminal</title>
+<meta name="description" content="Gamma is a read-only research terminal: portfolio, options, macro, commodities, prediction markets, filings, crypto and AIS on one plane. Every value carries its source. It never places an order.">
+<meta property="og:title" content="Gamma — a read-only market research terminal">
+<meta property="og:description" content="Thirteen research surfaces on one plane. Every value carries its source, and none of them can place an order.">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/img/mark.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/jetbrainsmono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body class="has-rail">
+<!--
+  THESIS: Gamma's landing page is one research morning, timestamped on a ruled
+  axis, refusing the category-default hero-plus-feature-cards arrangement.
+  OWN-WORLD: Gamma's own instrument palette (#070809 ground, #7aa6c8 accent,
+  semantic green/red/amber), Archivo condensed instrument caps for chrome,
+  JetBrains Mono for every number, hairline seams, square nested geometry, no
+  fill without a job.
+  STORY: A researcher sees the same day they would have had, hour by hour,
+  proven by real screens; understands that breadth here is joined, not siloed;
+  believes it because every value is stamped; clones the repo.
+  FIRST VIEWPORT: Ruled graticule ground; upper-left the thesis at display
+  scale with the primary action directly beneath; below it a live board that
+  actually ticks and shows its own provenance, MOCK badge honest in the bar.
+  FORM: The desk session — candidate 4 of my grounded list; seed 47a2e177.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the
+  finish review, the verdict, and DESIGN.md
+-->
+<a class="skip" href="#session">Skip to the session</a>
+<div class="graticule" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+    </span>
+    <span class="brand-name">GAMMA</span>
+    <span class="brand-sub">Research Terminal</span>
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="#session">Session</a>
+    <a href="#plane">Surfaces</a>
+    <a href="#boundary">Boundary</a>
+    <a href="keys.html">API keys</a>
+    <a href="setup.html">Setup</a>
+    <a href="faq.html">FAQ</a>
+    <a class="ghost-cta" href="https://github.com/gorkbravo/Gamma">GitHub</a>
+  </nav>
+</header>
+
+<aside class="rail" aria-hidden="true">
+  <div class="rail-track"></div>
+  <div class="rail-sweep"></div>
+  <div class="rail-ticks"></div>
+</aside>
+
+<main>
+
+<!-- ══════════════════════ HERO ══════════════════════ -->
+<section class="hero">
+  <div class="page">
+
+    <h1 class="reveal">Every number can tell you <em>where it came from.</em></h1>
+
+    <div>
+        <p class="hero-lede reveal">
+          Portfolio, risk, options, macro, commodities, prediction markets, crypto, SEC filings and
+          live AIS on <strong>one plane</strong> — with a research scope that forwards from any
+          surface into the next. Every value carries its provider, its retrieval time and the
+          transformation applied. <strong>It cannot place an order.</strong> That is the point,
+          not a limitation.
+        </p>
+
+        <div class="hero-actions reveal">
+          <a class="btn btn-primary" href="setup.html">
+            Get started
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+          </a>
+          <a class="btn" href="#session">Watch a morning on it</a>
+        </div>
+        <p class="hero-note" style="margin-top:var(--s6)">No hosted version. Clone it, add your keys, run it locally.</p>
+    </div>
+
+    <!-- ── Live board ── -->
+    <div class="term reveal" data-term>
+      <div class="term-bar">
+        <span class="dot" aria-hidden="true"></span>
+        <span>Gamma · live board</span>
+        <span class="right">
+          <span class="badge badge-mock">Mock</span>
+          <span class="badge">Read-only</span>
+        </span>
+      </div>
+
+      <div class="term-tabs" role="tablist" aria-label="Demonstration boards">
+        <button class="term-tab" role="tab" data-board="sitrep" aria-selected="true">Sitrep</button>
+        <button class="term-tab" role="tab" data-board="macro" aria-selected="false">Macro</button>
+        <button class="term-tab" role="tab" data-board="commodities" aria-selected="false">Commodities</button>
+        <button class="term-tab" role="tab" data-board="options" aria-selected="false">Options</button>
+      </div>
+
+      <div class="term-body">
+        <div class="term-main">
+          <div class="term-head">
+            <h3 data-board-title>Cross-asset tape</h3>
+            <span class="hint">Synthetic data · repriced every 1.5 s</span>
+          </div>
+          <table class="tape">
+            <thead><tr data-tape-head></tr></thead>
+            <tbody data-tape-body></tbody>
+          </table>
+        </div>
+
+        <div class="term-side">
+          <div class="term-head" style="padding-inline:0;border-bottom:none;padding-top:0">
+            <h3>Provenance</h3>
+          </div>
+          <dl data-prov></dl>
+          <p class="term-note" data-note></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ THE SESSION ══════════════════════ -->
+<section id="session" class="section">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>One morning, tab by tab</h2>
+      <p>
+        Every screen below is the real application running in mock mode — the same layout,
+        density and provenance you get with your own keys attached. Sample data is labelled
+        <span class="badge badge-mock">Mock</span> because Gamma never quietly swaps sample rows
+        in for a provider it could not reach.
+      </p>
+    </div>
+
+    <!-- 07:02 SITREP -->
+    <article class="moment" id="m-sitrep" data-moment="07:02" data-label="Sitrep">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>07:02</b><span class="tabname">Sitrep</span></p>
+          <h3>What moved while I was asleep?</h3>
+          <p>
+            SITREP is the pinned Research home. One backend request composes equities, FX, yields,
+            commodities, events, prediction markets and news into a single triage picture, and each
+            panel keeps <strong>its own freshness, provenance and failure state</strong> — one dead
+            provider degrades one panel, not the screen.
+          </p>
+          <p>
+            Anything worth chasing gets starred as a follow-up, which persists on the backend, and
+            hands off into the tab that actually owns the question.
+          </p>
+          <dl class="facts">
+            <div><dt>Composes</dt><dd>7 domains</dd></div>
+            <div><dt>Market data</dt><dd>yfinance, cached 300 s</dd></div>
+            <div><dt>Degrades</dt><dd>Per panel</dd></div>
+          </dl>
+          <p class="handoff">
+            <span class="k">Forwards</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            <span class="v">entity · lens · timeframe → owning tab</span>
+          </p>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Sitrep</span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/sitrep.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's SITREP tab showing worldwide indices, FX pairs, rates, commodities, a what-changed panel, provider status table and follow-ups.">
+              <span class="mark-pt" style="left:83%;top:74%">1</span>
+            </div>
+            <ul class="shot-legend">
+              <li><b>1</b> Provider, state and age, per domain</li>
+            </ul>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 07:19 MACRO -->
+    <article class="moment" id="m-macro" data-moment="07:19" data-label="Macro">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>07:19</b><span class="tabname">Macro</span></p>
+          <h3>Is the policy read coherent, or is it fracturing?</h3>
+          <p>
+            Macro pulls raw FRED series, derives the YoY and spread series it needs, then scores how
+            far the themed signals disagree. Divergence is <strong>strongest positive signal minus
+            strongest negative</strong>; the coherence label asks when each supportive series reached
+            roughly 60% of its current move, and names the leader and the laggard.
+          </p>
+          <p>
+            None of that is dressed up as a model. The labels read <strong>coherent</strong>,
+            <strong>narrow</strong> or <strong>fractured</strong>, and the tab states plainly that
+            they are heuristics.
+          </p>
+          <dl class="facts">
+            <div><dt>Modes</dt><dd>6</dd></div>
+            <div><dt>Sources</dt><dd>FRED · Treasury · IBKR FX · Census</dd></div>
+            <div><dt>Regions</dt><dd>US · EU · Global</dd></div>
+          </dl>
+          <p class="handoff">
+            <span class="k">Forwards</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            <span class="v">theme lens → Cross-Asset, Rates &amp; Policy</span>
+          </p>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Macro · Snapshot</span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/macro.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Macro tab: a what-matters-now row naming the biggest disagreement, policy expectations and next catalyst, above themed rows for growth, inflation, policy, curve shape, real yields, dollar and credit — each with coherence labels.">
+              <span class="mark-pt" style="left:30.5%;top:25%">1</span>
+              <span class="mark-pt" style="left:62.5%;top:25%">2</span>
+              <span class="mark-pt" style="left:11.5%;top:59%">3</span>
+            </div>
+            <ul class="shot-legend">
+              <li><b>1</b> Coherence label — a Gamma heuristic, marked as one</li>
+              <li><b>2</b> Divergence state on the same row</li>
+              <li><b>3</b> Per-theme divergence state and linked markets</li>
+            </ul>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 07:36 COMMODITIES -->
+    <article class="moment" id="m-commodities" data-moment="07:36" data-label="Commodities">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>07:36</b><span class="tabname">Commodities</span></p>
+          <h3>Does the physical curve agree with the macro story?</h3>
+          <p>
+            Curves come from official EIA fundamentals, FRED spot proxies, or — with a connected TWS
+            session and futures entitlements — <strong>read-only IBKR futures curves Gamma builds
+            itself</strong> from discovered contract details.
+          </p>
+          <p>
+            Gamma labels contango, backwardation and flat; computes front spread, M1–M6, curve slope
+            and a roll-yield proxy; and refuses to validate a futures row against a sample history.
+            When a row has no daily reference, it says so instead of inventing one.
+          </p>
+          <dl class="facts">
+            <div><dt>Modes</dt><dd>6</dd></div>
+            <div><dt>Providers</dt><dd>sample · EIA · IBKR</dd></div>
+            <div><dt>Cross-links</dt><dd>Macro · Sealanes · Predictions</dd></div>
+          </dl>
+          <p class="handoff">
+            <span class="k">Forwards</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            <span class="v">WTI · curve shape → Macro, Sealanes</span>
+          </p>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Commodities</span>
+              <span class="right"><span class="badge">EIA + FRED</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/commodities.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Commodities tab with a KPI strip for price, curve shape, front spread, roll-yield proxy and inventory signal, alongside curve charts and market snapshot tables for energy and metals.">
+            </div>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 07:54 PREDICTION MARKETS -->
+    <article class="moment" id="m-predictions" data-moment="07:54" data-label="Predictions">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>07:54</b><span class="tabname">Prediction Markets</span></p>
+          <h3>What odds is anyone actually putting on it?</h3>
+          <p>
+            Polymarket and Kalshi normalised into one market record: a screener, probability history,
+            wallet or taker-flow summaries, related-market consistency across venues, and a first-pass
+            <strong>calibration view</strong> that compares pre-resolution probability against realised
+            frequency on markets that already settled.
+          </p>
+          <p>
+            Research rank is Gamma's, not the venue's — a weighted mix of volume, liquidity, open
+            interest and resolution timing, penalised for staleness. Freshness has five explicit
+            states, including <strong>broken</strong>, for an "open" contract whose end time has passed.
+          </p>
+          <dl class="facts">
+            <div><dt>Venues</dt><dd>Polymarket · Kalshi</dd></div>
+            <div><dt>Modes</dt><dd>Screener · Contract · Compare · Calibration</dd></div>
+            <div><dt>Freshness</dt><dd>fresh / delayed / stale / broken / closed</dd></div>
+          </dl>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Prediction Markets</span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/prediction-markets.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Prediction Markets screener listing normalised contracts across Polymarket and Kalshi with probabilities, volume, liquidity, freshness state and Gamma research rank.">
+            </div>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 08:11 FUNDAMENTALS -->
+    <article class="moment" id="m-fundamentals" data-moment="08:11" data-label="Fundamentals">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>08:11</b><span class="tabname">Fundamentals</span></p>
+          <h3>Does the name survive its own filings?</h3>
+          <p>
+            Company analysis built directly on SEC EDGAR through EdgarTools: filing chronology,
+            company facts, income statement, balance sheet, cash flow and ratios on annual or
+            quarterly basis, with YoY and QoQ comparison and amendment context.
+          </p>
+          <p>
+            The DCF workbench holds Bear / Base / Bull scenarios, sensitivity, terminal-value framing
+            and snapshots that <strong>persist locally</strong> — plus a reverse-valuation mode that
+            asks what the current price already assumes.
+          </p>
+          <dl class="facts">
+            <div><dt>Modes</dt><dd>6</dd></div>
+            <div><dt>Source</dt><dd>SEC EDGAR / data.sec.gov</dd></div>
+            <div><dt>Coverage</dt><dd>Strongest for US filers</dd></div>
+          </dl>
+          <p class="handoff">
+            <span class="k">Forwards</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            <span class="v">ticker → Options, Risk, Strategy Lab, Copilot</span>
+          </p>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Fundamentals</span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/fundamentals.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Fundamentals tab showing a company overview with headline KPIs, filing provenance, peer basket and peer heatmap.">
+            </div>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 08:29 OPTIONS -->
+    <article class="moment" id="m-options" data-moment="08:29" data-label="Options">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>08:29</b><span class="tabname">Options / IV</span></p>
+          <h3>What is the option market charging for that move?</h3>
+          <p>
+            An IV surface snapshot over IBKR, with depth presets that trade expiry count against
+            strike width inside a fixed TWS market-data-line budget. Expiry/strike heatmap, ATM term
+            structure, front smile, wing skew, realized-vs-implied, and a local implied-probability
+            density slice.
+          </p>
+          <p>
+            The strategy builder takes selected legs from the chain and returns net premium,
+            breakevens, max profit and loss, and a <strong>payoff matrix across price and remaining
+            days</strong>. Greeks are the provider's where IBKR supplies them and Gamma's
+            Black-Scholes where it does not — the panel says which.
+          </p>
+          <dl class="facts">
+            <div><dt>Modes</dt><dd>6</dd></div>
+            <div><dt>Fit</dt><dd>Line · Spline · SSVI</dd></div>
+            <div><dt>Requires</dt><dd>Trader Workstation</dd></div>
+          </dl>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Portfolio · Options · Overview</span>
+              <span class="right"><span class="badge badge-mock">Sample</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/options.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Options workspace for SPY: front ATM IV, back ATM IV, ATM strike, put/call open interest, implied move and max pain, above a front expiry chain, a payoff heatmap by price and remaining days, a front IV smile chart and a data-and-source panel.">
+              <span class="mark-pt" style="left:91.5%;top:13.6%">1</span>
+              <span class="mark-pt" style="left:33%;top:64%">2</span>
+              <span class="mark-pt" style="left:83%;top:32%">3</span>
+            </div>
+            <ul class="shot-legend">
+              <li><b>1</b> Provider named, never assumed</li>
+              <li><b>2</b> Payoff by price × remaining days</li>
+              <li><b>3</b> Front IV smile from the fitted grid</li>
+            </ul>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 08:47 RISK -->
+    <article class="moment" id="m-risk" data-moment="08:47" data-label="Risk">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>08:47</b><span class="tabname">Risk</span></p>
+          <h3>What would this actually do to the book?</h3>
+          <p>
+            One engine, two workspaces: Portfolio mode analyses the live account snapshot, Research
+            mode analyses a synthetic book handed over from Equity Research or Strategy Lab. Historical
+            and parametric VaR, Monte Carlo under Gaussian draws or historical bootstrap, CVaR, rolling
+            beta and correlation, and contribution-to-risk rankings.
+          </p>
+          <p>
+            When only part of the book has usable history, the headline is <strong>a scaled estimate
+            and Gamma says so</strong>, with a coverage diagnostic naming every excluded asset.
+          </p>
+          <dl class="facts">
+            <div><dt>Modes</dt><dd>6</dd></div>
+            <div><dt>Monte Carlo</dt><dd>Gaussian · Bootstrap</dd></div>
+            <div><dt>v1 limit</dt><dd>Long-only, unlevered</dd></div>
+          </dl>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Risk · Overview</span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/risk.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Risk workspace showing historical and parametric VaR, CVaR, annualised volatility, drawdown and contribution-to-risk tables for the active book.">
+            </div>
+          </figure>
+        </div>
+      </div>
+    </article>
+
+    <!-- 09:05 COPILOT -->
+    <article class="moment" id="m-copilot" data-moment="09:05" data-label="Copilot">
+      <div class="moment-grid">
+        <div class="moment-meta reveal">
+          <p class="moment-time"><b>09:05</b><span class="tabname">Copilot</span></p>
+          <h3>Write it up — with the sources still attached.</h3>
+          <p>
+            Copilot is grounded in whatever Gamma has actually loaded. It adapts to the active tab and
+            selected entity, keeps per-domain thread history, and exposes
+            <strong>scope, provenance, warnings and tool traces</strong> inside the output rather than
+            behind it.
+          </p>
+          <p>
+            Its authority control is visible and has two settings: a context-bounded
+            <strong>Research Agent</strong>, or a <strong>Research Operator</strong> that can drive the
+            app — and is still read-only. Bring your own OpenAI key, or run the mock provider offline.
+          </p>
+          <dl class="facts">
+            <div><dt>Provider</dt><dd>OpenAI, or mock</dd></div>
+            <div><dt>Grounding</dt><dd>Loaded Gamma state only</dd></div>
+            <div><dt>Authority</dt><dd>Research Agent · Research Operator</dd></div>
+          </dl>
+        </div>
+        <div class="reveal">
+          <figure class="shot">
+            <figcaption class="shot-bar">
+              <span>Research · Copilot</span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
+            </figcaption>
+            <div class="shot-frame">
+              <img src="assets/img/screens/copilot.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Copilot tab as a chat workspace with a session sidebar, transcript and composer, plus a multi-select context picker for which loaded Gamma domains to ground on.">
+            </div>
+          </figure>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ══════════════════════ THE REST OF THE PLANE ══════════════════════ -->
+<section id="plane" class="section band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>The rest of the plane</h2>
+      <p>
+        Thirteen surfaces across two workspaces, reorderable, each with its own registered modes.
+        <code style="color:var(--accent-2)">Ctrl</code>+<code style="color:var(--accent-2)">1…N</code>
+        switches tabs; <code style="color:var(--accent-2)">Shift</code>+<code style="color:var(--accent-2)">1…N</code>
+        switches modes inside one.
+      </p>
+    </div>
+
+    <aside class="surface-index reveal">
+      <h2>Tab registry · registered modes per tab</h2>
+      <div class="reg-research">
+        <p class="ws">Research</p>
+        <ol>
+          <li><span class="n">Sitrep</span><span class="m">1</span></li>
+          <li><span class="n">Equity Research</span><span class="m">5</span></li>
+          <li><span class="n">Strategy Lab</span><span class="m">6</span></li>
+          <li><span class="n">Macro</span><span class="m">6</span></li>
+          <li><span class="n">Prediction Markets</span><span class="m">4</span></li>
+          <li><span class="n">Crypto</span><span class="m">3</span></li>
+          <li><span class="n">Fundamentals</span><span class="m">6</span></li>
+          <li><span class="n">Commodities</span><span class="m">6</span></li>
+          <li><span class="n">Sealanes</span><span class="m">5</span></li>
+          <li><span class="n">Copilot</span><span class="m">1</span></li>
+        </ol>
+      </div>
+      <div class="reg-portfolio">
+        <p class="ws">Portfolio</p>
+        <ol>
+          <li><span class="n">Portfolio</span><span class="m">1</span></li>
+          <li><span class="n">Risk</span><span class="m">6</span></li>
+          <li><span class="n">Options / IV</span><span class="m">6</span></li>
+        </ol>
+      </div>
+    </aside>
+
+    <div class="plane">
+      <div class="cell reveal">
+        <div class="cell-top"><h3>Portfolio</h3><span class="badge badge-live">IBKR</span></div>
+        <p>Net liquidation, day P&amp;L, gross and net exposure, cash weight, benchmark-relative performance, allocation and concentration — in your chosen base currency.</p>
+        <p class="modes">Local daily history · FX-converted positions · readiness diagnostics</p>
+      </div>
+
+      <div class="cell reveal">
+        <div class="cell-top"><h3>Equity Research</h3></div>
+        <p>Single-name or synthetic scopes normalised to 100 base-currency units. Total and annualised return, volatility, drawdown, beta, correlation, HHI concentration.</p>
+        <p class="modes">Overview · Scope Analysis · Comparables · Scenario · Saved</p>
+      </div>
+
+      <div class="cell reveal">
+        <div class="cell-top"><h3>Strategy Lab</h3></div>
+        <p>Read-only strategy objects: import CSV return streams, compose return-bearing objects, inspect drawdown and rolling-risk stress windows, reload saved runs.</p>
+        <p class="modes">Composer · Script · Backtest · Regime/Stress · Imports · Saved</p>
+      </div>
+
+      <div class="cell reveal">
+        <div class="cell-top"><h3>Crypto</h3></div>
+        <p>Token screener over CoinGecko with narrative baskets, chain and turnover filters, plus DEX liquidity context from GeckoTerminal and basket-relative comparison.</p>
+        <p class="modes">Overview · Deep Dive · Flows &amp; Liquidity</p>
+      </div>
+
+      <div class="cell reveal">
+        <div class="cell-top"><h3>Sealanes</h3><span class="badge badge-plan">Prototype</span></div>
+        <p>Live AIS over a server-side AISstream proxy that keeps the key out of the browser. Chokepoints, routes, ports, fleet watchlists and event replay on a MapLibre plane.</p>
+        <p class="modes">Live Map · Chokepoints · Trade Flows · Fleet · Event Replay</p>
+      </div>
+
+      <div class="cell reveal">
+        <div class="cell-top"><h3>Sitrep</h3><span class="badge badge-accent">Home</span></div>
+        <p>The pinned Research home. Cross-domain triage across seven domains with per-section freshness, backend-persisted follow-ups and context-preserving handoffs.</p>
+        <p class="modes">Single surface · no mode bar</p>
+      </div>
+    </div>
+
+    <figure class="shot reveal" style="margin-top:var(--s8)">
+      <figcaption class="shot-bar">
+        <span>Research · Sealanes · Live Map</span>
+        <span class="right"><span class="badge">MapLibre + AISstream</span></span>
+      </figcaption>
+      <div class="shot-frame">
+        <img src="assets/img/screens/sealanes.png" width="1920" height="1200" loading="lazy" decoding="async"
+             alt="Gamma's Sealanes live map: shipping lanes drawn across the Atlantic and Indian oceans with labelled chokepoints at the Suez Canal, Panama Canal and Bab el-Mandeb, and coloured vessel markers by type.">
+        <span class="mark-pt" style="left:87%;top:27.5%">1</span>
+        <span class="mark-pt" style="left:7.5%;top:53%">2</span>
+        <span class="mark-pt" style="left:94%;top:49.5%">3</span>
+      </div>
+      <ul class="shot-legend">
+        <li><b>1</b> Suez Canal chokepoint</li>
+        <li><b>2</b> Panama Canal chokepoint</li>
+        <li><b>3</b> Tanker position from the live AIS sample</li>
+      </ul>
+    </figure>
+  </div>
+</section>
+
+<!-- ══════════════════════ BOUNDARY ══════════════════════ -->
+<section id="boundary" class="section band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>The boundary is the product</h2>
+      <p>
+        Gamma is a research environment, not an execution platform. The read-only contract is exposed
+        by the API itself at <code style="color:var(--accent-2)">/system/read-only-boundary</code>,
+        covering both the TWS operator lock and the app-side refusal to execute.
+      </p>
+    </div>
+
+    <div class="boundary">
+      <div class="bnd bnd-does reveal">
+        <h3>What it does</h3>
+        <ul>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5"/></svg>Monitors a live or sample portfolio in your base currency</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5"/></svg>Builds single-name and synthetic research scopes</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5"/></svg>Forwards a scope from one tab into another, intact</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5"/></svg>Shows the arithmetic behind every derived value</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5"/></svg>Labels degraded, stale, partial and sample states explicitly</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5"/></svg>Runs entirely on your machine, on your own credentials</li>
+        </ul>
+      </div>
+
+      <div class="pull reveal">
+        <blockquote>
+          Gamma is designed to help you inspect data, compare signals, and understand the calculations
+          behind the screens. It is not designed to place trades or to hide its analytics behind
+          unexplained scores.
+        </blockquote>
+        <cite>README.md</cite>
+      </div>
+
+      <div class="bnd bnd-not reveal">
+        <h3>What it refuses</h3>
+        <ul>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Placing orders or executing strategies</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Acting as a trading bot or rebalancer</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Giving personalised investment advice</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Treating macro interpretation as a causal model</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Presenting incomplete risk coverage as portfolio-wide truth</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Running your code with network, credential or broker authority</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="table-wrap reveal" style="margin-top:var(--s8)">
+      <table class="data">
+        <caption>Provenance carried on returned entities</caption>
+        <thead>
+          <tr><th scope="col">Field</th><th scope="col">Answers</th><th scope="col">Example</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k"><code>source_provider</code></td><td>Which provider produced this?</td><td>FRED · IBKR · SEC EDGAR · Kalshi</td></tr>
+          <tr><td class="k"><code>retrieved_at</code></td><td>When did Gamma actually fetch it?</td><td>Timestamp, with a derived freshness label</td></tr>
+          <tr><td class="k"><code>origin</code></td><td>Is this the provider's number, or Gamma's?</td><td>provider · derived · sample</td></tr>
+          <tr><td class="k"><code>transformation_note</code></td><td>What did Gamma do to it on the way?</td><td>"YoY derived from index level"</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ DATA ══════════════════════ -->
+<section id="data" class="section band">
+  <div class="page">
+    <div class="sec-head reveal">
+      <h2>What it plugs into</h2>
+      <p>
+        Broker, public-market, official-macro, on-chain, filing and AIS data. Most of it is free.
+        Keys stay server-side and never reach the browser.
+        <a href="keys.html">Get every key →</a>
+      </p>
+    </div>
+
+    <div class="table-wrap reveal">
+      <table class="data">
+        <caption>Integrated providers</caption>
+        <thead>
+          <tr><th scope="col">Provider</th><th scope="col">Feeds</th><th scope="col">Key</th><th scope="col">Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">IBKR / TWS</td><td>Portfolio, FX, IV surfaces, futures curves, price context</td><td>Account + running TWS</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">Yahoo Finance</td><td>Default listed-market history for Research and Sitrep</td><td>None</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">FRED</td><td>Macro series, derived YoY and spreads, metal proxies</td><td><code>FRED_API_KEY</code></td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">SEC EDGAR</td><td>Company facts, filings, statements for Fundamentals</td><td>Identity only</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">US Treasury</td><td>Treasury curve snapshots for the US rates view</td><td>None</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">Polymarket</td><td>Gamma API, Data API and CLOB probability history</td><td>None</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">Kalshi</td><td>Market, event, history and trade endpoints</td><td>None</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">CoinGecko</td><td>Token coverage, metadata, categories, price history</td><td>None</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">GeckoTerminal</td><td>DEX networks, pool search, liquidity context</td><td>None</td><td><span class="badge badge-live">Live</span></td></tr>
+          <tr><td class="k">EIA</td><td>Official US energy fundamentals and product spot</td><td><code>EIA_API_KEY</code></td><td><span class="badge badge-accent">Optional</span></td></tr>
+          <tr><td class="k">US Census</td><td>Live US trade-partner goods-trade rows for Macro</td><td><code>CENSUS_API_KEY</code></td><td><span class="badge badge-accent">Optional</span></td></tr>
+          <tr><td class="k">AISstream</td><td>Live vessel positions for Sealanes</td><td><code>AISSTREAM_API_KEY</code></td><td><span class="badge badge-accent">Optional</span></td></tr>
+          <tr><td class="k">OpenAI</td><td>Copilot, Fundamentals summaries, Script runtime</td><td><code>OPENAI_API_KEY</code></td><td><span class="badge badge-accent">Optional</span></td></tr>
+          <tr><td class="k">BLS · BEA · ECB · Eurostat · IMF · OECD · UN Comtrade · WTO · AKShare</td><td>Country compare and trade-partner depth</td><td>Env slots reserved</td><td><span class="badge badge-plan">Planned</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ CLOSER ══════════════════════ -->
+<section class="closer">
+  <div class="page">
+    <h2 class="reveal">Clone it, point it at your own keys, run it.</h2>
+    <p class="reveal">
+      Python 3.11+, Node, and Trader Workstation if you want the live broker path. Mock mode runs the
+      entire application offline with sample providers, so you can see every surface before you connect
+      anything.
+    </p>
+    <div class="hero-actions reveal">
+      <a class="btn btn-primary" href="setup.html">
+        Setup guide
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      </a>
+      <a class="btn" href="keys.html">Get your API keys</a>
+      <a class="btn" href="https://github.com/gorkbravo/Gamma">
+        View source
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="page">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="index.html" style="margin-bottom:var(--s6)">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+          </span>
+          <span class="brand-name">GAMMA</span>
+        </a>
+        <p class="foot-blurb">
+          A read-only market research terminal. Built as a FastAPI backend, a Svelte frontend and a
+          Tauri desktop shell. It runs on your machine, on your credentials, and it never places an order.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#session">The session</a></li>
+          <li><a href="#plane">Surfaces</a></li>
+          <li><a href="#boundary">Read-only boundary</a></li>
+          <li><a href="#data">Data sources</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Get running</h4>
+        <ul>
+          <li><a href="setup.html">Setup guide</a></li>
+          <li><a href="keys.html">API keys</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma">GitHub</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/README.md">README</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/docs/design_principles.md">Design principles</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/roadmap.md">Roadmap</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/tree/main/docs/audits">Audits</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <span>Gamma is research software. It is not investment advice, and it does not execute trades.</span>
+      <span>Screens captured from the app in mock mode.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/site.js" defer></script>
+</body>
+</html>

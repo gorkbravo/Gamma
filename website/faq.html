@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ — Gamma</title>
+<meta name="description" content="What Gamma is, what it refuses to do, which providers it needs, and the failure modes you will actually hit.">
+<link rel="icon" href="assets/img/mark.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/jetbrainsmono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
+<a class="skip" href="#faq">Skip to the questions</a>
+<div class="graticule" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+    </span>
+    <span class="brand-name">GAMMA</span>
+    <span class="brand-sub">Research Terminal</span>
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="index.html#session">Session</a>
+    <a href="index.html#plane">Surfaces</a>
+    <a href="index.html#boundary">Boundary</a>
+    <a href="keys.html">API keys</a>
+    <a href="setup.html">Setup</a>
+    <a href="faq.html" aria-current="page">FAQ</a>
+    <a class="ghost-cta" href="https://github.com/gorkbravo/Gamma">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="hero" style="padding-bottom:var(--s8)">
+  <div class="page">
+    <h1 class="reveal" style="font-size:clamp(2.1rem,4.6vw,3.6rem)">Questions, answered plainly.</h1>
+    <p class="hero-lede reveal">
+      Where a surface is a first pass, paused, or dependent on data Gamma cannot reliably get, it says
+      so here in the same words it uses in the app.
+    </p>
+  </div>
+</section>
+
+<section id="faq" class="section">
+  <div class="page">
+
+    <div class="sec-head narrow reveal">
+      <h2>What it is</h2>
+      <p>Scope, boundaries and the things people most often assume.</p>
+    </div>
+
+    <div class="faq reveal">
+
+      <details class="qa">
+        <summary>Can Gamma place trades?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            No, and it is not a setting. Gamma places no orders, executes no strategies, and does no
+            rebalancing. The read-only contract is exposed by the API itself at
+            <code>/system/read-only-boundary</code>, which covers both the TWS API operator lock and
+            the app-side refusal to execute.
+          </p>
+          <p>
+            That boundary is also why the Strategy Lab <code>Script</code> mode runs only in an
+            isolated ephemeral runtime with no network, no local files, no credentials, no Gamma API
+            access, and no broker or wallet authority.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Is this investment advice?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            No. Gamma is research software. It helps you inspect data, compare signals and see the
+            arithmetic behind a number. It does not produce recommendations, and its interpretive
+            layers — macro divergence and coherence labels, commodity roll and spread heuristics,
+            prediction-market research rank, crypto screen scores — are explicitly Gamma heuristics,
+            labelled as such on screen.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Is there a hosted version, or an installer?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            No to both. There is no SaaS, no account, no telemetry, and no released binary today. The
+            distribution path is cloning the repository and running it locally. That is deliberate for
+            a tool that holds broker credentials and provider keys, but it does mean setup is a real
+            step rather than a download.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Who is it for?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Someone comfortable with a terminal, a Python virtual environment and their own broker
+            session, who wants cross-domain research in one place and wants to see how each number was
+            produced. If you want a one-click app with a managed backend, this is not that.
+          </p>
+        </div>
+      </details>
+
+    </div>
+
+    <div class="sec-head narrow reveal" style="margin-top:var(--s10)">
+      <h2>Data and providers</h2>
+      <p>What is live, what is optional, and what is not built yet.</p>
+    </div>
+
+    <div class="faq reveal">
+
+      <details class="qa">
+        <summary>Do I need an Interactive Brokers account?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Not to run Gamma. You need one for the Portfolio tab, live IV surfaces and options Greeks,
+            IBKR-built futures curves, and FX history. Everything else works without a broker: Macro,
+            Prediction Markets, Crypto, Fundamentals, Commodities on EIA, Sealanes, Copilot and
+            Equity Research.
+          </p>
+          <p>
+            The live path is Trader Workstation. <strong>IB Gateway is not supported yet.</strong>
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>How many API keys do I actually need?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Zero to start. Yahoo Finance, Polymarket, Kalshi, CoinGecko, GeckoTerminal, US Treasury and
+            SEC EDGAR all work without one. FRED is the highest-value free key because it drives all of
+            Macro. EIA, US Census, AISstream and OpenAI each unlock one specific surface.
+          </p>
+          <p><a href="keys.html">The keys page lists every provider, the signup link, and exactly what degrades without it →</a></p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Where are my keys stored, and can the frontend see them?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            In a local <code>.env</code> read by the FastAPI process. No key is compiled into the
+            frontend bundle or sent to the browser. The AISstream websocket is proxied through the
+            backend specifically so the credential stays server-side. Provider exception text and
+            credentials are also kept out of user-facing warning messages.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Why does a tab show sample data when I configured a real provider?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Because Gamma refuses to hide a provider failure. When a live path is configured but
+            unavailable, it keeps the sample or cached payload <em>and</em> returns an explicit coverage
+            warning with a <span class="badge badge-mock">Sample</span> label. Check the provenance
+            panel on that surface. It names the provider, retrieval time, origin and freshness.
+          </p>
+          <p>Common causes: TWS not running, missing market-data entitlements, a rate-limited Yahoo circuit breaker still cooling down, or <code>COMMODITIES_PROVIDER</code> still set to <code>sample</code>.</p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Sealanes shows zero vessels. Is it broken?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Usually not. AISstream has real regional coverage gaps, and Gamma only subscribes to your
+            configured bounding boxes above a zoom threshold, for a short sampling window. An empty
+            count is most often genuine absence of coverage in that box at that moment.
+          </p>
+          <p>
+            Sealanes is also an honest prototype: Live Map is the strongest mode, while chokepoint
+            counts, trade-flow proxies, fleet context and event replay are limited by partial live AIS
+            and the absence of durable historical AIS, port-call and cargo data. Risk, sanctions and
+            dark-activity labels are deliberately out of scope until the methodology holds up.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>What about the BLS, ECB, Eurostat and IMF providers I see in .env?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Reserved slots. Those adapters are not written. They appear in Gamma's provider-capability
+            metadata as <span class="badge badge-plan">Planned</span> so the roadmap is legible, and the
+            surfaces that would use them show curated placeholders labelled as placeholders. Setting
+            those keys today does nothing.
+          </p>
+        </div>
+      </details>
+
+    </div>
+
+    <div class="sec-head narrow reveal" style="margin-top:var(--s10)">
+      <h2>Analytics and limits</h2>
+      <p>What the maths does, and where it stops.</p>
+    </div>
+
+    <div class="faq reveal">
+
+      <details class="qa">
+        <summary>How trustworthy are the risk numbers?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            The engine is history-based and linear in spirit: historical and parametric VaR, CVaR,
+            Monte Carlo under Gaussian draws or historical bootstrap, contribution-to-risk. It is not a
+            full nonlinear scenario engine, and Monte Carlo v1 supports long-only, unlevered books only.
+          </p>
+          <p>
+            When only part of the book has usable history, the headline total VaR is a scaled estimate.
+            Gamma says so, and the coverage diagnostic names every excluded asset rather than quietly
+            dropping it.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Can I model a short or a long-short book?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Not yet. Synthetic research scopes and the Risk engine currently work on long-only weights;
+            negative weights are dropped rather than modelled, and there is no pair or long-short
+            construct. Treat Gamma's scope analysis as a long-book tool for now.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Are the Greeks and payoff matrices broker-grade?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            No. Gamma preserves provider Greeks when IBKR supplies them, and derives its own from
+            provider or solved IV using zero-rate, zero-dividend Black-Scholes assumptions otherwise.
+            The panel tells you which you are looking at. The implied-probability view is a local
+            lognormal density proxy from the fitted IV grid, not a vendor risk-neutral-density feed.
+          </p>
+          <p>
+            The payoff matrix marks selected legs to model values across remaining days. It is research
+            math, and implies no order routing or broker valuation authority.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Is the Macro divergence score a model?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            No, and Gamma is direct about it. Each themed signal is a clamped, scaled version of the
+            series' move over the active timeframe; divergence is the strongest positive signal minus
+            the strongest negative one. Coherence and lead/lag come from asking when each supportive
+            series reached roughly 60% of its current move.
+          </p>
+          <p>
+            It is a transparent heuristic for structuring attention. It is not a statistical factor
+            model, and event lead/lag is especially noisy on monthly or quarterly series.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Which surfaces are still first-pass or paused?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>Being explicit about maturity, since the tab bar does not distinguish:</p>
+          <ul>
+            <li><strong>Fundamentals</strong>: complete for the current pass; strongest on US SEC filers.</li>
+            <li><strong>Prediction Markets</strong>: first pass complete; calibration coverage is still thin and venue-dependent.</li>
+            <li><strong>Commodities</strong>: first pass; deeper vendor-grade historical curve storage is future work.</li>
+            <li><strong>Options / IV</strong>: a usable volatility lab, not a full options analytics suite; historical IV and skew persistence remain open.</li>
+            <li><strong>Macro</strong> and <strong>Crypto</strong>: paused at their first-pass checkpoints.</li>
+            <li><strong>Sealanes</strong>: a paused prototype with uneven analytical depth.</li>
+          </ul>
+        </div>
+      </details>
+
+    </div>
+
+    <div class="sec-head narrow reveal" style="margin-top:var(--s10)">
+      <h2>Running it</h2>
+      <p>Practical failure modes.</p>
+    </div>
+
+    <div class="faq reveal">
+
+      <details class="qa">
+        <summary>Every API request comes back 401.
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            The backend requires a session token on every route except <code>/health</code>.
+            <code>GAMMA_SESSION_TOKEN</code> on the backend and
+            <code>VITE_GAMMA_SESSION_TOKEN</code> on the frontend must be the same string, and the
+            frontend reads it at dev-server start, so restart Vite after changing it.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>What operating systems does it run on?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            The stack is cross-platform (FastAPI, Svelte, Tauri) and development happens on Windows,
+            which is why the documented commands are PowerShell. On macOS or Linux the equivalents are
+            the usual <code>python3 -m venv</code>, <code>source .venv/bin/activate</code> and
+            <code>export VAR=value</code>.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Can I use it offline?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            Yes. <code>MOCK_DATA=true</code> runs every surface against bundled sample providers with no
+            network at all, and the mock state is always labelled <span class="badge badge-mock">Mock</span>.
+            It is how the screenshots on this site were captured, and the honest way to evaluate the app
+            before wiring up credentials.
+          </p>
+        </div>
+      </details>
+
+      <details class="qa">
+        <summary>Is there a licence?
+          <svg class="mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        </summary>
+        <div class="answer">
+          <p>
+            The repository does not currently carry a LICENSE file, which means default copyright
+            applies and no reuse rights are granted. If you want to build on it, open an issue and ask.
+          </p>
+        </div>
+      </details>
+
+    </div>
+
+  </div>
+</section>
+
+<section class="closer">
+  <div class="page">
+    <h2 class="reveal">Still curious? The README holds the arithmetic.</h2>
+    <p class="reveal">
+      Every tab is documented with what it sources, what Gamma computes on top, the formulas, and the
+      caveats. Around nine hundred lines of it.
+    </p>
+    <div class="hero-actions reveal">
+      <a class="btn btn-primary" href="https://github.com/gorkbravo/Gamma/blob/main/README.md">
+        Read the README
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 10.5V13H3V5h2.5"/></svg>
+      </a>
+      <a class="btn" href="setup.html">Setup guide</a>
+      <a class="btn" href="keys.html">API keys</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="page">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="index.html" style="margin-bottom:var(--s6)">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+          </span>
+          <span class="brand-name">GAMMA</span>
+        </a>
+        <p class="foot-blurb">
+          A read-only market research terminal. Built as a FastAPI backend, a Svelte frontend and a
+          Tauri desktop shell. It runs on your machine, on your credentials, and it never places an order.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="index.html#session">The session</a></li>
+          <li><a href="index.html#plane">Surfaces</a></li>
+          <li><a href="index.html#boundary">Read-only boundary</a></li>
+          <li><a href="index.html#data">Data sources</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Get running</h4>
+        <ul>
+          <li><a href="setup.html">Setup guide</a></li>
+          <li><a href="keys.html">API keys</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma">GitHub</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/README.md">README</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/docs/design_principles.md">Design principles</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/blob/main/roadmap.md">Roadmap</a></li>
+          <li><a href="https://github.com/gorkbravo/Gamma/tree/main/docs/audits">Audits</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <span>Gamma is research software. It is not investment advice, and it does not execute trades.</span>
+      <span>Answers reflect the app as of September 2026.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/site.js" defer></script>
+</body>
+</html>

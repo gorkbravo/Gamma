@@ -1,0 +1,62 @@
+{
+  "mock_mode": false,
+  "symbol": "SPY",
+  "captures": [
+    {
+      "snapshot_id": "11ffc196ee4540caa574831a91a294d2",
+      "timestamp": "2026-10-06T16:13:10.409343",
+      "captured_at": "2026-10-06T16:13:10.492228Z",
+      "source_provider": "ibkr",
+      "freshness_label": "live",
+      "delayed": false,
+      "spot": 781.015,
+      "points": 17,
+      "quality": {
+        "expected_surface_cells": 24,
+        "observed_surface_cells": 17,
+        "interpolated_surface_cells": 7,
+        "interpolation_ratio": 0.2916666666666667,
+        "contracts_with_bid_ask": 31,
+        "contracts_with_volume": 31,
+        "contracts_with_open_interest": 32,
+        "contracts_with_provider_greeks": 15,
+        "contracts_with_derived_greeks": 33,
+        "call_contract_count": 21,
+        "put_contract_count": 21,
+        "pairs_with_both_sides": 21
+      },
+      "warnings": [],
+      "exact_payload_preserved": true
+    },
+    {
+      "snapshot_id": "1b49cfba263b4b9cb17891fdd11fee4f",
+      "timestamp": "2026-10-06T16:13:37.984238",
+      "captured_at": "2026-10-06T16:13:38.064105Z",
+      "source_provider": "ibkr",
+      "freshness_label": "live",
+      "delayed": false,
+      "spot": 781.04,
+      "points": 14,
+      "quality": {
+        "expected_surface_cells": 24,
+        "observed_surface_cells": 14,
+        "interpolated_surface_cells": 10,
+        "interpolation_ratio": 0.4166666666666667,
+        "contracts_with_bid_ask": 25,
+        "contracts_with_volume": 26,
+        "contracts_with_open_interest": 10,
+        "contracts_with_provider_greeks": 21,
+        "contracts_with_derived_greeks": 26,
+        "call_contract_count": 21,
+        "put_contract_count": 21,
+        "pairs_with_both_sides": 21
+      },
+      "warnings": [],
+      "exact_payload_preserved": true
+    }
+  ],
+  "connected": true,
+  "restart_exact_replay": true,
+  "storage_warnings": [],
+  "status": "passed"
+}

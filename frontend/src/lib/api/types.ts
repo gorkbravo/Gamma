@@ -4366,6 +4366,7 @@ export interface IvOptionPair {
 }
 
 export interface IvSurface {
+  pricing_assumptions?: { spot_reference: number | null; risk_free_rate: number | null; dividend_yield: number | null; fallback_greeks_methodology: string | null; notes: string[] } | null;
   symbol: string;
   timestamp: string;
   retrieved_at: string;
