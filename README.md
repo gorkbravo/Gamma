@@ -103,6 +103,12 @@ The current API surface is grouped by workspace:
 - `/risk/*`: risk computation
 - `/iv/*`: IV snapshot and session loop
 
+### Paid Research Acceptance And Accounting
+
+For paid Copilot/Script acceptance, set `GAMMA_OPENAI_USAGE_AUDIT_DIR` to an ignored local directory before starting the backend (for example `output/openai-usage`). This enables atomic per-attempt records for Copilot Responses, Fundamentals filing summaries, Script Responses and Script container creation. The records retain provider usage, response identity, service tier and runtime session metadata without prompts or credentials. Missing terminal usage remains an unknown charge; these records are not an invoiced billing total. Fundamentals summaries additionally persist their model usage with the cached summary. SDK transport retries are disabled so Gamma's bounded retries stay visible.
+
+Options Operator compares ATM IV against IBKR's underlying-stock 30-day historical-volatility field when supplied. The output states the backward/forward horizon mismatch and missing provider estimator/dates; missing IV or HV remains unavailable. Current Checkpoint 10 evidence and remaining native-reader/billing requirements are in the [October 6 follow-up](docs/audits/copilot_checkpoint10_followup_2026-10-06.md).
+
 ### Request Size And Compute Limits
 
 Gamma's local API rejects oversized or obviously invalid request payloads before they reach provider adapters or analytics engines. These limits are separate from external provider rate limits; they are local safety bounds for memory, CPU, cache-key size, and accidental refresh bursts.

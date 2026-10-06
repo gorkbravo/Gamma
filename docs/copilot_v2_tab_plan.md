@@ -2,7 +2,15 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
+
+#### 2026-10-06 — Market-open Options acceptance and accounting hardening
+
+Reviewed current official OpenAI [function calling](https://developers.openai.com/api/docs/guides/function-calling), [agent runtime comparison](https://developers.openai.com/api/docs/guides/agents) and [pricing](https://developers.openai.com/api/docs/pricing). Review date: **2026-10-06**. Decision: retain the configured `gpt-6.1-sol`, custom Responses loop and optional SDK comparison; Gamma owns exposure, validation, permissions, persistence, recovery and audit state. Disable hidden SDK transport retries and expose opt-in per-attempt metering across every Responses consumer plus Script container creation. Preserve unknown charges on cancellation rather than treating missing usage as zero; keep provider storage disabled.
+
+The market-open Options Operator gate now passes: unloaded SPY acquisition, IBKR underlying-stock 30-day historical volatility, exact compact/live/four-expiry inputs, two computed IV premiums/ratios, honest missing-IV rows and observation-grounded continuation. The Options path requests generic tick 104 on the underlying rather than relying on option-contract fields, labels the provider window/unknown estimator/date and forward-horizon mismatch, allows bounded chain initialization and retains a non-durable owning-tab result. Further fixes preserve explicit UI/ATM ticker cues, separate oil delivery month from expiration (including cache replay), calculate EIA point changes chronologically, and persist filing-summary/Script usage.
+
+**Checkpoint 10 remains open (~94%)** for native screen-reader acceptance and exact historical cancellation/filing-summary billing reconciliation. The previous Options blocker is superseded by current live success; partial IV/quote-quality and estimator limitations remain disclosed. See [October 6 follow-up](audits/copilot_checkpoint10_followup_2026-10-06.md) for release checks, cost, limitations and the native-reader acceptance checklist. October 5 outcomes remain the evidence for the other representative workflows.
 
 #### 2026-10-05 — Checkpoint 10 live acceptance; certification remains open
 

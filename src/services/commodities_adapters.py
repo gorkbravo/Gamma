@@ -520,6 +520,9 @@ class EiaCommoditiesDataProvider:
         rows = _extract_eia_rows(payload)
         points: list[CommodityInventoryPoint] = []
         previous_value: float | None = None
+        # EIA commonly returns newest first. Changes must be calculated against
+        # the previous chronological observation, before building the points.
+        rows = sorted(rows, key=lambda row: _parse_period(row.get("period") or row.get("date")) or datetime.min)
         for row in rows:
             timestamp = _parse_period(row.get("period") or row.get("date"))
             value = _float_value(row.get("value"))
@@ -1053,7 +1056,7 @@ class IbkrCommoditiesDataProvider:
     def _contract_cache_key(self, instrument_id: str) -> str:
         if self.cache is None:
             return ""
-        return self.cache.make_key("commodities", "ibkr", "contracts", instrument_id)
+        return self.cache.make_key("commodities", "ibkr", "contracts-v2", instrument_id)
 
     def _cached_contracts(self, config: IbkrFutureRootConfig) -> list[tuple[Contract, Any]]:
         if self.cache is None or self.contract_cache_seconds <= 0:
@@ -1081,7 +1084,7 @@ class IbkrCommoditiesDataProvider:
                 localSymbol=str(row.get("localSymbol") or ""),
                 tradingClass=str(row.get("tradingClass") or config.trading_class or ""),
             )
-            detail = SimpleNamespace(realExpirationDate=row.get("realExpirationDate"), contract=contract)
+            detail = SimpleNamespace(realExpirationDate=row.get("realExpirationDate"), contractMonth=row.get("contractMonth"), contract=contract)
             contracts.append((contract, detail))
         return contracts
 
@@ -1102,6 +1105,7 @@ class IbkrCommoditiesDataProvider:
                     "localSymbol": str(getattr(contract, "localSymbol", "") or ""),
                     "tradingClass": str(getattr(contract, "tradingClass", "") or config.trading_class or ""),
                     "realExpirationDate": str(getattr(detail, "realExpirationDate", "") or ""),
+                    "contractMonth": str(getattr(detail, "contractMonth", "") or ""),
                 }
             )
         self.cache.set_json(
@@ -1898,6 +1902,7 @@ def _ibkr_contract_origin(contract: Contract) -> str:
 
 def _ibkr_contract_month_key(contract: Contract, detail: Any = None) -> str:
     raw_values = [
+        getattr(detail, "contractMonth", None),
         getattr(contract, "lastTradeDateOrContractMonth", None),
         getattr(detail, "realExpirationDate", None),
     ]

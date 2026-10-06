@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.services.openai_usage_audit import audit_response
 
 import json
 import re
@@ -890,17 +891,19 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         `incomplete`. Provider failures raise RuntimeError; cancellation
         raises CopilotRunCancelled between SSE lines.
         """
-        try:
-            stream = self._open_stream(payload)
-        except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
-            raise RuntimeError(self._sdk_error_message(exc)) from exc
-
-        try:
-            return self._consume_response_stream(stream, emit, should_cancel)
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                close()
+        with audit_response("copilot.stream", str(payload.get("model") or self.model)) as audit:
+            try:
+                stream = self._open_stream(payload)
+            except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
+                raise RuntimeError(self._sdk_error_message(exc)) from exc
+            try:
+                result = self._consume_response_stream(stream, emit, should_cancel, audit=audit)
+                audit.observe(result[0])
+                return result
+            finally:
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    close()
 
     def _open_stream(self, payload: dict[str, Any]):
         """Open a typed Responses stream. Overridable by provider tests."""
@@ -911,11 +914,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         stream: Any,
         emit: RunEventEmitter,
         should_cancel: CancelCheck,
+        audit: Any = None,
     ) -> tuple[dict[str, Any], str]:
         for sdk_event in stream:
+            parsed = self._sdk_to_dict(sdk_event)
+            if audit is not None and isinstance(parsed.get("response"), dict):
+                audit.observe(parsed["response"])
             if should_cancel():
                 raise CopilotRunCancelled()
-            parsed = self._sdk_to_dict(sdk_event)
             outcome = self._dispatch_response_event(parsed, emit)
             if outcome is not None:
                 return outcome
@@ -980,6 +986,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             api_key=self.api_key,
             base_url=base_url,
             timeout=self.timeout_seconds,
+            max_retries=0,
         )
 
     @staticmethod
@@ -1393,7 +1400,9 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
 
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            response = self._client.responses.create(**payload)
+            with audit_response("copilot.response", str(payload.get("model") or self.model)) as audit:
+                response = self._client.responses.create(**payload)
+                audit.observe(response)
         except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
             raise RuntimeError(self._sdk_error_message(exc)) from exc
         rendered = self._sdk_to_dict(response)

@@ -96,6 +96,7 @@ class IVSurfaceSnapshot:
     cell_sources: list[list[str]] = field(default_factory=list)
     expiry_analytics: list[IVExpiryAnalyticsRecord] = field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsRecord | None = None
+    underlying_historical_volatility: float | None = None
 
 
 class IVSurfaceEngine:
@@ -445,7 +446,7 @@ class IVSurfaceEngine:
             raise RuntimeError(f"Unable to qualify underlying contract for {symbol}")
         underlying = qualified_underlying[0]
         self._underlying_ticker = self._run_ib(
-            lambda: self.client.ib.reqMktData(underlying, genericTickList="", snapshot=False),
+            lambda: self.client.ib.reqMktData(underlying, genericTickList="104", snapshot=False),
             timeout=8.0,
         )
 
@@ -906,6 +907,9 @@ class IVSurfaceEngine:
             points=observed_cells,
             source_provider="ibkr",
             origin="gamma.iv.surface.ibkr",
+            underlying_historical_volatility=self._coerce_positive(
+                getattr(self._underlying_ticker, "histVolatility", None)
+            ),
             transformation_note=(
                 "Gamma resolves the underlying through IBKR/TWS, requests option-chain parameters with "
                 "reqSecDefOptParams, subscribes to paired near-spot call and put contracts, preserves contract-level "

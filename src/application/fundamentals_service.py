@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.services.openai_usage_audit import audit_response
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -499,8 +500,10 @@ class FundamentalsService:
                     "Content-Type": "application/json",
                 },
             )
-            with urlopen(request, timeout=45) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
+            with audit_response("fundamentals.company_summary", self.summary_model) as audit:
+                with urlopen(request, timeout=45) as response:
+                    response_payload = json.loads(response.read().decode("utf-8"))
+                audit.observe(response_payload)
             parsed = _parse_openai_summary_payload(response_payload)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
             return None
@@ -520,6 +523,11 @@ class FundamentalsService:
             source_url=section.source_url,
             model_provider="openai_responses",
             model=str(response_payload.get("model") or self.summary_model),
+            model_usage={
+                "response_id": response_payload.get("id"),
+                "status": response_payload.get("status"),
+                "usage": deepcopy(response_payload.get("usage") or {}),
+            },
             generated_at=generated_at,
             confidence=_bounded_confidence(parsed.get("confidence")),
             warnings=[str(item) for item in parsed.get("warnings", []) if str(item).strip()],
@@ -3584,6 +3592,7 @@ def _company_summary_to_payload(summary: FundamentalsCompanySummaryRecord) -> di
 def _company_summary_from_payload(payload: dict[str, Any]) -> FundamentalsCompanySummaryRecord:
     return FundamentalsCompanySummaryRecord(
         ticker=str(payload.get("ticker") or ""),
+        model_usage=deepcopy(payload.get("model_usage") or {}),
         summary=str(payload.get("summary") or "").strip() or None,
         source_form=str(payload.get("source_form") or "").strip() or None,
         accession_number=str(payload.get("accession_number") or "").strip() or None,

@@ -290,6 +290,7 @@ class IVSurfaceResponseModel(BaseModel):
     surface_model_discontinuities: list[str] = Field(default_factory=list)
     expiry_analytics: list[IVExpiryAnalyticsModel] = Field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsModel | None = None
+    underlying_historical_volatility: float | None = None
 
     @classmethod
     def from_service_result(cls, symbol: str, result: IVSurfaceResult) -> "IVSurfaceResponseModel":
@@ -338,6 +339,7 @@ class IVSurfaceResponseModel(BaseModel):
             surface_model_discontinuities=list(surface_model.discontinuities),
             expiry_analytics=[IVExpiryAnalyticsModel.from_domain(item) for item in snapshot.expiry_analytics],
             pricing_assumptions=IVPricingAssumptionsModel.from_domain(snapshot.pricing_assumptions),
+            underlying_historical_volatility=snapshot.underlying_historical_volatility,
         )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,7 @@ class FundamentalsCompanySummaryRecord:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    model_usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.services.openai_usage_audit import audit_response
 
 import base64
 import csv
@@ -90,7 +91,7 @@ class OpenAICodeInterpreterRuntime:
         self._interfaces_available = self._detect_interfaces(client)
         if self._client is None and self._api_key_present and self._model_supports_code_interpreter():
             try:
-                self._client = OpenAI(api_key=api_key)
+                self._client = OpenAI(api_key=api_key, max_retries=0)
             except Exception:
                 self._client = None
             self._interfaces_available = self._detect_interfaces(self._client)
@@ -281,27 +282,29 @@ class OpenAICodeInterpreterRuntime:
             ],
             request.run_id,
         )
-        response = self._client.responses.create(
-            model=self.model,
-            instructions=(
-                "Act only as Gamma's deterministic Python execution transport. "
-                "Use exactly one Code Interpreter call. Do not use network access, install packages, "
-                "rewrite the research source, or substitute different inputs."
-            ),
-            input=(
-                "Execute the following wrapper verbatim in Code Interpreter. Do not add, remove, or "
-                "change any Python statement. After it finishes, return a download link for every "
-                "generated file using its exact filename so each file is present as a container-file citation.\n\n"
-                f"```python\n{wrapper}\n```"
-            ),
-            tools=[{"type": "code_interpreter", "container": binding.container_id}],
-            tool_choice="required",
-            parallel_tool_calls=False,
-            max_tool_calls=1,
-            max_output_tokens=2048,
-            store=False,
-            timeout=float(min(self.max_duration_seconds, int(request.limits.get("run_duration_seconds", self.max_duration_seconds)))),
-        )
+        with audit_response("strategy_lab.script", self.model) as audit:
+            response = self._client.responses.create(
+                model=self.model,
+                instructions=(
+                    "Act only as Gamma's deterministic Python execution transport. "
+                    "Use exactly one Code Interpreter call. Do not use network access, install packages, "
+                    "rewrite the research source, or substitute different inputs."
+                ),
+                input=(
+                    "Execute the following wrapper verbatim in Code Interpreter. Do not add, remove, or "
+                    "change any Python statement. After it finishes, return a download link for every "
+                    "generated file using its exact filename so each file is present as a container-file citation.\n\n"
+                    f"```python\n{wrapper}\n```"
+                ),
+                tools=[{"type": "code_interpreter", "container": binding.container_id}],
+                tool_choice="required",
+                parallel_tool_calls=False,
+                max_tool_calls=1,
+                max_output_tokens=2048,
+                store=False,
+                timeout=float(min(self.max_duration_seconds, int(request.limits.get("run_duration_seconds", self.max_duration_seconds)))),
+            )
+            audit.observe(response)
         response_id = str(getattr(response, "id", "") or "") or None
         with self._lock:
             if response_id:
@@ -445,6 +448,8 @@ class OpenAICodeInterpreterRuntime:
                 "executed_code": exact_wrapper,
                 "network_access": False,
                 "model": self.model,
+                "container_id": binding.container_id,
+                "container_memory_limit": "1g",
                 "uploaded_files": [
                     {
                         "role": item.role,
@@ -491,12 +496,15 @@ class OpenAICodeInterpreterRuntime:
             existing = self._bindings.get(key)
         if existing is not None:
             return existing
-        container = self._client.containers.create(
-            name=f"gamma-research-{request.run_id[:12]}",
-            expires_after={"anchor": "last_active_at", "minutes": self.CONTAINER_EXPIRY_MINUTES},
-            memory_limit="1g",
-            network_policy={"type": "disabled"},
-        )
+        with audit_response("strategy_lab.container", self.model) as audit:
+            container = self._client.containers.create(
+                name=f"gamma-research-{request.run_id[:12]}",
+                expires_after={"anchor": "last_active_at", "minutes": self.CONTAINER_EXPIRY_MINUTES},
+                memory_limit="1g",
+                network_policy={"type": "disabled"},
+            )
+            audit.record.update(status="created", container_id=str(getattr(container, "id", "") or ""),
+                                memory_limit="1g", network_access=False, charge_status="runtime_session_created")
         container_id = str(getattr(container, "id", "") or "")
         if not container_id:
             raise RuntimeError("provider_container_identity_missing")
@@ -722,6 +730,9 @@ class OpenAICodeInterpreterRuntime:
         usage = getattr(response, "usage", None)
         if usage is None:
             return {}
+        dump = getattr(usage, "model_dump", None)
+        if callable(dump):
+            return dump(mode="json")
         result: dict[str, Any] = {}
         for key in ("input_tokens", "output_tokens", "total_tokens"):
             value = getattr(usage, key, None)

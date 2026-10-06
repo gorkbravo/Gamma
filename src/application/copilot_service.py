@@ -3233,6 +3233,11 @@ class CopilotService:
             budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 90_000))
         if intent in {"macro_series_analysis", "crypto_token_analysis", "retained_analysis_research"}:
             budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 60_000))
+        if (callable(getattr(self.provider, "stream_research_operator", None))
+                and any(item.domain == "iv" for item in domain_plan)):
+            # TWS chain qualification/subscriptions and model continuation are
+            # asynchronous; the preview guard cannot certify unloaded Options.
+            budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 90_000))
         if (intent == "single_company_research"
                 and re.search(r"\b(?:fair\s+value|valuation|dcf)\b", normalized_prompt)
                 ):
@@ -17110,7 +17115,7 @@ class CopilotService:
             IVSurfaceRequest(
                 symbol=requested_symbol or "SPY",
                 market_data_mode=str(normalized.get("market_data_mode") or self.iv_service.market_data_mode),
-                wait_seconds=2.5,
+                wait_seconds=20.0,
                 depth_preset=str(normalized.get("depth_preset") or "compact"),
             )
         )
@@ -17154,6 +17159,7 @@ class CopilotService:
             "surface_model_status": snapshot.surface_model.status if snapshot.surface_model is not None else "applied",
             "surface_model_notes": list(snapshot.surface_model.notes) if snapshot.surface_model is not None else [],
             "expiry_analytics": [asdict(item) for item in snapshot.expiry_analytics],
+            "underlying_historical_volatility": snapshot.underlying_historical_volatility,
             "pricing_assumptions": asdict(snapshot.pricing_assumptions) if snapshot.pricing_assumptions is not None else None,
         }, list(result.warnings), list(result.messages)
 
@@ -17203,7 +17209,10 @@ class CopilotService:
                 row.get("atm_call_implied_volatility"),
                 row.get("atm_put_implied_volatility"),
             )
-            historical_vol = self._expiry_historical_volatility(
+            underlying_hv = self._optional_float(surface.get("underlying_historical_volatility"))
+            if underlying_hv is not None and (not math.isfinite(underlying_hv) or underlying_hv <= 0):
+                underlying_hv = None
+            historical_vol = underlying_hv if underlying_hv is not None and underlying_hv > 0 else self._expiry_historical_volatility(
                 expiry=expiry,
                 atm_strike=self._optional_float(row.get("atm_strike")),
                 contracts=contracts,
@@ -17222,6 +17231,14 @@ class CopilotService:
                     "atm_strike": row.get("atm_strike"),
                     "atm_implied_volatility": implied_vol,
                     "historical_volatility": historical_vol,
+                    "historical_volatility_basis": (
+                        "IBKR underlying stock 30-day historical volatility, generic tick 104; "
+                        "provider estimator and observation dates are not supplied. Backward-looking "
+                        "30-day measure is not matched to the forward expiry horizon."
+                        if underlying_hv is not None and underlying_hv > 0
+                        else "Contract provider historical-volatility field; window/methodology unavailable."
+                        if historical_vol is not None else None
+                    ),
                     "volatility_premium": implied_vol - historical_vol if implied_vol is not None and historical_vol is not None else None,
                     "implied_to_historical_ratio": implied_vol / historical_vol if implied_vol is not None and historical_vol not in {None, 0.0} else None,
                     "implied_move_pct": row.get("implied_move_pct"),
@@ -17234,6 +17251,11 @@ class CopilotService:
 
         if not rows:
             warnings = dedupe_warnings(warnings, ["IV surface contained no expiry analytics rows for comparison."])
+        if any(row.get("historical_volatility_basis", "") and "30-day" in row["historical_volatility_basis"] for row in rows):
+            warnings = dedupe_warnings(warnings, [
+                "IBKR supplies a backward-looking 30-day underlying historical-volatility measure; "
+                "its estimator and observation dates are unavailable and its horizon differs from each forward option expiry."
+            ])
         if any(row["comparison_status"] == "missing_historical_volatility" for row in rows):
             warnings = dedupe_warnings(
                 warnings,

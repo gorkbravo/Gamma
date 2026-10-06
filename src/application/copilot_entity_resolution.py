@@ -19,6 +19,8 @@ _TICKER_CUE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _NON_TICKER_ACRONYMS = {
+    "ATM",
+    "UI",
     "AI",
     "API",
     "CAGR",

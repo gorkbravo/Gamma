@@ -145,6 +145,7 @@ class FundamentalsCompanyModel(BaseModel):
 
 class FundamentalsCompanySummaryModel(BaseModel):
     ticker: str
+    model_usage: dict[str, Any] = Field(default_factory=dict)
     summary: str | None = None
     source_form: str | None = None
     accession_number: str | None = None
