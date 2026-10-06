@@ -106,7 +106,7 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert workspace.overview.term_structure is not None
     assert workspace.overview.term_structure.current_curve is not None
     assert workspace.overview.term_structure.previous_curve_snapshots == []
-    assert any("Historical curve stacks require" in caveat for caveat in workspace.overview.term_structure.caveats)
+    assert any("No earlier retained curve observations" in caveat for caveat in workspace.overview.term_structure.caveats)
 
     wti_curve = next(curve for curve in workspace.curves if curve.instrument_id == "wti")
     assert wti_curve.shape_label == "backwardation"
@@ -290,7 +290,7 @@ def test_eia_provider_without_key_degrades_to_sample_with_warning():
     assert workspace.overview.market_breadth.total_markets == len(workspace.market_summaries)
     assert workspace.overview.matrix_rows
     assert any("EIA_API_KEY is not configured" in warning for warning in workspace.warnings)
-    assert any("Previous full curve snapshots" in caveat for caveat in workspace.overview.term_structure.caveats)
+    assert any("No earlier retained curve observations" in caveat for caveat in workspace.overview.term_structure.caveats)
 
 
 def test_eia_provider_enriches_energy_inventory_with_official_series():

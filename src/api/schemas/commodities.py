@@ -160,6 +160,9 @@ class CommodityCurveNodeModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    quote_field: str | None = None
+    delayed: bool | None = None
+    freshness_label: str = "unknown"
 
     @classmethod
     def from_domain(cls, row: CommodityCurveNode) -> "CommodityCurveNodeModel":

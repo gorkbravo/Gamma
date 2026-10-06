@@ -15,6 +15,7 @@ from src.application.copilot_model_policy import (
 )
 from src.application.copilot_service import CopilotService
 from src.application.commodities_service import CommoditiesService
+from src.services.commodity_curve_store import CommodityCurveStore
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService
@@ -375,6 +376,7 @@ def build_runtime(
         prediction_market_service=prediction_market_service,
     )
     commodities_service = CommoditiesService(
+        curve_store=CommodityCurveStore(resolved_history_dir / "commodity_curves"),
         provider=trace_provider(
             _build_commodities_provider(cache, client, market_data, live_mode=not bool(mock_mode)),
             provider_usage,

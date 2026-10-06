@@ -1167,6 +1167,9 @@ class IbkrCommoditiesDataProvider:
                     source_provider="ibkr",
                     retrieved_at=retrieved_at,
                     origin=f"ibkr.reqMktData:{getattr(contract, 'conId', '') or _ibkr_contract_symbol(contract, config)}",
+                    quote_field=quote.field,
+                    delayed=quote.delayed,
+                    freshness_label="unavailable" if price is None else "prior_close" if "close" in str(quote.field).lower() else "delayed" if quote.delayed else "snapshot",
                     transformation_note=(
                         f"Gamma requested a read-only IBKR futures snapshot and selected {quote.field or 'no usable'} price field. "
                         "Node changes are not computed from Gamma's local curve-history cache."
@@ -1332,6 +1335,9 @@ class IbkrCommoditiesDataProvider:
                     "expiry_date": node.contract.expiry_date.isoformat() if node.contract.expiry_date else None,
                     "price": node.price,
                     "source_provider": node.source_provider,
+                    "quote_field": node.quote_field,
+                    "delayed": node.delayed,
+                    "freshness_label": node.freshness_label,
                     "origin": node.origin,
                 }
                 for node in curve.nodes
@@ -1436,6 +1442,9 @@ class IbkrCommoditiesDataProvider:
                     transformation_note=(
                         "Cached IBKR futures node restored from Gamma's local curve snapshot cache; no fresh market-data line was used."
                     ),
+                    quote_field=row.get("quote_field"),
+                    delayed=row.get("delayed"),
+                    freshness_label="cached",
                 )
             )
         if not nodes:

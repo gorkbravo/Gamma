@@ -2926,6 +2926,9 @@ export interface CommodityFuturesContract {
 }
 
 export interface CommodityCurveNode {
+  quote_field?: string | null;
+  delayed?: boolean | null;
+  freshness_label?: string;
   contract: CommodityFuturesContract;
   price: number | null;
   previous_price: number | null;

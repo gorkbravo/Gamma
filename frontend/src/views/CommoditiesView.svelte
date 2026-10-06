@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import CommodityCurveHistory from "../components/CommodityCurveHistory.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
     CommodityCurveSnapshot,
@@ -2078,6 +2079,9 @@
 
     <!-- Standalone curves-spreads term structure heatmap (kept for curves_spreads mode) -->
     {#if mode === "curves_spreads"}
+      {#key selectedInstrumentId}
+        <CommodityCurveHistory instrumentId={selectedInstrumentId} instrument={selectedInstrument} curve={selectedCurve} coverage={workspace?.coverage ?? null} providerLoading={loading} />
+      {/key}
       <section class="panel rows-panel">
         <header class="panel-title"><span>Term Structure Heatmap</span></header>
         {#if termSpreadHeatmapRows.length}
@@ -2491,11 +2495,14 @@
 <style>
   .view {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
     padding-bottom: var(--space-5);
   }
 
   /* ── Header panel ── */
+
+  .header-panel { grid-template-columns: minmax(0, 1fr); }
 
   /* Local: this subtitle carries a long provider list and has to truncate. */
   .subtitle {
@@ -3458,10 +3465,16 @@
       align-items: stretch;
     }
 
+    .header-top { flex-wrap: nowrap; }
+    .header-top > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
+
     .mode-bar {
+      display: grid;
       width: 100%;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+
+    .mode-bar button { min-width: 0; white-space: normal; }
 
     .mode-bar button:nth-child(3) { border-right: 0; }
     .mode-bar button:nth-child(-n+3) { border-bottom: 1px solid var(--panel-strong); }

@@ -2705,6 +2705,8 @@ On September 6, Copilot Checkpoint 8H added exact Research basket working analys
 
 Deepen the live first-pass commodity research tab into a fuller workspace with better historical curves, spreads, inventories, metals coverage, events, and cross-domain handoffs.
 
+On October 6, manual historical-curve retention and exact calendar-spread tracking shipped in Curves & Spreads. Immutable captures preserve contract IDs, timestamps, units and quote quality; comparisons align exact identities; saved spreads retain the original pair and expose missing, expired or incompatible observations as gaps. Earlier compatible captures also feed Overview term structure. Live WTI browser acceptance captured six IBKR contracts, restarted the backend and replayed the saved curves and spread with TWS disconnected. These are manually captured observations, not backfilled settlement or continuous-contract history. See [commodity curve acceptance](docs/audits/usability/commodity_curve_captures_2026-10-06.md).
+
 ### Workstream 9 - Maritime Intelligence
 
 Harden the paused Sealanes prototype around AIS, vessels, chokepoints, routes, event replay, trade-flow interpretation, and later shadow-fleet/risk analytics.

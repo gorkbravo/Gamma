@@ -30,6 +30,7 @@ from src.models.commodities import (
     CommodityWorkspaceResult,
 )
 from src.services.commodities_adapters import CommoditiesDataProvider
+from src.services.commodity_curve_store import CommodityCurveStore
 
 
 @dataclass(frozen=True)
@@ -40,8 +41,9 @@ class CommodityWorkspaceRequest:
 
 
 class CommoditiesService:
-    def __init__(self, *, provider: CommoditiesDataProvider) -> None:
+    def __init__(self, *, provider: CommoditiesDataProvider, curve_store: CommodityCurveStore | None = None) -> None:
         self.provider = provider
+        self.curve_store = curve_store
 
     def get_workspace(self, request: CommodityWorkspaceRequest | None = None) -> CommodityWorkspaceResult:
         normalized_request = request or CommodityWorkspaceRequest()
@@ -474,7 +476,9 @@ class CommoditiesService:
         matrix_rows = self._build_overview_matrix_rows(snapshot, summaries, curves, inventories)
         scatter = self._build_overview_scatter(snapshot, summaries, curves)
         rankings = self._build_overview_rankings(summaries, curves, inventories, spreads)
-        term_structure = self._build_overview_term_structure(selected_instrument_id, curves)
+        instrument = next((item for item in snapshot.instruments if item.instrument_id == selected_instrument_id), None)
+        term_structure = self._build_overview_term_structure(selected_instrument_id, curves,
+            unit=instrument.quote_unit if instrument else "", currency=instrument.currency if instrument else "")
         caveats = _dedupe(
             [
                 "Overview analytics are Gamma-engineered from the loaded workspace payload and should be treated as research context, not execution signals.",
@@ -771,31 +775,35 @@ class CommoditiesService:
         self,
         selected_instrument_id: str,
         curves: list[CommodityCurveSnapshot],
+        *, unit: str = "", currency: str = "",
     ) -> CommodityOverviewTermStructure:
         selected_curve = next((curve for curve in curves if curve.instrument_id == selected_instrument_id), None)
+        previous, storage_warnings = self.curve_store.prior_curves(selected_instrument_id, selected_curve.as_of, unit=unit, currency=currency) if self.curve_store and selected_curve else ([], [])
         caveats = [
             "Current curve uses the selected commodity's latest normalized curve snapshot.",
-            "Previous full curve snapshots are not available in this workspace payload. Node-level previous_price values may reflect sample/provider prior node observations, but they are not a stored historical curve stack.",
-            "Historical curve stacks require stored futures-curve history or a provider with historical curve snapshot support.",
+            "Historical curves are manually retained observations, not a continuous settlement history. Compare exact contract IDs in Curves & Spreads; front-month ranks can change between captures.",
+            *storage_warnings,
         ]
+        if not previous:
+            caveats.append("No earlier retained curve observations are available for this instrument. Save a curve in Curves & Spreads to begin a history.")
         if selected_curve is None:
             caveats.append("No current curve is available for the selected commodity.")
         return CommodityOverviewTermStructure(
             selected_instrument_id=selected_instrument_id,
             current_curve=selected_curve,
-            previous_curve_snapshots=[],
+            previous_curve_snapshots=previous,
             current_curve_methodology=(
                 "Current curve is the enriched curve snapshot for the selected instrument after Gamma computes shape, spreads, and roll-yield proxy."
             ),
             previous_curve_methodology=(
-                "Unavailable as full historical snapshots in this payload; previous curve history requires stored futures-curve history/provider support."
+                "Up to eight earlier manually retained full curves, with their original contract identities, observation timestamps and provider evidence."
             ),
             caveats=_dedupe(caveats),
             source_provider="gamma",
             retrieved_at=selected_curve.retrieved_at if selected_curve is not None else None,
             origin="gamma.commodities.overview.term_structure",
             transformation_note=(
-                "Gamma exposes the selected current curve and an explicit caveat instead of fabricating a historical curve stack."
+                "Gamma exposes the selected current curve and earlier retained full observations without creating settlement or rolled history."
             ),
         )
 
