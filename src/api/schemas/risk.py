@@ -25,6 +25,7 @@ class RiskComputeRequestModel(BaseModel):
     source_object_id: str | None = Field(default=None, max_length=240)
     source_origin: str | None = Field(default=None, max_length=160)
     research_book_return_points: list[TimeSeriesPoint] = Field(default_factory=list, max_length=MAX_STRATEGY_LAB_ROWS)
+    research_book_benchmark_points: list[TimeSeriesPoint] | None = Field(default=None, max_length=MAX_STRATEGY_LAB_ROWS)
     research_book_legs: list[ResearchBookRiskLegModel] = Field(default_factory=list, max_length=100)
     alpha: float = Field(default=0.95, gt=0.0, lt=1.0)
     lookback_days: int = Field(default=252, ge=20, le=MAX_RISK_LOOKBACK_DAYS)

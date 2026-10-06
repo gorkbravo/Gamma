@@ -6,6 +6,7 @@ Use this area for findings that should remain discoverable after the immediate b
 
 ## Categories
 
+- [Strategy Lab saved experiments and Risk acceptance, 2026-10-06](./usability/strategy_lab_experiments_2026-10-06.md): exact saved inputs/histories, restart replay, retained benchmark Risk handoff, revised-weight comparison, and live TWS browser evidence.
 - [Copilot Checkpoint 10 follow-up, 2026-10-06](./copilot_checkpoint10_followup_2026-10-06.md): market-open direct Options acceptance, provider/accounting fixes and exact remaining native-reader/billing gates.
 - [Copilot Checkpoint 10 acceptance, 2026-10-05](./copilot_checkpoint10_acceptance_2026-10-05.md): representative live outcomes, release checks and historical cost accounting limitations.
 

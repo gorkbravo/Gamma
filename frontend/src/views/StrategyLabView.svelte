@@ -3,6 +3,8 @@
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import CopilotStrategyLabWorkingAnalysis from "../components/CopilotStrategyLabWorkingAnalysis.svelte";
   import StrategyScriptWorkspace from "../components/StrategyScriptWorkspace.svelte";
+  import StrategyRunComparison from "../components/StrategyRunComparison.svelte";
+  import { STRATEGY_EXPERIMENT_CONTRACT, savedStrategyExperiment, frozenExperimentDraft, frozenExperimentBenchmark } from "../lib/strategy-experiments";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -51,6 +53,7 @@
   export let strategyLoading = false;
   export let savedLoading = false;
   export let riskHandoffLoading = false;
+  export let errorMessage = "";
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
   export let onComposeStrategy: (options: StrategyLabComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
   export let onComposePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
@@ -59,6 +62,7 @@
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
   export let onDeleteSaved: (itemId: string) => Promise<boolean> | void;
   export let onRestoreStrategy: ((result: StrategyLabResult) => void) | undefined = undefined;
+  export let onRestoreComposition: ((result: StrategyLabCompositionResult) => void) | undefined = undefined;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let strategyLabHandoffs: StrategyLabHandoffQueueItem[] = [];
   export let handoffLoading = false;
@@ -102,6 +106,9 @@
   let expandedDraftLegs: Record<string, boolean> = {};
   let portfolioName = restoredDraft.name;
   let portfolioBenchmarkSymbol = restoredDraft.benchmarkSymbol;
+  let portfolioBenchmarkObject: GammaResearchObject | null = restoredDraft.benchmarkObject ?? null;
+  let composePending = false;
+  let runNotice = "";
   let portfolioLookbackDays = restoredDraft.lookbackDays;
   let portfolioMinObservations = restoredDraft.minObservations ?? 5;
   let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = restoredDraft.legs.map((leg) => ({ ...leg }));
@@ -113,7 +120,7 @@
   let acceptedStrategyLenses: GammaResearchObject[] = [];
   let acceptedStrategyOverlays: GammaResearchObject[] = [];
   let acceptedHandoffWarnings: string[] = [];
-  let savedStrategyTitle = "Strategy Lab Run";
+  let savedStrategyTitle = "";
   let savedNotes = "";
   const portfolioAssetClasses: Array<{ id: StrategyPortfolioAssetClass; label: string }> = [
     { id: "equity", label: "Equity" },
@@ -223,6 +230,7 @@
       if (leg.id !== id) {
         return leg;
       }
+      leg = { ...leg, retainedObject: undefined };
       if (source === "object" && leg.objectOptionId) {
         return { ...leg, identifier: "", historyText: "" };
       }
@@ -237,6 +245,7 @@
   }
 
   function portfolioDraftSourceLabel(leg: StrategyPortfolioDraftLeg) {
+    if (leg.retainedObject && leg.historyText.trim()) return "Retained";
     if (leg.objectOptionId) return "Object";
     if (leg.historyText.trim()) return "Inline";
     if (leg.identifier.trim()) return "Provider";
@@ -333,26 +342,39 @@
     const summary = summarizeStrategyPortfolioDraft(portfolioDraftLegs);
     const blockingWarnings = [...summary.warnings, ...built.warnings];
     if (!built.legs.length) {
-      strategyInputWarning = blockingWarnings[0] ?? "Add at least one portfolio leg with usable history.";
+      runNotice = blockingWarnings[0] ?? "Add at least one portfolio leg with usable history.";
       return;
     }
-    if (!bookValidation?.valid || bookValidationStale) {
-      strategyInputWarning = "Validate the current signed book before composing it for Risk.";
+    if (built.warnings.length || built.legs.length !== portfolioDraftLegs.filter((leg) => Number(leg.weight) !== 0).length) {
+      runNotice = blockingWarnings.join(" ") || "Every non-zero leg must have valid inputs before composing.";
       return;
     }
     strategyInputWarning = blockingWarnings.join(" ");
-    const result = await onComposePortfolioStrategy({
-      name: portfolioName.trim() || "Strategy Lab Portfolio",
-      legs: built.legs,
-      lenses: acceptedStrategyLenses,
-      overlays: acceptedStrategyOverlays,
-      benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
-      benchmarkObject: null,
-      lookbackDays: portfolioLookbackDays,
-      minObservations: portfolioMinObservations,
-      validation: bookValidation
-    });
-    strategyComposition = result ?? null;
+    composePending = true;
+    runNotice = "";
+    try {
+      const result = await onComposePortfolioStrategy({
+        name: portfolioName.trim() || "Strategy Lab Portfolio",
+        legs: built.legs,
+        lenses: acceptedStrategyLenses,
+        overlays: acceptedStrategyOverlays,
+        benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
+        benchmarkObject: portfolioBenchmarkObject?.symbols.includes(portfolioBenchmarkSymbol.trim().toUpperCase()) ? portfolioBenchmarkObject : null,
+        lookbackDays: portfolioLookbackDays,
+        minObservations: portfolioMinObservations,
+        validation: bookValidation
+      });
+      if (result) {
+        strategyComposition = result;
+        runNotice = `Composed ${result.name}: ${result.returns_points.length} observations. Save this experiment or open it in Risk.`;
+      } else {
+        runNotice = "Composition failed. Review the error and input history, then retry Compose Portfolio.";
+      }
+    } catch (error) {
+      runNotice = error instanceof Error ? error.message : "Composition failed. Review the inputs and retry.";
+    } finally {
+      composePending = false;
+    }
   }
 
   async function validatePortfolioDraft() {
@@ -373,7 +395,7 @@
         lenses: acceptedStrategyLenses,
         overlays: acceptedStrategyOverlays,
         benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
-        benchmarkObject: null,
+        benchmarkObject: portfolioBenchmarkObject?.symbols.includes(portfolioBenchmarkSymbol.trim().toUpperCase()) ? portfolioBenchmarkObject : null,
         lookbackDays: portfolioLookbackDays,
         minObservations: portfolioMinObservations
       });
@@ -393,20 +415,38 @@
     if (!activeStrategyResult) {
       return;
     }
-    await onSaveResearch({
+    const experiment = strategyComposition?.portfolio_inputs ? strategyComposition : null;
+    const saved = await onSaveResearch({
       objectType: "strategy_lab",
       title: savedStrategyTitle.trim() || activeStrategyResult.name,
       notes: savedNotes,
-      payload: { ...activeStrategyResult, saved_from_mode: "strategy_lab" },
+      payload: { ...activeStrategyResult, saved_from_mode: "strategy_lab", ...(experiment ? { experiment_contract: STRATEGY_EXPERIMENT_CONTRACT } : {}) },
       warnings: activeStrategyResult.warnings,
-      sourceProvider: "uploaded_csv",
+      sourceProvider: activeStrategyResult.source_provider,
       origin: "frontend.research.strategy_lab.save",
-      transformationNote: "Saved normalized uploaded return stream; raw uploaded file is not persisted."
+      transformationNote: experiment ? "Retained exact signed inputs, resolved leg/benchmark histories, alignment dates, metrics and source evidence." : "Saved normalized return stream; raw uploaded file is not persisted."
     });
+    runNotice = saved ? `Saved ${saved.title}. Reopen it from Saved Runs after restarting Gamma.` : "Save failed. Review the error and retry.";
     void onLoadSaved();
   }
 
   function loadSavedStrategy(item: SavedResearchItem) {
+    const experiment = savedStrategyExperiment(item);
+    if (experiment?.portfolio_inputs) {
+      strategyComposition = experiment;
+      onRestoreComposition?.(experiment);
+      portfolioName = experiment.portfolio_inputs.name;
+      portfolioBenchmarkSymbol = experiment.portfolio_inputs.benchmark_symbol ?? experiment.portfolio_inputs.benchmark_object?.symbols[0] ?? experiment.benchmark_column ?? "";
+      portfolioBenchmarkObject = frozenExperimentBenchmark(experiment);
+      portfolioLookbackDays = experiment.portfolio_inputs.lookback_days;
+      portfolioMinObservations = experiment.portfolio_inputs.min_observations;
+      portfolioDraftLegs = frozenExperimentDraft(experiment);
+      acceptedStrategyLenses = experiment.lenses; acceptedStrategyOverlays = experiment.overlays;
+      bookValidation = null;
+      runNotice = `Reopened ${item.title}. Revisions use retained leg and benchmark history; edit weights and Compose Portfolio to compare an assumption.`;
+      mode = "composer";
+      return;
+    }
     const hydrated = hydrateStrategyLabResultFromSaved(item);
     if (!hydrated) {
       return;
@@ -434,6 +474,7 @@
   $: strategyComposerDraft.set({
     name: portfolioName,
     benchmarkSymbol: portfolioBenchmarkSymbol,
+    benchmarkObject: portfolioBenchmarkObject,
     lookbackDays: portfolioLookbackDays,
     minObservations: portfolioMinObservations,
     legs: portfolioDraftLegs,
@@ -737,11 +778,14 @@
                 <button type="button" class="ghost-button" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
                   {bookValidationLoading ? "Validating..." : "Validate Book"}
                 </button>
-                <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || !portfolioDraftBuild.legs.length || !bookValidation?.valid || bookValidationStale}>
-                  {strategyLoading ? "Composing..." : "Compose Portfolio"}
+                <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || composePending}>
+                  {strategyLoading || composePending ? "Composing..." : "Compose Portfolio"}
                 </button>
               </div>
             </div>
+
+            {#if runNotice}<p role="status">{runNotice}</p>{/if}
+            {#if errorMessage}<p class="warning" role="alert">{errorMessage}</p>{/if}
 
             <div class="field-grid compact-fields">
               <label><span>Name</span><input bind:value={portfolioName} /></label>
@@ -795,7 +839,7 @@
                     <tr>
                       <td><input class="compact-input wide" bind:value={leg.label} placeholder="Leg label" /></td>
                       <td>
-                        <select class="compact-input class-select" bind:value={leg.assetClass}>
+                        <select class="compact-input class-select" bind:value={leg.assetClass} on:change={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}>
                           {#each portfolioAssetClasses as assetClass}
                             <option value={assetClass.id}>{assetClass.label}</option>
                           {/each}
@@ -989,6 +1033,7 @@
                 </div>
                 <div class="builder-actions compact">
                   <small>{strategyComposition.returns_points.length} return points</small>
+                  <button type="button" class="ghost-button" on:click={saveStrategyRun} disabled={savedLoading || composePending}>Save Experiment</button>
                   <button type="button" class="ghost-button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading}>
                     {riskHandoffLoading ? "Opening..." : "Open In Risk"}
                   </button>
@@ -1294,9 +1339,10 @@
                       <td>{item.warnings.length}</td>
                       <td>
                         <div class="table-actions">
-                          {#if savedResearchCanReloadStrategy(item)}
+                          {#if savedResearchCanReloadStrategy(item) && !savedStrategyExperiment(item)}
                             <button type="button" class="ghost-button" on:click={() => loadSavedStrategy(item)}>Load Strategy</button>
                           {/if}
+                          {#if savedStrategyExperiment(item)}<button type="button" class="ghost-button" on:click={() => loadSavedStrategy(item)}>Reopen Experiment</button>{/if}
                           <button type="button" class="ghost-button" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
                         </div>
                       </td>
@@ -1309,12 +1355,15 @@
             </table>
           </div>
         </article>
+        <StrategyRunComparison items={visibleSavedItems} current={strategyComposition} />
       </div>
 
       <aside class="support-column">
         <article class="panel control-panel">
           <div class="rail-header"><div><p class="eyebrow">Save Current</p><h3>Strategy Run</h3></div></div>
-          <label><span>Strategy Title</span><input bind:value={savedStrategyTitle} /></label>
+          <label><span>Strategy Title</span><input bind:value={savedStrategyTitle} placeholder={activeStrategyResult?.name ?? "Experiment name"} /></label>
+          {#if runNotice}<p role="status">{runNotice}</p>{/if}
+          {#if errorMessage}<p class="warning" role="alert">{errorMessage}</p>{/if}
           <div class="builder-actions"><button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button></div>
           <label><span>Notes</span><textarea bind:value={savedNotes} rows="5"></textarea></label>
         </article>

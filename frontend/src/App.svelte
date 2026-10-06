@@ -199,6 +199,7 @@
     runDiagnosticsAction,
     compareResearch,
     restoreStrategyLabResult,
+    restoreStrategyLabComposition,
     runResearch,
     saveResearchItem,
     deleteSavedResearchItem,
@@ -3026,6 +3027,8 @@
             onSaveResearch={saveResearchItem}
             onDeleteSaved={deleteSavedResearchItem}
             onRestoreStrategy={restoreStrategyLabResult}
+            onRestoreComposition={restoreStrategyLabComposition}
+            errorMessage={$lastError}
             onOpenRisk={openRiskFromResearch}
             strategyLabHandoffs={$strategyLabHandoffQueue}
             handoffLoading={$loading.strategyLabHandoff}

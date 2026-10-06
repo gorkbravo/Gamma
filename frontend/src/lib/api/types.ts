@@ -922,11 +922,23 @@ export interface StrategyLabPortfolioLegInput {
 }
 
 export interface StrategyLabCompositionResult extends StrategyLabResult {
+  portfolio_inputs?: StrategyLabPortfolioInputs | null;
   leg_contributions: Record<string, number>;
   risk_legs?: ResearchBookRiskLeg[];
   lenses: GammaResearchObject[];
   overlays: GammaResearchObject[];
   alignment_diagnostics: Record<string, unknown>;
+}
+
+export interface StrategyLabPortfolioInputs {
+  name: string;
+  legs: StrategyLabPortfolioLegInput[];
+  lenses: GammaResearchObject[];
+  overlays: GammaResearchObject[];
+  benchmark_symbol: string | null;
+  benchmark_object: GammaResearchObject | null;
+  lookback_days: number;
+  min_observations: number;
 }
 
 export interface StrategyLabBookValidation {

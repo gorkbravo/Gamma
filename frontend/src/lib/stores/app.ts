@@ -1,4 +1,5 @@
 import { get, writable } from "svelte/store";
+import { compositionValidation } from "../strategy-experiments";
 import { deleteJson, getJson, getNdjsonStream, getText, patchJson, postJson, postNdjsonStream, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import {
@@ -253,6 +254,7 @@ export interface SharedEquitySelection {
 }
 
 export interface RiskComputeOptions {
+  researchBookBenchmarkPoints?: Array<{ timestamp: string; value: number }> | null;
   alpha: number;
   lookbackDays: number;
   horizonDays: number;
@@ -697,6 +699,7 @@ function resolvedIvWorkbench(): IvWorkbenchState | null {
  * GUA-20260708-8 before it).
  */
 export interface StrategyComposerDraft {
+  benchmarkObject?: GammaResearchObject | null;
   name: string;
   benchmarkSymbol: string;
   lookbackDays: number;
@@ -1966,13 +1969,14 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
       if (signal.aborted) return null;
       strategyLabResult.set(result);
       strategyLabComposition.set(null);
+      strategyLabResearchBook.set(null);
       researchCompareResult.set(null);
       resetCopilotCard("research");
       lastError.set("");
       return result;
     } catch (error) {
       if (!isAbortError(error)) setError(error);
-      return null;
+        return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -1994,16 +1998,16 @@ export async function composeStrategyLab(options: StrategyLabComposeOptions) {
       const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/compose", payload, { signal });
       if (signal.aborted) return null;
       strategyLabComposition.set(result);
+      strategyLabResearchBook.set(null);
       researchCompareResult.set(null);
       resetCopilotCard("research");
       lastError.set("");
       return result;
     } catch (error) {
       if (!isAbortError(error)) {
-        strategyLabComposition.set(null);
         setError(error);
       }
-      return null;
+        return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -2016,7 +2020,7 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
       legs: options.legs,
       lenses: options.lenses ?? [],
       overlays: options.overlays ?? [],
-      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+      benchmark_symbol: options.benchmarkSymbol === undefined ? "SPY" : options.benchmarkSymbol,
       benchmark_object: options.benchmarkObject ?? null,
       lookback_days: options.lookbackDays ?? 756,
       min_observations: options.minObservations ?? 5
@@ -2026,21 +2030,18 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     try {
       const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", payload, { signal });
       if (signal.aborted) return null;
-    strategyLabComposition.set(result);
-    if (options.validation?.valid) {
-      const book = buildStrategyLabResearchBook(result, options.validation, options.benchmarkSymbol ?? null);
+      const book = buildStrategyLabResearchBook(result, compositionValidation(result), result.portfolio_inputs?.benchmark_symbol ?? options.benchmarkSymbol ?? null);
+      strategyLabComposition.set(result);
       strategyLabResearchBook.set(book);
-    }
-    researchCompareResult.set(null);
-    resetCopilotCard("research");
-    lastError.set("");
-    return result;
+      researchCompareResult.set(null);
+      resetCopilotCard("research");
+      lastError.set("");
+      return result;
     } catch (error) {
       if (!isAbortError(error)) {
-        strategyLabComposition.set(null);
         setError(error);
       }
-    return null;
+      return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -2128,7 +2129,7 @@ export async function validateStrategyLabPortfolio(options: StrategyLabPortfolio
       return result;
     } catch (error) {
       if (!isAbortError(error)) setError(error);
-      return null;
+        return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -2263,8 +2264,17 @@ export function acceptResolvedStrategyLabHandoff(id: string) {
 export function restoreStrategyLabResult(result: StrategyLabResult) {
   strategyLabResult.set(result);
   strategyLabComposition.set(null);
+  strategyLabResearchBook.set(null);
   researchCompareResult.set(null);
   resetCopilotCard("research");
+  lastError.set("");
+}
+
+export function restoreStrategyLabComposition(result: StrategyLabCompositionResult) {
+  const book = buildStrategyLabResearchBook(result, compositionValidation(result), result.portfolio_inputs?.benchmark_symbol ?? null);
+  strategyLabComposition.set(result);
+  strategyLabResearchBook.set(book);
+  researchCompareResult.set(null);
   lastError.set("");
 }
 
@@ -3503,6 +3513,7 @@ export async function computeRisk(options: RiskComputeOptions) {
     source_object_id: options.riskSourceObjectId ?? null,
     source_origin: options.riskSourceOrigin ?? null,
     research_book_return_points: options.researchBookReturnPoints ?? [],
+    research_book_benchmark_points: options.researchBookBenchmarkPoints ?? null,
     research_book_legs: options.researchBookRiskLegs ?? [],
     alpha: options.alpha,
     lookback_days: options.lookbackDays,

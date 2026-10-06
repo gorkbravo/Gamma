@@ -12,12 +12,13 @@ export function buildStrategyLabRiskRequest(book: StrategyLabResearchBook): Risk
     snapshot: book.snapshot,
     sourceScope: "research_book",
     researchBookReturnPoints: book.object.return_points,
+    researchBookBenchmarkPoints: book.composition?.benchmark_points ?? null,
     researchBookRiskLegs: book.object.risk_legs ?? [],
     riskSourceLabel: book.sourceLabel,
     riskSourceObjectId: book.object.object_id,
     riskSourceOrigin: String(book.object.provenance.origin ?? "strategy_lab"),
     alpha: 0.95,
-    lookbackDays: 252,
+    lookbackDays: book.composition?.portfolio_inputs?.lookback_days ?? 252,
     horizonDays: 1,
     mcHorizonDays: 10,
     mcSimulationModel: "Gaussian",
@@ -55,6 +56,7 @@ export function createRiskHandoffController(deps: {
               deps.setActiveTab("risk");
               return await deps.computeRisk(buildStrategyLabRiskRequest(book));
             }
+            throw new Error("Compose or reopen a Strategy Lab experiment before opening it in Risk.");
           }
           const request = buildRiskRequestFromResearch(deps.getResearchResult());
           if (!request) {

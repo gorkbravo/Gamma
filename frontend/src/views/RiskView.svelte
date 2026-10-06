@@ -213,6 +213,10 @@
     adoptedResult = result;
     const adopted = adoptRiskSourceFromResult({ selected: selectedSource, available: availableRiskSources, result });
     if (adopted) selectedSource = adopted;
+    if (adopted === "strategy_lab_book" && strategyLabResearchBook) {
+      benchmarkSymbol = strategyLabResearchBook.benchmarkSymbol || "SPY";
+      lookbackDays = strategyLabResearchBook.composition?.portfolio_inputs?.lookback_days ?? lookbackDays;
+    }
   }
   $: sourceView = resolveRiskSourceView({ selected: selectedSource, result });
   $: computeSnapshot = riskSnapshotFor(selectedSource, snapshot, researchSnapshot, strategyLabResearchBook);
@@ -258,6 +262,8 @@
         snapshot: riskSnapshotFor(sourceId, snapshot, researchSnapshot, strategyLabResearchBook),
         sourceScope: riskSourceScopeFor(sourceId),
         researchBookReturnPoints: book?.object.return_points ?? [],
+        researchBookBenchmarkPoints: book && benchmarkSymbol.trim().toUpperCase() === (book.benchmarkSymbol || "SPY")
+          ? book.composition?.benchmark_points ?? null : null,
         researchBookRiskLegs: book?.object.risk_legs ?? [],
         riskSourceLabel: riskSourceLabelFor(sourceId, strategyLabResearchBook),
         riskSourceObjectId: book?.object.object_id ?? null,

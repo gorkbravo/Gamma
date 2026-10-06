@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -98,7 +100,16 @@ class SavedResearchStore:
 
     def _write_item(self, item: SavedResearchItem) -> None:
         path = self.items_dir / f"{self._safe_id(item.id)}.json"
-        path.write_text(json.dumps(self._to_json(item), indent=2, sort_keys=True), encoding="utf-8")
+        content = json.dumps(self._to_json(item), indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
+        descriptor, temporary = tempfile.mkstemp(dir=self.items_dir, suffix=".tmp")
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
     @staticmethod
     def _to_json(item: SavedResearchItem) -> dict[str, Any]:

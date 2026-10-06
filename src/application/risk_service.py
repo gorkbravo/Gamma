@@ -61,6 +61,7 @@ class RiskComputeRequest:
     source_object_id: str | None = None
     source_origin: str | None = None
     research_book_returns: pd.Series | None = None
+    research_book_benchmark_returns: pd.Series | None = None
     research_book_legs: list[ResearchBookRiskLeg] | None = None
 
     def __post_init__(self) -> None:
@@ -649,6 +650,7 @@ class RiskService:
             beta_window=request.beta_window,
             base_currency=request.base_currency,
             benchmark_symbol=request.benchmark_symbol,
+            retained_benchmark_returns=request.research_book_benchmark_returns,
         )
         warnings.extend(benchmark.warnings or [])
         if benchmark.beta is None or benchmark.correlation is None:
@@ -2273,9 +2275,18 @@ class RiskService:
         beta_window: int,
         base_currency: str,
         benchmark_symbol: str,
+        retained_benchmark_returns: pd.Series | None = None,
     ) -> BenchmarkMetricsResult:
         result = BenchmarkMetricsResult()
-        benchmark_returns, benchmark_warnings = self._load_benchmark_returns(lookback_days, base_currency, benchmark_symbol)
+        if retained_benchmark_returns is None:
+            benchmark_returns, benchmark_warnings = self._load_benchmark_returns(lookback_days, base_currency, benchmark_symbol)
+        else:
+            benchmark_returns = pd.to_numeric(retained_benchmark_returns, errors="coerce").dropna()
+            benchmark_returns = benchmark_returns[np.isfinite(benchmark_returns)].sort_index()
+            if getattr(benchmark_returns.index, "tz", None) is not None:
+                benchmark_returns.index = benchmark_returns.index.tz_convert(None)
+            benchmark_returns = benchmark_returns[~benchmark_returns.index.duplicated(keep="last")]
+            benchmark_warnings = ["Benchmark uses the retained Strategy Lab experiment history; no provider reload was made."]
         result.warnings.extend(benchmark_warnings)
         if benchmark_returns is None or benchmark_returns.empty or port_ret.empty:
             return result

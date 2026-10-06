@@ -63,6 +63,7 @@ export type StrategyPortfolioAssetClass = "equity" | "etf" | "commodity" | "pred
 export type StrategyPortfolioValueKind = "return" | "level";
 
 export interface StrategyPortfolioDraftLeg {
+  retainedObject?: GammaResearchObject;
   id: string;
   label: string;
   assetClass: StrategyPortfolioAssetClass;
@@ -763,7 +764,11 @@ export function buildStrategyPortfolioLegInputs(
     if (!Number.isFinite(weight) || weight === 0) {
       continue;
     }
-    const selectedObject = leg.objectOptionId ? objectById.get(leg.objectOptionId) ?? null : null;
+    const retained = leg.retainedObject;
+    const retainedHistory = retained ? ["date,value", ...retained.return_points.map((p) => `${p.timestamp},${p.value}`)].join("\n") : "";
+    const useRetained = retained && retained.symbols.some((symbol) => symbol.toUpperCase() === leg.identifier.trim().toUpperCase())
+      && retained.provenance.asset_class === leg.assetClass && leg.valueKind === "return" && leg.historyText === retainedHistory;
+    const selectedObject = leg.objectOptionId ? objectById.get(leg.objectOptionId) ?? null : useRetained ? retained : null;
     if (leg.objectOptionId && !selectedObject) {
       warnings.push(`${leg.label || leg.objectOptionId} is no longer available as a Strategy Lab object.`);
       continue;
@@ -1104,6 +1109,8 @@ export function buildResearchBookObjectFromStrategyComposition(
       symbol: weight.symbol,
       weight: normalizeSignatureNumber(weight.weight)
     })),
+    benchmark_column: result.benchmark_column,
+    benchmark_points: normalizeReturnPointSignature(result.benchmark_points),
     return_points: normalizeReturnPointSignature(returnPoints),
     risk_legs: riskLegs.map((leg) => ({
       leg_id: leg.leg_id,

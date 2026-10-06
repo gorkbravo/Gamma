@@ -2673,6 +2673,8 @@ Keep the Research workspace home as a dense cross-asset situation report with ne
 
 Deepen the shipped Equity Research and Strategy Lab tabs across provider breadth, saved/reusable objects, comparisons, regime analysis, and cross-tab handoffs.
 
+On October 6, the manual Strategy Lab → Risk saved-experiment milestone closed: direct composition now reports results or actionable errors; versioned saves retain exact signed inputs, resolved leg/benchmark histories, alignment and provenance; reopening restores the editable book; Risk uses retained benchmark data; and Saved Runs compares revised assumptions over a shared observation window. Browser acceptance composed QQQ minus SPY from 289 IBKR observations, restarted the backend, then reopened, ran Risk and compared revised weights with TWS disconnected. This does not close the broader research-depth or Risk workstreams. See [saved experiment acceptance](docs/audits/usability/strategy_lab_experiments_2026-10-06.md).
+
 ### Workstream 2A - Research Script Workspace
 
 Complete for this pass. Maintain the Strategy Lab `Script` mode where Copilot Operator can draft transparent Python, the user controls the canonical source, and an ephemeral isolated runtime executes only against copied read-only data with typed outputs and no Gamma, host, credential, broker, wallet, network, or execution authority.

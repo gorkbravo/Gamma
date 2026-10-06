@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
+import math
 from typing import Any, Literal
 
 import pandas as pd
@@ -634,6 +636,7 @@ class StrategyLabAnalyzeResponseModel(BaseModel):
 
 
 class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
+    portfolio_inputs: StrategyLabPortfolioCompositionRequestModel | None = None
     leg_contributions: dict[str, float] = Field(default_factory=dict)
     risk_legs: list[ResearchBookRiskLegModel] = Field(default_factory=list)
     lenses: list[GammaResearchObjectModel] = Field(default_factory=list)
@@ -785,6 +788,30 @@ class SavedResearchCreateRequestModel(BaseModel):
     source_provider: str = "gamma_saved_research"
     origin: str = "research_service.saved_research.create"
     transformation_note: str | None = None
+
+    @field_validator("payload")
+    @classmethod
+    def validate_experiment(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        contract = payload.get("experiment_contract")
+        if contract is None:
+            return payload
+        if contract != "gamma.strategy-lab-experiment.v1":
+            raise ValueError("Unsupported Strategy Lab experiment version.")
+        composition = StrategyLabCompositionResponseModel.model_validate(payload)
+        inputs = composition.portfolio_inputs
+        if inputs is None or not composition.risk_legs or not composition.returns_points:
+            raise ValueError("A saved experiment requires exact composition inputs and resolved leg history.")
+        active = [leg for leg in inputs.legs if leg.weight != 0]
+        if len(active) != len(composition.risk_legs):
+            raise ValueError("Saved experiment input legs do not match resolved risk legs.")
+        gross = sum(abs(leg.weight) for leg in active)
+        if not math.isfinite(gross) or gross <= 0:
+            raise ValueError("Saved experiment weights must be finite and non-zero.")
+        for requested, retained in zip(active, composition.risk_legs, strict=True):
+            if not math.isclose(requested.weight / gross, retained.weight, rel_tol=1e-9, abs_tol=1e-12):
+                raise ValueError("Saved experiment signed weights differ from the composed result.")
+        json.dumps(payload, allow_nan=False)
+        return payload
 
     def to_domain(self) -> SavedResearchCreateRequest:
         return SavedResearchCreateRequest(

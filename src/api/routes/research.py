@@ -139,7 +139,9 @@ def compose_strategy_lab_portfolio(
         result = runtime.research_service.compose_strategy_lab_portfolio(payload.to_domain())
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
-    return StrategyLabCompositionResponseModel.from_domain(result)
+    response = StrategyLabCompositionResponseModel.from_domain(result)
+    response.portfolio_inputs = payload
+    return response
 
 
 @router.post("/research/strategy-lab/portfolio-validate", response_model=StrategyLabBookValidationResponseModel)
