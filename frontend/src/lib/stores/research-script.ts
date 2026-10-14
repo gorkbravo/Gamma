@@ -8,17 +8,22 @@ import {
   createResearchScript,
   createResearchScriptRevision,
   createResearchScriptRun,
+  createResearchScriptInputBundle,
   duplicateResearchScript,
   exportResearchScriptInput,
   getResearchScriptRuntimeCapabilities,
   getResearchScriptInputSnapshot,
+  getResearchScriptInputPreview,
+  listResearchScriptInputBundles,
   getResearchScriptStorageDiagnostics,
   getResearchScript,
   listResearchScriptRuns,
   listResearchScripts,
   rejectResearchScriptRevision,
   restoreResearchScript,
-  type ExportResearchScriptInputPayload
+  type ExportResearchScriptInputPayload,
+  type CreateResearchScriptRunPayload,
+  type ResearchScriptInputPreview
 } from "../api/research-scripts";
 import type {
   ResearchScript,
@@ -31,11 +36,10 @@ import type {
   ResearchScriptStorageDiagnostics
 } from "../api/types";
 
-export const DEFAULT_RESEARCH_SCRIPT_SOURCE = `# Gamma Research Script
-# Save an immutable revision before running it in the configured bounded runtime.
+export const DEFAULT_RESEARCH_SCRIPT_SOURCE = `# Write ordinary Python. Read added datasets using their filenames.
+# Example: prices = pandas.read_csv("spy-prices.csv")
 
-def research(inputs):
-    return {"status": "preview"}
+print("Hello World")
 `;
 
 export interface ResearchScriptWorkspaceState {
@@ -48,6 +52,11 @@ export interface ResearchScriptWorkspaceState {
   selectedRun: ResearchScriptRun | null;
   capabilities: ResearchScriptRuntimeCapabilities | null;
   preparedInputSnapshot: ResearchScriptInputSnapshot | null;
+  inputBundles: ResearchScriptInputSnapshot[];
+  selectedRunInputSnapshot: ResearchScriptInputSnapshot | null;
+  inputPreview: ResearchScriptInputPreview | null;
+  previewLoading: boolean;
+  previewError: string;
   runComparison: ResearchScriptRunComparison | null;
   diagnostics: ResearchScriptStorageDiagnostics | null;
   includeArchived: boolean;
@@ -68,6 +77,11 @@ export const initialResearchScriptWorkspaceState = (): ResearchScriptWorkspaceSt
   selectedRun: null,
   capabilities: null,
   preparedInputSnapshot: null,
+  inputBundles: [],
+  selectedRunInputSnapshot: null,
+  inputPreview: null,
+  previewLoading: false,
+  previewError: "",
   runComparison: null,
   diagnostics: null,
   includeArchived: false,
@@ -118,8 +132,8 @@ export function updateResearchScriptInput(inputFilename: string, inputContent: s
     ...state,
     inputFilename,
     inputContent,
-    preparedInputSnapshot: null,
-    runComparison: null
+    error: "",
+    notice: ""
   }));
 }
 
@@ -181,6 +195,9 @@ export async function createWorkspaceResearchScript(title: string) {
       runs: [],
       selectedRun: null,
       preparedInputSnapshot: null,
+      inputBundles: [],
+      selectedRunInputSnapshot: null,
+      inputPreview: null,
       runComparison: null,
       loading: null,
       notice: "Script created with immutable revision 1."
@@ -197,9 +214,10 @@ export async function loadResearchScript(scriptId: string) {
   if (!scriptId) return null;
   setBusy("load");
   try {
-    const [detail, runResponse] = await Promise.all([
+    const [detail, runResponse, inputBundles] = await Promise.all([
       getResearchScript(scriptId),
-      listResearchScriptRuns(scriptId)
+      listResearchScriptRuns(scriptId),
+      listResearchScriptInputBundles(scriptId)
     ]);
     const revision = canonicalRevision(detail);
     researchScriptWorkspace.update((state) => ({
@@ -210,10 +228,16 @@ export async function loadResearchScript(scriptId: string) {
       selectedRevisionId: revision?.revision_id ?? null,
       runs: runResponse.items,
       selectedRun: runResponse.items[0] ?? null,
-      preparedInputSnapshot: null,
+      preparedInputSnapshot: inputBundles[0] ?? null,
+      inputBundles,
+      selectedRunInputSnapshot: null,
+      inputPreview: null,
+      inputFilename: "",
+      inputContent: "",
       runComparison: null,
       loading: null
     }));
+    if (runResponse.items[0]) selectResearchScriptRun(runResponse.items[0].run_id);
     return detail;
   } catch (error) {
     researchScriptWorkspace.update((state) => ({ ...state, loading: null, error: messageOf(error) }));
@@ -288,24 +312,16 @@ export async function runSelectedResearchScript() {
     }));
     return null;
   }
-  if (state.inputContent && !state.inputFilename.trim()) {
-    researchScriptWorkspace.update((current) => ({ ...current, error: "Name the optional text input before running." }));
+  if (state.inputContent || state.inputFilename.trim()) {
+    researchScriptWorkspace.update((current) => ({ ...current, error: "Add the pasted input to the bundle, or clear it, before running." }));
     return null;
   }
   setBusy("run");
   try {
-    const inputFiles = !state.preparedInputSnapshot && state.inputFilename.trim()
-      ? [{
-          logical_filename: state.inputFilename.trim(),
-          media_type: "text/plain",
-          content: state.inputContent,
-          source_kind: "user_upload" as const
-        }]
-      : [];
     const run = await createResearchScriptRun(state.detail.script.script_id, {
       revision_id: revision.revision_id,
       input_snapshot_id: state.preparedInputSnapshot?.snapshot_id,
-      input_files: inputFiles
+      input_files: []
     });
     researchScriptWorkspace.update((current) => ({
       ...current,
@@ -324,7 +340,13 @@ export async function runSelectedResearchScript() {
       const inputSnapshot = await getResearchScriptInputSnapshot(run.input_snapshot_id);
       researchScriptWorkspace.update((current) => (
         current.selectedRun?.run_id === run.run_id
-          ? { ...current, preparedInputSnapshot: inputSnapshot }
+          ? { ...current, selectedRunInputSnapshot: inputSnapshot,
+            // Adding data can finish while the retained manifest is being fetched.
+            // Never overwrite newer inputs with the just-finished run's snapshot.
+            preparedInputSnapshot: current.preparedInputSnapshot?.snapshot_id === state.preparedInputSnapshot?.snapshot_id
+              ? inputSnapshot : current.preparedInputSnapshot,
+            inputBundles: current.inputBundles.some(item => item.snapshot_id === inputSnapshot.snapshot_id)
+              ? current.inputBundles : [inputSnapshot, ...current.inputBundles] }
           : current
       ));
     } catch (error) {
@@ -348,13 +370,13 @@ export function selectResearchScriptRun(runId: string) {
     ...state,
     selectedRun: run,
     runComparison: null,
-    preparedInputSnapshot: null
+    selectedRunInputSnapshot: null
   }));
   void getResearchScriptInputSnapshot(run.input_snapshot_id)
     .then((snapshot) => {
       researchScriptWorkspace.update((state) => (
         state.selectedRun?.run_id === run.run_id
-          ? { ...state, preparedInputSnapshot: snapshot }
+          ? { ...state, selectedRunInputSnapshot: snapshot }
           : state
       ));
     })
@@ -417,6 +439,7 @@ export async function prepareResearchScriptDomainInput(
   payload: Omit<ExportResearchScriptInputPayload, "additional_input_files">
 ) {
   const state = get(researchScriptWorkspace);
+  if (state.loading) return null;
   if (!state.detail) {
     researchScriptWorkspace.update((current) => ({
       ...current,
@@ -424,23 +447,17 @@ export async function prepareResearchScriptDomainInput(
     }));
     return null;
   }
-  const additionalInputFiles = state.inputFilename.trim()
-    ? [{
-        logical_filename: state.inputFilename.trim(),
-        media_type: "text/plain",
-        content: state.inputContent,
-        source_kind: "user_upload" as const
-      }]
-    : [];
   setBusy("input");
   try {
     const snapshot = await exportResearchScriptInput(state.detail.script.script_id, {
       ...payload,
-      additional_input_files: additionalInputFiles
+      base_snapshot_id: state.preparedInputSnapshot?.snapshot_id
     });
     researchScriptWorkspace.update((current) => ({
       ...current,
       preparedInputSnapshot: snapshot,
+      inputBundles: [snapshot, ...current.inputBundles].slice(0, 100),
+      inputPreview: null,
       loading: null,
       notice: `Prepared immutable input snapshot ${snapshot.manifest_sha256.slice(0, 12)} with ${snapshot.files.length} file${snapshot.files.length === 1 ? "" : "s"}.`
     }));
@@ -449,6 +466,145 @@ export async function prepareResearchScriptDomainInput(
   } catch (error) {
     researchScriptWorkspace.update((current) => ({ ...current, loading: null, error: messageOf(error) }));
     return null;
+  }
+}
+
+type InputFilePayload = NonNullable<CreateResearchScriptRunPayload["input_files"]>[number];
+
+async function editResearchScriptInputBundle(
+  inputFiles: InputFilePayload[],
+  retainedFilenames?: string[],
+  clearPaste = false
+) {
+  const state = get(researchScriptWorkspace);
+  if (state.loading) return null;
+  if (!state.detail) {
+    researchScriptWorkspace.update((current) => ({ ...current, error: "Create or load a script before adding inputs." }));
+    return null;
+  }
+  setBusy("input");
+  try {
+    const snapshot = await createResearchScriptInputBundle(state.detail.script.script_id, {
+      base_snapshot_id: state.preparedInputSnapshot?.snapshot_id,
+      retained_filenames: retainedFilenames,
+      input_files: inputFiles
+    });
+    researchScriptWorkspace.update((current) => ({
+      ...current,
+      preparedInputSnapshot: snapshot,
+      inputBundles: [snapshot, ...current.inputBundles].slice(0, 100),
+      inputPreview: null,
+      previewError: "",
+      inputFilename: clearPaste ? "" : current.inputFilename,
+      inputContent: clearPaste ? "" : current.inputContent,
+      loading: null,
+      notice: `Input bundle ready: ${snapshot.files.length} file${snapshot.files.length === 1 ? "" : "s"}.`
+    }));
+    await refreshStorageDiagnostics();
+    return snapshot;
+  } catch (error) {
+    researchScriptWorkspace.update((current) => ({ ...current, loading: null, error: messageOf(error) }));
+    return null;
+  }
+}
+
+const inputMediaType = (filename: string) => filename.toLowerCase().endsWith(".csv")
+  ? "text/csv" : filename.toLowerCase().endsWith(".json") ? "application/json" : "text/plain";
+
+export async function addPastedResearchScriptInput() {
+  const state = get(researchScriptWorkspace);
+  if (!state.inputFilename.trim()) {
+    researchScriptWorkspace.update((current) => ({ ...current, error: "Name the pasted input before adding it." }));
+    return null;
+  }
+  return editResearchScriptInputBundle([{
+    logical_filename: state.inputFilename.trim(),
+    media_type: inputMediaType(state.inputFilename),
+    content: state.inputContent,
+    source_kind: "user_upload"
+  }], undefined, true);
+}
+
+export async function importResearchScriptFiles(files: File[]) {
+  const state = get(researchScriptWorkspace);
+  if (!files.length || state.loading) return null;
+  if (!state.detail) {
+    researchScriptWorkspace.update((current) => ({ ...current, error: "Create or load a script before importing files." }));
+    return null;
+  }
+  const limits = state.capabilities?.active_limits;
+  const names = [...(state.preparedInputSnapshot?.files.map((file) => file.logical_filename) ?? []), ...files.map((file) => file.name)];
+  try {
+    if (names.length > (limits?.input_files ?? 20)) throw new Error("Input bundle exceeds the file-count limit.");
+    if (new Set(names.map(name => name.trim().toLowerCase())).size !== names.length) throw new Error("Input filenames must be unique. Remove the existing file before replacing it.");
+    if (files.some((file) => !/\.(csv|json|txt)$/i.test(file.name))) throw new Error("Import UTF-8 CSV, JSON or TXT files.");
+    if (files.some((file) => file.size > (limits?.individual_input_bytes ?? 20 * 1024 * 1024))) throw new Error("An input file exceeds the per-file size limit.");
+    if ((state.preparedInputSnapshot?.total_bytes ?? 0) + files.reduce((total, file) => total + file.size, 0) > (limits?.total_input_bytes ?? 64 * 1024 * 1024)) throw new Error("Input bundle exceeds the total size limit.");
+    setBusy("input");
+    const inputFiles: InputFilePayload[] = [];
+    for (const file of files) {
+      // Preserve UTF-8 bytes, including a BOM, rather than silently converting an encoding.
+      const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+      inputFiles.push({ logical_filename: file.name, media_type: inputMediaType(file.name), content, source_kind: "user_upload" });
+    }
+    const current = get(researchScriptWorkspace);
+    if (current.detail?.script.script_id !== state.detail.script.script_id ||
+        current.preparedInputSnapshot?.snapshot_id !== state.preparedInputSnapshot?.snapshot_id) {
+      throw new Error("The selected script or bundle changed during import. Select the intended script and import again.");
+    }
+    researchScriptWorkspace.update((current) => ({ ...current, loading: null }));
+    return editResearchScriptInputBundle(inputFiles);
+  } catch (error) {
+    researchScriptWorkspace.update((current) => ({ ...current, loading: null, error: `Import failed: ${messageOf(error)}` }));
+    return null;
+  }
+}
+
+export function removeResearchScriptInput(filename: string) {
+  const snapshot = get(researchScriptWorkspace).preparedInputSnapshot;
+  if (!snapshot) return null;
+  return editResearchScriptInputBundle([], snapshot.files.filter((file) => file.logical_filename !== filename).map((file) => file.logical_filename));
+}
+
+export function useSelectedRunResearchScriptInputs() {
+  researchScriptWorkspace.update((state) => state.loading || !state.selectedRunInputSnapshot ? state : ({
+    ...state,
+    preparedInputSnapshot: state.selectedRunInputSnapshot,
+    inputBundles: state.inputBundles.some(item => item.snapshot_id === state.selectedRunInputSnapshot?.snapshot_id)
+      ? state.inputBundles : [state.selectedRunInputSnapshot, ...state.inputBundles].slice(0, 100),
+    inputPreview: null,
+    notice: "Selected the historical run's frozen inputs for the next run."
+  }));
+}
+
+export function selectResearchScriptInputBundle(snapshotId: string) {
+  researchScriptWorkspace.update((state) => {
+    if (state.loading) return state;
+    const bundle = state.inputBundles.find(item => item.snapshot_id === snapshotId);
+    if (!bundle) return state;
+    return { ...state, preparedInputSnapshot: bundle, inputPreview: null, previewError: "",
+      notice: "Selected a retained input bundle for the next run." };
+  });
+}
+
+let previewRequest = 0;
+export async function previewResearchScriptInput(filename: string) {
+  const snapshot = get(researchScriptWorkspace).preparedInputSnapshot;
+  if (!snapshot) return;
+  const request = ++previewRequest;
+  researchScriptWorkspace.update((state) => ({ ...state, inputPreview: null, previewLoading: true, previewError: "" }));
+  try {
+    const preview = await getResearchScriptInputPreview(snapshot.snapshot_id, filename);
+    researchScriptWorkspace.update((state) => request !== previewRequest ? state : ({
+      ...state,
+      inputPreview: state.preparedInputSnapshot?.snapshot_id === snapshot.snapshot_id ? preview : null,
+      previewLoading: false
+    }));
+  } catch (error) {
+    researchScriptWorkspace.update((state) => request !== previewRequest ? state : ({
+      ...state, previewLoading: false,
+      previewError: state.preparedInputSnapshot?.snapshot_id === snapshot.snapshot_id ? messageOf(error) : ""
+    }));
   }
 }
 
@@ -467,6 +623,11 @@ export async function duplicateWorkspaceResearchScript(title?: string) {
       runs: [],
       selectedRun: null,
       preparedInputSnapshot: null,
+      inputBundles: [],
+      selectedRunInputSnapshot: null,
+      inputPreview: null,
+      inputFilename: "",
+      inputContent: "",
       runComparison: null,
       loading: null,
       notice: "Created an explicit duplicate with a new script and revision identity."
@@ -498,6 +659,9 @@ export async function setWorkspaceResearchScriptArchived(archived: boolean) {
       runs: archived && !state.includeArchived ? [] : current.runs,
       selectedRun: archived && !state.includeArchived ? null : current.selectedRun,
       preparedInputSnapshot: null,
+      inputBundles: [],
+      selectedRunInputSnapshot: null,
+      inputPreview: null,
       runComparison: null,
       loading: null,
       notice: archived ? "Archived the script without deleting revisions or retained runs." : "Restored the script."

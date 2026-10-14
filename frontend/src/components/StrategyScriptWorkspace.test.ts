@@ -302,9 +302,12 @@ describe("StrategyScriptWorkspace", () => {
 
     const { body } = render(StrategyScriptWorkspace, { props: { snapshot } });
 
-    expect(body).toContain("Prepare Gamma snapshot");
+    expect(body).toContain("Add Gamma dataset");
     expect(body).toContain("spy.csv");
-    expect(body).toContain("gamma_state");
+    expect(body).toContain("gamma_market_data");
+    expect(body).toContain("Import CSV, JSON or TXT files");
+    expect(body).toContain("Preview spy.csv");
+    expect(body).toContain("Remove spy.csv");
     expect(body).toContain("Duplicate");
     expect(body).toContain("Archive");
     expect(body).toContain("Recover / reload");

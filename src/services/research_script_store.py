@@ -41,6 +41,7 @@ def is_safe_research_script_filename(value: str | None) -> bool:
     return bool(
         text
         and text not in {".", ".."}
+        and not text.endswith(".")
         and all(character in _SAFE_FILENAME_CHARS for character in text)
         and stem not in _WINDOWS_RESERVED_FILENAMES
         and Path(text).name == text
@@ -340,6 +341,16 @@ class ResearchScriptStore:
                 "research_script_input",
                 self._parse_snapshot,
             )
+
+    def list_input_snapshots(self, script_id: str, *, limit: int = 100) -> list[ResearchScriptInputSnapshot]:
+        safe_id = self._require_safe_id(script_id, "script_id")
+        with self._lock:
+            snapshots = [
+                snapshot for path in sorted(self.inputs_dir.glob("*/manifest.json"))
+                if (snapshot := self._load_record(path, "research_script_input", self._parse_snapshot)) is not None
+                and snapshot.script_id == safe_id
+            ]
+        return sorted(snapshots, key=lambda snapshot: (snapshot.created_at, snapshot.snapshot_id), reverse=True)[:limit]
 
     def load_input_contents(self, snapshot: ResearchScriptInputSnapshot) -> dict[str, bytes]:
         safe_id = self._require_safe_id(snapshot.snapshot_id, "snapshot_id")

@@ -9,7 +9,7 @@ This directory is split into active documentation, audits, and archived project 
 - [`design_principles.md`](./design_principles.md): canonical frontend doctrine, token roles, component contracts, interaction/accessibility rules, review tests, and the §14 common-mistakes / §15 quick-reference lookup used as the post-edit check
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
-- [`research_script_workspace_plan.md`](./research_script_workspace_plan.md): completed Strategy Lab `Script` mode architecture, isolated-runtime and authority boundary, domain/API/runtime contracts, delivery evidence, tests, and maintenance rules
+- [`research_script_workspace_plan.md`](./research_script_workspace_plan.md): Strategy Lab `Script` architecture and expansion checkpoints E1-E6, isolated-runtime boundary, data bundles, delivery evidence, tests, and maintenance rules
 - [`copilot_v2_handoff_prompt.md`](./copilot_v2_handoff_prompt.md): reusable ~87%-to-100% handoff prompt for completing temporary tab-owned analyses, same-run approval/recovery, and the release gate while keeping framework choice eval-backed
 - [`strategy_lab_cross_tab_handoffs.md`](./strategy_lab_cross_tab_handoffs.md): active spec and progress board for sending selected research objects from source tabs into the Strategy Lab composer
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro

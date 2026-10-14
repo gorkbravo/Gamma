@@ -3,11 +3,34 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-08-29
-- Last reviewed: 2026-09-04
-- Implementation status: Slices 1-5 implemented and verified; Workstream 2A completion gate satisfied
+- Last reviewed: 2026-10-14
+- Implementation status: Slices 1-5 remain verified; expansion E1 implemented and verified; E2-E6 planned
 - Roadmap owner: Workstream 2A in [`../roadmap.md`](../roadmap.md)
 - Primary product surface: `Strategy Lab / Script`
 - Natural-language entry point: Copilot Operator
+
+## Expansion checkpoints — 2026-10-14
+
+The user's expanded direction is an ordinary Python research workspace for tasks that are more naturally expressed in code than through Gamma's existing screens. Users may write any bounded research computation, including a simple print statement, and combine Gamma datasets with external CSV/JSON. Operator may help acquire inputs, draft code and interpret actual outputs under the existing explicit Script authorization and staged-edit contract. A predefined strategy interface or cross-tab handoff is never required to produce a useful result.
+
+Slices 1–5 below remain the completed baseline. The following checkpoints track the expansion separately; each must record validation evidence before being marked complete.
+
+| Checkpoint | Scope | Acceptance gate | Status |
+|---|---|---|---|
+| E1 — Input bundles and ordinary Python | Add multiple Gamma exports and external UTF-8 CSV/JSON/text files to one immutable bundle; preview/remove inputs; use a runnable top-level starter. | Mixed bundles preserve bytes, metadata and hashes; duplicates, invalid filenames, foreign snapshots and limits fail without losing existing inputs; retained runs remain unchanged after bundle edits; browser checks cover desktop/intermediate/narrow layouts. | Complete (2026-10-14; deterministic/mock acceptance) |
+| E2 — Discoverable data and broader exports | Select Gamma objects with field/unit/coverage previews; add owning-service exports for the concrete Fundamentals, Options, Commodities, Crypto and Prediction Markets use cases. | Each export identifies source, retrieval time, units, coverage and provider degradation; no credentials or live service handles enter the runtime. | Planned |
+| E3 — Operator-assisted custom research | Allow visibly authorized Script tasks when code fits the request; acquire bundles, draft/run exact source and synthesize from actual outputs; improve reviewed revision feedback. | Evals prove scope/role separation, exact dataset/source identities, staged edits, failure truth and no silent fallback to code without Script authorization. | Planned |
+| E4 — Optional typed analytical results | Add an optional output helper/contract for metrics, returns, signals and weights; validate explicit handoffs into existing Strategy Lab/Risk analytics. Logs, tables, images and files remain valid standalone results. | Live structured metrics compare correctly; invalid dates/units/weights remain explicit; opening or saving a derived research object is deliberate and provenance-preserving. | Planned |
+| E5 — Parameters and methodology | Record parameters separately from source; provide bounded sweeps, comparisons, optional lag/cost/rebalance/alignment helpers and holdout/walk-forward checks. | Runs bind source, parameters and inputs; tests prove causal timing and stated cost/rebalance assumptions; no misleading best-in-sample certification. | Planned |
+| E6 — Execution and reproducibility | Add asynchronous jobs, progress/cancellation, runtime/library metadata, optional seed recording and workload-based compute tiers. Evaluate verified libraries or bounded multi-file code only against demonstrated gaps. | Restart/cancel/timeout/expiry retain honest terminal state and unknown usage; repeatability is qualified by environment/seeds; sandbox boundaries and exact-source gates continue to pass. | Planned |
+
+Implementation order: E1 establishes the foundation; select concrete E2 datasets and E3 research journeys next. Later checkpoints have separate acceptance gates and do not imply a new runtime/model/framework. Gamma continues to own data acquisition, permissions, storage and evidence. The official runtime review and provisional Responses/Agents SDK division are recorded in the active Copilot plan under 2026-10-14.
+
+### E1 implementation notes
+
+Implemented additive Gamma exports plus atomic multi-file UTF-8 CSV/JSON/TXT import and explicit pasted-input addition. Bundle edits derive a new immutable snapshot from retained, hash-verified input bytes, preserving timestamps and file provenance; duplicate names, invalid paths, foreign-script snapshots and aggregate/per-file/count limits fail before persistence. Removing a file also removes its filename-associated export references; legacy bundle-wide references are conservatively retained while any original files remain. Previews show up to 8 KiB of text without changing retained bytes. The latest 100 bundles are selectable and the latest bundle reloads even before a first run; historical-run inspection is separate from the next run's inputs, with explicit reuse. The starter runs top-level Python and requires no custom function contract.
+
+Validation: 42 focused backend tests (Script service/storage/API, runtime adapter and Operator regressions), 17 frontend store/component/view tests, TypeScript typecheck and production build. An isolated mock-backend browser journey adds equity history and a Macro series plus two uploaded files, previews CSV, binds a run to four files, removes one file, reloads the unrun three-file bundle, explicitly reuses historical inputs and runs the reduced bundle. Screenshots inspected at 1440/1000/390 pixels with no page overflow or page errors; intermediate control stretching was corrected. The journey also exposed and fixed the stale export identifier label and invalid default Macro series identifier. Evidence lives in ignored `output/playwright/script-bundle/`. No live OpenAI/IBKR call, runtime/model switch, new Operator tool or authority change was made; live mixed-bundle execution remains unverified. Existing unrelated production-build warnings remain.
 
 ## Start Here
 

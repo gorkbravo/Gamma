@@ -22,6 +22,7 @@ from src.models.research_script import (
     ResearchScriptCreateRequest,
     ResearchScriptDataExportRequest,
     ResearchScriptInputFileCreateRequest,
+    ResearchScriptInputBundleRequest,
     ResearchScriptRevisionCreateRequest,
     ResearchScriptRunCreateRequest,
 )
@@ -462,6 +463,23 @@ def test_route_vertical_slice_and_conflicts(tmp_path: Path) -> None:
     assert capabilities.json()["network_access"] is False
     assert client.get(f"/research/strategy-lab/scripts/{script_id}").status_code == 200
 
+    prepared = client.post(
+        f"/research/strategy-lab/scripts/{script_id}/inputs",
+        json={"input_files": [{"logical_filename": "external.csv", "content": "date,value\n2026-10-14,42\n", "media_type": "text/csv"}]},
+    )
+    assert prepared.status_code == 201
+    snapshot_id = prepared.json()["snapshot_id"]
+    listed_bundles = client.get(f"/research/strategy-lab/scripts/{script_id}/inputs")
+    assert listed_bundles.status_code == 200
+    assert [item["snapshot_id"] for item in listed_bundles.json()] == [snapshot_id]
+    preview = client.get(f"/research/strategy-lab/script-inputs/{snapshot_id}/preview", params={"filename": "external.csv"})
+    assert preview.status_code == 200
+    assert preview.json()["text"] == "date,value\n2026-10-14,42\n"
+    assert preview.json()["truncated"] is False
+    assert client.get(f"/research/strategy-lab/script-inputs/{snapshot_id}/preview", params={"filename": "../external.csv"}).status_code == 404
+    invalid_bundle = client.post(f"/research/strategy-lab/scripts/{script_id}/inputs", json={"base_snapshot_id": snapshot_id, "retained_filenames": ["missing.csv"]})
+    assert invalid_bundle.status_code == 422
+
     conflict = client.post(
         f"/research/strategy-lab/scripts/{script_id}/revisions",
         json={"source": f"{SOURCE}# changed\n", "expected_parent_sha256": "0" * 64},
@@ -551,3 +569,97 @@ def test_route_vertical_slice_and_conflicts(tmp_path: Path) -> None:
     assert client.get("/research/strategy-lab/scripts/missing").status_code == 404
 
     runtime.shutdown()
+
+
+def test_mixed_bundle_preserves_copied_bytes_provenance_and_old_runs_on_restart(tmp_path: Path) -> None:
+    service = ResearchScriptService(
+        ResearchScriptStore(tmp_path), MockResearchScriptRuntime(),
+        research_provider=FakeResearchProvider(), macro_service=FakeMacroService(),
+    )
+    script_id = create_script(service, 'print("Hello World")\n').script.script_id
+    equity = service.export_domain_input(script_id, ResearchScriptDataExportRequest(
+        domain="equity_history", object_id="SPY", logical_filename="spy.csv", lookback_days=40,
+    ))
+    macro = service.export_domain_input(script_id, ResearchScriptDataExportRequest(
+        domain="macro_series", object_id="CPI", logical_filename="cpi.csv", base_snapshot_id=equity.snapshot_id,
+    ))
+    external_bytes = "\ufeffdate,name\r\n2026-10-14,España\r\n".encode("utf-8")
+    mixed = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=macro.snapshot_id,
+        input_files=[ResearchScriptInputFileCreateRequest(
+            logical_filename="external.csv", media_type="text/csv", content=external_bytes,
+        )],
+    ))
+    assert [file.logical_filename for file in mixed.files] == ["spy.csv", "cpi.csv", "external.csv"]
+    assert mixed.files[0].content_sha256 == equity.files[0].content_sha256
+    assert mixed.files[0].retrieved_at == equity.files[0].retrieved_at
+    assert mixed.files[0].transformation_note == equity.files[0].transformation_note
+    assert len(mixed.dataset_refs) == len(mixed.source_refs) == 2
+    old_run = service.create_run(script_id, ResearchScriptRunCreateRequest(input_snapshot_id=mixed.snapshot_id))
+    reduced = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=mixed.snapshot_id, retained_filenames=["cpi.csv", "external.csv"],
+    ))
+    assert reduced.snapshot_id != mixed.snapshot_id
+    assert [ref["domain"] for ref in reduced.dataset_refs] == ["macro_series"]
+    assert [ref["logical_filename"] for ref in reduced.source_refs] == ["cpi.csv"]
+    restarted = make_service(tmp_path)
+    assert restarted.list_input_bundles(script_id)[0].snapshot_id == reduced.snapshot_id
+    assert {item.snapshot_id for item in restarted.list_input_bundles(script_id)} == {equity.snapshot_id, macro.snapshot_id, mixed.snapshot_id, reduced.snapshot_id}
+    assert restarted.get_run(old_run.run_id) == old_run
+    retained = restarted.get_input_snapshot(mixed.snapshot_id)
+    assert restarted.store.load_input_contents(retained)["external.csv"] == external_bytes
+    assert len(retained.files) == 3
+    assert restarted.preview_input_file(mixed.snapshot_id, "external.csv")["text"].startswith("date,name")
+
+
+def test_bundle_validation_is_atomic_and_previews_are_bounded(tmp_path: Path, monkeypatch) -> None:
+    service = make_service(tmp_path)
+    script_id = create_script(service).script.script_id
+    base = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[
+        ResearchScriptInputFileCreateRequest(logical_filename="large.txt", media_type="text/plain", content=b"x" * 9000),
+    ]))
+    preview = service.preview_input_file(base.snapshot_id, "large.txt")
+    assert len(preview["text"]) == 8192 and preview["truncated"] is True
+    initial_count = service.storage_diagnostics().input_snapshot_count
+    foreign_script_id = create_script(service).script.script_id
+    invalid_requests = [
+        (foreign_script_id, ResearchScriptInputBundleRequest(base_snapshot_id=base.snapshot_id)),
+        (script_id, ResearchScriptInputBundleRequest(base_snapshot_id=base.snapshot_id, retained_filenames=["absent.csv"])),
+        (script_id, ResearchScriptInputBundleRequest(base_snapshot_id=base.snapshot_id, retained_filenames=["large.txt", "large.txt"])),
+        (script_id, ResearchScriptInputBundleRequest(retained_filenames=[])),
+        (script_id, ResearchScriptInputBundleRequest(base_snapshot_id=base.snapshot_id, input_files=[ResearchScriptInputFileCreateRequest(logical_filename="large.txt", media_type="text/plain", content=b"changed")])),
+        (script_id, ResearchScriptInputBundleRequest(base_snapshot_id=base.snapshot_id, input_files=[ResearchScriptInputFileCreateRequest(logical_filename="LARGE.txt", media_type="text/plain", content=b"changed")])),
+        (script_id, ResearchScriptInputBundleRequest(input_files=[ResearchScriptInputFileCreateRequest(logical_filename="../escape.csv", media_type="text/csv", content=b"x")])),
+        (script_id, ResearchScriptInputBundleRequest(input_files=[ResearchScriptInputFileCreateRequest(logical_filename="escape.csv.", media_type="text/csv", content=b"x")])),
+    ]
+    for target, request in invalid_requests:
+        with pytest.raises(ResearchScriptValidationError):
+            service.create_input_bundle(target, request)
+    monkeypatch.setattr(research_script_service_module, "MAX_RESEARCH_SCRIPT_TOTAL_INPUT_BYTES", 9001)
+    with pytest.raises(ResearchScriptValidationError, match="bundle exceeds"):
+        service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+            base_snapshot_id=base.snapshot_id,
+            input_files=[ResearchScriptInputFileCreateRequest(logical_filename="extra.csv", media_type="text/csv", content=b"12")],
+        ))
+    assert service.storage_diagnostics().input_snapshot_count == initial_count
+    assert service.store.load_input_contents(service.get_input_snapshot(base.snapshot_id)) == {"large.txt": b"x" * 9000}
+    with monkeypatch.context() as limits:
+        limits.setattr(research_script_service_module, "MAX_RESEARCH_SCRIPT_INPUT_FILES", 1)
+        with pytest.raises(ResearchScriptValidationError, match="file count exceeds"):
+            service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+                base_snapshot_id=base.snapshot_id,
+                input_files=[ResearchScriptInputFileCreateRequest(logical_filename="extra.csv", media_type="text/csv", content=b"1")],
+            ))
+    with monkeypatch.context() as limits:
+        limits.setattr(research_script_service_module, "MAX_RESEARCH_SCRIPT_INDIVIDUAL_INPUT_BYTES", 1)
+        with pytest.raises(ResearchScriptValidationError, match="exceeds"):
+            service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[
+                ResearchScriptInputFileCreateRequest(logical_filename="extra.csv", media_type="text/csv", content=b"12"),
+            ]))
+    assert service.list_input_bundles(foreign_script_id) == []
+    assert service.storage_diagnostics().input_snapshot_count == initial_count
+    cleared = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(base_snapshot_id=base.snapshot_id, retained_filenames=[]))
+    assert cleared.files == [] and cleared.total_bytes == 0
+    service.archive_script(script_id)
+    with pytest.raises(ResearchScriptConflictError):
+        service.create_input_bundle(script_id, ResearchScriptInputBundleRequest())

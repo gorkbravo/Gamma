@@ -11,6 +11,7 @@ from src.models.research_script import (
     ResearchScriptDataExportRequest,
     ResearchScriptDetail,
     ResearchScriptInputFile,
+    ResearchScriptInputBundleRequest,
     ResearchScriptInputFileCreateRequest,
     ResearchScriptOutput,
     ResearchScriptRevision,
@@ -110,6 +111,7 @@ class ResearchScriptDataExportRequestModel(BaseModel):
     lookback_days: int | None = Field(default=None, ge=20, le=3650)
     frequency: Literal["daily", "weekly", "monthly"] | None = None
     additional_input_files: list[ResearchScriptInputFileCreateRequestModel] = Field(default_factory=list)
+    base_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     def to_domain(self) -> ResearchScriptDataExportRequest:
         return ResearchScriptDataExportRequest(
@@ -121,7 +123,29 @@ class ResearchScriptDataExportRequestModel(BaseModel):
             lookback_days=self.lookback_days,
             frequency=self.frequency,
             additional_input_files=[item.to_domain() for item in self.additional_input_files],
+            base_snapshot_id=self.base_snapshot_id,
         )
+
+
+class ResearchScriptInputBundleRequestModel(BaseModel):
+    base_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
+    retained_filenames: list[str] | None = Field(default=None, max_length=20)
+    input_files: list[ResearchScriptInputFileCreateRequestModel] = Field(default_factory=list, max_length=20)
+
+    def to_domain(self) -> ResearchScriptInputBundleRequest:
+        return ResearchScriptInputBundleRequest(
+            base_snapshot_id=self.base_snapshot_id,
+            retained_filenames=self.retained_filenames,
+            input_files=[item.to_domain() for item in self.input_files],
+        )
+
+
+class ResearchScriptInputPreviewModel(BaseModel):
+    logical_filename: str
+    media_type: str
+    byte_size: int
+    text: str
+    truncated: bool
 
 
 class ResearchScriptDuplicateRequestModel(BaseModel):

@@ -42,7 +42,37 @@ export interface ExportResearchScriptInputPayload {
   lookback_days?: number;
   frequency?: "daily" | "weekly" | "monthly";
   additional_input_files?: CreateResearchScriptRunPayload["input_files"];
+  base_snapshot_id?: string;
 }
+
+export interface ResearchScriptInputPreview {
+  logical_filename: string;
+  media_type: string;
+  byte_size: number;
+  text: string;
+  truncated: boolean;
+}
+
+export const createResearchScriptInputBundle = (
+  scriptId: string,
+  payload: {
+    base_snapshot_id?: string;
+    retained_filenames?: string[];
+    input_files?: CreateResearchScriptRunPayload["input_files"];
+  }
+) => postJson<ResearchScriptInputSnapshot>(
+  `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/inputs`, payload
+);
+
+export const listResearchScriptInputBundles = (scriptId: string) =>
+  getJson<ResearchScriptInputSnapshot[]>(
+    `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/inputs`
+  );
+
+export const getResearchScriptInputPreview = (snapshotId: string, filename: string) =>
+  getJson<ResearchScriptInputPreview>(
+    `/research/strategy-lab/script-inputs/${encodeURIComponent(snapshotId)}/preview?filename=${encodeURIComponent(filename)}`
+  );
 
 export interface ResearchScriptRevisionDecisionPayload {
   expected_parent_sha256: string;

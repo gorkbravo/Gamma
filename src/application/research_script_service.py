@@ -40,6 +40,7 @@ from src.models.research_script import (
     ResearchScriptDataExportRequest,
     ResearchScriptDetail,
     ResearchScriptInputFile,
+    ResearchScriptInputBundleRequest,
     ResearchScriptInputFileCreateRequest,
     ResearchScriptInputSnapshot,
     ResearchScriptOutput,
@@ -858,15 +859,102 @@ class ResearchScriptService:
             transformation_note=transformation,
             source_kind="gamma_state",
         )
+        # Associate newly exported references with their file so later removal
+        # can retain precisely the remaining bundle's provenance.
+        source_ref["logical_filename"] = filename
+        return self.create_input_bundle(
+            script_id,
+            ResearchScriptInputBundleRequest(
+                base_snapshot_id=request.base_snapshot_id,
+                input_files=[exported_file, *request.additional_input_files],
+            ),
+            dataset_refs=[dataset_ref],
+            source_refs=[source_ref],
+            extra_warnings=warnings,
+        )
+
+    def create_input_bundle(
+        self,
+        script_id: str,
+        request: ResearchScriptInputBundleRequest,
+        *,
+        dataset_refs: list[dict[str, Any]] | None = None,
+        source_refs: list[dict[str, Any]] | None = None,
+        extra_warnings: list[str] | None = None,
+    ) -> ResearchScriptInputSnapshot:
+        detail = self.get_script(script_id)
+        if detail.script.status in {"archived", "discarded"}:
+            raise ResearchScriptConflictError("Restore the archived script before editing inputs.")
+        files: list[ResearchScriptInputFileCreateRequest] = []
+        datasets = list(dataset_refs or [])
+        sources = list(source_refs or [])
+        warnings = list(extra_warnings or [])
+        if request.retained_filenames is not None and not request.base_snapshot_id:
+            raise ResearchScriptValidationError(["Retained filenames require a base input snapshot."])
+        if request.base_snapshot_id:
+            base = self.get_input_snapshot(request.base_snapshot_id)
+            if base.script_id != script_id:
+                raise ResearchScriptValidationError(["Input snapshot does not belong to the requested script."])
+            if self.manifest_sha256(self._input_manifest_identity(base)) != base.manifest_sha256:
+                raise ResearchScriptServiceError("Persisted input manifest hash does not match the immutable snapshot.")
+            available = {item.logical_filename for item in base.files}
+            retained = available if request.retained_filenames is None else set(request.retained_filenames)
+            if request.retained_filenames is not None and len(retained) != len(request.retained_filenames):
+                raise ResearchScriptValidationError(["Retained filenames must be unique."])
+            if not retained.issubset(available):
+                raise ResearchScriptValidationError(["A retained filename is absent from the base input snapshot."])
+            contents = self.store.load_input_contents(base)
+            for item in base.files:
+                if item.logical_filename not in retained:
+                    continue
+                files.append(ResearchScriptInputFileCreateRequest(
+                    logical_filename=item.logical_filename,
+                    media_type=item.media_type,
+                    content=contents[item.logical_filename],
+                    gamma_object_id=item.gamma_object_id,
+                    provider_id=item.provider_id,
+                    source_timestamp=item.source_timestamp,
+                    retrieved_at=item.retrieved_at,
+                    transformation_note=item.transformation_note,
+                    source_kind=item.source_kind,
+                ))
+            # Older snapshots can have bundle-wide references without a filename.
+            # Preserve those conservatively while any original files remain.
+            def included(ref: dict[str, Any]) -> bool:
+                return bool(retained) and (
+                    "logical_filename" not in ref or ref["logical_filename"] in retained
+                )
+            datasets = [dict(ref) for ref in base.dataset_refs if included(ref)] + datasets
+            sources = [dict(ref) for ref in base.source_refs if included(ref)] + sources
+            warnings = list(base.warnings) + warnings if retained else warnings
         return self._create_input_snapshot(
             script_id,
             ResearchScriptRunCreateRequest(
-                input_files=[exported_file, *request.additional_input_files],
-                dataset_refs=[dataset_ref],
-                source_refs=[source_ref],
+                input_files=[*files, *request.input_files],
+                dataset_refs=datasets,
+                source_refs=sources,
             ),
-            extra_warnings=warnings,
+            extra_warnings=list(dict.fromkeys(warnings)),
         )
+
+    def list_input_bundles(self, script_id: str) -> list[ResearchScriptInputSnapshot]:
+        self.get_script(script_id)
+        return self.store.list_input_snapshots(script_id)
+
+    def preview_input_file(self, snapshot_id: str, filename: str) -> dict[str, Any]:
+        snapshot = self.get_input_snapshot(snapshot_id)
+        item = next((item for item in snapshot.files if item.logical_filename == filename), None)
+        if item is None:
+            raise ResearchScriptNotFoundError("Research script input file not found.")
+        content = self.store.load_input_contents(snapshot)[filename]
+        preview_bytes = content[:8192]
+        return {
+            "logical_filename": filename,
+            "media_type": item.media_type,
+            "byte_size": item.byte_size,
+            "text": preview_bytes.decode("utf-8-sig", errors="replace"),
+            "truncated": len(content) > len(preview_bytes),
+        }
 
     def compare_runs(
         self,
@@ -1048,9 +1136,10 @@ class ResearchScriptService:
                 errors.append(
                     f"Input filename {filename!r} exceeds {MAX_RESEARCH_SCRIPT_FILENAME_CHARS} characters."
                 )
-            if filename in filenames:
+            # Retained files must also remain distinct on Windows filesystems.
+            if filename.casefold() in filenames:
                 errors.append(f"Duplicate input filename: {filename}.")
-            filenames.add(filename)
+            filenames.add(filename.casefold())
             byte_size = len(item.content)
             total_bytes += byte_size
             if byte_size > MAX_RESEARCH_SCRIPT_INDIVIDUAL_INPUT_BYTES:

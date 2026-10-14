@@ -27,6 +27,8 @@ from src.api.schemas.research_script import (
     ResearchScriptDetailModel,
     ResearchScriptDuplicateRequestModel,
     ResearchScriptInputSnapshotModel,
+    ResearchScriptInputBundleRequestModel,
+    ResearchScriptInputPreviewModel,
     ResearchScriptListResponseModel,
     ResearchScriptRevisionCreateRequestModel,
     ResearchScriptRevisionDecisionRequestModel,
@@ -301,6 +303,53 @@ def export_research_script_domain_input(
     except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
         _raise_script_http_error(exc)
     return ResearchScriptInputSnapshotModel.from_domain(snapshot)
+
+
+@router.post(
+    "/research/strategy-lab/scripts/{script_id}/inputs",
+    response_model=ResearchScriptInputSnapshotModel,
+    status_code=201,
+)
+def create_research_script_input_bundle(
+    script_id: str,
+    payload: ResearchScriptInputBundleRequestModel,
+    request: Request,
+) -> ResearchScriptInputSnapshotModel:
+    try:
+        snapshot = request.app.state.runtime.research_script_service.create_input_bundle(
+            script_id, payload.to_domain(),
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptInputSnapshotModel.from_domain(snapshot)
+
+
+@router.get(
+    "/research/strategy-lab/scripts/{script_id}/inputs",
+    response_model=list[ResearchScriptInputSnapshotModel],
+)
+def list_research_script_input_bundles(script_id: str, request: Request) -> list[ResearchScriptInputSnapshotModel]:
+    try:
+        snapshots = request.app.state.runtime.research_script_service.list_input_bundles(script_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return [ResearchScriptInputSnapshotModel.from_domain(snapshot) for snapshot in snapshots]
+
+
+@router.get(
+    "/research/strategy-lab/script-inputs/{snapshot_id}/preview",
+    response_model=ResearchScriptInputPreviewModel,
+)
+def preview_research_script_input_file(
+    snapshot_id: str,
+    request: Request,
+    filename: str = Query(min_length=1, max_length=128),
+) -> ResearchScriptInputPreviewModel:
+    try:
+        preview = request.app.state.runtime.research_script_service.preview_input_file(snapshot_id, filename)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptInputPreviewModel(**preview)
 
 
 @router.post(

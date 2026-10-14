@@ -17,6 +17,12 @@
     loadResearchScript,
     persistResearchScriptRevision,
     prepareResearchScriptDomainInput,
+    addPastedResearchScriptInput,
+    importResearchScriptFiles,
+    previewResearchScriptInput,
+    removeResearchScriptInput,
+    useSelectedRunResearchScriptInputs,
+    selectResearchScriptInputBundle,
     refreshResearchScriptWorkspace,
     researchScriptWorkspace,
     resolveStagedResearchScriptRevision,
@@ -92,7 +98,7 @@
   const usageValue = (value: unknown) => {
     return typeof value === "number" ? value.toLocaleString() : "—";
   };
-  const exportObjectLabel = () => exportDomain === "equity_history"
+  $: exportObjectLabel = exportDomain === "equity_history"
     ? "Ticker"
     : exportDomain === "macro_series"
       ? "Series id"
@@ -104,7 +110,7 @@
       exportObjectId = "SPY";
       exportFilename = "spy-prices.csv";
     } else if (exportDomain === "macro_series") {
-      exportObjectId = "DGS10";
+      exportObjectId = "us-10y-yield";
       exportFilename = "macro-series.csv";
     } else {
       exportObjectId = "";
@@ -136,6 +142,12 @@
       workspace.inputFilename,
       (event.currentTarget as HTMLTextAreaElement).value
     );
+  }
+
+  async function onImportFiles(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    await importResearchScriptFiles(Array.from(input.files ?? []));
+    input.value = "";
   }
 
   function saveBlob(blob: Blob, filename: string) {
@@ -505,7 +517,19 @@
     {/if}
 
     <article class="panel input-panel">
-      <div class="rail-header"><div><p class="eyebrow">Immutable inputs</p><h3>Input manifest</h3></div></div>
+      <div class="rail-header"><div><p class="eyebrow">Next run</p><h3>Input bundle</h3></div></div>
+      <p class="muted">Add datasets, then read them in Python using the filenames below. Each addition preserves the files already in the bundle.</p>
+      {#if workspace.inputBundles.length}
+        <label>
+          <span>Retained input bundle</span>
+          <select aria-label="Retained input bundle" value={workspace.preparedInputSnapshot?.snapshot_id ?? ""}
+            on:change={(event) => selectResearchScriptInputBundle((event.currentTarget as HTMLSelectElement).value)} disabled={workspace.loading !== null}>
+            {#each workspace.inputBundles as bundle}
+              <option value={bundle.snapshot_id}>{shortDate(bundle.created_at)} · {bundle.files.length} files · {shortHash(bundle.manifest_sha256)}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <div class="domain-export-grid">
         <label>
           <span>Gamma export</span>
@@ -516,8 +540,8 @@
           </select>
         </label>
         <label>
-          <span>{exportObjectLabel()}</span>
-          <input bind:value={exportObjectId} aria-label={exportObjectLabel()} />
+          <span>{exportObjectLabel}</span>
+          <input bind:value={exportObjectId} aria-label={exportObjectLabel} />
         </label>
         <label>
           <span>Snapshot filename</span>
@@ -542,32 +566,53 @@
           class="ghost-button"
           on:click={prepareDomainExport}
           disabled={!workspace.detail || workspace.detail.script.status === "archived" || !exportObjectId.trim() || !exportFilename.trim() || workspace.loading !== null}
-        >{workspace.loading === "input" ? "Preparing…" : "Prepare Gamma snapshot"}</button>
+        >{workspace.loading === "input" ? "Preparing…" : "Add Gamma dataset"}</button>
       </div>
 
-      <div class="input-divider"><span>Optional user file</span></div>
+      <div class="input-divider"><span>External data</span></div>
       <label>
-        <span>Logical filename</span>
-        <input value={workspace.inputFilename} on:input={onInputFilename} placeholder="prices.csv" />
+        <span>Import CSV, JSON or TXT files</span>
+        <input type="file" accept=".csv,.json,.txt" multiple on:change={onImportFiles}
+          disabled={!workspace.detail || workspace.detail.script.status === "archived" || workspace.loading !== null} />
+      </label>
+      <p class="muted">UTF-8 files, up to 20 MiB each and 64 MiB per bundle. Filenames use letters, numbers, dots, underscores or hyphens.</p>
+      <label>
+        <span>Pasted input filename</span>
+        <input value={workspace.inputFilename} on:input={onInputFilename} placeholder="prices.csv" disabled={workspace.loading !== null} />
       </label>
       <label>
         <span>Text content</span>
-        <textarea value={workspace.inputContent} on:input={onInputContent} rows="5" placeholder="date,close"></textarea>
+        <textarea value={workspace.inputContent} on:input={onInputContent} rows="5" placeholder="date,close" disabled={workspace.loading !== null}></textarea>
       </label>
+      <button type="button" on:click={() => void addPastedResearchScriptInput()}
+        disabled={!workspace.detail || workspace.detail.script.status === "archived" || !workspace.inputFilename.trim() || workspace.loading !== null}>Add pasted input</button>
       <div class="stack compact-stack">
-        <div class="row"><span>Files</span><strong>{workspace.preparedInputSnapshot?.files.length ?? (workspace.inputFilename.trim() ? 1 : 0)} / 20</strong></div>
+        <div class="row"><span>Files</span><strong>{workspace.preparedInputSnapshot?.files.length ?? 0} / 20</strong></div>
         <div class="row">
           <span>Bundle</span>
-          <strong>{(workspace.preparedInputSnapshot?.total_bytes ?? new TextEncoder().encode(workspace.inputContent).length).toLocaleString()} B / 64 MiB</strong>
+          <strong>{(workspace.preparedInputSnapshot?.total_bytes ?? 0).toLocaleString()} B / 64 MiB</strong>
         </div>
         <div class="row"><span>Manifest SHA</span><strong>{shortHash(workspace.preparedInputSnapshot?.manifest_sha256)}</strong></div>
       </div>
       {#if workspace.preparedInputSnapshot}
         <div class="manifest-files" aria-label="Prepared immutable input files">
           {#each workspace.preparedInputSnapshot.files as file}
-            <div class="row">
-              <span>{file.logical_filename}</span>
-              <strong>{file.source_kind} · {file.byte_size.toLocaleString()} B</strong>
+            <div class="bundle-file">
+              <div class="row"><strong>{file.logical_filename}</strong><span>{file.byte_size.toLocaleString()} B</span></div>
+              <p class="muted">{file.source_kind === "user_upload" ? "User file" : file.provider_id ?? "Gamma dataset"}</p>
+              <div class="bundle-actions">
+                <button type="button" on:click={() => void previewResearchScriptInput(file.logical_filename)}
+                  disabled={workspace.loading !== null} aria-label={`Preview ${file.logical_filename}`}>Preview</button>
+                <button type="button" on:click={() => void removeResearchScriptInput(file.logical_filename)}
+                  disabled={workspace.loading !== null || workspace.detail?.script.status === "archived"}
+                  aria-label={`Remove ${file.logical_filename}`}>Remove</button>
+              </div>
+              <details>
+                <summary>Source details</summary>
+                <p class="muted">Retrieved {shortDate(file.retrieved_at)} · {file.gamma_object_id ?? "External input"}</p>
+                <p class="muted">{file.transformation_note ?? "Copied input; no analytical transformation."}</p>
+                <p class="muted">SHA {shortHash(file.content_sha256)}</p>
+              </details>
             </div>
           {/each}
         </div>
@@ -576,6 +621,18 @@
             {#each workspace.preparedInputSnapshot.warnings as warning}<p>{warning}</p>{/each}
           </div>
         {/if}
+      {/if}
+      {#if !workspace.preparedInputSnapshot?.files.length}
+        <p class="muted">No datasets added. Python can run without inputs.</p>
+      {/if}
+      {#if workspace.previewLoading}<p class="muted" role="status">Loading input preview…</p>{/if}
+      {#if workspace.previewError}<p class="muted" role="alert">{workspace.previewError}</p>{/if}
+      {#if workspace.inputPreview}
+        <section aria-label={`Input preview: ${workspace.inputPreview.logical_filename}`}>
+          <h4>{workspace.inputPreview.logical_filename}</h4>
+          <pre class="input-preview">{workspace.inputPreview.text || "Empty file"}</pre>
+          {#if workspace.inputPreview.truncated}<p class="muted">Preview limited to the first 8 KiB. The full file is retained.</p>{/if}
+        </section>
       {/if}
     </article>
 
@@ -614,6 +671,10 @@
     <article class="panel history-panel">
       <div class="rail-header"><div><p class="eyebrow">History</p><h3>Stored runs</h3></div></div>
       {#if workspace.runs.length}
+        {#if workspace.selectedRunInputSnapshot}
+          <p class="muted">Selected run inputs: {workspace.selectedRunInputSnapshot.files.map((file) => file.logical_filename).join(", ") || "No input files"}</p>
+          <button type="button" on:click={useSelectedRunResearchScriptInputs} disabled={workspace.loading !== null}>Use selected run inputs</button>
+        {/if}
         <div class="run-list">
           {#each workspace.runs as run}
             <button
@@ -680,6 +741,8 @@
     align-items: start;
   }
 
+  .support-column { align-items: start; }
+
   .safety-panel {
     grid-template-columns: minmax(12rem, 0.3fr) minmax(0, 1fr);
     align-items: center;
@@ -735,6 +798,13 @@
     display: grid;
     gap: var(--space-2);
   }
+
+  .bundle-file { min-width: 0; padding: var(--space-3) 0; border-bottom: 1px solid var(--panel-border); }
+  .bundle-file strong { overflow-wrap: anywhere; }
+  .bundle-file p { margin: var(--space-2) 0; }
+  .bundle-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+  .input-preview { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  input[type="file"] { min-width: 0; font-size: var(--text-xs); }
 
   input,
   select,

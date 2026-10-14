@@ -800,6 +800,8 @@ _Dependency marker: Builds on Strategy Lab modes, Copilot Operator working analy
 _Decision date: 2026-08-29_
 _Detailed implementation plan: [`docs/research_script_workspace_plan.md`](./docs/research_script_workspace_plan.md)_
 
+_2026-10-14 expansion: Script is being deepened as an ordinary Python research surface for tasks more naturally expressed in code than through existing screens. The existing plan now tracks checkpoints E1-E6. E1 adds cumulative Gamma datasets, multiple external UTF-8 CSV/JSON/text files, preview/removal, immutable bundle history/recovery and a top-level Python starter. It is verified with deterministic/mock acceptance; broader exports, Operator-assisted custom research, optional typed results, parameter experiments and execution/reproducibility remain separate planned checkpoints. The original isolated-runtime boundary is unchanged._
+
 _Completion date: 2026-08-31. Slices 1-5 and every completion-gate category are implemented and verified. Active OpenAI-backed app workloads use `gpt-5.6-luna`; Gamma remains the authority for permissions, hashes, persistence, terminal states, retention, and audit._
 
 ### Why this workstream matters

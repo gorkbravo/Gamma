@@ -206,6 +206,14 @@ class ResearchScriptDataExportRequest:
     lookback_days: int | None = None
     frequency: Literal["daily", "weekly", "monthly"] | None = None
     additional_input_files: list[ResearchScriptInputFileCreateRequest] = field(default_factory=list)
+    base_snapshot_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ResearchScriptInputBundleRequest:
+    base_snapshot_id: str | None = None
+    retained_filenames: list[str] | None = None
+    input_files: list[ResearchScriptInputFileCreateRequest] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,7 @@
 import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ResearchScriptDetail, ResearchScriptRun } from "../api/types";
+import type { ResearchScriptDetail, ResearchScriptRun, ResearchScriptInputSnapshot } from "../api/types";
 import {
   createWorkspaceResearchScript,
   persistResearchScriptRevision,
@@ -9,7 +9,15 @@ import {
   resolveStagedResearchScriptRevision,
   resetResearchScriptWorkspace,
   runSelectedResearchScript,
-  updateResearchScriptDraft
+  updateResearchScriptDraft,
+  prepareResearchScriptDomainInput,
+  addPastedResearchScriptInput,
+  importResearchScriptFiles,
+  removeResearchScriptInput,
+  selectResearchScriptRun,
+  updateResearchScriptInput,
+  useSelectedRunResearchScriptInputs,
+  loadResearchScript
 } from "./research-script";
 
 const detail = (revisionNumber = 1, source = "print('preview')\n"): ResearchScriptDetail => {
@@ -107,9 +115,126 @@ const jsonResponse = (value: unknown, status = 200, statusText = "OK") => new Re
   { status, statusText, headers: { "Content-Type": "application/json" } }
 );
 
+const bundle = (id: string, filenames: string[]): ResearchScriptInputSnapshot => ({
+  ...inputSnapshot,
+  snapshot_id: id,
+  source_provider: "gamma_research_script",
+  origin: "research_script_service.create_input_snapshot",
+  transformation_note: "Copied data",
+  files: filenames.map((name) => ({
+    logical_filename: name, media_type: "text/csv", byte_size: 20,
+    content_sha256: "b".repeat(64), gamma_object_id: null, provider_id: null,
+    source_timestamp: null, retrieved_at: "2026-10-14T12:00:00", transformation_note: null,
+    source_kind: "user_upload", artifact_ref: `research-script-input:${id}:${name}`
+  })),
+  total_bytes: filenames.length * 20
+});
+
+function loadedWorkspace(preparedInputSnapshot: ResearchScriptInputSnapshot | null = null) {
+  const initial = detail();
+  researchScriptWorkspace.set({ ...get(researchScriptWorkspace), detail: initial,
+    sourceDraft: initial.revisions[0].source, selectedRevisionId: "revision-1", preparedInputSnapshot });
+}
+
 describe("research script workspace store", () => {
   beforeEach(() => resetResearchScriptWorkspace());
   afterEach(() => vi.unstubAllGlobals());
+
+  it("appends Gamma exports to the existing frozen bundle without including unadded pasted text", async () => {
+    const base = bundle("base", ["spy.csv"]);
+    loadedWorkspace(base);
+    updateResearchScriptInput("draft.csv", "x,y\n1,2\n");
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(bundle("mixed", ["spy.csv", "cpi.csv"])))
+      .mockResolvedValueOnce(jsonResponse(diagnostics()));
+    vi.stubGlobal("fetch", fetchMock);
+    await prepareResearchScriptDomainInput({ domain: "macro_series", object_id: "CPI", logical_filename: "cpi.csv" });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.base_snapshot_id).toBe("base");
+    expect(body.additional_input_files).toBeUndefined();
+    expect(get(researchScriptWorkspace).preparedInputSnapshot?.files.map(file => file.logical_filename)).toEqual(["spy.csv", "cpi.csv"]);
+    expect(get(researchScriptWorkspace).inputContent).toBe("x,y\n1,2\n");
+  });
+
+  it("preserves the bundle and pasted draft after an append failure and blocks running unadded text", async () => {
+    const base = bundle("base", ["spy.csv"]);
+    loadedWorkspace(base);
+    updateResearchScriptInput("spy.csv", "new prices");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ detail: ["Duplicate input filename"] }, 422));
+    vi.stubGlobal("fetch", fetchMock);
+    await addPastedResearchScriptInput();
+    expect(get(researchScriptWorkspace).preparedInputSnapshot).toEqual(base);
+    expect(get(researchScriptWorkspace).inputContent).toBe("new prices");
+    await runSelectedResearchScript();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(get(researchScriptWorkspace).error).toContain("Add the pasted input");
+  });
+
+  it("imports several UTF-8 files atomically and preserves BOM and line endings", async () => {
+    loadedWorkspace(bundle("base", ["spy.csv"]));
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(bundle("mixed", ["spy.csv", "external.csv", "config.json"])))
+      .mockResolvedValueOnce(jsonResponse(diagnostics()));
+    vi.stubGlobal("fetch", fetchMock);
+    await importResearchScriptFiles([
+      new File(["\ufeffdate,name\r\n2026-10-14,España\r\n"], "external.csv"),
+      new File(['{"lookback":20}'], "config.json")
+    ]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.base_snapshot_id).toBe("base");
+    expect(body.input_files[0].content).toBe("\ufeffdate,name\r\n2026-10-14,España\r\n");
+    expect(body.input_files.map((file: {media_type: string}) => file.media_type)).toEqual(["text/csv", "application/json"]);
+    expect(get(researchScriptWorkspace).preparedInputSnapshot?.files).toHaveLength(3);
+  });
+
+  it("rejects duplicate names, invalid UTF-8 and oversized uploads without changing the bundle", async () => {
+    const base = bundle("base", ["spy.csv"]);
+    loadedWorkspace(base);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await importResearchScriptFiles([new File(["x"], "SPY.csv")]);
+    expect(get(researchScriptWorkspace).error).toContain("unique");
+    await importResearchScriptFiles([new File([new Uint8Array([0xff])], "bad.csv")]);
+    expect(get(researchScriptWorkspace).error).toContain("Import failed");
+    await importResearchScriptFiles([{ name: "huge.csv", size: 21 * 1024 * 1024 } as File]);
+    expect(get(researchScriptWorkspace).error).toContain("per-file size");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(get(researchScriptWorkspace).preparedInputSnapshot).toEqual(base);
+  });
+
+  it("inspects historical inputs separately and uses them only after an explicit selection", async () => {
+    const base = bundle("next", ["new.csv"]);
+    loadedWorkspace(base);
+    researchScriptWorkspace.update(state => ({ ...state, runs: [run()] }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(bundle("historical", ["old.csv"]))));
+    selectResearchScriptRun("run-1");
+    await vi.waitFor(() => expect(get(researchScriptWorkspace).selectedRunInputSnapshot?.snapshot_id).toBe("historical"));
+    expect(get(researchScriptWorkspace).preparedInputSnapshot).toEqual(base);
+    useSelectedRunResearchScriptInputs();
+    expect(get(researchScriptWorkspace).preparedInputSnapshot?.snapshot_id).toBe("historical");
+  });
+
+  it("removes only the selected file by deriving a new snapshot", async () => {
+    loadedWorkspace(bundle("mixed", ["spy.csv", "external.csv"]));
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(bundle("reduced", ["external.csv"])))
+      .mockResolvedValueOnce(jsonResponse(diagnostics()));
+    vi.stubGlobal("fetch", fetchMock);
+    await removeResearchScriptInput("spy.csv");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.base_snapshot_id).toBe("mixed");
+    expect(body.retained_filenames).toEqual(["external.csv"]);
+    expect(get(researchScriptWorkspace).preparedInputSnapshot?.snapshot_id).toBe("reduced");
+  });
+
+  it("recovers a prepared bundle before any run exists", async () => {
+    const latest = bundle("latest", ["spy.csv", "external.csv"]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(detail()))
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+      .mockResolvedValueOnce(jsonResponse([latest]));
+    vi.stubGlobal("fetch", fetchMock);
+    await loadResearchScript("script-1");
+    expect(get(researchScriptWorkspace).preparedInputSnapshot).toEqual(latest);
+    expect(get(researchScriptWorkspace).inputBundles).toEqual([latest]);
+    expect(get(researchScriptWorkspace).selectedRun).toBeNull();
+  });
 
   it("creates a script, persists a revision, and submits that exact revision for a run", async () => {
     const first = detail();

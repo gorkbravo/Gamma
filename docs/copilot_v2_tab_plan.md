@@ -2,7 +2,15 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-06
+Last updated: 2026-10-14
+
+#### 2026-10-14 — Strategy Lab Script extension discovery
+
+Reviewed current official [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter) and [agent runtime comparison](https://developers.openai.com/api/docs/guides/agents) documentation for the user's Script capability inventory and extension brainstorming. Review date: **2026-10-14**.
+
+Planning decision: retain the existing provider-neutral Script service, exact-source execution gate, copied input snapshots, server-owned permissions/persistence, custom Responses Operator default and optional Agents SDK comparison while exploring dataset bundles, typed analytical outputs and bounded experiments. Responses supplies model/tool interactions; the SDK is an optional orchestration layer, not a replacement for sandbox execution or Gamma authority. A runtime migration, dependency expansion or model change requires concrete workload evidence and acceptance tests; none is selected or implemented in this discovery pass. Official container memory tiers and ephemeral lifecycle are provider capabilities, not newly enabled Gamma features. Implementation scope remains open for user brainstorming.
+
+Implementation follow-up: the user authorized checkpoint-based expansion. [Script checkpoints E1-E6](research_script_workspace_plan.md#expansion-checkpoints--2026-10-14) now track the work. E1 changes only ordinary-Python onboarding and copied input-bundle preparation/retention/UI; it introduces no new Operator tool, execution permission or runtime/model selection. E3 will separately evaluate visibly authorized Operator-assisted custom research against the existing role, staged-revision and exact-source evals.
 
 #### 2026-10-06 — Market-open Options acceptance and accounting hardening
 
