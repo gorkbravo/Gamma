@@ -26,6 +26,7 @@
     riskSourceScopeFor,
     type RiskSourceId,
   } from "../lib/risk-source";
+  import { strategyLabBenchmarkLabel, strategyLabBenchmarkPoints, strategyLabBookBenchmarkSymbol } from "../lib/risk-handoff";
   import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
@@ -214,7 +215,7 @@
     const adopted = adoptRiskSourceFromResult({ selected: selectedSource, available: availableRiskSources, result });
     if (adopted) selectedSource = adopted;
     if (adopted === "strategy_lab_book" && strategyLabResearchBook) {
-      benchmarkSymbol = strategyLabResearchBook.benchmarkSymbol || "SPY";
+      benchmarkSymbol = strategyLabBookBenchmarkSymbol(strategyLabResearchBook);
       lookbackDays = strategyLabResearchBook.composition?.portfolio_inputs?.lookback_days ?? lookbackDays;
     }
   }
@@ -223,10 +224,13 @@
   $: renderSnapshot = riskSnapshotFor(sourceView.rendered, snapshot, researchSnapshot, strategyLabResearchBook);
   $: selectedSourceLabel = riskSourceLabelFor(selectedSource, strategyLabResearchBook);
   $: renderedSourceLabel = riskSourceLabelFor(sourceView.rendered, strategyLabResearchBook);
+  $: benchmarkLabel = sourceView.rendered === "strategy_lab_book" && strategyLabResearchBook
+    ? strategyLabBenchmarkLabel(strategyLabResearchBook, benchmarkSymbol)
+    : benchmarkSymbol.trim().toUpperCase() || "SPY";
   $: workspace = buildRiskWorkspaceModel(renderSnapshot, result, {
     sourceScope: sourceView.renderScope,
     sourceLabel: renderedSourceLabel,
-    benchmarkSymbol: benchmarkSymbol.trim().toUpperCase() || "SPY",
+    benchmarkSymbol: benchmarkLabel,
     returnFrequency,
   });
 
@@ -262,8 +266,7 @@
         snapshot: riskSnapshotFor(sourceId, snapshot, researchSnapshot, strategyLabResearchBook),
         sourceScope: riskSourceScopeFor(sourceId),
         researchBookReturnPoints: book?.object.return_points ?? [],
-        researchBookBenchmarkPoints: book && benchmarkSymbol.trim().toUpperCase() === (book.benchmarkSymbol || "SPY")
-          ? book.composition?.benchmark_points ?? null : null,
+        researchBookBenchmarkPoints: book ? strategyLabBenchmarkPoints(book, benchmarkSymbol) : null,
         researchBookRiskLegs: book?.object.risk_legs ?? [],
         riskSourceLabel: riskSourceLabelFor(sourceId, strategyLabResearchBook),
         riskSourceObjectId: book?.object.object_id ?? null,
@@ -640,7 +643,7 @@
   $: cumulativeChart = (() => {
     const rows: ChartSeries[] = [];
     const portfolio = cumulativeSeries(result?.portfolio_return_points ?? [], "portfolio", "Portfolio", "var(--chart-primary)");
-    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkSymbol.trim().toUpperCase() || "SPY", "var(--chart-secondary)", "dashed");
+    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkLabel, "var(--chart-secondary)", "dashed");
     if (portfolio) rows.push(portfolio);
     if (benchmark) rows.push(benchmark);
     return rows;

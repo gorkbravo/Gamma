@@ -116,6 +116,8 @@ import {
   researchCompareResult,
   researchResult,
   strategyLabComposition,
+  strategyLabCompositionStale,
+  strategyLabResearchBook,
   strategyLabHandoffQueue,
   resolvePendingStrategyLabHandoffs,
   restoreStrategyLabResult,
@@ -962,26 +964,33 @@ describe("app store orchestration", () => {
     expect(body.lenses[0].object_id).toBe(lens.object_id);
     expect(body.overlays).toEqual([]);
     expect(get(strategyLabComposition)?.lenses[0]?.object_id).toBe(lens.object_id);
+    // Una composición correcta del servidor se conserva aunque no alcance para derivar un research book.
+    expect(get(strategyLabResearchBook)).toBeNull();
+    expect(get(lastError)).toBe("");
   });
 
-  it("clears stale Strategy Lab composition after failed portfolio compose", async () => {
-    strategyLabComposition.set({
+  // Auditoría 2026-10-06: el fallo conserva el último resultado correcto, pero debe quedar marcado como obsoleto.
+  it("retains the last successful composition after failed portfolio compose but marks it stale", async () => {
+    const previous = {
       ...makeStrategyLabResult(),
       name: "Previous Composition",
       leg_contributions: { QQQ: 1 },
       lenses: [],
       overlays: [],
       alignment_diagnostics: {}
-    } as any);
+    } as any;
+    strategyLabComposition.set(previous);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValueOnce(
-        notFound({
-          detail: [
-            "Strategy Lab composition needs at least 5 shared return observations; only 0 overlap after source alignment."
-          ]
-        })
-      )
+      vi.fn()
+        .mockResolvedValueOnce(
+          notFound({
+            detail: [
+              "Strategy Lab composition needs at least 5 shared return observations; only 0 overlap after source alignment."
+            ]
+          })
+        )
+        .mockResolvedValueOnce(ok({ ...previous, name: "Recovered Composition" }))
     );
 
     const result = await composeStrategyLabPortfolio({
@@ -1002,8 +1011,37 @@ describe("app store orchestration", () => {
     });
 
     expect(result).toBeNull();
-    expect(get(strategyLabComposition)).toBeNull();
+    expect(get(strategyLabComposition)).toBe(previous);
     expect(get(lastError)).toContain("only 0 overlap");
+    expect(get(strategyLabCompositionStale)).toContain("only 0 overlap");
+
+    // Una composición correcta posterior anula la marca de obsoleto.
+    const recovered = await composeStrategyLabPortfolio({
+      name: "Recovered Composition",
+      legs: [{ label: "QQQ", asset_class: "etf", identifier: "QQQ", weight: 1, value_kind: "return", return_points: [] }],
+      benchmarkSymbol: null,
+      lookbackDays: 252,
+      minObservations: 5
+    });
+    expect(recovered?.name).toBe("Recovered Composition");
+    expect(get(strategyLabCompositionStale)).toBeNull();
+    expect(get(lastError)).toBe("");
+  });
+
+  it("does not mark anything stale when a first composition fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(notFound({ detail: ["No shared observations."] })));
+
+    await composeStrategyLabPortfolio({
+      name: "First",
+      legs: [{ label: "QQQ", asset_class: "etf", identifier: "QQQ", weight: 1, value_kind: "return", return_points: [] }],
+      benchmarkSymbol: null,
+      lookbackDays: 252,
+      minObservations: 5
+    });
+
+    expect(get(strategyLabComposition)).toBeNull();
+    expect(get(strategyLabCompositionStale)).toBeNull();
+    expect(get(lastError)).toContain("No shared observations");
   });
 
   it("restores a normalized saved Strategy Lab result without an API call", () => {

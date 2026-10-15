@@ -22,6 +22,19 @@ def script_acquisition_authorized(prompt):
     return bool(re.search(r"\b(?:acquire|fetch|load|download|retrieve|add|combine)\b", text))
 
 
+def script_visible_to_request(script, request):
+    # El Operator solo actúa sobre el Script adjunto de forma visible a esta petición
+    # o sobre uno creado por esta misma sesión de Copilot. Strategy Lab crea los
+    # Scripts con su propia sesión de workspace, distinta del id del chat.
+    context = getattr(request, "context", None)
+    state = getattr(context, "strategy_lab_state", None)
+    visible = state.get("script_state") if isinstance(state, dict) else None
+    if isinstance(visible, dict) and str(visible.get("script_id") or "").strip() == script.script_id:
+        return True
+    session_id = str(getattr(request, "user_session_id", None) or "").strip()
+    return bool(session_id) and script.session_id == session_id
+
+
 def strict(properties):
     return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
@@ -86,8 +99,8 @@ def execute_script_action(copilot, tool_id, arguments, context, *, request, run_
         else:
             script_id = arguments["script_id"]
             detail = service.get_script(script_id)
-            if detail.script.session_id != request.user_session_id:
-                return blocked("Script belongs to another Copilot session.")
+            if not script_visible_to_request(detail.script, request):
+                return blocked("Script is neither attached to this request nor owned by this Copilot session.")
             if operation in {"inspect", "add_input"}:
                 selection = {k: v for k, v in arguments.items() if k != "script_id"}
                 export = ResearchScriptDataExportRequest(**selection)

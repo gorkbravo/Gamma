@@ -106,6 +106,8 @@ test("reopen after server restart, Risk, revised weights and shared-window compa
   });
   await page.getByRole("button", { name: "Compose Portfolio", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Ticker history unavailable");
+  // El resultado conservado queda marcado como obsoleto frente al borrador actual.
+  await expect(page.getByTestId("composition-stale")).toBeVisible();
   const retainedRisk = page.waitForResponse(r => r.url().endsWith("/risk/compute"));
   await page.getByRole("button", { name: "Open In Risk" }).click();
   const retainedRiskResponse = await retainedRisk;

@@ -185,6 +185,7 @@
     researchCompareResult,
     researchResult,
     strategyLabComposition,
+    strategyLabCompositionStale,
     strategyLabResearchBook,
     riskResult,
     riskWorkspaceBasis,
@@ -3014,6 +3015,7 @@
             result={$researchResult}
             strategyResult={$strategyLabResult}
             strategyComposition={$strategyLabComposition}
+            compositionStaleMessage={$strategyLabCompositionStale ?? ""}
             workingAnalysis={strategyLabWorkingAnalysis}
             savedItems={$savedResearchItems}
             strategyLoading={$loading.strategyLab}

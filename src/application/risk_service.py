@@ -2286,7 +2286,13 @@ class RiskService:
             if getattr(benchmark_returns.index, "tz", None) is not None:
                 benchmark_returns.index = benchmark_returns.index.tz_convert(None)
             benchmark_returns = benchmark_returns[~benchmark_returns.index.duplicated(keep="last")]
-            benchmark_warnings = ["Benchmark uses the retained Strategy Lab experiment history; no provider reload was made."]
+            # Un histórico retenido vacío no debe presentarse como benchmark utilizado.
+            benchmark_warnings = [
+                "Benchmark uses the retained Strategy Lab experiment history; no provider reload was made."
+                if not benchmark_returns.empty
+                else "The Strategy Lab experiment retained no benchmark history; benchmark metrics are unavailable "
+                "and no provider benchmark was fetched."
+            ]
         result.warnings.extend(benchmark_warnings)
         if benchmark_returns is None or benchmark_returns.empty or port_ret.empty:
             return result

@@ -132,7 +132,7 @@ from src.models.prediction_markets import (
     PredictionProbabilityPoint,
 )
 from src.models.research_script import ResearchScriptInputFileCreateRequest
-from src.application.copilot_script_tools import script_action_definitions, execute_script_action, script_acquisition_authorized
+from src.application.copilot_script_tools import script_action_definitions, execute_script_action, script_acquisition_authorized, script_visible_to_request
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import (
     ResearchComparisonLeg,
@@ -6148,8 +6148,8 @@ class CopilotService:
         try:
             if script_state.get("script_id"):
                 script_id = str(script_state["script_id"])
-                if self.research_script_service.get_script(script_id).script.session_id != session_id:
-                    raise ResearchScriptConflictError("Script belongs to another Copilot session.")
+                if not script_visible_to_request(self.research_script_service.get_script(script_id).script, request):
+                    raise ResearchScriptConflictError("Script is neither attached to this request nor owned by this Copilot session.")
                 expected_hash = str(
                     script_state.get("source_sha256")
                     or script_state.get("canonical_source_sha256")
@@ -6321,8 +6321,8 @@ class CopilotService:
                 "Research Script runtime is unavailable.",
             )
         try:
-            if self.research_script_service.get_script(str(arguments["script_id"])).script.session_id != request.user_session_id:
-                raise ResearchScriptConflictError("Script belongs to another Copilot session.")
+            if not script_visible_to_request(self.research_script_service.get_script(str(arguments["script_id"])).script, request):
+                raise ResearchScriptConflictError("Script is neither attached to this request nor owned by this Copilot session.")
             snapshot = self.research_script_service.get_input_snapshot(str(arguments["input_snapshot_id"]))
             filenames = {item.logical_filename for item in snapshot.files}
             if any(ref.get("logical_filename") not in filenames for ref in snapshot.dataset_refs):

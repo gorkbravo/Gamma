@@ -48,6 +48,8 @@
   export let result: ResearchResult | null = null;
   export let strategyResult: StrategyLabResult | null = null;
   export let strategyComposition: StrategyLabCompositionResult | null = null;
+  // Mensaje del último intento fallido cuando se sigue mostrando la composición correcta anterior.
+  export let compositionStaleMessage = "";
   export let workingAnalysis: CopilotWorkingAnalysis | null = null;
   export let savedItems: SavedResearchItem[] = [];
   export let strategyLoading = false;
@@ -1039,6 +1041,11 @@
                   </button>
                 </div>
               </div>
+              {#if compositionStaleMessage}
+                <p class="warning" role="status" data-testid="composition-stale">
+                  Latest composition failed; showing the last successful result. Save Experiment and Open In Risk use this retained result, not the current inputs.
+                </p>
+              {/if}
               {#if compositionDiagnosticLegs.length}
                 <div class="alignment-diagnostics">
                   <div class="row">

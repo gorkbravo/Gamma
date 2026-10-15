@@ -2,7 +2,13 @@ import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PortfolioSnapshot, RiskResult, TabId } from "./api/types";
 import { activeTab, computeRisk, lastError, loading, riskResult, type RiskComputeOptions, type StrategyLabResearchBook } from "./stores/app";
-import { buildStrategyLabRiskRequest, createRiskHandoffController } from "./risk-handoff";
+import {
+  NO_RETAINED_BENCHMARK_LABEL,
+  buildStrategyLabRiskRequest,
+  createRiskHandoffController,
+  strategyLabBenchmarkLabel,
+  strategyLabBenchmarkPoints
+} from "./risk-handoff";
 
 describe("risk compute idempotency", () => {
   beforeEach(() => {
@@ -158,6 +164,31 @@ describe("risk compute idempotency", () => {
       ["XOM", 0.6],
       ["AMD", -0.4]
     ]);
+  });
+
+  // Regresión: un experimento sin histórico de benchmark retenido no debe mostrarse en Risk como SPY.
+  it("labels an experiment without retained benchmark history honestly instead of SPY", () => {
+    for (const benchmarkSymbol of [null, "spy"]) {
+      const book = { ...makeStrategyLabResearchBook(), benchmarkSymbol, composition: { benchmark_points: [] } } as unknown as StrategyLabResearchBook;
+
+      const request = buildStrategyLabRiskRequest(book);
+
+      expect(request.benchmarkSymbol).toBe("SPY");
+      expect(request.researchBookBenchmarkPoints).toEqual([]);
+      expect(strategyLabBenchmarkLabel(book, request.benchmarkSymbol)).toBe(NO_RETAINED_BENCHMARK_LABEL);
+    }
+  });
+
+  it("uses retained benchmark history only for the experiment's own benchmark", () => {
+    const points = [{ timestamp: "2026-07-07T00:00:00Z", value: 0.004 }];
+    const book = { ...makeStrategyLabResearchBook(), benchmarkSymbol: "qqq", composition: { benchmark_points: points } } as unknown as StrategyLabResearchBook;
+
+    expect(buildStrategyLabRiskRequest(book).researchBookBenchmarkPoints).toEqual(points);
+    expect(strategyLabBenchmarkPoints(book, " QQQ ")).toEqual(points);
+    expect(strategyLabBenchmarkLabel(book, "QQQ")).toBe("QQQ");
+    // Otro benchmark elegido en Risk usa la ruta del proveedor y conserva su símbolo.
+    expect(strategyLabBenchmarkPoints(book, "IWM")).toBeNull();
+    expect(strategyLabBenchmarkLabel(book, "iwm")).toBe("IWM");
   });
 });
 

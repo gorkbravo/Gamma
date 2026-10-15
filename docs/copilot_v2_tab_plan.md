@@ -4,6 +4,10 @@ _Living planning document. Future agents should update the status checklist and 
 
 Last updated: 2026-10-15
 
+### Official guidance reviewed 2026-10-15 — Script E3 access fix
+
+Re-fetched the current official [function calling](https://developers.openai.com/api/docs/guides/function-calling) guide. The application executes model-proposed calls and returns their outputs; strict mode guarantees schema conformance, not authorization, so access control stays in Gamma's handlers. Defect: E3 Script handlers required `script.session_id == user_session_id`, but Strategy Lab creates Scripts under its own workspace session, so the Operator rejected every user-authored Script, including the visibly attached one ("Run this Python Script"). Decision: one shared server predicate (`script_visible_to_request`) admits a Script only when it is the Script visibly attached to the current request's Strategy Lab context or one created by the same Copilot session. Attaching a different Script grants nothing. Role, Script intent, per-operation scope, staged-revision acceptance and forbidden-authority checks are unchanged; no tool, model, runtime or framework change. Covered by `tests/test_script_operator_e3.py`.
+
 ### Official guidance reviewed 2026-10-15 — Script E3
 
 Reviewed current official [function calling](https://developers.openai.com/api/docs/guides/function-calling) and [Agents runtime comparison](https://developers.openai.com/api/docs/guides/agents). Function calling requests application execution and returns its observation to the model; strict schemas do not replace application authorization. Responses function names permit letters, digits, underscores and hyphens. The SDK packages orchestration while application storage, approval and runtime responsibilities remain application-owned.

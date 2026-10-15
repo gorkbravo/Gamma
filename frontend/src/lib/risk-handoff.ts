@@ -1,4 +1,4 @@
-import type { ResearchResult, TabId } from "./api/types";
+import type { ResearchResult, TabId, TimeSeriesPoint } from "./api/types";
 import type { RiskComputeOptions, StrategyLabResearchBook } from "./stores/app";
 import { buildRiskRequestFromResearch } from "./workspace";
 
@@ -7,12 +7,32 @@ export type RiskHandoffController = {
   open: () => Promise<unknown>;
 };
 
+export const NO_RETAINED_BENCHMARK_LABEL = "No retained benchmark";
+
+export function strategyLabBookBenchmarkSymbol(book: StrategyLabResearchBook): string {
+  return (book.benchmarkSymbol ?? "").trim().toUpperCase() || "SPY";
+}
+
+// El histórico retenido solo se reutiliza si Risk pide el mismo benchmark del experimento;
+// otro símbolo elegido deliberadamente en Risk usa la ruta del proveedor (null).
+export function strategyLabBenchmarkPoints(book: StrategyLabResearchBook, requestedSymbol: string): TimeSeriesPoint[] | null {
+  const requested = requestedSymbol.trim().toUpperCase() || "SPY";
+  return requested === strategyLabBookBenchmarkSymbol(book) ? book.composition?.benchmark_points ?? null : null;
+}
+
+// Un experimento sin histórico de benchmark retenido no debe etiquetarse con un símbolo que no se usó.
+export function strategyLabBenchmarkLabel(book: StrategyLabResearchBook, requestedSymbol: string): string {
+  const points = strategyLabBenchmarkPoints(book, requestedSymbol);
+  return points && points.length === 0 ? NO_RETAINED_BENCHMARK_LABEL : requestedSymbol.trim().toUpperCase() || "SPY";
+}
+
 export function buildStrategyLabRiskRequest(book: StrategyLabResearchBook): RiskComputeOptions {
+  const benchmarkSymbol = strategyLabBookBenchmarkSymbol(book);
   return {
     snapshot: book.snapshot,
     sourceScope: "research_book",
     researchBookReturnPoints: book.object.return_points,
-    researchBookBenchmarkPoints: book.composition?.benchmark_points ?? null,
+    researchBookBenchmarkPoints: strategyLabBenchmarkPoints(book, benchmarkSymbol),
     researchBookRiskLegs: book.object.risk_legs ?? [],
     riskSourceLabel: book.sourceLabel,
     riskSourceObjectId: book.object.object_id,
@@ -24,7 +44,7 @@ export function buildStrategyLabRiskRequest(book: StrategyLabResearchBook): Risk
     mcSimulationModel: "Gaussian",
     mcNumSimulations: 2000,
     betaWindow: 126,
-    benchmarkSymbol: book.benchmarkSymbol || "SPY"
+    benchmarkSymbol
   };
 }
 

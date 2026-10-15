@@ -75,6 +75,10 @@ def test_saved_experiment_exact_restart_risk_and_revised_weight_comparison(tmp_p
         assert unavailable.status_code == 200, unavailable.text
         assert unavailable.json()["metrics"]["benchmark_overlap_count"] is None
         assert unavailable.json()["benchmark_return_points"] == []
+        # Regresión: un benchmark retenido vacío no se presenta como histórico utilizado.
+        assert any("uses the retained Strategy Lab experiment history" in w for w in risk.json()["warnings"])
+        assert any("retained no benchmark history" in w for w in unavailable.json()["warnings"])
+        assert not any("uses the retained Strategy Lab experiment history" in w for w in unavailable.json()["warnings"])
         revised = deepcopy(request())
         revised["name"] = "Revised QQQ minus SPY"
         revised["legs"][0]["weight"] = 2

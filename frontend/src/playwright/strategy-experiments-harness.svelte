@@ -4,7 +4,7 @@
   import RiskView from "../views/RiskView.svelte";
   import { composeStrategyLabPortfolio, validateStrategyLabPortfolio, saveResearchItem, loadSavedResearch,
     deleteSavedResearchItem, restoreStrategyLabComposition, restoreStrategyLabResult, computeRisk,
-    strategyLabComposition, strategyLabResult, strategyLabResearchBook, savedResearchItems, loading, lastError,
+    strategyLabComposition, strategyLabCompositionStale, strategyLabResult, strategyLabResearchBook, savedResearchItems, loading, lastError,
     riskResult, strategyComposerDraft } from "../lib/stores/app";
   import { buildStrategyLabRiskRequest } from "../lib/risk-handoff";
   import type { StrategyLabMode } from "../lib/view-models/research";
@@ -31,7 +31,7 @@
   <RiskView mode="research" strategyLabResearchBook={$strategyLabResearchBook} result={$riskResult}
     loading={$loading.risk} onCompute={async (options) => { await computeRisk(options); }} />
 {:else}
-  <StrategyLabView bind:mode strategyComposition={$strategyLabComposition} strategyResult={$strategyLabResult}
+  <StrategyLabView bind:mode strategyComposition={$strategyLabComposition} compositionStaleMessage={$strategyLabCompositionStale ?? ""} strategyResult={$strategyLabResult}
     savedItems={$savedResearchItems} strategyLoading={$loading.strategyLab} savedLoading={$loading.savedResearch}
     errorMessage={$lastError} onComposePortfolioStrategy={composeStrategyLabPortfolio}
     onValidatePortfolioStrategy={validateStrategyLabPortfolio} onAnalyzeStrategy={async () => null}

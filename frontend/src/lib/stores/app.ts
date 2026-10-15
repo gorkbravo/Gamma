@@ -1,4 +1,4 @@
-import { get, writable } from "svelte/store";
+import { derived, get, writable } from "svelte/store";
 import { compositionValidation } from "../strategy-experiments";
 import { deleteJson, getJson, getNdjsonStream, getText, patchJson, postJson, postNdjsonStream, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
@@ -440,6 +440,13 @@ export const sitrepWorkspaceMeta = writable<SitrepWorkspaceMeta | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
 export const strategyLabResult = writable<StrategyLabResult | null>(null);
 export const strategyLabComposition = writable<StrategyLabCompositionResult | null>(null);
+// Un fallo de composición conserva el último resultado correcto (ver auditoría 2026-10-06),
+// pero queda ligado a ese resultado concreto: cualquier composición posterior anula la marca.
+const strategyLabCompositionFailure = writable<{ message: string; retained: StrategyLabCompositionResult } | null>(null);
+export const strategyLabCompositionStale = derived(
+  [strategyLabComposition, strategyLabCompositionFailure],
+  ([composition, failure]) => (composition && failure?.retained === composition ? failure.message : null)
+);
 export const researchCompareResult = writable<ResearchCompareResult | null>(null);
 export const savedResearchItems = writable<SavedResearchItem[]>([]);
 export const macroContext = writable<MacroContextState>({
@@ -1976,7 +1983,7 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
       return result;
     } catch (error) {
       if (!isAbortError(error)) setError(error);
-        return null;
+      return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -1999,6 +2006,7 @@ export async function composeStrategyLab(options: StrategyLabComposeOptions) {
       if (signal.aborted) return null;
       strategyLabComposition.set(result);
       strategyLabResearchBook.set(null);
+      strategyLabCompositionFailure.set(null);
       researchCompareResult.set(null);
       resetCopilotCard("research");
       lastError.set("");
@@ -2006,8 +2014,9 @@ export async function composeStrategyLab(options: StrategyLabComposeOptions) {
     } catch (error) {
       if (!isAbortError(error)) {
         setError(error);
+        markRetainedStrategyLabComposition();
       }
-        return null;
+      return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -2030,9 +2039,9 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     try {
       const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", payload, { signal });
       if (signal.aborted) return null;
-      const book = buildStrategyLabResearchBook(result, compositionValidation(result), result.portfolio_inputs?.benchmark_symbol ?? options.benchmarkSymbol ?? null);
       strategyLabComposition.set(result);
-      strategyLabResearchBook.set(book);
+      strategyLabResearchBook.set(researchBookForComposition(result, result.portfolio_inputs?.benchmark_symbol ?? options.benchmarkSymbol ?? null));
+      strategyLabCompositionFailure.set(null);
       researchCompareResult.set(null);
       resetCopilotCard("research");
       lastError.set("");
@@ -2040,12 +2049,26 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     } catch (error) {
       if (!isAbortError(error)) {
         setError(error);
+        markRetainedStrategyLabComposition();
       }
       return null;
     } finally {
       endLoading("strategyLab");
     }
   });
+}
+
+// Marca el resultado conservado como no correspondiente al último intento de composición.
+function markRetainedStrategyLabComposition() {
+  const retained = get(strategyLabComposition);
+  strategyLabCompositionFailure.set(retained ? { message: get(lastError) || "Composition failed.", retained } : null);
+}
+
+// Un resultado correcto del servidor nunca se descarta porque no pueda derivarse un research book:
+// en ese caso no hay book y Open In Risk lo indica explícitamente.
+function researchBookForComposition(result: StrategyLabCompositionResult, benchmarkSymbol: string | null) {
+  const validation = compositionValidation(result);
+  return validation.valid ? buildStrategyLabResearchBook(result, validation, benchmarkSymbol) : null;
 }
 
 function buildStrategyLabResearchBook(
@@ -2129,7 +2152,7 @@ export async function validateStrategyLabPortfolio(options: StrategyLabPortfolio
       return result;
     } catch (error) {
       if (!isAbortError(error)) setError(error);
-        return null;
+      return null;
     } finally {
       endLoading("strategyLab");
     }
@@ -2271,9 +2294,8 @@ export function restoreStrategyLabResult(result: StrategyLabResult) {
 }
 
 export function restoreStrategyLabComposition(result: StrategyLabCompositionResult) {
-  const book = buildStrategyLabResearchBook(result, compositionValidation(result), result.portfolio_inputs?.benchmark_symbol ?? null);
   strategyLabComposition.set(result);
-  strategyLabResearchBook.set(book);
+  strategyLabResearchBook.set(researchBookForComposition(result, result.portfolio_inputs?.benchmark_symbol ?? null));
   researchCompareResult.set(null);
   lastError.set("");
 }

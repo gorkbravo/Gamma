@@ -178,3 +178,40 @@ def test_failed_run_cannot_rewrite_retry_or_fabricate_success(e3, monkeypatch):
     assert result.status == "incomplete" and result.card is None
     assert len(service.get_script(script_id).revisions) == 1
     assert len(service.list_runs(script_id)) == 1
+
+
+def test_operator_reaches_visibly_attached_strategy_lab_script_but_not_unattached_foreign_ones(e3):
+    # Regresión: Strategy Lab crea los Scripts con su sesión de workspace, distinta del id del chat de Copilot.
+    from src.models.research_script import ResearchScriptCreateRequest
+    runtime, service, _, request, call = e3
+    ui_script = service.create_script(ResearchScriptCreateRequest("strategy-lab-script-workspace", "UI script", "print('ui')"))
+    ui_id = ui_script.script.script_id
+    revision = ui_script.revisions[0]
+    attached = replace(request, user_session_id="copilot-chat-1", context=replace(request.context,
+        strategy_lab_state={"script_state": {"script_id": ui_id, "source_sha256": revision.source_sha256}}))
+    unattached = replace(attached, context=replace(request.context, strategy_lab_state=None))
+
+    assert call("inspect", selection(ui_id), attached)["status"] == "preview_only"
+    refused = call("inspect", selection(ui_id), unattached)
+    assert "neither attached" in refused["error"]
+    # Adjuntar otro Script no concede acceso a éste.
+    other = replace(attached, context=replace(request.context, strategy_lab_state={"script_state": {"script_id": "other"}}))
+    assert "neither attached" in call("inspect", selection(ui_id), other)["error"]
+
+    bundle = service.create_input_bundle(ui_id, ResearchScriptInputBundleRequest())
+    exact = dict(script_id=ui_id, revision_id=revision.revision_id, input_snapshot_id=bundle.snapshot_id,
+        source_sha256=revision.source_sha256, manifest_sha256=bundle.manifest_sha256)
+    copilot = runtime.copilot_service
+
+    def run(req):
+        req = replace(req, prompt="Run this Python Script.")
+        return copilot._execute_registered_operator_action("strategy_lab.run_research_script", exact,
+            copilot._build_strategy_lab_context(req), request=req).output
+
+    assert run(unattached)["status"] == "rejected"
+    assert service.list_runs(ui_id) == []
+    assert run(attached)["status"] == "completed"
+    assert len(service.list_runs(ui_id)) == 1
+    # Un Script creado por la propia sesión de Copilot sigue siendo accesible sin adjuntarlo.
+    own = service.create_script(ResearchScriptCreateRequest("copilot-chat-1", "Own script", "print('own')"))
+    assert call("inspect", selection(own.script.script_id), unattached)["status"] == "preview_only"
