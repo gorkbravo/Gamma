@@ -26,6 +26,9 @@ Path('summary.csv').write_text('metric,value\\nreturn,0.12\\n', encoding='utf-8'
 
 def _runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("GAMMA_RESEARCH_SCRIPT_RUNTIME", "mock")
+    monkeypatch.setenv("RESEARCH_HISTORY_PROVIDERS", "mock")
+    monkeypatch.setenv("RESEARCH_MARKET_DATA_PROVIDERS", "mock")
+    monkeypatch.setenv("SITREP_MARKET_DATA_PROVIDERS", "mock")
     return build_runtime(
         mock_mode=True,
         cache_dir=tmp_path / "cache",
@@ -123,7 +126,8 @@ def test_script_plan_distinguishes_draft_from_explicit_run(tmp_path, monkeypatch
         )
         assert draft_plan.intent == "research_script_workflow"
         assert [step.tool_id for step in draft_plan.steps] == [
-            "strategy_lab.draft_research_script"
+            "strategy_lab.draft_research_script",
+            "strategy_lab.script_read_inputs", "strategy_lab.script_draft_from_bundle"
         ]
 
         run_plan = runtime.copilot_service.plan_research_operator(
@@ -141,6 +145,7 @@ def test_script_plan_distinguishes_draft_from_explicit_run(tmp_path, monkeypatch
         )
         assert [step.tool_id for step in combined_plan.steps] == [
             "strategy_lab.draft_research_script",
+            "strategy_lab.script_read_inputs", "strategy_lab.script_draft_from_bundle",
             "strategy_lab.run_research_script",
         ]
 
@@ -159,7 +164,7 @@ def test_operator_draft_run_and_working_analysis_preserve_exact_identities(tmp_p
         service = runtime.copilot_service
         service.create_session(session_id="operator-script-session")
         draft_request = _operator_request(
-            "Build a monthly moving-average Research Script for SPY. Show the code, but do not run it."
+            "Build a monthly moving-average Research Script for SPY. Fetch inputs and show the code, but do not run it."
         )
         draft_context = service._build_strategy_lab_context(draft_request)
         draft = service._execute_registered_operator_action(
@@ -193,8 +198,15 @@ def test_operator_draft_run_and_working_analysis_preserve_exact_identities(tmp_p
             draft.output["input_snapshot_id"]
         )
         assert retained_snapshot is not None
-        assert retained_snapshot.files[0].logical_filename == "spy_monthly.csv"
-        assert retained_snapshot.files[0].source_kind == "provider"
+        assert retained_snapshot.files == []
+        assert retained_snapshot.warnings  # legacy references are not executable bundles
+        # Acquire through E3's catalog in the dedicated acceptance suite; this legacy test
+        # verifies unresolved references cannot enter execution.
+        from src.models.research_script import ResearchScriptInputBundleRequest
+        retained_snapshot = runtime.research_script_service.create_input_bundle(
+            draft.output["script_id"], ResearchScriptInputBundleRequest())
+        draft.output["input_snapshot_id"] = retained_snapshot.snapshot_id
+        draft.output["manifest_sha256"] = retained_snapshot.manifest_sha256
 
         run_request = _operator_request(
             "Run it.",
@@ -251,7 +263,7 @@ def test_degraded_input_acquisition_is_explicit_and_does_not_expand_authority(
     runtime = _runtime(tmp_path, monkeypatch)
     try:
         copilot = runtime.copilot_service
-        draft_request = _operator_request("Build a Research Script from the authorized dataset.")
+        draft_request = _operator_request("Build a Research Script and fetch the authorized dataset.")
         arguments = _draft_arguments()
         arguments["authorized_input_references"][0]["symbol"] = None
         draft = copilot._execute_registered_operator_action(
@@ -276,7 +288,7 @@ def test_operator_revision_is_staged_and_accept_reject_enforces_parent_hash(tmp_
     runtime = _runtime(tmp_path, monkeypatch)
     try:
         service = runtime.copilot_service
-        request = _operator_request("Build a Research Script for SPY. Show the code.")
+        request = _operator_request("Build a Research Script for SPY. Fetch inputs and show the code.")
         initial = service._execute_registered_operator_action(
             "strategy_lab.draft_research_script",
             _draft_arguments(),
@@ -294,7 +306,7 @@ def test_operator_revision_is_staged_and_accept_reject_enforces_parent_hash(tmp_
         )
         staged = service._execute_registered_operator_action(
             "strategy_lab.draft_research_script",
-            _draft_arguments(f"{SCRIPT}\nprint('warning: fixture')\n"),
+            {**_draft_arguments(f"{SCRIPT}\nprint('warning: fixture')\n"), "authorized_input_references": []},
             service._build_strategy_lab_context(edit_request),
             request=edit_request,
             run_id="operator-candidate",
@@ -476,8 +488,9 @@ def test_responses_operator_observes_draft_before_identity_citing_synthesis(
             assert should_cancel() is False
             self.payloads.append(deepcopy(payload))
             if len(self.payloads) == 1:
-                tools = {item["name"]: item for item in payload["tools"]}
-                assert set(tools) == {"strategy_lab.draft_research_script"}
+                assert all("." not in item["name"] for item in payload["tools"])
+                tools = {item["name"].replace("__", "."): item for item in payload["tools"]}
+                assert {"strategy_lab.draft_research_script", "strategy_lab.script_inspect", "strategy_lab.script_add_input"}.issubset(tools)
                 assert tools["strategy_lab.draft_research_script"]["strict"] is True
                 return (
                     {
@@ -488,7 +501,7 @@ def test_responses_operator_observes_draft_before_identity_citing_synthesis(
                                 "type": "function_call",
                                 "id": "fc-script-draft",
                                 "call_id": "call-script-draft",
-                                "name": "strategy_lab.draft_research_script",
+                                "name": "strategy_lab__draft_research_script",
                                 "arguments": json.dumps(_draft_arguments()),
                             }
                         ],
@@ -557,7 +570,7 @@ def test_responses_operator_observes_draft_before_identity_citing_synthesis(
             "/copilot/operator-plan/execute",
             json={
                 "domain": "strategy_lab",
-                "prompt": "Build a monthly moving-average Research Script for SPY. Show the code, but do not run it.",
+                "prompt": "Build a monthly moving-average Research Script for SPY. Fetch inputs and show the code, but do not run it.",
                 "user_session_id": "operator-script-session",
                 "context": {"current_tab": "copilot", "workspace_mode": "research"},
             },
@@ -617,7 +630,8 @@ def test_responses_operator_run_observation_precedes_identity_citing_synthesis(
         def _post_json_stream(self, payload, emit, should_cancel):
             self.turn += 1
             if self.turn == 1:
-                tools = {item["name"]: item for item in payload["tools"]}
+                assert all("." not in item["name"] for item in payload["tools"])
+                tools = {item["name"].replace("__", "."): item for item in payload["tools"]}
                 assert set(tools) == {"strategy_lab.run_research_script"}
                 return (
                     {
@@ -628,7 +642,7 @@ def test_responses_operator_run_observation_precedes_identity_citing_synthesis(
                                 "type": "function_call",
                                 "id": "fc-script-run",
                                 "call_id": "call-script-run",
-                                "name": "strategy_lab.run_research_script",
+                                "name": "strategy_lab__run_research_script",
                                 "arguments": json.dumps(exact_arguments),
                             }
                         ],
@@ -781,7 +795,7 @@ def test_timed_out_script_observation_prevents_false_success_synthesis(
                                 "type": "function_call",
                                 "id": "fc-timeout",
                                 "call_id": "call-timeout",
-                                "name": "strategy_lab.run_research_script",
+                                "name": "strategy_lab__run_research_script",
                                 "arguments": json.dumps(exact_arguments),
                             }
                         ],

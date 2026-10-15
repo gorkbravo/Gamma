@@ -59,6 +59,8 @@ def strict_objects(schema: dict) -> bool:
 
 def main() -> int:
     os.environ["GAMMA_RESEARCH_SCRIPT_RUNTIME"] = "mock"
+    os.environ["RESEARCH_MARKET_DATA_PROVIDERS"] = "mock"
+    os.environ["SITREP_MARKET_DATA_PROVIDERS"] = "mock"
     with TemporaryDirectory(prefix="gamma-research-script-operator-eval-") as temp_dir:
         root = Path(temp_dir)
         runtime = build_runtime(
@@ -127,8 +129,11 @@ def main() -> int:
             checks = {
                 "strict_draft_schema": strict_objects(draft_definition.input_schema),
                 "strict_run_schema": strict_objects(run_definition.input_schema),
+                "strict_catalog_schemas": all(strict_objects(d.input_schema) for name,d in definitions.items() if name.startswith("strategy_lab.script_")),
+                "mock_execution_truth": run_output.get("execution_evidence") == "mock_safe_preview",
+                "output_contents_observed": any(o.get("text") or o.get("rows") for o in run_output.get("outputs", [])),
                 "draft_only_selects_draft": [step.tool_id for step in draft_plan.steps]
-                == ["strategy_lab.draft_research_script"],
+                == ["strategy_lab.draft_research_script", "strategy_lab.script_read_inputs", "strategy_lab.script_draft_from_bundle"],
                 "explicit_run_selects_run": [step.tool_id for step in run_plan.steps]
                 == ["strategy_lab.run_research_script"],
                 "draft_did_not_execute": draft_output.get("revision_status") == "canonical"

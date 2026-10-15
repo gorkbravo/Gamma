@@ -400,8 +400,15 @@ export async function resolveStagedResearchScriptRevision(
     }));
     return null;
   }
+  if (state.sourceDraft !== canonical.source) {
+    researchScriptWorkspace.update((current) => ({ ...current,
+      error: "Save your canonical edits before accepting or rejecting an Operator candidate." }));
+    return null;
+  }
   setBusy("decision");
   try {
+    const acceptedInputs = decision === "accept" && candidate.input_snapshot_id
+      ? await getResearchScriptInputSnapshot(candidate.input_snapshot_id) : null;
     const next = await (
       decision === "accept" ? acceptResearchScriptRevision : rejectResearchScriptRevision
     )(
@@ -419,6 +426,7 @@ export async function resolveStagedResearchScriptRevision(
       detail: next,
       selectedRevisionId: nextCanonical?.revision_id ?? null,
       sourceDraft: nextCanonical?.source ?? current.sourceDraft,
+      ...(acceptedInputs ? { preparedInputSnapshot: acceptedInputs } : {}),
       loading: null,
       notice: decision === "accept"
         ? `Accepted Operator candidate as canonical revision ${nextCanonical?.revision_number ?? ""}.`

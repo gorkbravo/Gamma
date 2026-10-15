@@ -451,15 +451,29 @@
         </p>
         {#each stagedRevisions as candidate (candidate.revision_id)}
           {@const parent = workspace.detail?.revisions.find((item) => item.revision_id === candidate.parent_revision_id)}
+          {@const candidateInputs = workspace.inputBundles.find((item) => item.snapshot_id === candidate.input_snapshot_id)}
           <section class="candidate-card">
             <div class="row"><span>Candidate</span><strong>Rev {candidate.revision_number} · {shortHash(candidate.source_sha256)}</strong></div>
             <div class="row"><span>Parent</span><strong>{shortHash(candidate.expected_parent_sha256)}</strong></div>
             <div class="row"><span>Diff</span><strong>{changedLineCount(candidate.source, parent?.source ?? "")}</strong></div>
             <p>{candidate.change_summary ?? "Operator-authored candidate revision"}</p>
+            {#if candidate.input_snapshot_id}
+              <p class="muted">Reviewed input bundle: {candidate.input_snapshot_id}. Execution stays bound to this bundle.</p>
+            {/if}
             <details>
-              <summary>Inspect candidate source</summary>
-              <pre>{candidate.source}</pre>
+              <summary>Compare canonical and candidate source</summary>
+              <p class="muted">Canonical source</p><pre>{parent?.source ?? "Parent source unavailable"}</pre>
+              <p class="muted">Candidate source</p><pre>{candidate.source}</pre>
             </details>
+            {#if candidateInputs}
+              <details>
+                <summary>Review candidate inputs ({candidateInputs.files.length})</summary>
+                {#each candidateInputs.files as file}
+                  <div class="row"><span>{file.logical_filename}</span><strong>{shortHash(file.content_sha256)}</strong></div>
+                  <p class="muted">{file.provider_id ?? "User-supplied file"} · {file.media_type}</p>
+                {/each}
+              </details>
+            {/if}
             <div class="candidate-actions">
               <button
                 type="button"

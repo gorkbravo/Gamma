@@ -319,6 +319,7 @@ describe("research script workspace store", () => {
           parent_revision_id: "revision-1",
           status: "staged",
           change_summary: "Operator candidate",
+          input_snapshot_id: "reviewed-inputs",
           operator_run_id: "oprun-1",
           expected_parent_sha256: "1".repeat(64)
         }
@@ -338,17 +339,34 @@ describe("research script workspace store", () => {
       sourceDraft: initial.revisions[0].source,
       selectedRevisionId: "revision-1"
     });
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(accepted));
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(bundle("reviewed-inputs", ["external.json"])))
+      .mockResolvedValueOnce(jsonResponse(accepted));
     vi.stubGlobal("fetch", fetchMock);
 
     await resolveStagedResearchScriptRevision("revision-staged", "accept");
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(body.expected_parent_sha256).toBe("1".repeat(64));
-    expect(fetchMock.mock.calls[0][0]).toContain("/revision-staged/accept");
+    expect(fetchMock.mock.calls[1][0]).toContain("/revision-staged/accept");
     expect(get(researchScriptWorkspace).detail?.script.canonical_revision_id).toBe(
       "revision-staged"
     );
     expect(get(researchScriptWorkspace).sourceDraft).toBe("print('operator candidate')\n");
+    expect(get(researchScriptWorkspace).preparedInputSnapshot?.snapshot_id).toBe("reviewed-inputs");
   });
+  it("keeps unsaved canonical edits when candidate review is requested", async () => {
+    const initial = detail();
+    const staged = { ...initial.revisions[0], revision_id: "candidate", status: "staged" as const,
+      source: "print('candidate')", created_by: "operator" as const };
+    loadedWorkspace(bundle("original", ["external.json"]));
+    researchScriptWorkspace.update(state => ({ ...state,
+      detail: { ...initial, revisions: [...initial.revisions, staged] }, sourceDraft: "print('unsaved user edit')" }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await resolveStagedResearchScriptRevision("candidate", "accept");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(get(researchScriptWorkspace).sourceDraft).toBe("print('unsaved user edit')");
+    expect(get(researchScriptWorkspace).error).toContain("Save your canonical edits");
+  });
+
 });

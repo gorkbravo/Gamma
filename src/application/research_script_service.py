@@ -379,11 +379,14 @@ class ResearchScriptService:
         expected_parent_sha256: str,
         change_summary: str | None,
         operator_run_id: str,
+        input_snapshot_id: str | None = None,
     ) -> ResearchScriptDetail:
         detail = self.get_script(script_id)
         parent = next(
             item for item in detail.revisions if item.revision_id == detail.script.canonical_revision_id
         )
+        if input_snapshot_id and self.get_input_snapshot(input_snapshot_id).script_id != script_id:
+            raise ResearchScriptValidationError(["Candidate input bundle belongs to another Script."])
         errors = self._validate_source(source)
         expected_hash = str(expected_parent_sha256 or "").strip().lower()
         if expected_hash != parent.source_sha256:
@@ -411,6 +414,7 @@ class ResearchScriptService:
             change_summary=str(change_summary or "Operator candidate revision").strip(),
             operator_run_id=str(operator_run_id or "").strip() or None,
             expected_parent_sha256=expected_hash,
+            input_snapshot_id=input_snapshot_id,
         )
         try:
             self.store.append_staged_revision(
@@ -528,6 +532,8 @@ class ResearchScriptService:
         else:
             snapshot = self._create_input_snapshot(detail.script.script_id, request)
 
+        if revision.input_snapshot_id and revision.input_snapshot_id != snapshot.snapshot_id:
+            raise ResearchScriptConflictError("The candidate was reviewed against a different input bundle.")
         input_contents = self.store.load_input_contents(snapshot)
         input_manifest = self._input_manifest_identity(snapshot)
         computed_manifest_hash = self.manifest_sha256(input_manifest)
@@ -728,7 +734,7 @@ class ResearchScriptService:
                 exported, metadata = self.dataset_catalog.retained_preview(script_id, request)
             except ValueError as exc:
                 raise ResearchScriptValidationError([str(exc)]) from exc
-            reference = {key: value for key, value in metadata.items() if key != "fields"}
+            reference = {key: value for key, value in metadata.items() if key not in {"fields", "preview_id"}}
             reference["logical_filename"] = request.logical_filename
             source_reference = {
                 **reference,

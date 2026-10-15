@@ -697,6 +697,7 @@ class ResearchScriptStore:
             change_summary=payload.get("change_summary"),
             operator_run_id=payload.get("operator_run_id"),
             expected_parent_sha256=payload.get("expected_parent_sha256"),
+            input_snapshot_id=payload.get("input_snapshot_id"),
             contract_version=str(payload["contract_version"]),
         )
 

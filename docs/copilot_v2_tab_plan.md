@@ -2,7 +2,17 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
+
+### Official guidance reviewed 2026-10-15 — Script E3
+
+Reviewed current official [function calling](https://developers.openai.com/api/docs/guides/function-calling) and [Agents runtime comparison](https://developers.openai.com/api/docs/guides/agents). Function calling requests application execution and returns its observation to the model; strict schemas do not replace application authorization. Responses function names permit letters, digits, underscores and hyphens. The SDK packages orchestration while application storage, approval and runtime responsibilities remain application-owned.
+
+Decision: retain Gamma's custom Responses loop, configured models, isolated runtime and registry/store authority for Script. The SDK remains the comparison path for verified native analytics; its unverified Script path explicitly returns unavailable. No framework/model migration is justified. E3 reuses E2's catalog and E1's immutable bundles. Dotted registry IDs receive double-underscore aliases only at the Responses transport boundary; permissions and traces retain registry IDs. Live HTTP 400 evidence revealed this transport defect; corrected wire calls and dispatch are verified.
+
+Acquisition, draft/revision and execution have separate current-request checks. Agent has no Script authority. Reviewed candidates bind immutable inputs and require user acceptance; failed runs cannot rewrite/retry in the same run. Synthesis sees retained text/rows/metrics and artifact identities; safe preview receives a server-owned non-execution caveat.
+
+E3 remains **in progress**. A bounded live journey discovered exact SPY/QQQ identities and acquired one real yfinance-backed SPY preview, then exhausted the unchanged 12,000 ms Operator elapsed guard. The configured runtime is `mock_safe_preview`, with `executes_source=false`. No complete live multi-dataset retention, isolated Python execution or output synthesis is certified. See the active Script plan for deterministic evidence and remaining gates.
 
 #### 2026-10-14 — Strategy Lab Script extension discovery
 

@@ -189,6 +189,7 @@ class ResearchScriptRevisionModel(BaseModel):
     status: Literal["canonical", "staged", "superseded", "rejected"]
     change_summary: str | None = None
     operator_run_id: str | None = None
+    input_snapshot_id: str | None = None
     expected_parent_sha256: str | None = None
     contract_version: str
 

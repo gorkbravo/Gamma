@@ -66,6 +66,7 @@ class ResearchScriptRevision:
     change_summary: str | None
     operator_run_id: str | None
     expected_parent_sha256: str | None
+    input_snapshot_id: str | None = None
     contract_version: str = "research-script-revision.v1"
 
 

@@ -1076,6 +1076,9 @@ def main() -> int:
     from src.application.runtime import build_runtime
 
     os.environ.setdefault(GAMMA_SESSION_ENV, "copilot-operator-eval")
+    os.environ["RESEARCH_MARKET_DATA_PROVIDERS"] = "mock"
+    os.environ["SITREP_MARKET_DATA_PROVIDERS"] = "mock"
+    os.environ["PORTFOLIO_RISK_HISTORY_PROVIDERS"] = "mock"
     os.environ["COMMODITIES_PROVIDER"] = "sample"
     os.environ["MARITIME_PROVIDER"] = "sample"
     os.environ["NEWS_PROVIDER"] = "sample"

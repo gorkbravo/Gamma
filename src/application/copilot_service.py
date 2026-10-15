@@ -132,6 +132,7 @@ from src.models.prediction_markets import (
     PredictionProbabilityPoint,
 )
 from src.models.research_script import ResearchScriptInputFileCreateRequest
+from src.application.copilot_script_tools import script_action_definitions, execute_script_action, script_acquisition_authorized
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import (
     ResearchComparisonLeg,
@@ -1749,6 +1750,7 @@ class CopilotService:
             )
         }
         self._mutation_action_definitions = [
+            *script_action_definitions(),
             CopilotResearchActionDefinition(
                 tool_id="strategy_lab.draft_research_script",
                 domains=["strategy_lab"],
@@ -4194,7 +4196,7 @@ class CopilotService:
             "stream_research_operator",
             None,
         )
-        if plan.intent == "research_script_workflow" and not callable(adaptive_operator):
+        if plan.intent == "research_script_workflow" and (not callable(adaptive_operator) or resolution.orchestration_path != CUSTOM_OPERATOR_PATH):
             result = CopilotResearchCardResult(
                 domain="strategy_lab",
                 current_tab=request.context.current_tab or "copilot",
@@ -4203,7 +4205,7 @@ class CopilotService:
                 model=resolution.model,
                 message=(
                     "Research Script Operator drafting/execution is unavailable because the "
-                    "configured Copilot provider does not support Gamma's custom Responses loop."
+                    "configured Copilot provider/path does not support Gamma's custom Responses loop."
                 ),
                 warnings=[
                     "No Script action ran and no authority was expanded; direct user Script editing and the mock runtime remain available."
@@ -5572,6 +5574,14 @@ class CopilotService:
                 for warning in context.warnings:
                     record_warning(warning, step=step)
 
+            if normalized_tool_id.startswith("strategy_lab.") and any(
+                isinstance(item, dict) and isinstance(item.get("result"), dict)
+                and item["result"].get("run_id") and item["result"].get("status") != "completed"
+                for item in outputs.values()
+            ):
+                return blocked_execution(tool_id=normalized_tool_id, arguments=validated_arguments,
+                    summary="A failed Script run requires a new user request before any rewrite or retry.",
+                    step=step, status="rejected", reason="script_failure_requires_user")
             invocation_id = (
                 f"observation_{attempted_tool_calls:02d}_"
                 f"{self._safe_source_id(normalized_tool_id).lower()}"
@@ -5833,6 +5843,15 @@ class CopilotService:
             and observation["result"].get("run_id")
             and observation["result"].get("status") != "completed"
         ]
+        mock_script_runs = [observation.get("result") for observation in outputs.values()
+            if isinstance(observation, dict) and isinstance(observation.get("result"), dict)
+            and observation["result"].get("execution_evidence") == "mock_safe_preview"]
+        if mock_script_runs:
+            mock_warning = "Mock safe-preview output: Python was not executed; these are fixture outputs, not computed findings."
+            warnings = dedupe_warnings([*warnings, mock_warning])
+            if provider_result.card:
+                provider_result = replace(provider_result, card=replace(provider_result.card,
+                    caveats=dedupe_warnings([*provider_result.card.caveats, mock_warning])))
         if script_terminal_failures:
             failed_run = script_terminal_failures[-1]
             provider_result = replace(
@@ -5846,6 +5865,12 @@ class CopilotService:
                 card=None,
             )
             stop_reason = f"script_run_{failed_run.get('status')}"
+        elif plan.intent == "research_script_workflow" and provider_result.status == "ready" and (
+            stop_reason in {"elapsed_budget_exhausted", "tool_request_limit_exhausted", "external_provider_budget_exhausted", "tool_budget_exhausted"}
+            or failed_steps
+        ):
+            provider_result = replace(provider_result, status="incomplete",
+                message="The Script workflow stopped before completion. Inspect retained observations and warnings before continuing.")
         elif (
             provider_result.status == "ready"
             and allowed_steps
@@ -6049,6 +6074,8 @@ class CopilotService:
                     source_ids=[],
                 ),
             )
+        if tool_id.startswith("strategy_lab.script_"):
+            return execute_script_action(self, tool_id, arguments, context, request=request, run_id=run_id)
         if tool_id == "strategy_lab.draft_research_script":
             return self._tool_draft_research_script(
                 arguments,
@@ -6082,7 +6109,7 @@ class CopilotService:
                 arguments,
                 "Research Script drafting is available only to Research Operator.",
             )
-        if not self._prompt_requests_script_workflow(prompt.lower(), request.context):
+        if not self._prompt_requests_script_workflow(prompt, request.context) or not self._prompt_requests_script_draft(prompt):
             return self._blocked_script_execution(
                 "strategy_lab.draft_research_script",
                 arguments,
@@ -6112,12 +6139,17 @@ class CopilotService:
         script_state = context.summary_data.get("script_state")
         script_state = script_state if isinstance(script_state, dict) else {}
         authorized_references = list(arguments["authorized_input_references"])
+        if authorized_references and not script_acquisition_authorized(prompt):
+            return self._blocked_script_execution("strategy_lab.draft_research_script", arguments,
+                "Data acquisition needs explicit current-turn permission; use a retained bundle to draft without fetching.")
         acquired_input_files, acquisition_warnings = self._acquire_research_script_inputs(
             authorized_references
         )
         try:
             if script_state.get("script_id"):
                 script_id = str(script_state["script_id"])
+                if self.research_script_service.get_script(script_id).script.session_id != session_id:
+                    raise ResearchScriptConflictError("Script belongs to another Copilot session.")
                 expected_hash = str(
                     script_state.get("source_sha256")
                     or script_state.get("canonical_source_sha256")
@@ -6126,18 +6158,19 @@ class CopilotService:
                     raise ResearchScriptConflictError(
                         "The visible canonical source hash is required before staging an Operator candidate."
                     )
+                if authorized_references:
+                    raise ResearchScriptConflictError("Existing Script revisions must use a retained bundle; acquire inputs through the shared catalog first.")
+                bundles = self.research_script_service.list_input_bundles(script_id)
+                snapshot = (self.research_script_service.get_input_snapshot(str(script_state["input_snapshot_id"]))
+                    if script_state.get("input_snapshot_id") else bundles[0] if bundles else
+                    self.research_script_service.create_authorized_input_snapshot(script_id, []))
                 detail = self.research_script_service.stage_operator_revision(
                     script_id,
                     source=str(arguments["python_source"]),
                     expected_parent_sha256=expected_hash,
                     change_summary=f"Operator candidate: {str(arguments['research_intent']).strip()}",
                     operator_run_id=operator_run_id,
-                )
-                snapshot = self.research_script_service.create_authorized_input_snapshot(
-                    script_id,
-                    authorized_references,
-                    acquired_input_files=acquired_input_files,
-                    acquisition_warnings=acquisition_warnings,
+                    input_snapshot_id=snapshot.snapshot_id,
                 )
                 revision = max(
                     (
@@ -6247,75 +6280,13 @@ class CopilotService:
         self,
         references: list[dict[str, Any]],
     ) -> tuple[list[ResearchScriptInputFileCreateRequest], list[str]]:
-        """Copy supported app-native price history into the bounded Script snapshot.
-
-        This resolver deliberately accepts no URL, tool name, path, credential, or
-        execution destination. Unsupported references remain requirements with an
-        explicit degraded warning rather than widening the runtime boundary.
-        """
-
-        files: list[ResearchScriptInputFileCreateRequest] = []
-        warnings: list[str] = []
-        for reference in references:
-            reference_id = str(reference.get("reference_id") or "input").strip()
-            source_kind = str(reference.get("source_kind") or "").strip()
-            symbol = str(reference.get("symbol") or "").strip().upper()
-            logical_filename = str(reference.get("logical_filename") or "").strip()
-            media_type = str(reference.get("media_type") or "text/csv").strip().lower()
-            if source_kind == "user_upload":
-                warnings.append(
-                    f"Input `{reference_id}` requires user-uploaded bytes before data-dependent execution."
-                )
-                continue
-            if not symbol or not logical_filename or media_type != "text/csv":
-                warnings.append(
-                    f"Input `{reference_id}` could not be acquired: the v1 app-native bridge requires symbol, logical_filename, and text/csv."
-                )
-                continue
-            if self.research_provider is None or not hasattr(
-                self.research_provider,
-                "load_symbol_history",
-            ):
-                warnings.append(
-                    f"Input `{reference_id}` could not be acquired because Gamma historical-price data is unavailable."
-                )
-                continue
-            lookback_days = int(reference.get("lookback_days") or 756)
-            try:
-                series = self.research_provider.load_symbol_history(symbol, lookback_days)
-                if series is None or getattr(series, "empty", True):
-                    raise ValueError("no bounded history was returned")
-                frequency = str(reference.get("frequency") or "daily").strip().lower()
-                if frequency == "weekly":
-                    series = series.resample("W-FRI").last().dropna()
-                elif frequency == "monthly":
-                    series = series.resample("ME").last().dropna()
-                csv_text = series.rename("close").to_csv(index_label="date")
-                files.append(
-                    ResearchScriptInputFileCreateRequest(
-                        logical_filename=logical_filename,
-                        media_type="text/csv",
-                        content=csv_text.encode("utf-8"),
-                        gamma_object_id=(
-                            str(reference.get("dataset_id") or "").strip() or None
-                        ),
-                        provider_id=(
-                            str(reference.get("provider") or "").strip() or None
-                        ),
-                        transformation_note=(
-                            f"Gamma copied bounded {frequency} historical prices for {symbol}; "
-                            "the Script runtime received only this retained CSV snapshot."
-                        ),
-                        source_kind=(
-                            "gamma_state" if source_kind == "gamma_state" else "provider"
-                        ),
-                    )
-                )
-            except Exception:
-                warnings.append(
-                    f"Input `{reference_id}` acquisition degraded: Gamma could not copy the requested bounded historical-price snapshot."
-                )
-        return files, dedupe_warnings(warnings)
+        # Legacy references are requirements, never an alternate export path.
+        # E3 acquisition must inspect the shared catalog and retain its copied bytes.
+        return [], [
+            f"Input `{reference.get('reference_id', 'input')}` could not be acquired from a legacy reference. "
+            "Discover and inspect the exact shared catalog object, then append it to a retained input bundle."
+            for reference in references
+        ]
 
     def _tool_run_research_script(
         self,
@@ -6350,6 +6321,12 @@ class CopilotService:
                 "Research Script runtime is unavailable.",
             )
         try:
+            if self.research_script_service.get_script(str(arguments["script_id"])).script.session_id != request.user_session_id:
+                raise ResearchScriptConflictError("Script belongs to another Copilot session.")
+            snapshot = self.research_script_service.get_input_snapshot(str(arguments["input_snapshot_id"]))
+            filenames = {item.logical_filename for item in snapshot.files}
+            if any(ref.get("logical_filename") not in filenames for ref in snapshot.dataset_refs):
+                raise ResearchScriptConflictError("Unresolved input references cannot execute. Acquire a retained bundle first.")
             run = self.research_script_service.create_exact_run(
                 str(arguments["script_id"]),
                 revision_id=str(arguments["revision_id"]),
@@ -6375,6 +6352,11 @@ class CopilotService:
                 "metric_value": item.metric_value,
                 "columns": list(item.columns),
                 "row_count": len(item.rows),
+                "rows": list(item.rows[:20]),
+                "text": item.text[:8000] if item.text else None,
+                "alt_text": item.alt_text,
+                "artifact_ref": item.artifact_ref,
+                "content_truncated": len(item.rows) > 20 or len(item.text or "") > 8000,
                 "generated": item.generated,
                 "derived": True,
             }
@@ -6431,6 +6413,9 @@ class CopilotService:
             "manifest_sha256": run.input_manifest_sha256,
             "run_id": run.run_id,
             "status": run.status,
+            "runtime_provider": run.runtime_provider,
+            "runtime_kind": run.runtime_kind,
+            "execution_evidence": "mock_safe_preview" if "mock" in run.runtime_provider.lower() or "mock" in run.runtime_kind.lower() else "isolated_runtime",
             "outputs": output_summaries,
             "warnings": list(run.warnings),
             "sources": source_ids,
@@ -6714,6 +6699,7 @@ class CopilotService:
         if tool_id in {
             "strategy_lab.draft_research_script",
             "strategy_lab.run_research_script",
+            "strategy_lab.script_draft_from_bundle",
         }:
             script_id = str(output.get("script_id") or "").strip()
             revision_id = str(output.get("revision_id") or "").strip()
@@ -8506,6 +8492,11 @@ class CopilotService:
             planned_tools: list[str] = []
             if self._prompt_requests_script_draft(prompt):
                 planned_tools.append("strategy_lab.draft_research_script")
+                planned_tools.extend(["strategy_lab.script_read_inputs", "strategy_lab.script_draft_from_bundle"])
+            if re.search(r"\b(?:discover|find|search)\b", prompt):
+                planned_tools.append("strategy_lab.script_discover")
+            if script_acquisition_authorized(prompt):
+                planned_tools.extend(["strategy_lab.script_discover", "strategy_lab.script_inspect", "strategy_lab.script_add_input", "strategy_lab.script_read_inputs"])
             if self._prompt_requests_script_execution(prompt, request.context):
                 planned_tools.append("strategy_lab.run_research_script")
             add(
@@ -8520,7 +8511,7 @@ class CopilotService:
                     if planned_tools == ["strategy_lab.run_research_script"]
                     else "draft_change"
                 ),
-                planned_tools=planned_tools,
+                planned_tools=list(dict.fromkeys(planned_tools)),
                 required_context=["script_state", "authorized_input_references"],
             )
         elif intent == "research_basket_analysis":

@@ -113,6 +113,7 @@ export interface ResearchScriptRevision {
   change_summary: string | null;
   operator_run_id: string | null;
   expected_parent_sha256: string | null;
+  input_snapshot_id?: string | null;
   contract_version: string;
 }
 

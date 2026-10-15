@@ -613,6 +613,13 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
         max_model_turns = min(10, max(2, plan.max_tool_calls + 2))
         instructions = self._build_operator_instructions(plan)
+        # Responses function names permit only letters, digits, underscores and hyphens.
+        # Registry identities (including dotted Script ids) remain Gamma's authority.
+        wire_names = {str(spec["name"]).replace(".", "__"): str(spec["name"]) for spec in tool_specs}
+        if len(wire_names) != len(tool_specs):
+            raise RuntimeError("Operator tool wire aliases collide.")
+        wire_specs = [{**spec, "name": str(spec["name"]).replace(".", "__")} for spec in tool_specs]
+        instructions += " Provider tool names replace registry dots with double underscores; call the provided function name."
 
         def build_result(
             *,
@@ -645,7 +652,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 context=context,
                 input_items=input_items,
                 reasoning_effort=reasoning_effort,
-                tool_specs=tool_specs,
+                tool_specs=wire_specs,
                 tool_choice="auto",
                 max_output_tokens=1600,
                 prompt_cache_key="gamma-copilot:operator:closed-loop:v1",
@@ -705,7 +712,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 for item in tool_calls:
                     if should_cancel():
                         raise CopilotRunCancelled()
-                    tool_name = str(item.get("name") or "").strip()
+                    wire_name = str(item.get("name") or "").strip()
+                    tool_name = wire_names.get(wire_name, wire_name)
                     arguments = self._parse_operator_tool_arguments(
                         item.get("arguments")
                     )
@@ -1167,9 +1175,19 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "or budget error as an observation. Do not bypass it or invent a tool. "
             "Never place trades, rebalance, mutate accounts or wallets, invoke shell, "
             "install packages, access a runtime network, or apply durable local changes. "
-            "The two strategy_lab Research Script actions are the only authorized code-workflow "
+            "The authorized strategy_lab Research Script actions are the only authorized code-workflow "
             "surface: draft only when the current turn explicitly requests Script authoring, and "
             "run only when it explicitly requests execution with exact immutable ids and hashes. "
+            "Prefer existing app-native analytics when they fit; never silently fall back to Python. "
+            "For custom research, discover exact catalog identities, inspect schema/units/coverage, add previews "
+            "to retained immutable bundles and read actual filenames before drafting. Preview tokens are temporary. "
+            "External files must already be supplied by the user; read them from retained bundles. "
+            "Draft an initial empty-input Script if no Script exists, then prepare its inputs. "
+            "Revisions against acquired bundles use script_draft_from_bundle and require user acceptance; stop there. "
+            "Never run an unaccepted candidate or rewrite/retry after failure. Ordinary top-level Python and "
+            "standalone logs/tables/images/files are valid; no strategy function or typed result is required. "
+            "Use only retained output text/rows/metrics as evidence. Image/file existence alone does not establish "
+            "its unseen contents. Explicitly label mock_safe_preview as not executed Python. "
             "Your final schema-valid research card must directly answer the user's "
             "goal from actual tool outputs, distinguish evidence from inference, "
             "cite only source_id values returned by tools, retain warnings and "
