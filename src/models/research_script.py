@@ -32,7 +32,7 @@ ResearchScriptOutputKind = Literal[
 ]
 ResearchScriptInputSourceKind = Literal["gamma_state", "provider", "user_upload"]
 ResearchScriptMockScenario = Literal["success", "failed", "timed_out", "unavailable", "incomplete"]
-ResearchScriptDataExportDomain = Literal["equity_history", "macro_series", "saved_research"]
+ResearchScriptDataExportDomain = Literal["equity_history", "macro_series", "saved_research", "fundamentals", "options_capture", "commodity_history", "commodity_curve", "commodity_spread", "commodity_inventory", "crypto_history", "crypto_liquidity", "prediction_history"]
 
 
 @dataclass(frozen=True)
@@ -199,6 +199,7 @@ class ResearchScriptRunCreateRequest:
 @dataclass(frozen=True)
 class ResearchScriptDataExportRequest:
     domain: ResearchScriptDataExportDomain
+    # Preview tokens refer only to bounded server-side copied bytes.
     object_id: str
     logical_filename: str
     region: str | None = None
@@ -207,6 +208,8 @@ class ResearchScriptDataExportRequest:
     frequency: Literal["daily", "weekly", "monthly"] | None = None
     additional_input_files: list[ResearchScriptInputFileCreateRequest] = field(default_factory=list)
     base_snapshot_id: str | None = None
+    preview_id: str | None = None
+    outcome_id: str | None = None
 
 
 @dataclass(frozen=True)

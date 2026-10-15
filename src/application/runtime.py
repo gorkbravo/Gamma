@@ -436,12 +436,16 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     iv_service = IVService(client, market_data_mode, usage_ledger=provider_usage)
+    iv_snapshot_store = IVSnapshotStore(resolved_history_dir / "options_snapshots")
     research_script_service = ResearchScriptService(
         research_script_store,
         research_script_runtime,
         research_provider=research_provider,
         research_service=research_service,
         macro_service=macro_service,
+        dataset_services={"fundamentals": fundamentals_service, "options": iv_snapshot_store,
+                          "commodities": commodities_service, "crypto": crypto_service,
+                          "prediction": prediction_market_service},
     )
     copilot_provider = trace_provider(
         _build_copilot_provider(allow_mock=bool(mock_mode)),
@@ -508,7 +512,7 @@ def build_runtime(
         risk_service=risk_service,
         iv_service=iv_service,
         desktop=desktop,
-        iv_snapshot_store=IVSnapshotStore(resolved_history_dir / "options_snapshots"),
+        iv_snapshot_store=iv_snapshot_store,
     )
 
 

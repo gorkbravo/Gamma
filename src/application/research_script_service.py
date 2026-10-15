@@ -93,12 +93,15 @@ class ResearchScriptService:
         research_provider: Any | None = None,
         research_service: Any | None = None,
         macro_service: Any | None = None,
+        dataset_services: dict[str, Any] | None = None,
     ) -> None:
         self.store = store
         self.runtime = runtime
         self.research_provider = research_provider
         self.research_service = research_service
         self.macro_service = macro_service
+        from src.application.script_dataset_catalog import ScriptDatasetCatalog
+        self.dataset_catalog = ScriptDatasetCatalog(self, equity=research_provider, research=research_service, macro=macro_service, **(dataset_services or {}))
 
     @staticmethod
     def source_sha256(source: str) -> str:
@@ -720,6 +723,26 @@ class ResearchScriptService:
         detail = self.get_script(script_id)
         if detail.script.status in {"archived", "discarded"}:
             raise ResearchScriptConflictError("Restore the archived script before exporting inputs.")
+        if request.preview_id:
+            try:
+                exported, metadata = self.dataset_catalog.retained_preview(script_id, request)
+            except ValueError as exc:
+                raise ResearchScriptValidationError([str(exc)]) from exc
+            reference = {key: value for key, value in metadata.items() if key != "fields"}
+            reference["logical_filename"] = request.logical_filename
+            source_reference = {
+                **reference,
+                "source_id": f"{request.domain}:{request.object_id}:{request.outcome_id or ''}",
+                "provider": exported.provider_id,
+                "retrieved_at": exported.retrieved_at.isoformat() if exported.retrieved_at else None,
+                "origin": "script_dataset_catalog.preview",
+            }
+            return self.create_input_bundle(
+                script_id,
+                ResearchScriptInputBundleRequest(base_snapshot_id=request.base_snapshot_id,
+                    input_files=[exported, *request.additional_input_files]),
+                dataset_refs=[reference], source_refs=[source_reference], extra_warnings=metadata["warnings"],
+            )
         object_id = str(request.object_id or "").strip()
         filename = self._safe_output_filename(str(request.logical_filename or "").strip())
         if not object_id:

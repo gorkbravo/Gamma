@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.application.script_dataset_catalog import DatasetSelectionError
+
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.api.schemas.research import (
@@ -283,6 +285,32 @@ def restore_research_script(script_id: str, request: Request) -> ResearchScriptD
     except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
         _raise_script_http_error(exc)
     return ResearchScriptDetailModel.from_domain(detail)
+
+
+@router.get("/research/strategy-lab/script-datasets")
+def script_dataset_definitions(request: Request):
+    return request.app.state.runtime.research_script_service.dataset_catalog.definitions()
+
+
+@router.get("/research/strategy-lab/script-datasets/search")
+def script_dataset_search(request: Request, domain: str = Query(max_length=64), query: str = Query(default="", max_length=128)):
+    try:
+        return request.app.state.runtime.research_script_service.dataset_catalog.search(domain, query)
+    except Exception:
+        # Adapter exceptions can contain URLs or provider diagnostics; never echo secrets.
+        return {"items": [], "warnings": ["Dataset discovery is unavailable. Retry or use external files; existing inputs are unchanged."], "status": "unavailable"}
+
+
+@router.post("/research/strategy-lab/scripts/{script_id}/dataset-preview")
+def script_dataset_preview(script_id: str, payload: ResearchScriptDataExportRequestModel, request: Request):
+    try:
+        return request.app.state.runtime.research_script_service.dataset_catalog.preview(script_id, payload.to_domain())
+    except ResearchScriptNotFoundError as exc:
+        _raise_script_http_error(exc)
+    except DatasetSelectionError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "Dataset provider unavailable. Retry; existing inputs are unchanged.") from exc
 
 
 @router.post(

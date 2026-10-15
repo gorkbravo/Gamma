@@ -7,6 +7,7 @@
     fetchResearchScriptRunExport
   } from "../lib/api/research-scripts";
   import AuthenticatedResearchScriptImage from "./AuthenticatedResearchScriptImage.svelte";
+  import ScriptDatasetPicker from "./ScriptDatasetPicker.svelte";
   import ResearchScriptCodeEditor from "./ResearchScriptCodeEditor.svelte";
   import {
     cleanupResearchScriptRetainedOutputs,
@@ -39,13 +40,6 @@
   export let snapshot: ResearchScriptWorkspaceState | null = null;
 
   let newScriptTitle = "Research Script";
-  let exportDomain: "equity_history" | "macro_series" | "saved_research" = "equity_history";
-  let exportObjectId = "SPY";
-  let exportFilename = "spy-prices.csv";
-  let exportRegion = "US";
-  let exportTimeframe = "1Y";
-  let exportLookbackDays = 756;
-  let exportFrequency: "daily" | "weekly" | "monthly" = "daily";
   let comparisonRunId = "";
   let artifactActionError = "";
 
@@ -98,38 +92,6 @@
   const usageValue = (value: unknown) => {
     return typeof value === "number" ? value.toLocaleString() : "—";
   };
-  $: exportObjectLabel = exportDomain === "equity_history"
-    ? "Ticker"
-    : exportDomain === "macro_series"
-      ? "Series id"
-      : "Saved research id";
-
-  function onExportDomain(event: Event) {
-    exportDomain = (event.currentTarget as HTMLSelectElement).value as typeof exportDomain;
-    if (exportDomain === "equity_history") {
-      exportObjectId = "SPY";
-      exportFilename = "spy-prices.csv";
-    } else if (exportDomain === "macro_series") {
-      exportObjectId = "us-10y-yield";
-      exportFilename = "macro-series.csv";
-    } else {
-      exportObjectId = "";
-      exportFilename = "saved-research.json";
-    }
-  }
-
-  function prepareDomainExport() {
-    void prepareResearchScriptDomainInput({
-      domain: exportDomain,
-      object_id: exportObjectId,
-      logical_filename: exportFilename,
-      region: exportDomain === "macro_series" ? exportRegion : undefined,
-      timeframe: exportDomain === "macro_series" ? exportTimeframe : undefined,
-      lookback_days: exportDomain === "equity_history" ? exportLookbackDays : undefined,
-      frequency: exportDomain === "equity_history" ? exportFrequency : undefined
-    });
-  }
-
   function onInputFilename(event: Event) {
     updateResearchScriptInput(
       (event.currentTarget as HTMLInputElement).value,
@@ -530,44 +492,9 @@
           </select>
         </label>
       {/if}
-      <div class="domain-export-grid">
-        <label>
-          <span>Gamma export</span>
-          <select aria-label="Gamma export domain" value={exportDomain} on:change={onExportDomain}>
-            <option value="equity_history">Equity history</option>
-            <option value="macro_series">Macro series</option>
-            <option value="saved_research">Saved research</option>
-          </select>
-        </label>
-        <label>
-          <span>{exportObjectLabel}</span>
-          <input bind:value={exportObjectId} aria-label={exportObjectLabel} />
-        </label>
-        <label>
-          <span>Snapshot filename</span>
-          <input bind:value={exportFilename} aria-label="Snapshot filename" />
-        </label>
-        {#if exportDomain === "equity_history"}
-          <label><span>Lookback days</span><input type="number" min="20" max="3650" bind:value={exportLookbackDays} /></label>
-          <label>
-            <span>Frequency</span>
-            <select bind:value={exportFrequency}>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </label>
-        {:else if exportDomain === "macro_series"}
-          <label><span>Region</span><input bind:value={exportRegion} /></label>
-          <label><span>Timeframe</span><input bind:value={exportTimeframe} /></label>
-        {/if}
-        <button
-          type="button"
-          class="ghost-button"
-          on:click={prepareDomainExport}
-          disabled={!workspace.detail || workspace.detail.script.status === "archived" || !exportObjectId.trim() || !exportFilename.trim() || workspace.loading !== null}
-        >{workspace.loading === "input" ? "Preparing…" : "Add Gamma dataset"}</button>
-      </div>
+      <ScriptDatasetPicker scriptId={workspace.detail?.script.script_id ?? null}
+        disabled={!workspace.detail || workspace.detail.script.status === "archived" || workspace.loading !== null}
+        onAdd={prepareResearchScriptDomainInput} />
 
       <div class="input-divider"><span>External data</span></div>
       <label>
@@ -730,7 +657,6 @@
   .new-script,
   .warning-list,
   .run-list,
-  .domain-export-grid,
   .manifest-files {
     display: grid;
     gap: var(--space-4);
@@ -1029,12 +955,6 @@
 
   .comparison-table table { min-width: 24rem; }
 
-  .domain-export-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .domain-export-grid button { align-self: end; }
-
   .input-divider {
     display: flex;
     align-items: center;
@@ -1120,6 +1040,5 @@
     .action-row,
     .output-toolbar { align-items: stretch; flex-direction: column; }
     .action-row button { width: 100%; }
-    .domain-export-grid { grid-template-columns: 1fr; }
   }
 </style>

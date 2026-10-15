@@ -34,7 +34,9 @@ export interface CreateResearchScriptRunPayload {
 }
 
 export interface ExportResearchScriptInputPayload {
-  domain: "equity_history" | "macro_series" | "saved_research";
+  domain: string;
+  preview_id?: string;
+  outcome_id?: string;
   object_id: string;
   logical_filename: string;
   region?: string;
@@ -191,3 +193,18 @@ export const fetchResearchScriptOutput = (runId: string, outputId: string) =>
 
 export const fetchResearchScriptRunExport = (runId: string) =>
   getBlob(`/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/export`);
+
+export interface ScriptDatasetDefinition { domain: string; label: string; limitations: string }
+export interface ScriptDatasetSelection { object_id: string; label: string; region?: string; outcome_id?: string }
+export interface ScriptDatasetSearch { items: ScriptDatasetSelection[]; warnings: string[]; status: string; limitations?: string }
+export interface ScriptDatasetPreview {
+  preview_id: string; byte_size: number; sha256: string;
+  fields: Array<{ name: string; type: string; unit: string | null }>;
+  sources: string[]; retrieval_times: string[]; states: string[]; units: string[]; frequencies: string[];
+  coverage_start: string | null; coverage_end: string | null; warnings: string[]; limitations: string; field_notes: string; cache_status: string;
+}
+export const listScriptDatasets = () => getJson<ScriptDatasetDefinition[]>("/research/strategy-lab/script-datasets");
+export const searchScriptDatasets = (domain: string, query: string) => getJson<ScriptDatasetSearch>(
+  `/research/strategy-lab/script-datasets/search?domain=${encodeURIComponent(domain)}&query=${encodeURIComponent(query)}`);
+export const previewScriptDataset = (scriptId: string, payload: ExportResearchScriptInputPayload) => postJson<ScriptDatasetPreview>(
+  `/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/dataset-preview`, payload, { timeoutMs: 120_000 });

@@ -103,7 +103,7 @@ class ResearchScriptRunCreateRequestModel(BaseModel):
 
 
 class ResearchScriptDataExportRequestModel(BaseModel):
-    domain: Literal["equity_history", "macro_series", "saved_research"]
+    domain: Literal["equity_history", "macro_series", "saved_research", "fundamentals", "options_capture", "commodity_history", "commodity_curve", "commodity_spread", "commodity_inventory", "crypto_history", "crypto_liquidity", "prediction_history"]
     object_id: str = Field(min_length=1, max_length=128)
     logical_filename: str = Field(min_length=1, max_length=128)
     region: str | None = Field(default=None, max_length=32)
@@ -113,9 +113,14 @@ class ResearchScriptDataExportRequestModel(BaseModel):
     additional_input_files: list[ResearchScriptInputFileCreateRequestModel] = Field(default_factory=list)
     base_snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
 
+    preview_id: str | None = Field(default=None, max_length=128)
+    outcome_id: str | None = Field(default=None, max_length=256)
+
     def to_domain(self) -> ResearchScriptDataExportRequest:
         return ResearchScriptDataExportRequest(
             domain=self.domain,
+            preview_id=self.preview_id,
+            outcome_id=self.outcome_id,
             object_id=self.object_id,
             logical_filename=self.logical_filename,
             region=self.region,
