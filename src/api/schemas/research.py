@@ -590,6 +590,7 @@ class ResearchPeriodReturnModel(BaseModel):
 
 
 class StrategyLabAnalyzeResponseModel(BaseModel):
+    analytical_provenance: dict[str, Any] | None = None
     name: str
     value_kind: str
     benchmark_column: str | None = None

@@ -679,6 +679,8 @@ class ResearchScriptService:
             raise ResearchScriptNotFoundError("Retained research script artifact is unavailable.")
         if len(content) != output.byte_size:
             raise ResearchScriptServiceError("Retained research script artifact size does not match metadata.")
+        if output.content_sha256 and hashlib.sha256(content).hexdigest() != output.content_sha256:
+            raise ResearchScriptServiceError("Retained research script artifact hash does not match metadata.")
         return output.filename, output.media_type, content
 
     def get_input_snapshot(self, snapshot_id: str) -> ResearchScriptInputSnapshot:
@@ -1054,6 +1056,8 @@ class ResearchScriptService:
                 "run.json",
                 json.dumps(asdict(run), indent=2, sort_keys=True, default=self._json_default),
             )
+            from src.application.script_analytics import inspect_analytics
+            bundle.writestr("analytical_validation.json", json.dumps(inspect_analytics(self, run_id), indent=2, default=self._json_default))
             bundle.writestr(
                 "README.txt",
                 "Gamma Research Script export\n"
@@ -1062,7 +1066,7 @@ class ResearchScriptService:
             for output in run.outputs:
                 if not output.artifact_ref or not output.filename:
                     continue
-                content = self.store.load_output_artifact(run.run_id, output.output_id, output.filename)
+                _, _, content = self.get_output_artifact(run.run_id, output.output_id)
                 if content is None:
                     raise ResearchScriptServiceError(
                         f"Retained output is unavailable for export: {output.output_id}."
@@ -1394,6 +1398,8 @@ class ResearchScriptService:
                     source_provider=source_provider,
                     origin=origin,
                     transformation_note=raw.transformation_note,
+                    content_sha256=hashlib.sha256(artifact_bytes).hexdigest() if artifact_bytes is not None else None,
+                    run_association_verified=raw.run_association_verified is True,
                 )
             )
         if retained_bytes > MAX_RESEARCH_SCRIPT_TOTAL_OUTPUT_BYTES:

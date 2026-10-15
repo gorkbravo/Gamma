@@ -124,6 +124,8 @@ class ResearchScriptOutput:
     origin: str = "mock_research_script_runtime"
     transformation_note: str | None = None
     generated: bool = True
+    content_sha256: str | None = None
+    run_association_verified: bool = False
     contract_version: str = "research-script-output.v1"
 
 

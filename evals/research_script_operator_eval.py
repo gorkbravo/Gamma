@@ -131,6 +131,8 @@ def main() -> int:
                 "strict_run_schema": strict_objects(run_definition.input_schema),
                 "strict_catalog_schemas": all(strict_objects(d.input_schema) for name,d in definitions.items() if name.startswith("strategy_lab.script_")),
                 "mock_execution_truth": run_output.get("execution_evidence") == "mock_safe_preview",
+                "optional_analytics_absent_without_contract": run_output.get("analytical_results", {}).get("artifacts") == [],
+                "analytical_execution_truth": run_output.get("analytical_results", {}).get("executes_source") is False,
                 "output_contents_observed": any(o.get("text") or o.get("rows") for o in run_output.get("outputs", [])),
                 "draft_only_selects_draft": [step.tool_id for step in draft_plan.steps]
                 == ["strategy_lab.draft_research_script", "strategy_lab.script_read_inputs", "strategy_lab.script_draft_from_bundle"],

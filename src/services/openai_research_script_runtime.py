@@ -9,7 +9,7 @@ import json
 import mimetypes
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -37,7 +37,7 @@ _ALLOWED_ARTIFACT_MIME_TYPES = {
     "text/csv",
     "text/plain",
 }
-_CODE_INTERPRETER_MODEL = re.compile(r"^gpt-5\.(?:4|5|6)(?:$|-)", re.IGNORECASE)
+_CODE_INTERPRETER_MODEL = re.compile(r"^(?:gpt-5\.(?:4|5|6)(?:$|-)|gpt-6\.1-sol$)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -297,6 +297,7 @@ class OpenAICodeInterpreterRuntime:
                     f"```python\n{wrapper}\n```"
                 ),
                 tools=[{"type": "code_interpreter", "container": binding.container_id}],
+                include=["code_interpreter_call.outputs"],
                 tool_choice="required",
                 parallel_tool_calls=False,
                 max_tool_calls=1,
@@ -392,6 +393,7 @@ class OpenAICodeInterpreterRuntime:
                             cited_files[file_id] = filename
 
         after_files = self._container_files(binding.container_id)
+        after_paths = {str(getattr(item, "id", "")): str(getattr(item, "path", "")) for item in after_files}
         upload_ids = {item.file_id for item in binding.uploads}
         generated: dict[str, str] = dict(cited_files)
         for item in after_files:
@@ -415,7 +417,16 @@ class OpenAICodeInterpreterRuntime:
             if media_type not in _ALLOWED_ARTIFACT_MIME_TYPES:
                 warnings.append(f"Generated file {filename or file_id} used an unsupported media type and was not retained.")
                 continue
-            outputs.append(self._artifact_output(file_id, filename, content, media_type, sequence))
+            artifact = self._artifact_output(file_id, filename, content, media_type, sequence)
+            # Citations alone can refer to older files in a reused container.
+            # Optional analytics must be a new output of this exact workspace,
+            # rather than an uploaded/copied input or a prior run's artifact.
+            expected_path = f"/mnt/data/gamma-run-{request.run_id[:16]}/{artifact.filename}"
+            outputs.append(replace(artifact, run_association_verified=(
+                file_id not in before_ids and file_id not in upload_ids
+                and artifact.filename not in {item.logical_filename for item in request.input_files}
+                and after_paths.get(file_id) == expected_path
+            )))
             sequence += 1
             for artifact_warning in self._artifact_warnings(content, media_type):
                 artifact_warning = self._sanitize_provider_text(artifact_warning)

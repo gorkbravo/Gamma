@@ -8,6 +8,7 @@ so a developer's .env cannot make tests contact Yahoo Finance or TWS.
 
 import os
 from typing import Any
+import pytest
 
 os.environ["MOCK_DATA"] = "true"
 os.environ["RESEARCH_MARKET_DATA_PROVIDERS"] = "mock"
@@ -39,3 +40,11 @@ def _test_client_init_with_gamma_session(self: TestClient, *args: Any, **kwargs:
 
 
 TestClient.__init__ = _test_client_init_with_gamma_session
+
+
+@pytest.fixture(autouse=True)
+def pin_script_runtime_for_deterministic_tests(monkeypatch, request):
+    # A user's live Script preference must not turn routine test runs into API
+    # execution. Only E4's explicitly opted-in configured-runtime gate reads it.
+    if request.node.module.__name__ != "test_script_analytics_live":
+        monkeypatch.setenv("GAMMA_RESEARCH_SCRIPT_RUNTIME", "mock")

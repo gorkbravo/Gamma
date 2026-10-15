@@ -109,6 +109,34 @@ def test_agent_cannot_acquire_operator_authority(e3, operation):
     assert service.list_input_bundles(script_id) == []
 
 
+@pytest.mark.parametrize("invalid", [False, True])
+def test_operator_observes_retained_validity_and_never_upgrades_preview_authority(e3, invalid):
+    from test_script_analytics import FixtureRuntime, payload
+    runtime, service, script_id, request, _ = e3
+    owner = service.research_service
+    service.runtime = FixtureRuntime(b"{" if invalid else json.dumps(payload()).encode(), executed=False)
+    bundle = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest())
+    revision = service.get_script(script_id).revisions[0]
+    exact = dict(script_id=script_id, revision_id=revision.revision_id,
+                 input_snapshot_id=bundle.snapshot_id, source_sha256=revision.source_sha256, manifest_sha256=bundle.manifest_sha256)
+    req = replace(request, prompt="Run this Python Script.")
+    observed = runtime.copilot_service._execute_registered_operator_action("strategy_lab.run_research_script", exact,
+        runtime.copilot_service._build_strategy_lab_context(req), request=req).output
+    assert observed["status"] == "completed"
+    report = observed["analytical_results"]
+    assert not report["executes_source"]
+    artifact = report["artifacts"][0]
+    assert artifact["valid"] is not invalid
+    assert artifact["eligible"] is False
+    if not invalid:
+        assert artifact["provenance"]["source_sha256"] == revision.source_sha256
+        assert artifact["results"][0]["result"]["observations"][0]["value"] == 1.0
+        assert all(not item["can_open"] for item in artifact["results"])
+    else:
+        assert artifact["errors"]
+    assert service.research_service is owner  # no additional analytics/saving authority
+
+
 def test_scoped_permissions_expiry_unavailable_no_substitution_and_conflicts(e3):
     runtime, service, script_id, request, call = e3
     for definition in runtime.copilot_service.list_research_action_definitions():

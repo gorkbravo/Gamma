@@ -118,6 +118,13 @@ def execute_script_action(copilot, tool_id, arguments, context, *, request, run_
                 if snapshot.script_id != script_id:
                     return blocked("Input bundle belongs to another Script.")
                 output = bundle_observation(service, snapshot)
+                if operation == "read_inputs":
+                    from src.models.script_analytics import AUTHORING_EXAMPLE, FILENAME, MAX_BYTES
+                    output["optional_analytical_output"] = {
+                        "filename": FILENAME, "contract_version": "gamma-script-analytics.v1", "max_bytes": MAX_BYTES,
+                        "example_source": AUTHORING_EXAMPLE,
+                        "authority": "Optional serialization only within existing Script scope. Do not modify code, acquire inputs, execute, open or save without the existing separate authorization. Ordinary logs/files remain valid outcomes.",
+                    }
                 if operation == "draft_from_bundle":
                     parent = next(r for r in detail.revisions if r.revision_id == detail.script.canonical_revision_id)
                     detail = service.stage_operator_revision(script_id, source=arguments["python_source"],

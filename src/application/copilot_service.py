@@ -6405,6 +6405,17 @@ class CopilotService:
                 navigation_context={"script_id": run.script_id, "run_id": run.run_id},
             ),
         ]
+        from src.application.script_analytics import inspect_analytics
+        analytical_observation = inspect_analytics(self.research_script_service, run.run_id)
+        for artifact in analytical_observation["artifacts"]:
+            for item in artifact["results"]:
+                observations = item["result"].get("observations", [])
+                item["observation_count"] = len(observations)
+                item["observations_truncated"] = len(observations) > 20
+                if observations:
+                    item["result"]["observations"] = observations[:20]
+                if item["mapping"]:
+                    item["mapping"]["rows"] = item["mapping"]["rows"][:20]
         output = {
             "script_id": run.script_id,
             "revision_id": run.revision_id,
@@ -6416,6 +6427,7 @@ class CopilotService:
             "runtime_provider": run.runtime_provider,
             "runtime_kind": run.runtime_kind,
             "execution_evidence": "mock_safe_preview" if "mock" in run.runtime_provider.lower() or "mock" in run.runtime_kind.lower() else "isolated_runtime",
+            "analytical_results": analytical_observation,
             "outputs": output_summaries,
             "warnings": list(run.warnings),
             "sources": source_ids,

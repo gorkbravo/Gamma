@@ -432,6 +432,16 @@
     void onLoadSaved();
   }
 
+  function exportScriptAnalysis() {
+    if (!activeStrategyResult?.analytical_provenance) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(activeStrategyResult, null, 2)], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `gamma-script-analysis-${String(activeStrategyResult.analytical_provenance.run_id)}.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   function loadSavedStrategy(item: SavedResearchItem) {
     const experiment = savedStrategyExperiment(item);
     if (experiment?.portfolio_inputs) {
@@ -673,7 +683,7 @@
   </article>
 
   {#if scriptModeActive}
-    <StrategyScriptWorkspace />
+    <StrategyScriptWorkspace onOpenAnalysis={(result) => { strategyComposition = null; strategyResult = result; onRestoreStrategy?.(result); mode = "backtest_analyze"; }} />
   {:else if strategyModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
@@ -1115,6 +1125,7 @@
               <h2>{activeStrategyResult?.name ?? strategyModeTitle}</h2>
             </div>
             <div class="builder-actions compact">
+              {#if activeStrategyResult?.analytical_provenance}<button type="button" on:click={exportScriptAnalysis}>Export analysis JSON</button>{/if}
               <button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
             </div>
           </div>
@@ -1313,6 +1324,9 @@
 
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Source</p><h3>Warnings &amp; Provenance</h3></div></div>
+          {#if activeStrategyResult?.analytical_provenance}
+            <details><summary>Script source, inputs and analytical mapping</summary><pre class="script-provenance">{JSON.stringify(activeStrategyResult.analytical_provenance, null, 2)}</pre></details>
+          {/if}
           {#if activeStrategyResult?.warnings.length}
             <div class="notes-list">
               {#each activeStrategyResult.warnings as warning}
@@ -1388,6 +1402,7 @@
 </section>
 
 <style>
+  .script-provenance { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: var(--text-xs); }
   /* ── Layout shells ── */
   .view,
   .kpi-grid,

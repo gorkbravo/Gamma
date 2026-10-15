@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { ResearchScriptOutput } from "../lib/api/types";
+  import type { ResearchScriptOutput, StrategyLabResult } from "../lib/api/types";
+  import ScriptAnalyticalResults from "./ScriptAnalyticalResults.svelte";
   import {
     fetchResearchScriptOutput,
     fetchResearchScriptRunExport
@@ -38,6 +39,7 @@
   } from "../lib/stores/research-script";
 
   export let snapshot: ResearchScriptWorkspaceState | null = null;
+  export let onOpenAnalysis: ((result: StrategyLabResult) => void) | undefined = undefined;
 
   let newScriptTitle = "Research Script";
   let comparisonRunId = "";
@@ -371,6 +373,9 @@
   </div>
 
   <aside class="support-column">
+    {#key workspace.selectedRun?.run_id ?? "no-run"}
+      <ScriptAnalyticalResults runId={workspace.selectedRun?.run_id ?? null} onOpen={onOpenAnalysis} />
+    {/key}
     <article class="panel control-panel">
       <div class="rail-header"><div><p class="eyebrow">Workspace</p><h3>Script controls</h3></div></div>
       <label>

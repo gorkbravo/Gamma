@@ -66,6 +66,7 @@ class ResearchScriptRuntimeOutput:
     provider_native_ref: str | None = None
     artifact_bytes: bytes | None = None
     transformation_note: str | None = None
+    run_association_verified: bool = False
 
 
 @dataclass(frozen=True)

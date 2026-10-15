@@ -246,6 +246,38 @@ def test_capability_detection_is_sanitized_and_model_specific() -> None:
     assert "key" not in repr(available).lower()
 
 
+def test_explicit_sol_code_interpreter_support_preserves_unknown_model_refusal():
+    capabilities = runtime(FakeOpenAIClient(), model="gpt-6.1-sol").capabilities()
+    assert capabilities.available and capabilities.executes_source
+    assert capabilities.model == "gpt-6.1-sol"
+    assert not capabilities.network_access
+    assert not runtime(FakeOpenAIClient(), model="gpt-6.1-other").capabilities().available
+
+
+@pytest.mark.parametrize("path,filename,expected", [
+    ("gamma-run-run-1/gamma_analytics.json", "gamma_analytics.json", True),
+    ("gamma-run-older/gamma_analytics.json", "gamma_analytics.json", False),
+    ("gamma_analytics.json", "gamma_analytics.json", False),
+    ("gamma-run-run-1/prices.csv", "prices.csv", False),
+])
+def test_artifact_run_association_requires_current_workspace_and_excludes_inputs(path, filename, expected):
+    client = FakeOpenAIClient(generated_filename=path, annotation_filename=filename, generated_bytes=b"{}")
+    result = runtime(client).start_run(request())
+    assert result.status == "completed"
+    retained = next(o for o in result.outputs if o.artifact_bytes is not None)
+    assert retained.run_association_verified is expected
+
+
+def test_preexisting_provider_citation_cannot_establish_new_artifact_association(monkeypatch):
+    client = FakeOpenAIClient(generated_filename="gamma-run-run-1/gamma_analytics.json", annotation_filename="gamma_analytics.json", generated_bytes=b"{}")
+    adapter = runtime(client)
+    # Provider citation/path may look right, but the file identity existed before dispatch.
+    monkeypatch.setattr(adapter, "_container_file_ids", lambda *args: {f"file-{client.containers.files._next + 1}"})
+    result = adapter.start_run(request())
+    retained = next(o for o in result.outputs if o.artifact_bytes is not None)
+    assert retained.run_association_verified is False
+
+
 def test_request_is_exact_source_network_disabled_and_code_interpreter_only() -> None:
     client = FakeOpenAIClient()
     adapter = runtime(client)
@@ -259,6 +291,7 @@ def test_request_is_exact_source_network_disabled_and_code_interpreter_only() ->
     assert client.containers.create_calls[0]["memory_limit"] == "1g"
     call = client.responses.create_calls[0]
     assert call["tools"] == [{"type": "code_interpreter", "container": "container-1"}]
+    assert call["include"] == ["code_interpreter_call.outputs"]
     assert call["tool_choice"] == "required"
     assert call["max_tool_calls"] == 1
     assert call["parallel_tool_calls"] is False

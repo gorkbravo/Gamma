@@ -1211,6 +1211,7 @@ export function hydrateStrategyLabResultFromSaved(item: SavedResearchItem): Stra
   }
   return {
     name: String(payload.name ?? item.title ?? "Saved Strategy"),
+    analytical_provenance: isPlainRecord(payload.analytical_provenance) ? payload.analytical_provenance : null,
     value_kind: String(payload.value_kind ?? "return"),
     benchmark_column: typeof payload.benchmark_column === "string" ? payload.benchmark_column : null,
     benchmark_value_kind: String(payload.benchmark_value_kind ?? "return"),

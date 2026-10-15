@@ -49,9 +49,44 @@ from src.application.research_script_service import (
 from src.application.research_service import ResearchAnalysisRequest
 from src.application.research_validation import ResearchValidationError
 from src.models.research_overview import ResearchOverviewRequest
+from pydantic import BaseModel, ConfigDict, Field
+from src.application.script_analytics import inspect_analytics, open_analytics
 
 
 router = APIRouter(tags=["research"])
+
+
+class ScriptAnalyticalOpenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    output_id: str = Field(min_length=1, max_length=128)
+    result_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    preview_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+@router.get("/research/strategy-lab/scripts/analytical-contract")
+def script_analytical_contract():
+    from src.models.script_analytics import AnalyticalPayload, FILENAME, MAX_BYTES, AUTHORING_EXAMPLE
+    return {"filename": FILENAME, "max_bytes": MAX_BYTES, "schema": AnalyticalPayload.model_json_schema(), "example_source": AUTHORING_EXAMPLE}
+
+
+@router.get("/research/strategy-lab/script-runs/{run_id}/analytics")
+def inspect_script_analytics(run_id: str, request: Request):
+    try:
+        return inspect_analytics(request.app.state.runtime.research_script_service, run_id)
+    except (ResearchScriptNotFoundError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+
+
+@router.post("/research/strategy-lab/script-runs/{run_id}/analytics/open", response_model=StrategyLabAnalyzeResponseModel)
+def open_script_analytics(run_id: str, payload: ScriptAnalyticalOpenRequest, request: Request):
+    try:
+        analysis, provenance = open_analytics(request.app.state.runtime.research_script_service,
+            run_id, payload.output_id, payload.result_id, payload.preview_sha256)
+        return StrategyLabAnalyzeResponseModel.from_domain(analysis).model_copy(update={"analytical_provenance": provenance})
+    except (ResearchScriptNotFoundError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    except ResearchValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
 def _raise_script_http_error(exc: Exception) -> None:
@@ -571,6 +606,26 @@ def create_saved_research(
     request: Request,
 ) -> SavedResearchItemModel:
     runtime = request.app.state.runtime
+    evidence = payload.payload.get("analytical_provenance")
+    if evidence is not None or payload.source_provider == "gamma_script_analytics":
+        try:
+            if not isinstance(evidence, dict) or payload.object_type != "strategy_lab":
+                raise ResearchScriptValidationError(["Script analytical saving requires its retained provenance and Strategy Lab object type."])
+            analysis, provenance = open_analytics(runtime.research_script_service,
+                str(evidence.get("run_id", "")), str(evidence.get("output_id", "")),
+                str(evidence.get("result_id", "")), str(evidence.get("preview_sha256", "")))
+            expected = StrategyLabAnalyzeResponseModel.from_domain(analysis).model_dump(mode="json")
+            expected["analytical_provenance"] = provenance
+            allowed = set(expected) | {"saved_from_mode"}
+            if (any(payload.payload.get(key) != value for key, value in expected.items())
+                    or set(payload.payload) - allowed):
+                raise ResearchScriptValidationError(["Saved analytical content differs from its retained validated run. Open the exact analysis again."])
+            # Metadata and warnings are also server-owned; the explicit save
+            # request supplies only the title/notes and choice to persist.
+            payload = payload.model_copy(update={"warnings": analysis.warnings, "source_provider": analysis.source_provider,
+                "origin": "script_analytics.explicit_save", "transformation_note": analysis.transformation_note})
+        except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+            _raise_script_http_error(exc)
     return SavedResearchItemModel.from_domain(runtime.research_service.save_research(payload.to_domain()))
 
 

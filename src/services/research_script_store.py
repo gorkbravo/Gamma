@@ -758,6 +758,8 @@ class ResearchScriptStore:
             origin=str(payload["origin"]),
             transformation_note=payload.get("transformation_note"),
             generated=bool(payload.get("generated", True)),
+            content_sha256=payload.get("content_sha256"),
+            run_association_verified=payload.get("run_association_verified") is True,
             contract_version=str(payload["contract_version"]),
         )
 

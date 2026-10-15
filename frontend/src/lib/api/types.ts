@@ -153,6 +153,8 @@ export interface ResearchScriptInputSnapshot {
 }
 
 export interface ResearchScriptOutput {
+  content_sha256?: string | null;
+  run_association_verified?: boolean;
   output_id: string;
   kind: ResearchScriptOutputKind;
   sequence: number;
@@ -840,6 +842,7 @@ export interface ResearchPeriodReturn {
 }
 
 export interface StrategyLabResult {
+  analytical_provenance?: Record<string, unknown> | null;
   name: string;
   value_kind: "return" | "level" | string;
   benchmark_column: string | null;

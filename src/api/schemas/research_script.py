@@ -259,6 +259,8 @@ class ResearchScriptInputSnapshotModel(BaseModel):
 
 
 class ResearchScriptOutputModel(BaseModel):
+    content_sha256: str | None = None
+    run_association_verified: bool = False
     output_id: str
     kind: Literal["log", "error", "metric", "table", "image", "file", "summary", "warning"]
     sequence: int

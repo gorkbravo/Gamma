@@ -1,5 +1,6 @@
 import { getBlob, getJson, postJson } from "./client";
 import type {
+  StrategyLabResult,
   ResearchScriptDetail,
   ResearchScriptInputSnapshot,
   ResearchScriptListResponse,
@@ -9,6 +10,26 @@ import type {
   ResearchScriptRuntimeCapabilities,
   ResearchScriptStorageDiagnostics
 } from "./types";
+
+export interface ScriptAnalyticalItem {
+  result: { result_id: string; name: string; kind: string; meaning: string; [key: string]: unknown };
+  mapping: Record<string, unknown> | null;
+  preview_sha256: string;
+  can_open: boolean;
+  unsupported_reason: string | null;
+}
+export interface ScriptAnalyticalReport {
+  run_id: string; execution_status: string; executes_source: boolean;
+  artifacts: Array<{ output_id: string; valid: boolean; eligible: boolean; errors: string[]; warnings: string[];
+    provenance: Record<string, unknown>; instruments?: Record<string, unknown>[]; results: ScriptAnalyticalItem[] }>;
+}
+export const inspectScriptAnalytics = (runId: string) => getJson<ScriptAnalyticalReport>(
+  `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/analytics`
+);
+export const openScriptAnalytics = (runId: string, outputId: string, resultId: string, previewHash: string) => postJson<StrategyLabResult>(
+  `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/analytics/open`,
+  { output_id: outputId, result_id: resultId, preview_sha256: previewHash }
+);
 
 export interface CreateResearchScriptPayload {
   session_id: string;
