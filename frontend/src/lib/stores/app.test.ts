@@ -1,5 +1,6 @@
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { researchScriptWorkspace } from "./research-script";
 import type {
   CopilotResearchCardResult,
   CryptoComparison,
@@ -2350,6 +2351,34 @@ describe("app store orchestration", () => {
     expect(strategyBody.context.strategy_lab_state.imported_result?.name).toBe("CSV Strategy");
     expect(get(copilotCards).equity_research?.response_id).toBe("resp_equity_1");
     expect(get(copilotCards).strategy_lab?.response_id).toBe("resp_strategy_1");
+  });
+
+  // E3: tras aceptar un candidato aún no hay ejecución; el Operator debe ver el conjunto revisado preparado.
+  it("sends the prepared Script input bundle to Copilot instead of the selected run's bundle", async () => {
+    const initial = get(researchScriptWorkspace);
+    const revision = { revision_id: "rev-accepted", source_sha256: "a".repeat(64), source: "print(1)\n" };
+    researchScriptWorkspace.set({
+      ...initial,
+      detail: { script: { script_id: "script-1", canonical_revision_id: "rev-accepted" }, revisions: [revision] },
+      preparedInputSnapshot: { snapshot_id: "bundle-reviewed", manifest_sha256: "b".repeat(64), files: [] },
+      selectedRun: { run_id: "run-old", status: "completed", input_snapshot_id: "bundle-old", input_manifest_sha256: "c".repeat(64), outputs: [] }
+    } as any);
+    strategyLabResult.set(makeStrategyLabResult());  // contexto activo exigido por la validación previa
+    const fetchMock = vi.fn().mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+      makeCopilotResult("strategy_lab", "resp_script_1", "Script Card"),
+      init
+    )));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await loadCopilotResearchCard("strategy_lab", "Run this Python Script.", { workspaceMode: "research" });
+      const scriptState = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")).context.strategy_lab_state.script_state;
+      expect(scriptState.input_snapshot_id).toBe("bundle-reviewed");
+      expect(scriptState.manifest_sha256).toBe("b".repeat(64));
+      expect(scriptState.selected_run_id).toBe("run-old");
+    } finally {
+      researchScriptWorkspace.set(initial);
+    }
   });
 
   it("adds a visible copilot error turn when generation fails before a response", async () => {

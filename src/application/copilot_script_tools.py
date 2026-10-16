@@ -5,8 +5,10 @@ then appended through the same retained-preview path used by Script's picker.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict
 from difflib import unified_diff
+import json
 import re
 
 from src.models.copilot import CopilotResearchActionDefinition, CopilotToolExecution, CopilotToolTrace, CopilotSourceRef
@@ -15,11 +17,40 @@ from src.application.script_dataset_catalog import DATASETS, DatasetSelectionErr
 from src.application.research_script_service import ResearchScriptServiceError
 
 
+# Verbos que por sí solos piden datos externos.
+_ACQUIRE_VERBS = r"(?:acquir(?:e|es|ed|ing)|fetch(?:es|ed|ing)?|download(?:s|ed|ing)?)"
+# Verbos genéricos: también se usan para editar código ("add a column"), así que
+# solo autorizan cuando se refieren a datos.
+_COLLECT_VERBS = (
+    r"(?:add(?:s|ed|ing)?|combin(?:e|es|ed|ing)|load(?:s|ed|ing)?|includ(?:e|es|ed|ing)|"
+    r"retriev(?:e|es|ed|ing)|pull(?:s|ed|ing)?|import(?:s|ed|ing)?|bring(?:s|ing)?\s+in)"
+)
+_DATA_NOUNS = (
+    r"(?:data(?:sets?)?|histor(?:y|ies)|prices?|series|inputs?|quotes?|observations?|curves?|"
+    r"captures?|fundamentals|statements?|closes?|bars|spreads?|inventor(?:y|ies)|outcomes?)"
+)
+_CODE_NOUNS = (
+    r"(?:columns?|fields?|features?|indicators?|charts?|plots?|warnings?|comments?|tests?|"
+    r"functions?|parameters?|labels?|lines?|steps?|checks?|logs?|prints?)"
+)
+_NEGATIONS = r"(?:do\s+not|don't|dont|without|never|no\s+need\s+to|avoid|not)"
+
+
 def script_acquisition_authorized(prompt):
-    text = str(prompt or "").lower()
-    if re.search(r"\b(?:do not|don't|without|never)\b[^.!?]{0,40}\b(?:fetch|acquire|load|download|retrieve)\b", text):
+    text = " ".join(str(prompt or "").lower().split())
+    # Una negación próxima a cualquier verbo de adquisición, o "no new data", la anula.
+    if re.search(rf"\b{_NEGATIONS}\b[^.!?;]{{0,40}}\b(?:{_ACQUIRE_VERBS}|{_COLLECT_VERBS})\b", text):
         return False
-    return bool(re.search(r"\b(?:acquire|fetch|load|download|retrieve|add|combine)\b", text))
+    if re.search(rf"\b(?:no|without)\s+(?:any\s+)?(?:new\s+|more\s+|additional\s+|external\s+)?{_DATA_NOUNS}\b", text):
+        return False
+    if re.search(rf"\b{_ACQUIRE_VERBS}\b", text):
+        return True
+    for match in re.finditer(rf"\b{_COLLECT_VERBS}\b([^.!?;]{{0,60}})", text):
+        span = match.group(1)
+        # "add a returns column" edita código; ante la duda no se autoriza.
+        if re.search(rf"\b{_DATA_NOUNS}\b", span) and not re.search(rf"\b{_CODE_NOUNS}\b", span):
+            return True
+    return False
 
 
 def script_visible_to_request(script, request):
@@ -33,6 +64,48 @@ def script_visible_to_request(script, request):
         return True
     session_id = str(getattr(request, "user_session_id", None) or "").strip()
     return bool(session_id) and script.session_id == session_id
+
+
+# Margen bajo el límite de 50 KB del proveedor (MAX_OPERATOR_OBSERVATION_BYTES): por encima,
+# el proveedor sustituye los niveles profundos (nombres de fichero, esquemas) por marcadores.
+MAX_SCRIPT_OBSERVATION_BYTES = 40_000
+SCRIPT_OBSERVATION_BOUNDED_NOTE = (
+    "Gamma shortened samples, text, rows or diff so filenames, schemas, hashes and identities stay visible; "
+    "the complete content remains retained."
+)
+
+
+def _observation_size(value):
+    # Mismo renderizado que el proveedor (ensure_ascii) para medir bytes reales.
+    return len(json.dumps(value, ensure_ascii=True, default=str).encode("utf-8"))
+
+
+def fit_script_observation(output):
+    """Ajusta una observación de Script al presupuesto recortando contenido, nunca identidades."""
+    if not isinstance(output, dict) or _observation_size(output) <= MAX_SCRIPT_OBSERVATION_BYTES:
+        return output
+    output = copy.deepcopy(output)
+    limit = 6_000
+    while _observation_size(output) > MAX_SCRIPT_OBSERVATION_BYTES and limit >= 200:
+        max_rows = max(1, limit // 600)
+        for item in output.get("files") or []:
+            if isinstance(item.get("sample"), str) and len(item["sample"]) > limit:
+                item["sample"], item["sample_truncated"] = item["sample"][:limit], True
+        for item in output.get("outputs") or []:
+            if isinstance(item.get("text"), str) and len(item["text"]) > limit:
+                item["text"], item["content_truncated"] = item["text"][:limit], True
+            if isinstance(item.get("rows"), list) and len(item["rows"]) > max_rows:
+                item["rows"], item["content_truncated"] = item["rows"][:max_rows], True
+        for artifact in (output.get("analytical_results") or {}).get("artifacts") or []:
+            for result in artifact.get("results") or []:
+                observations = (result.get("result") or {}).get("observations")
+                if isinstance(observations, list) and len(observations) > max_rows:
+                    result["result"]["observations"], result["observations_truncated"] = observations[:max_rows], True
+        if isinstance(output.get("source_diff"), str) and len(output["source_diff"]) > 2 * limit:
+            output["source_diff"], output["source_diff_truncated"] = output["source_diff"][:2 * limit], True
+        limit //= 2
+    output["bounded_for_operator"] = SCRIPT_OBSERVATION_BOUNDED_NOTE
+    return output
 
 
 def strict(properties):
@@ -53,7 +126,7 @@ def script_action_definitions():
         ("discover", {"domain": {"type": "string", "enum": list(DATASETS)}, "query": {"type": "string", "maxLength": 128}},
          "Discover exact supported objects through Script's shared catalog. Ambiguous matches require user clarification; never choose a nearby identity.", 3),
         ("inspect", selection,
-         "Acquire and inspect one exact dataset's schema, units, source, warnings and coverage. Requires explicit acquisition permission. Returns a temporary preview, not executable input. Needs an existing Script id (draft an empty-input Script first if needed).", 3),
+         "Acquire and inspect one exact dataset's schema, units, source, warnings and coverage. Requires explicit acquisition permission. Returns a temporary preview, not executable input. Use the attached script_state.script_id; draft an empty-input Script first only when no Script is attached.", 3),
         ("add_input", {**selection, "preview_id": text, "base_snapshot_id": nullable},
          "Append previously inspected copied bytes to an immutable bundle. Always pass the current bundle as base to preserve its earlier files. No refetch, filename substitution or external-file invention.", 3),
         ("read_inputs", {"script_id": text, "input_snapshot_id": text},
@@ -70,7 +143,8 @@ def script_action_definitions():
         permission_policy="automatic_draft" if name in {"add_input", "draft_from_bundle"} else "automatic",
         request_limit=limit, retry_policy="none", test_coverage_owner="tests/test_script_operator_e3.py",
         can_call_external_providers=name in {"discover", "inspect"},
-        external_provider="script_catalog" if name == "inspect" else None,
+        # discover también consulta proveedores (SEC, materias primas, cripto) y cuenta en el presupuesto.
+        external_provider="script_catalog" if name in {"discover", "inspect"} else None,
     ) for name, schema, description, limit in specs]
 
 
@@ -139,6 +213,7 @@ def execute_script_action(copilot, tool_id, arguments, context, *, request, run_
                         "source_diff": "".join(unified_diff(parent.source.splitlines(True), candidate.source.splitlines(True), fromfile="canonical.py", tofile="candidate.py"))[:16000],
                         "materialization": copilot._script_materialization_target(script_id=script_id,
                             revision_id=candidate.revision_id, input_snapshot_id=snapshot.snapshot_id, selected_run_id=None)})
+        output = fit_script_observation(output)
         source_ids = list(output.get("sources") or [])
         sources = [CopilotSourceRef(source_id=identity, label="Retained Script input bundle", kind="input_manifest",
             provider="gamma", origin="gamma.strategy_lab.script.input_snapshot",

@@ -243,3 +243,132 @@ def test_operator_reaches_visibly_attached_strategy_lab_script_but_not_unattache
     # Un Script creado por la propia sesión de Copilot sigue siendo accesible sin adjuntarlo.
     own = service.create_script(ResearchScriptCreateRequest("copilot-chat-1", "Own script", "print('own')"))
     assert call("inspect", selection(own.script.script_id), unattached)["status"] == "preview_only"
+
+
+@pytest.mark.parametrize("prompt, expected", [
+    ("Fetch and combine datasets, draft a Python Script, but do not run it.", True),
+    ("Fetching SPY history for the Python Script.", True),
+    ("Add SPY and QQQ daily history to the Research Script.", True),
+    ("Combine SPY prices with WTI curves in a Python Script.", True),
+    # Regresión: editar código o negar la adquisición no concede permiso para pedir datos.
+    ("Edit the Python Script to add a 20-day MA column", False),
+    ("Edit the Research Script to add a warning.", False),
+    ("Edit the script to add a returns column.", False),
+    ("Draft a Python Script, but don't add any new data.", False),
+    ("Draft a Python Script without fetching data.", False),
+    ("Draft a Python Script with no new data.", False),
+    ("Run this Python Script.", False),
+])
+def test_acquisition_authorization_requires_explicit_data_request(prompt, expected):
+    from src.application.copilot_script_tools import script_acquisition_authorized
+    assert script_acquisition_authorized(prompt) is expected
+
+
+def test_accepted_candidate_binding_limits_operator_but_not_user_runs(e3):
+    from src.models.research_script import ResearchScriptRunCreateRequest
+    runtime, service, script_id, request, call = e3
+    reviewed = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[
+        ResearchScriptInputFileCreateRequest("settings.json", "application/json", b'{"window":20}')]))
+    parent = service.get_script(script_id).revisions[0]
+    candidate = call("draft_from_bundle", dict(script_id=script_id, input_snapshot_id=reviewed.snapshot_id,
+        expected_parent_sha256=parent.source_sha256, python_source="print(open('settings.json').read())\n",
+        change_summary="Print the reviewed settings."))
+    service.accept_staged_revision(script_id, candidate["revision_id"], expected_parent_sha256=parent.source_sha256)
+    # El usuario añade después un fichero desde la UI.
+    newer = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(base_snapshot_id=reviewed.snapshot_id,
+        input_files=[ResearchScriptInputFileCreateRequest("notes.txt", "text/plain", b"user note")]))
+    user_run = service.create_run(script_id, ResearchScriptRunCreateRequest(input_snapshot_id=newer.snapshot_id))
+    assert user_run.input_snapshot_id == newer.snapshot_id and user_run.revision_id == candidate["revision_id"]
+    # El Operator sigue sin poder ejecutar el código revisado sobre entradas no revisadas.
+    with pytest.raises(ResearchScriptConflictError, match="different input bundle"):
+        service.create_exact_run(script_id, revision_id=candidate["revision_id"], input_snapshot_id=newer.snapshot_id,
+            source_sha256=candidate["source_sha256"], manifest_sha256=newer.manifest_sha256)
+
+
+def test_large_script_observations_keep_filenames_and_schema_for_the_model(e3):
+    from src.application.copilot_script_tools import MAX_SCRIPT_OBSERVATION_BYTES, _observation_size
+    from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
+    runtime, service, script_id, request, call = e3
+    rows = ",".join('{"timestamp":"2026-10-%02d","value":%d.123456}' % (1 + i % 28, i) for i in range(400))
+    files = [ResearchScriptInputFileCreateRequest(f"dataset_{i}.json", "application/json",
+        ('{"metadata":{"fields":[{"name":"close","unit":"USD"}]},"data":{"points":[%s]}}' % rows).encode()) for i in range(5)]
+    bundle = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=files))
+    observed = call("read_inputs", {"script_id": script_id, "input_snapshot_id": bundle.snapshot_id})
+    assert _observation_size(observed) <= MAX_SCRIPT_OBSERVATION_BYTES
+    assert "bounded_for_operator" in observed
+    # El proveedor ya no necesita compactarla, así que nombres y esquema llegan íntegros al modelo.
+    delivered = OpenAIResponsesCopilotProvider._bounded_operator_observation(observed)
+    assert [item["logical_filename"] for item in delivered["files"]] == [f"dataset_{i}.json" for i in range(5)]
+    assert all(item["sample_truncated"] and '"fields":[{"name":"close","unit":"USD"}]' in item["sample"] for item in delivered["files"])
+
+
+def test_script_budget_extension_is_limited_to_script_workflows(e3):
+    from types import SimpleNamespace
+    runtime, service, script_id, request, call = e3
+    copilot = runtime.copilot_service
+    definitions = {d.tool_id: d for d in copilot.list_research_action_definitions()}
+    assert definitions["strategy_lab.script_discover"].external_provider == "script_catalog"
+    acquiring = copilot.plan_research_operator(_operator_request("Fetch SPY and QQQ history and draft a Python Script."))
+    drafting = copilot.plan_research_operator(_operator_request("Draft a Python Script without fetching data."))
+    assert acquiring.intent == drafting.intent == "research_script_workflow"
+    assert acquiring.max_provider_calls == 4 and drafting.max_provider_calls == 1
+    assert acquiring.max_elapsed_ms == 12_000  # sin proveedor real no se amplía el tiempo
+    copilot.provider = SimpleNamespace(stream_research_operator=lambda *args, **kwargs: None)
+    live = copilot.plan_research_operator(_operator_request("Fetch SPY and QQQ history and draft a Python Script."))
+    other = copilot.plan_research_operator(_operator_request("Compare SPY and QQQ total return over one year."))
+    assert live.max_elapsed_ms == 180_000 and live.max_provider_calls == 4
+    assert other.intent != "research_script_workflow" and other.max_elapsed_ms < 180_000 and other.max_provider_calls < 4
+
+
+def test_long_research_intent_stages_candidate_with_bounded_change_summary(e3):
+    # Regresión (validación en vivo 2026-10-15): un research_intent largo hacía fallar el paso
+    # porque el resumen derivado superaba el límite de 512 caracteres.
+    from src.application.request_limits import MAX_RESEARCH_SCRIPT_CHANGE_SUMMARY_CHARS
+    runtime, service, script_id, request, call = e3
+    parent = service.get_script(script_id).revisions[0]
+    edit = replace(request, prompt="Edit the Research Script to print a short summary.", context=replace(request.context,
+        strategy_lab_state={"script_state": {"script_id": script_id, "source_sha256": parent.source_sha256}}))
+    copilot = runtime.copilot_service
+    output = copilot._execute_registered_operator_action("strategy_lab.draft_research_script", {
+        "title": "Summary", "research_intent": "Explain every step in detail. " * 60, "python_source": "print('summary')\n",
+        "language": "python", "authorized_input_references": []}, copilot._build_strategy_lab_context(edit),
+        request=edit, run_id="long-intent").output
+    assert output.get("error") is None and output["revision_status"] == "staged"
+    staged = next(r for r in service.get_script(script_id).revisions if r.revision_id == output["revision_id"])
+    assert len(staged.change_summary) <= MAX_RESEARCH_SCRIPT_CHANGE_SUMMARY_CHARS and staged.change_summary.endswith("…")
+
+
+def test_operator_model_receives_visibly_attached_script_identities(e3):
+    # Regresión (validación en vivo 2026-10-15): el mensaje del loop omitía script_state, así que
+    # el modelo no podía rellenar script_id ni hashes exactos y terminaba sin llamar herramientas.
+    from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider, MAX_ATTACHED_SCRIPT_SOURCE_CHARS
+    runtime, service, script_id, request, call = e3
+    provider = OpenAIResponsesCopilotProvider(api_key="test", model="gpt-test", reasoning_effort="low")
+    copilot = runtime.copilot_service
+    state = {"script_id": script_id, "source_sha256": "f" * 64, "input_snapshot_id": "bundle-1",
+             "manifest_sha256": "e" * 64, "canonical_source": "x" * (MAX_ATTACHED_SCRIPT_SOURCE_CHARS + 10),
+             "selected_run_outputs": [{"text": "no debe enviarse"}]}
+    script_request = replace(request, context=replace(request.context, strategy_lab_state={"script_state": state}))
+    body = json.loads(provider._build_operator_user_message(script_request, copilot.plan_research_operator(script_request))["content"][0]["text"])
+    attached = body["attached_context"]["script_state"]
+    assert attached["script_id"] == script_id and attached["input_snapshot_id"] == "bundle-1"
+    assert attached["source_sha256"] == "f" * 64 and attached["manifest_sha256"] == "e" * 64
+    assert attached["canonical_source_truncated"] and len(attached["canonical_source"]) == MAX_ATTACHED_SCRIPT_SOURCE_CHARS
+    assert "selected_run_outputs" not in attached  # solo identidades y código, no salidas
+    other = replace(script_request, prompt="Compare SPY and QQQ total return over one year.")
+    other_body = json.loads(provider._build_operator_user_message(other, copilot.plan_research_operator(other))["content"][0]["text"])
+    assert "attached_context" not in other_body
+    assert "attached_context.script_state" in provider._build_operator_instructions(copilot.plan_research_operator(script_request))
+
+
+def test_script_operator_turns_allow_full_source_output(e3):
+    # Regresión (validación en vivo 2026-10-16): con 1.600 tokens la llamada que propone el código se cortaba.
+    from src.services.openai_copilot_provider import (
+        MAX_OPERATOR_OUTPUT_TOKENS, MAX_SCRIPT_OPERATOR_OUTPUT_TOKENS, OpenAIResponsesCopilotProvider)
+    runtime, service, script_id, request, call = e3
+    copilot = runtime.copilot_service
+    script_plan = copilot.plan_research_operator(request)
+    other_plan = copilot.plan_research_operator(replace(request, prompt="Compare SPY and QQQ total return over one year."))
+    assert script_plan.intent == "research_script_workflow" != other_plan.intent
+    assert OpenAIResponsesCopilotProvider._operator_max_output_tokens(script_plan) == MAX_SCRIPT_OPERATOR_OUTPUT_TOKENS
+    assert OpenAIResponsesCopilotProvider._operator_max_output_tokens(other_plan) == MAX_OPERATOR_OUTPUT_TOKENS == 1_600

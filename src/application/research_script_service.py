@@ -494,6 +494,10 @@ class ResearchScriptService:
             raise ResearchScriptConflictError("Requested source hash does not match the immutable revision.")
         if snapshot.manifest_sha256 != str(manifest_sha256 or "").strip().lower():
             raise ResearchScriptConflictError("Requested manifest hash does not match the immutable input snapshot.")
+        # La ruta exacta es la del Operator: no puede ejecutar código revisado sobre entradas
+        # distintas de las revisadas. El usuario elige libremente las entradas en create_run.
+        if revision.input_snapshot_id and revision.input_snapshot_id != snapshot.snapshot_id:
+            raise ResearchScriptConflictError("The candidate was reviewed against a different input bundle.")
         return self.create_run(
             script_id,
             ResearchScriptRunCreateRequest(
@@ -532,8 +536,6 @@ class ResearchScriptService:
         else:
             snapshot = self._create_input_snapshot(detail.script.script_id, request)
 
-        if revision.input_snapshot_id and revision.input_snapshot_id != snapshot.snapshot_id:
-            raise ResearchScriptConflictError("The candidate was reviewed against a different input bundle.")
         input_contents = self.store.load_input_contents(snapshot)
         input_manifest = self._input_manifest_identity(snapshot)
         computed_manifest_hash = self.manifest_sha256(input_manifest)

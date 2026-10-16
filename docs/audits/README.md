@@ -6,6 +6,9 @@ Use this area for findings that should remain discoverable after the immediate b
 
 ## Categories
 
+- [Script E3 live Operator closure, 2026-10-16](./script_e3_live_closure_2026-10-16.md): three passing live acquire → review → accept → isolated Python → synthesis journeys, five defects found live and fixed, remaining E2/runtime follow-ups.
+- [Script E4 live lifecycle, 2026-10-15](./script_e4_live_lifecycle_2026-10-15.md): actual isolated-Python analytical results, retention, opening/saving and export evidence.
+
 - [Commodity historical curves and exact spreads, 2026-10-06](./usability/commodity_curve_captures_2026-10-06.md): immutable curve captures, exact-contract comparison, restart replay, gap handling and live WTI evidence.
 
 - [Strategy Lab saved experiments and Risk acceptance, 2026-10-06](./usability/strategy_lab_experiments_2026-10-06.md): exact saved inputs/histories, restart replay, retained benchmark Risk handoff, revised-weight comparison, and live TWS browser evidence.

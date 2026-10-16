@@ -98,7 +98,9 @@ class FakeResponses:
         annotation_filename: str | None = None,
         status: str = "completed",
         summary_text: str | None = None,
+        fence_returned_code: bool = False,
     ) -> None:
+        self.fence_returned_code = fence_returned_code
         self.containers = containers
         self.expire_first = expire_first
         self.returned_code = returned_code
@@ -118,6 +120,8 @@ class FakeResponses:
         match = re.search(r"```python\n(.*?)\n```", str(kwargs["input"]), re.DOTALL)
         assert match
         code = self.returned_code if self.returned_code is not None else match.group(1)
+        if self.fence_returned_code:
+            code = "```python\n" + code + "\n```\n"
         generated = self.containers.files.add_generated(
             container_id,
             self.generated_filename,
@@ -334,6 +338,18 @@ def test_altered_wrapper_fails_exact_source_gate() -> None:
     assert result.status == "incomplete"
     assert result.executed_source_sha256 is None
     assert any("exact-source" in warning for warning in result.warnings)
+    assert result.usage["executed_wrapper_sha256"] != result.usage["expected_wrapper_sha256"]
+
+
+def test_fenced_but_identical_wrapper_reports_matching_normalized_hashes() -> None:
+    # Regresión (validación en vivo 2026-10-16): los hashes en bruto diferían aunque la
+    # validación normalizada confirmaba el wrapper exacto, y el modelo lo sintetizaba como discrepancia.
+    client = FakeOpenAIClient(fence_returned_code=True)
+    result = runtime(client).start_run(request())
+
+    assert result.status == "completed" and result.usage["executed_code"] is True
+    assert result.usage["executed_wrapper_sha256"] == result.usage["expected_wrapper_sha256"]
+    assert result.usage["wrapper_hash_basis"] == "normalized_code"
 
 
 def test_provider_reported_python_failure_maps_to_typed_failed_terminal_state() -> None:

@@ -3731,8 +3731,10 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
                 selected_revision_id: scriptWorkspace.selectedRevisionId,
                 selected_run_id: scriptWorkspace.selectedRun?.run_id ?? null,
                 selected_run_status: scriptWorkspace.selectedRun?.status ?? null,
-                input_snapshot_id: scriptWorkspace.selectedRun?.input_snapshot_id ?? null,
-                manifest_sha256: scriptWorkspace.selectedRun?.input_manifest_sha256 ?? null,
+                // Entradas de la próxima ejecución (p. ej. el conjunto revisado tras aceptar un
+                // candidato); solo sin conjunto preparado se usan las de la ejecución seleccionada.
+                input_snapshot_id: scriptWorkspace.preparedInputSnapshot?.snapshot_id ?? scriptWorkspace.selectedRun?.input_snapshot_id ?? null,
+                manifest_sha256: scriptWorkspace.preparedInputSnapshot?.manifest_sha256 ?? scriptWorkspace.selectedRun?.input_manifest_sha256 ?? null,
                 selected_run_outputs: scriptWorkspace.selectedRun?.outputs.map((item) => ({
                   output_id: item.output_id,
                   kind: item.kind,

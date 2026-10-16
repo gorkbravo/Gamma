@@ -71,7 +71,7 @@ from src.application.research_action_registry import (
     ResearchActionPermissionError,
     ResearchActionRegistry,
 )
-from src.application.request_limits import MAX_RISK_LOOKBACK_DAYS
+from src.application.request_limits import MAX_RESEARCH_SCRIPT_CHANGE_SUMMARY_CHARS, MAX_RISK_LOOKBACK_DAYS
 from src.application.risk_service import RiskComputeRequest, RiskService
 from src.application.sitrep_service import SitrepService, SitrepWorkspaceRequest
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
@@ -132,7 +132,13 @@ from src.models.prediction_markets import (
     PredictionProbabilityPoint,
 )
 from src.models.research_script import ResearchScriptInputFileCreateRequest
-from src.application.copilot_script_tools import script_action_definitions, execute_script_action, script_acquisition_authorized, script_visible_to_request
+from src.application.copilot_script_tools import (
+    execute_script_action,
+    fit_script_observation,
+    script_acquisition_authorized,
+    script_action_definitions,
+    script_visible_to_request,
+)
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import (
     ResearchComparisonLeg,
@@ -1757,7 +1763,10 @@ class CopilotService:
                 action_type="draft_change",
                 description=(
                     "Create a session-ephemeral Strategy Lab Script draft and initial immutable revision "
-                    "for an explicit current-turn Script workflow. This never runs source or saves a strategy."
+                    "for an explicit current-turn Script workflow. This never runs source or saves a strategy. "
+                    "When the request already attaches a Script (script_state.script_id), do not draft a "
+                    "placeholder: acquire inputs with the script_* catalog tools using that script_id and stage "
+                    "reviewed code with strategy_lab.script_draft_from_bundle."
                 ),
                 input_schema={
                     "type": "object",
@@ -3255,6 +3264,14 @@ class CopilotService:
             # not let the generic single-surface guard expire between the
             # portfolio comparison and the Risk scenario.
             budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 60_000))
+        if intent == "research_script_workflow":
+            if callable(getattr(self.provider, "stream_research_operator", None)):
+                # Script en vivo: el runtime aislado admite hasta 120 s por ejecución, más los
+                # turnos del modelo; el guard genérico de 12 s no certifica ninguna ejecución real.
+                budget = replace(budget, max_elapsed_ms=max(budget.max_elapsed_ms, 180_000))
+            if script_acquisition_authorized(normalized_prompt):
+                # Adquisición autorizada explícitamente: hasta dos datasets (discover + inspect).
+                budget = replace(budget, max_provider_calls=max(budget.max_provider_calls, 4))
         domain_decisions = self._build_domain_decisions(
             intent=intent,
             domain_plan=domain_plan,
@@ -6168,7 +6185,7 @@ class CopilotService:
                     script_id,
                     source=str(arguments["python_source"]),
                     expected_parent_sha256=expected_hash,
-                    change_summary=f"Operator candidate: {str(arguments['research_intent']).strip()}",
+                    change_summary=self._bounded_script_change_summary(str(arguments["research_intent"])),
                     operator_run_id=operator_run_id,
                     input_snapshot_id=snapshot.snapshot_id,
                 )
@@ -6275,6 +6292,15 @@ class CopilotService:
             ),
             sources=sources,
         )
+
+    @staticmethod
+    def _bounded_script_change_summary(research_intent: str) -> str:
+        # research_intent no tiene límite de longitud y el resumen sí (512): se acorta en
+        # lugar de hacer fallar el paso; la revisión conserva el código completo.
+        summary = f"Operator candidate: {research_intent.strip()}"
+        if len(summary) <= MAX_RESEARCH_SCRIPT_CHANGE_SUMMARY_CHARS:
+            return summary
+        return summary[: MAX_RESEARCH_SCRIPT_CHANGE_SUMMARY_CHARS - 1].rstrip() + "…"
 
     def _acquire_research_script_inputs(
         self,
@@ -6440,7 +6466,7 @@ class CopilotService:
             ),
         }
         return CopilotToolExecution(
-            output=output,
+            output=fit_script_observation(output),
             trace=CopilotToolTrace(
                 tool_name="strategy_lab.run_research_script",
                 summary=(

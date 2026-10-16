@@ -1,6 +1,6 @@
 # Optional Script analytical results — v1
 
-Status: implemented with deterministic fixtures and a passed bounded actual isolated-Python supplied-file handoff (2026-10-15). E4 acceptance remains open for hypothetical-weight handoff. E3's separate live Operator gate remains open.
+Status: implemented with deterministic fixtures and a passed bounded actual isolated-Python supplied-file handoff (2026-10-15). E4 acceptance remains open for hypothetical-weight handoff. E3's separate live Operator gate closed on 2026-10-16 (see audits/script_e3_live_closure_2026-10-16.md).
 
 Ordinary Python needs no strategy class, entrypoint, helper, Gamma import, network or structured output. Print/log/table/image/file outputs remain complete research outcomes. This convention is an optional interpretation layer over the existing retained-file mechanism.
 

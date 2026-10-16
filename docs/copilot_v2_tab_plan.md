@@ -2,7 +2,32 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
+
+### Official guidance reviewed 2026-10-16 — Script E3 live closure
+
+Fetched the current official [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning). `max_output_tokens` covers reasoning, visible and formatting tokens. Hitting it returns `incomplete` with reason `max_output_tokens`, possibly before any usable output. The guide recommends reserving at least 25,000 tokens for reasoning and output. The function-calling and Code Interpreter reviews of 2026-10-15 still apply.
+
+Live investigation of the Script Operator loop found these defects, now fixed:
+
+- **Attached Script was never sent to the model.** `_build_operator_user_message` omitted request context, so the model could not supply exact `script_id`/hashes. Decision: for `research_script_workflow` only, the user message carries `attached_context.script_state`, holding identities, hashes and canonical source capped at 8,000 characters, never run outputs or data. Instructions tell the model to use those exact ids. This is visibly attached user state, not new authority; Gamma still validates every argument.
+- **Output ceiling.** Script workflows use `max_output_tokens=25_000`, per the guidance above, because a staging call carries full source (up to 64 KB) plus reasoning. Other Operator workflows keep 1,600.
+- **Robustness.** The derived change summary is shortened to its 512-character limit. The opt-in usage audit retries a transient Windows rename lock and never aborts a model call on audit I/O failure. Code Interpreter wrapper hashes are recorded on the same normalized text used for exact-wrapper validation (`wrapper_hash_basis`).
+
+Evidence: three passing live journeys, one with the default `auto` profile and two with `deep` ([audit](audits/script_e3_live_closure_2026-10-16.md)). No framework, model, tool-exposure or authority change: staged review and user acceptance remain mandatory. Finding for a future decision: `auto` resolves every Operator request to Quick (low reasoning). It sufficed once context was attached, but the policy was not evaluated for heavier Script tasks.
+
+### Official guidance reviewed 2026-10-15 — Script E3 pending-defect fixes
+
+Re-fetched the current official [function calling](https://developers.openai.com/api/docs/guides/function-calling) and [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter) guides. The application executes calls and owns validation, permissions and limits. Code Interpreter documents container expiry, memory tiers and rate limits but no per-execution time limit, so Gamma's 120-second Script runtime guard and the Operator's elapsed guard remain application decisions. Decisions, approved by the user on 2026-10-15:
+
+- **Acquisition permission:** `script_acquisition_authorized` no longer treats any "add"/"combine" as permission. Unambiguous verbs (fetch/acquire/download, all inflections) authorize. Generic verbs (add, combine, load, include, retrieve, pull, import) authorize only when they refer to data nouns and not to code nouns ("add a returns column" does not). Negation covers every verb and "no new data". Ambiguity fails closed.
+- **Reviewed-bundle binding:** this now applies only to the Operator's exact-run path. A user run of accepted source with a newer bundle the user chose is allowed. The Operator still cannot run reviewed code on unreviewed inputs.
+- **Observation size:** Script observations are fitted under 40 KB before reaching the provider's 50 KB compaction. Samples, text, rows and diffs shrink; filenames, hashes, schemas and identities stay intact. The observation carries an explicit `bounded_for_operator` note.
+- **Budget, Script only:** `script_discover` now counts as an external-provider call. A Script workflow whose prompt explicitly authorizes acquisition gets up to 4 provider calls (two datasets, discover plus inspect each). With a real streaming provider, a Script workflow gets a 180-second elapsed guard, covering the 120-second runtime plus model turns. Other workflows are unchanged.
+- **Script context:** `script_state.input_snapshot_id`/`manifest_sha256` now carry the prepared next-run bundle, falling back to the selected run's. After acceptance the Operator receives the reviewed inputs, and `draft_research_script` no longer binds candidates to a stale run bundle.
+- **Authority boundary unchanged (user decision):** Operator revisions after a Script exists remain staged and need user acceptance. A data-dependent "build and run" therefore completes over two turns: acquire and stage, then run after acceptance.
+
+No framework, model or tool-exposure change. Covered by `tests/test_script_operator_e3.py`; the Script eval (17 checks) and the general Operator eval (31 cases, average 0.9093) pass.
 
 ### Official guidance reviewed 2026-10-15 — Script E3 access fix
 

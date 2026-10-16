@@ -479,8 +479,12 @@ class OpenAICodeInterpreterRuntime:
                     for item in code_calls
                 ],
                 "executed_wrapper": self._sanitize_wrapper(returned_codes[0]) if len(returned_codes) == 1 else None,
-                "executed_wrapper_sha256": hashlib.sha256(returned_codes[0].encode("utf-8")).hexdigest() if len(returned_codes) == 1 else None,
-                "expected_wrapper_sha256": hashlib.sha256(wrapper.encode("utf-8")).hexdigest(),
+                # Ambos hashes sobre el texto normalizado, el mismo con el que se valida exact_wrapper:
+                # con hashes en bruto (delimitadores, espacios) diferían aunque el wrapper coincidiera
+                # y el modelo lo sintetizaba como discrepancia (validación en vivo 2026-10-16).
+                "executed_wrapper_sha256": hashlib.sha256(self._normalized_code(returned_codes[0]).encode("utf-8")).hexdigest() if len(returned_codes) == 1 else None,
+                "expected_wrapper_sha256": hashlib.sha256(self._normalized_code(wrapper).encode("utf-8")).hexdigest(),
+                "wrapper_hash_basis": "normalized_code",
                 "source_sha256": request.source_sha256,
                 "input_manifest_sha256": request.input_manifest_sha256,
                 "expired_container_replay": replayed,
