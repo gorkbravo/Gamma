@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
+from src.application.copilot_context_helpers import PLANNER_ONLY_WARNING
 from src.application.copilot_context_contracts import (
     COPILOT_SCOPE_CONTEXT_BUDGET_BYTES,
     COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
@@ -4243,6 +4244,93 @@ def test_checkpoint7_responses_operator_closes_the_model_tool_model_loop(
         assert final_payload["stop_reason"] == "final_answer"
         assert final_payload["tool_calls_used"] == 1
         assert final_payload["outputs"]
+    finally:
+        runtime.shutdown()
+
+
+def test_planner_only_warning_stays_on_plan_preview_and_leaves_executed_operator_results(
+    tmp_path,
+    monkeypatch,
+):
+    # Regresión (E3 en vivo, 2026-10-16): el proveedor real copia `plan.warnings` al resultado y al
+    # contexto del modelo, así que el aviso «Planner-only prototype» llegaba a resultados en los
+    # que sí se habían ejecutado herramientas. Solo debe aparecer donde no se ejecuta nada.
+    class _OneToolResponsesOperator(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test-operator",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payloads: list[dict[str, object]] = []
+
+        def _post_json_stream(self, payload, emit, should_cancel):
+            self.payloads.append(deepcopy(payload))
+            if len(self.payloads) == 1:
+                output = {
+                    "type": "function_call",
+                    "id": "fc_planner_warning",
+                    "call_id": "call_planner_warning",
+                    "name": "run_risk_scenario_analysis",
+                    "arguments": json.dumps(_checkpoint7_rate_shock_arguments()),
+                }
+            else:
+                output = {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(_checkpoint7_final_card())}
+                    ],
+                }
+            return (
+                {"id": f"resp_planner_warning_{len(self.payloads)}", "model": self.model, "output": [output]},
+                "completed",
+            )
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    provider = _OneToolResponsesOperator()
+    runtime.copilot_service.provider = provider
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        body = {
+            "domain": "synthesis",
+            "prompt": (
+                "Is my portfolio exposed to a +75 bps rate shock and a -12% "
+                "equity shock? Duration proxy: 7.5 years."
+            ),
+            "context": {
+                "current_tab": "portfolio",
+                "workspace_mode": "portfolio",
+                "portfolio_state": {"snapshot": snapshot},
+            },
+        }
+
+        # La vista previa del plan no ejecuta nada: ahí el aviso sigue siendo veraz.
+        preview = client.post("/copilot/operator-plan", json=body)
+        assert preview.status_code == 200
+        assert PLANNER_ONLY_WARNING in preview.json()["warnings"]
+        assert PLANNER_ONLY_WARNING in preview.json()["research_plan"]["warnings"]
+
+        response = client.post("/copilot/operator-plan/execute", json=body)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert len(payload["tool_traces"]) == 1
+        assert payload["operator_events"][-1]["payload"]["tool_calls_used"] == 1
+        # Se ejecutó una herramienta: ni el resultado, ni sus eventos, ni el plan adjunto,
+        # ni el contexto enviado al modelo afirman que la vista previa no ejecuta herramientas.
+        assert all(not warning.startswith("Planner-only prototype") for warning in payload["warnings"])
+        assert all(
+            not warning.startswith("Planner-only prototype")
+            for warning in payload["research_plan"]["warnings"]
+        )
+        assert all(
+            not warning.startswith("Planner-only prototype")
+            for event in payload["operator_events"]
+            for warning in event["warnings"]
+        )
+        assert "Planner-only prototype" not in json.dumps(provider.payloads)
     finally:
         runtime.shutdown()
 

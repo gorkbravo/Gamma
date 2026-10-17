@@ -5,6 +5,17 @@ from datetime import datetime
 from typing import Any, Iterable
 
 
+# Aviso de la vista previa del planificador. Solo es veraz donde no se ejecuta nada (la respuesta
+# de planificación o un turno que termina antes de ejecutar); cualquier ruta que ejecuta
+# herramientas debe retirarlo del resultado, de sus eventos, del plan adjunto y del plan que ve el modelo.
+PLANNER_ONLY_WARNING = "Planner-only prototype: this preview does not execute tools or fetch provider data yet."
+
+
+def without_planner_only_warning(warnings: Iterable[str] | None) -> list[str]:
+    """Devuelve los avisos sin el aviso de vista previa del planificador."""
+    return [str(warning) for warning in warnings or [] if not str(warning).startswith("Planner-only prototype")]
+
+
 def dedupe_warnings(*groups: Iterable[str] | None) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []

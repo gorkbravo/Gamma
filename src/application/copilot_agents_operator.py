@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.application.copilot_context_helpers import dedupe_warnings
+from src.application.copilot_context_helpers import dedupe_warnings, without_planner_only_warning
 from src.application.copilot_model_policy import OPENAI_BASELINE_MODEL
 from src.application.research_action_registry import (
     ResearchActionArgumentError,
@@ -169,11 +169,7 @@ class CopilotAgentsOperatorService:
         events: list[CopilotOperatorProgressEvent] = []
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
-        warnings: list[str] = [
-            warning
-            for warning in plan.warnings
-            if not warning.startswith("Planner-only prototype")
-        ]
+        warnings: list[str] = without_planner_only_warning(plan.warnings)
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
         failed_steps: list[str] = []

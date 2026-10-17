@@ -14,6 +14,7 @@ import time
 from typing import Any, Callable, Iterator
 
 from src.application.copilot_context_helpers import (
+    PLANNER_ONLY_WARNING,
     dedupe_warnings,
     resolve_iv_surface,
     summarize_commodities_workspace,
@@ -23,6 +24,7 @@ from src.application.copilot_context_helpers import (
     summarize_portfolio_snapshot,
     summarize_research_result,
     summarize_risk_result,
+    without_planner_only_warning,
 )
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.application.copilot_model_policy import (
@@ -3848,14 +3850,12 @@ class CopilotService:
             request, resolution = self._prepare_request(request, role=request.role)
         else:
             resolution = request.model_resolution
+        # Esta ruta ejecuta el plan: el aviso de vista previa del planificador tampoco viaja en el plan adjunto.
         plan = self.plan_research(request)
+        plan = replace(plan, warnings=without_planner_only_warning(plan.warnings))
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
-        warnings = [
-            warning
-            for warning in plan.warnings
-            if not warning.startswith("Planner-only prototype")
-        ]
+        warnings = list(plan.warnings)
         executed_domains: list[str] = []
         skipped_domains: list[str] = []
         tool_outputs: dict[str, dict[str, Any]] = {}
@@ -4299,6 +4299,7 @@ class CopilotService:
             adaptive_custom_requested
             and resolution.status in {"ready", "degraded"}
         ):
+            plan = self._operator_plan_for_execution(plan)
             result = self._execute_responses_operator_loop(
                 request=request,
                 plan=plan,
@@ -4343,6 +4344,7 @@ class CopilotService:
                     usage=self._merge_usage_records(entity_preflight.usage, result.usage),
                 )
                 return self._persist_operator_execution_result(request, plan, result)
+            plan = self._operator_plan_for_execution(plan)
             provider_started_at = time.perf_counter()
             result = self.agents_operator_service.execute(
                 request=request,
@@ -4396,15 +4398,12 @@ class CopilotService:
             result = self._persist_agents_operator_execution_result(request, plan, result)
             return result
 
+        plan = self._operator_plan_for_execution(plan)
         resolved_run_id = (run_id or "").strip() or new_copilot_id("oprun")
         response_id = new_copilot_id("opexec")
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
-        warnings = [
-            warning
-            for warning in plan.warnings
-            if not warning.startswith("Planner-only prototype")
-        ]
+        warnings = list(plan.warnings)
         events: list[CopilotOperatorProgressEvent] = []
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
@@ -5242,11 +5241,7 @@ class CopilotService:
         resolved_run_id = (run_id or "").strip() or new_copilot_id("oprun")
         events: list[CopilotOperatorProgressEvent] = []
         sources: dict[str, CopilotSourceRef] = {}
-        warnings = [
-            warning
-            for warning in plan.warnings
-            if not warning.startswith("Planner-only prototype")
-        ]
+        warnings = without_planner_only_warning(plan.warnings)
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
         failed_steps: list[str] = []
@@ -9169,14 +9164,25 @@ class CopilotService:
 
     @staticmethod
     def _plan_warnings(prompt: str, domain_plan: list[CopilotResearchPlanDomain]) -> list[str]:
-        warnings: list[str] = [
-            "Planner-only prototype: this preview does not execute tools or fetch provider data yet."
-        ]
+        warnings: list[str] = [PLANNER_ONLY_WARNING]
         if not prompt.strip():
             warnings.append("No prompt was supplied; the plan falls back to active context.")
         if any(item.domain == "external_context" for item in domain_plan):
             warnings.append("External context is planned only through approved read-only provider adapters; general web browsing is not the default path.")
         return warnings
+
+    @staticmethod
+    def _operator_plan_for_execution(plan: CopilotOperatorPlan) -> CopilotOperatorPlan:
+        """Plan del Operator listo para ejecutar, sin el aviso de vista previa del planificador.
+
+        El aviso describe la respuesta de planificación, donde no se ejecuta nada. Si llegara al plan
+        de una ruta que ejecuta, el proveedor lo devuelve como aviso del resultado (y el modelo lo ve
+        en su contexto) aunque las herramientas se hayan ejecutado (E3 en vivo, 2026-10-16).
+        """
+        research_plan = plan.research_plan
+        if research_plan is not None:
+            research_plan = replace(research_plan, warnings=without_planner_only_warning(research_plan.warnings))
+        return replace(plan, warnings=without_planner_only_warning(plan.warnings), research_plan=research_plan)
 
     @staticmethod
     def _context_summary_for_persistence(context: CopilotContextBundle) -> dict[str, Any]:
