@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,6 +20,8 @@ from src.application.research_script_service import (
     ResearchScriptValidationError,
 )
 from src.application.runtime import build_runtime
+from src.models.macro import MacroSeriesHistory, MacroSeriesPoint
+from src.models.provenance import FreshnessLabel
 from src.models.research_script import (
     ResearchScriptCreateRequest,
     ResearchScriptDataExportRequest,
@@ -26,6 +30,7 @@ from src.models.research_script import (
     ResearchScriptRevisionCreateRequest,
     ResearchScriptRunCreateRequest,
 )
+from src.services.research_market_data import ResearchHistoryResult
 from src.services.research_script_runtime import MockResearchScriptRuntime, ResearchScriptRuntimeOutput
 from src.services.research_script_store import ResearchScriptStore, ResearchScriptStoreCorruptionError
 
@@ -40,33 +45,36 @@ def make_service(base_dir: Path, *, run_history_limit: int = 100) -> ResearchScr
     )
 
 
-class FakeEquitySeries:
-    empty = False
-
-    def rename(self, _name: str):
-        return self
-
-    def to_csv(self, *, index_label: str) -> str:
-        assert index_label == "date"
-        return "date,close\n2026-08-28,100.0\n2026-08-29,101.5\n"
-
-
 class FakeResearchProvider:
-    def load_symbol_history(self, symbol: str, lookback_days: int):
-        assert (symbol, lookback_days) == ("SPY", 40)
-        return FakeEquitySeries()
+    """Propietario de cotizaciones con la forma real (serie pandas) que descarga más de lo pedido.
+
+    Igual que yfinance (max(1.8 × días, 30) + 10 días naturales), devuelve 82 días naturales para 40 pedidos.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def load_instrument_history_result(self, reference, lookback_days: int) -> ResearchHistoryResult:
+        self.calls.append((reference.symbol, lookback_days))
+        index = pd.bdate_range("2026-06-10", "2026-08-31")
+        series = pd.Series([100.0 + step for step in range(len(index))], index=index)
+        return ResearchHistoryResult(series, "gamma_fixture", "Fixture", "fixture.history", FreshnessLabel.MOCKED,
+                                     retrieved_at=datetime(2026, 8, 31, 22))
 
 
 class FakeMacroService:
+    """Macro devuelve como mínimo history_days (540+) aunque el timeframe pedido sea 1Y."""
+
     def get_series_history(self, series_id: str, **kwargs):
-        assert series_id == "CPI"
+        assert series_id == "us-10y-yield"
         assert kwargs == {"region": "US", "timeframe": "1Y", "force_refresh": False}
-        return SimpleNamespace(
-            series_id="CPI",
-            frequency="monthly",
+        months = pd.date_range("2025-02-01", "2026-08-01", freq="MS")
+        return MacroSeriesHistory(
+            series_id, "US 10Y Treasury", "US", "pct", "monthly", "rates",
+            points=[MacroSeriesPoint(month.to_pydatetime(), 4.0, "gamma_macro_fixture", datetime(2026, 8, 30))
+                    for month in months],
             source_provider="gamma_macro_fixture",
             retrieved_at=datetime(2026, 8, 30),
-            points=[SimpleNamespace(timestamp=datetime(2026, 7, 1), value=3.1)],
         )
 
 
@@ -94,6 +102,23 @@ def create_script(service: ResearchScriptService, source: str = SOURCE):
             source=source,
         )
     )
+
+
+def add_inspected(service: ResearchScriptService, script_id: str, request: ResearchScriptDataExportRequest):
+    """Inspecciona en el catálogo compartido y añade esos mismos bytes: el único camino de exportación."""
+    preview = service.dataset_catalog.preview(script_id, request)
+    return service.export_domain_input(script_id, replace(request, preview_id=preview["preview_id"]))
+
+
+EXPORT_REQUESTS = (
+    ResearchScriptDataExportRequest(
+        domain="equity_history", object_id="SPY", logical_filename="spy.json", lookback_days=40, frequency="daily",
+    ),
+    ResearchScriptDataExportRequest(
+        domain="macro_series", object_id="us-10y-yield", logical_filename="ust10y.json", region="US", timeframe="1Y",
+    ),
+    ResearchScriptDataExportRequest(domain="saved_research", object_id="saved-1", logical_filename="saved.json"),
+)
 
 
 def test_create_and_revise_preserves_immutable_source_and_exact_hash(tmp_path: Path) -> None:
@@ -328,41 +353,21 @@ def test_store_recovers_after_restart_prunes_history_and_quarantines_corruption(
 
 
 def test_slice_five_domain_exports_are_bounded_and_provenanced(tmp_path: Path) -> None:
+    provider = FakeResearchProvider()
     service = ResearchScriptService(
         ResearchScriptStore(base_dir=tmp_path),
         MockResearchScriptRuntime(),
-        research_provider=FakeResearchProvider(),
+        research_provider=provider,
         research_service=FakeSavedResearchService(),
         macro_service=FakeMacroService(),
     )
     detail = create_script(service)
-    requests = [
-        ResearchScriptDataExportRequest(
-            domain="equity_history",
-            object_id="spy",
-            logical_filename="spy.csv",
-            lookback_days=40,
-            frequency="daily",
-        ),
-        ResearchScriptDataExportRequest(
-            domain="macro_series",
-            object_id="CPI",
-            logical_filename="cpi.csv",
-            region="US",
-            timeframe="1Y",
-        ),
-        ResearchScriptDataExportRequest(
-            domain="saved_research",
-            object_id="saved-1",
-            logical_filename="saved.json",
-        ),
-    ]
 
-    snapshots = [service.export_domain_input(detail.script.script_id, request) for request in requests]
+    snapshots = [add_inspected(service, detail.script.script_id, request) for request in EXPORT_REQUESTS]
 
     assert [snapshot.files[0].logical_filename for snapshot in snapshots] == [
-        "spy.csv",
-        "cpi.csv",
+        "spy.json",
+        "ust10y.json",
         "saved.json",
     ]
     assert all(snapshot.files[0].source_kind == "gamma_state" for snapshot in snapshots)
@@ -372,9 +377,42 @@ def test_slice_five_domain_exports_are_bounded_and_provenanced(tmp_path: Path) -
         "macro_series",
         "saved_research",
     ]
+    assert provider.calls == [("SPY", 40)]
+    # La ventana declarada es la aplicada: la historia sobrante del proveedor se recorta y queda registrada.
+    equity_window, macro_window = (snapshot.dataset_refs[0]["window"] for snapshot in snapshots[:2])
+    assert (equity_window["lookback_days"], equity_window["start"], equity_window["end"]) == (40, "2026-07-22", "2026-08-31")
+    assert (macro_window["lookback_days"], macro_window["start"], macro_window["end"]) == (370, "2025-07-27", "2026-08-01")
+    for snapshot, window in zip(snapshots[:2], (equity_window, macro_window)):
+        assert window["status"] == "trimmed_to_request"
+        content = json.loads(service.store.load_input_contents(snapshot)[snapshot.files[0].logical_filename])
+        dates = [point["timestamp"][:10] for point in content["data"]["points"]]
+        assert window["start"] <= min(dates) and max(dates) == window["end"]
+        assert len(dates) == window["observations"] < window["provider_observations"]
+        assert content["metadata"]["window"] == window
+    assert "window" not in snapshots[2].dataset_refs[0]
     saved_bytes = service.store.load_input_contents(snapshots[-1])["saved.json"]
     assert b'"title": "Bounded note"' in saved_bytes
     assert b"api_key" not in saved_bytes
+
+
+@pytest.mark.parametrize("preview_id", [None, "", "   "])
+def test_exports_without_inspected_preview_are_refused_before_any_fetch(tmp_path: Path, preview_id) -> None:
+    class Untouchable:
+        def __getattr__(self, name: str):
+            raise AssertionError(f"an export without preview must not reach the owning service ({name})")
+
+    service = ResearchScriptService(
+        ResearchScriptStore(base_dir=tmp_path),
+        MockResearchScriptRuntime(),
+        research_provider=Untouchable(),
+        research_service=Untouchable(),
+        macro_service=Untouchable(),
+    )
+    script_id = create_script(service).script.script_id
+    for request in EXPORT_REQUESTS:
+        with pytest.raises(ResearchScriptValidationError, match="require a preview_id"):
+            service.export_domain_input(script_id, replace(request, preview_id=preview_id))
+    assert not service.list_input_bundles(script_id)
 
 
 def test_slice_five_lifecycle_comparison_export_and_cleanup(tmp_path: Path) -> None:
@@ -468,6 +506,14 @@ def test_route_vertical_slice_and_conflicts(tmp_path: Path) -> None:
         json={"input_files": [{"logical_filename": "external.csv", "content": "date,value\n2026-10-14,42\n", "media_type": "text/csv"}]},
     )
     assert prepared.status_code == 201
+    legacy_export = client.post(
+        f"/research/strategy-lab/scripts/{script_id}/inputs/export",
+        json={"domain": "equity_history", "object_id": "SPY", "logical_filename": "spy.csv", "lookback_days": 30,
+              "base_snapshot_id": prepared.json()["snapshot_id"]},
+    )
+    assert legacy_export.status_code == 422
+    assert "require a preview_id" in legacy_export.json()["detail"][0]
+    assert len(client.get(f"/research/strategy-lab/scripts/{script_id}/inputs").json()) == 1
     snapshot_id = prepared.json()["snapshot_id"]
     listed_bundles = client.get(f"/research/strategy-lab/scripts/{script_id}/inputs")
     assert listed_bundles.status_code == 200
@@ -577,12 +623,8 @@ def test_mixed_bundle_preserves_copied_bytes_provenance_and_old_runs_on_restart(
         research_provider=FakeResearchProvider(), macro_service=FakeMacroService(),
     )
     script_id = create_script(service, 'print("Hello World")\n').script.script_id
-    equity = service.export_domain_input(script_id, ResearchScriptDataExportRequest(
-        domain="equity_history", object_id="SPY", logical_filename="spy.csv", lookback_days=40,
-    ))
-    macro = service.export_domain_input(script_id, ResearchScriptDataExportRequest(
-        domain="macro_series", object_id="CPI", logical_filename="cpi.csv", base_snapshot_id=equity.snapshot_id,
-    ))
+    equity = add_inspected(service, script_id, EXPORT_REQUESTS[0])
+    macro = add_inspected(service, script_id, replace(EXPORT_REQUESTS[1], base_snapshot_id=equity.snapshot_id))
     external_bytes = "\ufeffdate,name\r\n2026-10-14,España\r\n".encode("utf-8")
     mixed = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
         base_snapshot_id=macro.snapshot_id,
@@ -590,18 +632,18 @@ def test_mixed_bundle_preserves_copied_bytes_provenance_and_old_runs_on_restart(
             logical_filename="external.csv", media_type="text/csv", content=external_bytes,
         )],
     ))
-    assert [file.logical_filename for file in mixed.files] == ["spy.csv", "cpi.csv", "external.csv"]
+    assert [file.logical_filename for file in mixed.files] == ["spy.json", "ust10y.json", "external.csv"]
     assert mixed.files[0].content_sha256 == equity.files[0].content_sha256
     assert mixed.files[0].retrieved_at == equity.files[0].retrieved_at
     assert mixed.files[0].transformation_note == equity.files[0].transformation_note
     assert len(mixed.dataset_refs) == len(mixed.source_refs) == 2
     old_run = service.create_run(script_id, ResearchScriptRunCreateRequest(input_snapshot_id=mixed.snapshot_id))
     reduced = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
-        base_snapshot_id=mixed.snapshot_id, retained_filenames=["cpi.csv", "external.csv"],
+        base_snapshot_id=mixed.snapshot_id, retained_filenames=["ust10y.json", "external.csv"],
     ))
     assert reduced.snapshot_id != mixed.snapshot_id
     assert [ref["domain"] for ref in reduced.dataset_refs] == ["macro_series"]
-    assert [ref["logical_filename"] for ref in reduced.source_refs] == ["cpi.csv"]
+    assert [ref["logical_filename"] for ref in reduced.source_refs] == ["ust10y.json"]
     restarted = make_service(tmp_path)
     assert restarted.list_input_bundles(script_id)[0].snapshot_id == reduced.snapshot_id
     assert {item.snapshot_id for item in restarted.list_input_bundles(script_id)} == {equity.snapshot_id, macro.snapshot_id, mixed.snapshot_id, reduced.snapshot_id}

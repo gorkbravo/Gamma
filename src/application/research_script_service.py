@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import csv
 import hashlib
 import io
 import json
@@ -733,177 +732,35 @@ class ResearchScriptService:
         detail = self.get_script(script_id)
         if detail.script.status in {"archived", "discarded"}:
             raise ResearchScriptConflictError("Restore the archived script before exporting inputs.")
-        if request.preview_id:
-            try:
-                exported, metadata = self.dataset_catalog.retained_preview(script_id, request)
-            except ValueError as exc:
-                raise ResearchScriptValidationError([str(exc)]) from exc
-            reference = {key: value for key, value in metadata.items() if key not in {"fields", "preview_id"}}
-            reference["logical_filename"] = request.logical_filename
-            source_reference = {
-                **reference,
-                "source_id": f"{request.domain}:{request.object_id}:{request.outcome_id or ''}",
-                "provider": exported.provider_id,
-                "retrieved_at": exported.retrieved_at.isoformat() if exported.retrieved_at else None,
-                "origin": "script_dataset_catalog.preview",
-            }
-            return self.create_input_bundle(
-                script_id,
-                ResearchScriptInputBundleRequest(base_snapshot_id=request.base_snapshot_id,
-                    input_files=[exported, *request.additional_input_files]),
-                dataset_refs=[reference], source_refs=[source_reference], extra_warnings=metadata["warnings"],
-            )
-        object_id = str(request.object_id or "").strip()
-        filename = self._safe_output_filename(str(request.logical_filename or "").strip())
-        if not object_id:
-            raise ResearchScriptValidationError(["A Gamma object identifier is required for export."])
-
-        retrieved_at = now_utc()
-        dataset_ref: dict[str, Any]
-        source_ref: dict[str, Any]
-        warnings: list[str] = []
-        if request.domain == "equity_history":
-            if self.research_provider is None or not hasattr(self.research_provider, "load_symbol_history"):
-                raise ResearchScriptValidationError(["Gamma equity-history export is unavailable."])
-            symbol = object_id.upper()
-            lookback_days = int(request.lookback_days or 756)
-            if lookback_days < 20 or lookback_days > 3650:
-                raise ResearchScriptValidationError(["Equity-history lookback_days must be between 20 and 3650."])
-            frequency = request.frequency or "daily"
-            try:
-                series = self.research_provider.load_symbol_history(symbol, lookback_days)
-                if series is None or getattr(series, "empty", True):
-                    raise ValueError("empty history")
-                if frequency == "weekly":
-                    series = series.resample("W-FRI").last().dropna()
-                elif frequency == "monthly":
-                    series = series.resample("ME").last().dropna()
-                content = series.rename("close").to_csv(index_label="date").encode("utf-8")
-            except Exception as exc:
-                raise ResearchScriptValidationError(
-                    [f"Gamma could not export bounded equity history for {symbol}."]
-                ) from exc
-            provider_id = "gamma_research_market_data"
-            transformation = (
-                f"Gamma copied bounded {frequency} historical prices for {symbol}; "
-                "the isolated runtime receives only this immutable CSV snapshot."
-            )
-            dataset_ref = {
-                "contract_version": "research-script-domain-export.v1",
-                "domain": request.domain,
-                "object_id": symbol,
-                "frequency": frequency,
-                "lookback_days": lookback_days,
-                "logical_filename": filename,
-            }
-            source_ref = {
-                "source_id": f"equity_history:{symbol}",
-                "provider": provider_id,
-                "retrieved_at": retrieved_at.isoformat(),
-            }
-            media_type = "text/csv"
-        elif request.domain == "macro_series":
-            if self.macro_service is None or not hasattr(self.macro_service, "get_series_history"):
-                raise ResearchScriptValidationError(["Gamma macro-series export is unavailable."])
-            region = str(request.region or "US").strip() or "US"
-            timeframe = str(request.timeframe or "1Y").strip() or "1Y"
-            history = self.macro_service.get_series_history(
-                object_id,
-                region=region,
-                timeframe=timeframe,
-                force_refresh=False,
-            )
-            if history is None or not history.points:
-                raise ResearchScriptValidationError([f"Gamma macro series is unavailable: {object_id}."])
-            buffer = io.StringIO()
-            writer = csv.writer(buffer, lineterminator="\n")
-            writer.writerow(("timestamp", "value"))
-            for point in history.points:
-                writer.writerow((point.timestamp.isoformat(), point.value))
-            content = buffer.getvalue().encode("utf-8")
-            provider_id = str(history.source_provider or "gamma_macro")
-            transformation = (
-                f"Gamma copied the normalized {region}/{timeframe} macro series {history.series_id}; "
-                "the isolated runtime receives only this immutable CSV snapshot."
-            )
-            dataset_ref = {
-                "contract_version": "research-script-domain-export.v1",
-                "domain": request.domain,
-                "object_id": history.series_id,
-                "region": region,
-                "timeframe": timeframe,
-                "frequency": history.frequency,
-                "logical_filename": filename,
-            }
-            source_ref = {
-                "source_id": f"macro_series:{history.series_id}",
-                "provider": provider_id,
-                "retrieved_at": (history.retrieved_at or retrieved_at).isoformat(),
-            }
-            warnings.extend([])
-            media_type = "text/csv"
-        elif request.domain == "saved_research":
-            if self.research_service is None or not hasattr(self.research_service, "load_saved_research"):
-                raise ResearchScriptValidationError(["Gamma saved-research export is unavailable."])
-            saved = self.research_service.load_saved_research(object_id)
-            if saved is None:
-                raise ResearchScriptNotFoundError("Saved Gamma research object not found.")
-            payload = asdict(saved) if is_dataclass(saved) else dict(saved)
-            if self._payload_contains_sensitive_key(payload):
-                raise ResearchScriptValidationError(
-                    ["The selected saved research object contains fields outside the Script export boundary."]
-                )
-            content = json.dumps(
-                payload,
-                sort_keys=True,
-                ensure_ascii=False,
-                indent=2,
-                default=self._json_default,
-            ).encode("utf-8")
-            provider_id = str(getattr(saved, "source_provider", "gamma_saved_research") or "gamma_saved_research")
-            transformation = (
-                "Gamma serialized one selected saved research object into a bounded immutable JSON snapshot; "
-                "no live service handle or local path was exposed."
-            )
-            dataset_ref = {
-                "contract_version": "research-script-domain-export.v1",
-                "domain": request.domain,
-                "object_id": str(saved.id),
-                "object_type": str(saved.object_type),
-                "logical_filename": filename,
-            }
-            source_ref = {
-                "source_id": f"saved_research:{saved.id}",
-                "provider": provider_id,
-                "retrieved_at": (saved.retrieved_at or saved.updated_at).isoformat(),
-            }
-            warnings.extend(list(saved.warnings))
-            media_type = "application/json"
-        else:
-            raise ResearchScriptValidationError([f"Unsupported Gamma export domain: {request.domain}."])
-
-        exported_file = ResearchScriptInputFileCreateRequest(
-            logical_filename=filename,
-            media_type=media_type,
-            content=content,
-            gamma_object_id=object_id,
-            provider_id=provider_id,
-            retrieved_at=retrieved_at,
-            transformation_note=transformation,
-            source_kind="gamma_state",
-        )
-        # Associate newly exported references with their file so later removal
-        # can retain precisely the remaining bundle's provenance.
-        source_ref["logical_filename"] = filename
+        # Solo se añaden bytes ya inspeccionados en el catálogo compartido, que aplica y etiqueta la
+        # ventana pedida (metadata.window). La exportación CSV heredada sin preview se retiró el
+        # 2026-10-17: volvía a descargar del proveedor sin inspección y declaraba lookback_days/timeframe
+        # aunque yfinance y Macro devuelven más historia de la pedida. Un preview_id vacío no la reactiva.
+        if not str(request.preview_id or "").strip():
+            raise ResearchScriptValidationError([
+                "Gamma dataset exports require a preview_id. Inspect the exact dataset with "
+                "POST /research/strategy-lab/scripts/{script_id}/dataset-preview, then add that retained preview. "
+                "The export without preview was retired because it could not honor the requested window; "
+                "nothing was fetched and existing inputs are unchanged."
+            ])
+        try:
+            exported, metadata = self.dataset_catalog.retained_preview(script_id, request)
+        except ValueError as exc:
+            raise ResearchScriptValidationError([str(exc)]) from exc
+        reference = {key: value for key, value in metadata.items() if key not in {"fields", "preview_id"}}
+        reference["logical_filename"] = request.logical_filename
+        source_reference = {
+            **reference,
+            "source_id": f"{request.domain}:{request.object_id}:{request.outcome_id or ''}",
+            "provider": exported.provider_id,
+            "retrieved_at": exported.retrieved_at.isoformat() if exported.retrieved_at else None,
+            "origin": "script_dataset_catalog.preview",
+        }
         return self.create_input_bundle(
             script_id,
-            ResearchScriptInputBundleRequest(
-                base_snapshot_id=request.base_snapshot_id,
-                input_files=[exported_file, *request.additional_input_files],
-            ),
-            dataset_refs=[dataset_ref],
-            source_refs=[source_ref],
-            extra_warnings=warnings,
+            ResearchScriptInputBundleRequest(base_snapshot_id=request.base_snapshot_id,
+                input_files=[exported, *request.additional_input_files]),
+            dataset_refs=[reference], source_refs=[source_reference], extra_warnings=metadata["warnings"],
         )
 
     def create_input_bundle(

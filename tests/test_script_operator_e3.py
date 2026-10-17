@@ -150,6 +150,8 @@ def test_scoped_permissions_expiry_unavailable_no_substitution_and_conflicts(e3)
     preview = call("inspect", eq)
     service.dataset_catalog.TTL = -1
     assert "expired" in call("add_input", {**eq, "preview_id": preview["preview_id"], "base_snapshot_id": None})["error"]
+    # Un preview_id vacío no reactiva la exportación retirada: se rechaza sin descargar ni crear bundles.
+    assert "require a preview_id" in call("add_input", {**eq, "preview_id": "", "base_snapshot_id": None})["error"]
     service.dataset_catalog.TTL = 600
     preview = call("inspect", eq)
     service.dataset_catalog.services["equity"] = None
