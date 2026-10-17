@@ -9,8 +9,9 @@ import hashlib
 import json
 import time
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from statistics import median
 from threading import RLock
 from uuid import uuid4
 
@@ -37,6 +38,91 @@ DATASETS = {
     "crypto_liquidity": ("Crypto · market & liquidity", "Current token market data and supported DEX pool liquidity. No historical pool depth or executable prices."),
     "prediction_history": ("Prediction Markets · outcome history", "Exact venue contract and outcome history with event metadata; provider range/resolution limits remain explicit."),
 }
+
+EQUITY_DEFAULT_LOOKBACK_DAYS = 756
+CRYPTO_TIMEFRAME_DAYS = {"30D": 30, "90D": 90, "1Y": 365}
+# Parámetros de ventana/frecuencia que cada dominio aplica de verdad; el resto se etiqueta como no aplicado.
+WINDOW_PARAMETERS = {
+    "equity_history": {"lookback_days", "frequency"},
+    "commodity_history": {"lookback_days"},
+    "macro_series": {"timeframe"},
+    "crypto_history": {"timeframe"},
+    "prediction_history": {"timeframe"},
+}
+DAY_SECONDS = 86400
+
+
+def _timestamp(value):
+    """Instante comparable (UTC sin zona) de una marca ISO copiada del servicio propietario."""
+    parsed = datetime.fromisoformat(str(value))
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+def _shortfall(first, start, instants, window_days):
+    """True si la cobertura empieza después del inicio pedido más allá del hueco normal de la serie.
+
+    La tolerancia absorbe fines de semana/festivos (mínimo 4 días, acotado a 1/4 de ventanas cortas)
+    y el espaciado nativo de series mensuales o trimestrales; nunca se rellena el hueco.
+    """
+    unique = sorted(set(instants))
+    gaps = [(b - a).total_seconds() for a, b in zip(unique, unique[1:])]
+    tolerance = max(median(gaps) if gaps else 0, min(4, window_days / 4) * DAY_SECONDS)
+    return (first - start).total_seconds() > tolerance
+
+
+def coverage(points):
+    """Cobertura real de los puntos exportados (marcas tal como se copian), sin suponer orden."""
+    instants = [_timestamp(p["timestamp"]) for p in points]
+    first, last = instants.index(min(instants)), instants.index(max(instants))
+    return {"coverage_start": points[first]["timestamp"], "coverage_end": points[last]["timestamp"],
+            "coverage_calendar_days": (instants[last].date() - instants[first].date()).days, "observations": len(points)}
+
+
+def bound_to_calendar_window(points, days):
+    """Recorta observaciones a [última fecha observada − days, última fecha observada].
+
+    Los proveedores pueden imponer un periodo mínimo de descarga o servir una caché más larga; el recorte
+    ocurre tras la adquisición, conserva el orden copiado y nunca interpola ni amplía la cobertura.
+    Con days=None no se recorta y se declara la historia completa disponible.
+    """
+    instants = [_timestamp(p["timestamp"]) for p in points]
+    anchor = max(instants).date()
+    start = anchor - timedelta(days=days) if days is not None else None
+    kept = [p for p, t in zip(points, instants) if start is None or t.date() >= start]
+
+    def midnight(day):
+        return datetime.combine(day, datetime.min.time())
+
+    if start is None:
+        status = "full_available_history"
+    elif len(kept) < len(points):
+        status = "trimmed_to_request"
+    elif _shortfall(midnight(min(instants).date()), midnight(start), [midnight(t.date()) for t in instants], days):
+        status = "shorter_than_request"
+    else:
+        status = "within_request"
+    provided = coverage(points)
+    window = {
+        "basis": "calendar_days" if days is not None else "full_available_history",
+        "lookback_days": days, "anchor": "latest_observation",
+        "start": start.isoformat() if start else None, "end": anchor.isoformat(), **coverage(kept),
+        "provider_coverage_start": provided["coverage_start"], "provider_coverage_end": provided["coverage_end"],
+        "provider_observations": len(points), "status": status,
+    }
+    return kept, window
+
+
+def resample_last(points, frequency):
+    """Última observación de cada semana (cierre viernes) o mes, conservando su fecha observada real.
+
+    A diferencia de una etiqueta de periodo, la fecha nunca queda después de la última observación.
+    """
+    buckets = {}
+    for point in points:
+        day = _timestamp(point["timestamp"]).date()
+        key = day + timedelta(days=(4 - day.weekday()) % 7) if frequency == "weekly" else (day.year, day.month)
+        buckets[key] = point
+    return list(buckets.values())
 
 
 def plain(value):
@@ -177,7 +263,7 @@ class ScriptDatasetCatalog:
             instrument = self.equities().get(identity)
             if instrument is None:
                 raise DatasetSelectionError("Select an exact instrument from the curated catalog.")
-            days = request.lookback_days or 756
+            days = request.lookback_days or EQUITY_DEFAULT_LOOKBACK_DAYS
             if not 20 <= days <= 3650:
                 raise DatasetSelectionError("Equity lookback must be between 20 and 3650 days.")
             frequency = request.frequency or "daily"
@@ -187,9 +273,9 @@ class ScriptDatasetCatalog:
             series = result.series
             if series is None or series.empty:
                 raise DatasetSelectionError("Selected instrument history is unavailable.")
-            if frequency != "daily":
-                series = series.resample("W-FRI" if frequency == "weekly" else "ME").last().dropna()
-            return {"instrument": plain(instrument), "frequency": frequency, "unit": instrument.currency,
+            series = series.dropna().sort_index()
+            # Se copian cierres diarios; apply_window recorta a la ventana pedida y después remuestrea.
+            return {"instrument": plain(instrument), "frequency": "daily", "unit": instrument.currency,
                     "source_provider": result.source_provider, "retrieved_at": plain(result.retrieved_at),
                     "origin": result.origin, "freshness_label": plain(result.freshness_label),
                     "transformation_note": result.transformation_note, "warnings": result.warnings,
@@ -232,7 +318,7 @@ class ScriptDatasetCatalog:
             rows = workspace.spreads if domain == "commodity_spread" else workspace.inventories
             return next((r for r in rows if (r.definition.spread_id if domain == "commodity_spread" else r.metadata.series_id) == identity), None)
         if domain == "crypto_history":
-            days = {"30D": 30, "90D": 90, "1Y": 365}.get(request.timeframe or "30D")
+            days = CRYPTO_TIMEFRAME_DAYS.get(request.timeframe or "30D")
             if days is None:
                 raise DatasetSelectionError("Crypto timeframe must be 30D, 90D or 1Y.")
             token = self.service("crypto").get_token_detail(identity)
@@ -257,11 +343,75 @@ class ScriptDatasetCatalog:
             raise DatasetSelectionError("Exact outcome history unavailable.")
         return {"market": market, "history": history, "unit": "probability fraction [0,1]", "frequency": "provider resolution; see history.effective_resolution_minutes"}
 
+    @staticmethod
+    def apply_window(request, payload):
+        """Aplica y describe la ventana pedida sobre el payload copiado (lo modifica en sitio).
+
+        Devuelve (ventana | None, avisos, notas). Una historia más larga que la pedida se recorta; una
+        cobertura más corta impuesta por el proveedor se etiqueta. Ninguna ventana cambia en silencio.
+        """
+        domain, warnings, notes = request.domain, [], []
+        supported = WINDOW_PARAMETERS.get(domain, set())
+        for name in ("lookback_days", "timeframe", "frequency"):
+            value = getattr(request, name)
+            if value is not None and name not in supported:
+                reason = ("observations keep the owning service's native frequency" if name == "frequency"
+                          else "metadata.window describes the window actually exported" if supported
+                          else "this dataset has no requested window and is copied as provided")
+                warnings.append(f"{name}={value!r} is not applied to {domain}; {reason}.")
+        points = (payload.get("history") or {}).get("points") if domain == "prediction_history" else payload.get("points")
+        if domain not in WINDOW_PARAMETERS or not isinstance(points, list) or not points:
+            return None, warnings, notes
+        if domain == "prediction_history":
+            # El servicio propietario ya recorta a su ventana; aquí solo se declara y se verifica la cobertura.
+            from src.application.prediction_market_service import HISTORY_RANGE_DAYS
+            history, timeframe = payload["history"], request.timeframe or "1m"
+            days = HISTORY_RANGE_DAYS.get(timeframe)
+            window = {"basis": "owning_service_range", "lookback_days": days, "anchor": "owning_service_window",
+                      "start": history.get("window_start"), "end": history.get("window_end"),
+                      "effective_range": history.get("effective_range"), **coverage(points)}
+            if days is None or not window["start"]:
+                window["status"] = "full_available_history"
+            elif _shortfall(_timestamp(window["coverage_start"]), _timestamp(window["start"]), [_timestamp(p["timestamp"]) for p in points], days):
+                window["status"] = "shorter_than_request"
+            else:
+                window["status"] = "within_request"
+        else:
+            if domain == "macro_series":
+                from src.application.macro_service import TIMEFRAME_DAYS
+                days = TIMEFRAME_DAYS[request.timeframe or "1Y"]
+            elif domain == "crypto_history":
+                days = CRYPTO_TIMEFRAME_DAYS[request.timeframe or "30D"]
+            elif domain == "equity_history":
+                days = request.lookback_days or EQUITY_DEFAULT_LOOKBACK_DAYS
+            else:
+                days = request.lookback_days
+            payload["points"], window = bound_to_calendar_window(points, days)
+            if window["status"] == "trimmed_to_request":
+                notes.append(f"The owning service returned {window['provider_observations']} observations "
+                             f"({window['provider_coverage_start']} to {window['provider_coverage_end']}); Gamma kept the "
+                             f"{window['observations']} observations inside the requested {days}-calendar-day window ending at the latest observation.")
+            frequency = request.frequency or "daily"
+            if domain == "equity_history" and frequency != "daily":
+                payload["points"], payload["frequency"] = resample_last(payload["points"], frequency), frequency
+                window.update(coverage(payload["points"]))
+                notes.append(f"Resampled to {frequency} after windowing, keeping the last observation per "
+                             f"{'week ending Friday' if frequency == 'weekly' else 'calendar month'} at its observed date.")
+        window["requested"] = {name: getattr(request, name) for name in sorted(supported)}
+        window["lookback_source"] = "requested" if any(getattr(request, n) is not None for n in supported - {"frequency"}) else (
+            "not_requested" if domain == "commodity_history" else "default")
+        if window["status"] == "shorter_than_request":
+            warnings.append(f"Requested {window['lookback_days']} calendar days ending {window['end'] or window['coverage_end']}; the owning "
+                            f"service supplied observations only from {window['coverage_start']} ({window['coverage_calendar_days']} "
+                            "calendar days). Gamma did not backfill the difference.")
+        return window, warnings, notes
+
     def preview(self, script_id, request):
         self.owner.get_script(script_id)
         payload = plain(self.acquire(request))
         if payload is None:
             raise DatasetSelectionError("Selected dataset is unavailable; existing inputs are unchanged.")
+        window, window_warnings, window_notes = self.apply_window(request, payload) if isinstance(payload, dict) else (None, [], [])
         public_token_fields = (
             {"token_id", "outcome_token_id", "subject_token_id", "base_token_price_usd", "quote_token_symbol", "top_tokens"}
             if request.domain.startswith(("crypto_", "prediction_")) else set()
@@ -290,18 +440,18 @@ class ScriptDatasetCatalog:
         origins = json.dumps(payload, ensure_ascii=False)
         metadata["cache_status"] = "cached" if 'research_cache.' in origins else "not_reported_by_owning_service"
         metadata["field_notes"] = {
-            "equity_history": "points.close is in instrument.currency; timestamp is the observed date. Weekly/monthly uses the last available observation, without filling gaps.",
-            "macro_series": "points.value uses the series unit and native frequency; derived transformations are retained in transformation_note.",
+            "equity_history": "points.close is in instrument.currency; timestamp is the observed date. lookback_days is a calendar-day window ending at the latest observation (metadata.window). Weekly/monthly keeps the last available observation per period at its observed date, without filling gaps.",
+            "macro_series": "points.value uses the series unit and native frequency; derived transformations are retained in transformation_note. timeframe is applied as the Macro service's calendar-day window ending at the latest observation (metadata.window).",
             "saved_research": "Saved payload is heterogeneous: units, methodology and coverage are supplied by the saved object's own fields.",
             "fundamentals": "Statement lines carry unit; cells retain period_key, value, filing/accession, date and provenance. Ratios retain their native unit; display_value is presentation only. Missing cells remain null.",
             "options_capture": "surface.contracts contains observed quotes with exact contract_id/con_id/expiry/right/strike/currency/multiplier. Bid/ask/last/model/derived Greeks remain separate. IV is an annualized fraction; grid values may be fitted: inspect cell_sources and surface_model. Captured_at is storage time, not retrieval time.",
-            "commodity_history": "points.value uses history.unit; source basis/proxy limitations remain in warnings and origin.",
+            "commodity_history": "points.value uses history.unit; source basis/proxy limitations remain in warnings and origin. lookback_days, when given, is a calendar-day window ending at the latest observation; otherwise all available history is copied (metadata.window).",
             "commodity_curve": "nodes.price uses the selected instrument quote unit; nodes.contract preserves contract_id/month/expiry. Shape/spread/roll metrics are derived, not observations.",
             "commodity_spread": "history.value and value use definition.unit; definition.formula and left/right_leg_id identify transformations and legs. z_score is dimensionless; percentile is percent.",
             "commodity_inventory": "points.value uses metadata.unit and metadata.frequency. Latest change and seasonal percentile are derived; seasonal_percentile is percent.",
-            "crypto_history": "points.price, market_cap and total_volume are USD; total_volume is provider-reported rolling market volume, not trade-level volume. Observations retain their native timestamps.",
+            "crypto_history": "points.price, market_cap and total_volume are USD; total_volume is provider-reported rolling market volume, not trade-level volume. Observations retain their native timestamps; timeframe is a calendar-day window ending at the latest observation (metadata.window).",
             "crypto_liquidity": "Prices, market caps, reserves and *_usd fields are USD; supplies are native token quantities. *_pct fields are percent; *_ratio/share fields are dimensionless. Pool records preserve network/address/pool_id. This is a current snapshot, not liquidity history.",
-            "prediction_history": "history.points.probability is a fraction [0,1]. Exact market_id, outcome_id and outcome token_id are retained. Effective range/resolution/coverage may differ from the requested range, as reported by the owning service.",
+            "prediction_history": "history.points.probability is a fraction [0,1]. Exact market_id, outcome_id and outcome token_id are retained. Effective range/resolution/coverage may differ from the requested range, as reported by the owning service; metadata.window records its window and status.",
         }[request.domain]
         # Empty histories cannot masquerade as successful exports.
         def empty_history(v):
@@ -317,6 +467,13 @@ class ScriptDatasetCatalog:
                          "lookback_days": request.lookback_days, "frequency": request.frequency,
                          "materialized_at": now_utc().isoformat(), "limitations": DATASETS[request.domain][1],
                          "transformation_note": "Copied normalized owning-service payload to JSON; nested units, provenance, identities and missing values retained. No interpolation or historical backfill added."})
+        if window is not None:
+            # La cobertura publicada es la de las observaciones exportadas, no la de otras fechas del payload.
+            metadata["window"] = window
+            metadata["coverage_start"], metadata["coverage_end"] = window["coverage_start"], window["coverage_end"]
+        if window_notes:
+            metadata["transformation_note"] = " ".join([metadata["transformation_note"], *window_notes])
+        metadata["warnings"].extend(window_warnings)
         if request.domain == "commodity_curve":
             workspace = self.service("commodities").get_workspace()
             instrument = next((i for i in workspace.instruments if i.instrument_id == request.object_id), None)

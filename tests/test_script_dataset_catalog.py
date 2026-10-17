@@ -1,6 +1,6 @@
 """E2 deterministic contracts; these fixtures are not live-provider acceptance."""
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 from types import SimpleNamespace
@@ -224,6 +224,109 @@ def test_adding_preview_does_not_refetch_and_resampling_is_declared(tmp_path):
     assert payload["metadata"]["units"] == ["USD"]
     assert [point["close"] for point in payload["data"]["points"]] == [100, 101]
     assert payload["metadata"]["coverage_start"].startswith("2026-08-31")
+
+
+LIVE_END = datetime(2026, 10, 16, 21, tzinfo=timezone.utc)
+
+
+def provider_closes(start, end="2026-10-16"):
+    # Sesiones hábiles sin el festivo del Labor Day: reproduce las 46 observaciones del cierre E3 en vivo.
+    index = pd.bdate_range(start, end).drop(pd.Timestamp("2026-09-07"), errors="ignore")
+    return pd.Series([100.0 + n for n in range(len(index))], index=index)
+
+
+def pin_equity(service, series):
+    service.dataset_catalog.services["equity"] = SimpleNamespace(load_instrument_history_result=lambda i, days: ResearchHistoryResult(
+        series, "yfinance", "Fixture", "fixture.history", FreshnessLabel.HISTORICAL, retrieved_at=LIVE_END))
+
+
+@pytest.mark.parametrize("frequency", ["daily", "weekly", "monthly"])
+def test_requested_lookback_trims_provider_minimum_fetch_to_calendar_window(tmp_path, frequency):
+    service, script, capture = setup(tmp_path)
+    provider = provider_closes("2026-08-13")  # yfinance descarga ≥ 64 días naturales para 30 pedidos
+    assert len(provider) == 46
+    pin_equity(service, provider)
+    req = replace(request_for("equity_history", capture), lookback_days=30, frequency=frequency)
+    preview = service.dataset_catalog.preview(script, req)
+    window = preview["window"]
+    start, end = (datetime.fromisoformat(preview[key]).date() for key in ("coverage_start", "coverage_end"))
+    assert end == date(2026, 10, 16) and (end - start).days <= 30
+    assert (window["status"], window["lookback_days"], window["start"], window["end"]) == ("trimmed_to_request", 30, "2026-09-16", "2026-10-16")
+    assert window["provider_observations"] == 46 and window["provider_coverage_start"].startswith("2026-08-13")
+    assert window["requested"] == {"frequency": frequency, "lookback_days": 30} and window["lookback_source"] == "requested"
+    assert "kept the" in preview["transformation_note"] and not any("backfill" in w for w in preview["warnings"])
+    bundle = service.export_domain_input(script, replace(req, preview_id=preview["preview_id"]))
+    payload = json.loads(service.store.load_input_contents(bundle)[req.logical_filename])
+    dates = [datetime.fromisoformat(point["timestamp"]).date() for point in payload["data"]["points"]]
+    assert min(dates) >= date(2026, 9, 16) and max(dates) == date(2026, 10, 16)  # nunca una etiqueta de periodo futura
+    assert payload["metadata"]["lookback_days"] == 30 and payload["metadata"]["window"] == window
+    assert payload["data"]["frequency"] == frequency and window["observations"] == len(dates)
+    if frequency == "daily":
+        assert len(dates) == len(provider.loc["2026-09-16":])
+    if frequency == "monthly":
+        assert [str(d) for d in dates] == ["2026-09-30", "2026-10-16"]
+
+
+def test_provider_shorter_than_requested_window_is_labeled_not_backfilled(tmp_path):
+    service, script, capture = setup(tmp_path)
+    provider = provider_closes("2026-08-20")  # el proveedor solo cubre ~57 días de los 365 pedidos
+    pin_equity(service, provider)
+    req = replace(request_for("equity_history", capture), lookback_days=365)
+    preview = service.dataset_catalog.preview(script, req)
+    window = preview["window"]
+    assert (window["status"], window["start"], window["observations"]) == ("shorter_than_request", "2025-10-16", len(provider))
+    assert preview["coverage_start"].startswith("2026-08-20") and window["coverage_calendar_days"] == 57
+    assert any("Requested 365 calendar days" in w and "did not backfill" in w for w in preview["warnings"])
+    assert preview["lookback_days"] == 365
+
+
+def test_other_history_domains_trim_or_label_their_window(tmp_path):
+    from src.models.commodities import CommodityPriceHistory, CommodityPricePoint
+    from src.models.crypto import CryptoPricePoint
+    from src.models.macro import MacroSeriesHistory, MacroSeriesPoint
+    from src.models.prediction_markets import PredictionProbabilityHistory, PredictionProbabilityPoint
+    service, script, capture = setup(tmp_path)
+    catalog = service.dataset_catalog
+    days = [LIVE_END - timedelta(days=n) for n in range(540, -1, -1)]  # caché caliente más larga que la ventana
+    crypto, prediction = catalog.services["crypto"], catalog.services["prediction"]
+    catalog.services.update(
+        macro=SimpleNamespace(get_series_history=lambda i, **kw: MacroSeriesHistory(i, "Treasury", kw["region"], "pct", "daily", "rates", points=[MacroSeriesPoint(d, 4, "fred", LIVE_END) for d in days], source_provider="fred", retrieved_at=LIVE_END)),
+        crypto=SimpleNamespace(get_token_detail=crypto.get_token_detail, get_price_history=lambda i, **kw: [CryptoPricePoint(d, 60000, None, None, "coingecko", LIVE_END) for d in days[-41:]]),
+        commodities=SimpleNamespace(get_price_history=lambda i: CommodityPriceHistory("wti", "WTI", "USD/bbl", [CommodityPricePoint("wti", d, 70, "USD/bbl", "eia", LIVE_END) for d in days[-120:]], source_provider="eia", retrieved_at=LIVE_END)),
+        prediction=SimpleNamespace(get_market_detail=prediction.get_market_detail, get_history_series=lambda i, **kw: PredictionProbabilityHistory(
+            i, "venue", [PredictionProbabilityPoint(LIVE_END - timedelta(days=n), .4) for n in (10, 5, 0)], outcome_id=kw["outcome_id"],
+            requested_range="1m", window_start=LIVE_END - timedelta(days=30), window_end=LIVE_END, source_provider="venue", retrieved_at=LIVE_END)),
+    )
+    cases = [
+        (replace(request_for("macro_series", capture), timeframe="1M"), "trimmed_to_request", 31, 31),
+        (replace(request_for("crypto_history", capture), timeframe="30D"), "trimmed_to_request", 30, 30),
+        (replace(request_for("commodity_history", capture), lookback_days=30), "trimmed_to_request", 30, 30),
+        (request_for("commodity_history", capture), "full_available_history", None, 119),
+        (replace(request_for("prediction_history", capture), timeframe="1m"), "shorter_than_request", 30, 10),
+    ]
+    for req, status, lookback, span in cases:
+        preview = catalog.preview(script, req)
+        window = preview["window"]
+        assert (window["status"], window["lookback_days"], window["coverage_calendar_days"]) == (status, lookback, span), req.domain
+        assert preview["coverage_end"] == window["coverage_end"] and window["coverage_end"].startswith("2026-10-16")
+        data = json.loads(catalog._previews[preview["preview_id"]][3])["data"]
+        assert len(data.get("points") or data["history"]["points"]) == window["observations"]
+        if status == "shorter_than_request":
+            assert window["start"] == (LIVE_END - timedelta(days=30)).isoformat()
+            assert any("did not backfill" in w for w in preview["warnings"])
+    assert catalog.preview(script, request_for("commodity_history", capture))["window"]["lookback_source"] == "not_requested"
+
+
+def test_window_parameters_a_domain_does_not_apply_are_labeled(tmp_path):
+    service, script, capture = setup(tmp_path)
+    catalog = service.dataset_catalog
+    oil = catalog.preview(script, replace(request_for("commodity_history", capture), lookback_days=30, frequency="daily"))
+    assert any(w.startswith("frequency='daily' is not applied to commodity_history") for w in oil["warnings"])
+    company = catalog.preview(script, replace(request_for("fundamentals", capture), lookback_days=30))
+    assert "window" not in company and any(w.startswith("lookback_days=30 is not applied to fundamentals") for w in company["warnings"])
+    equity = catalog.preview(script, replace(request_for("equity_history", capture), timeframe="1Y"))
+    assert any(w.startswith("timeframe='1Y' is not applied to equity_history") for w in equity["warnings"])
+    assert (equity["window"]["lookback_days"], equity["window"]["lookback_source"]) == (756, "default")
 
 
 def test_missing_capture_and_unknown_objects_never_substitute(tmp_path):
