@@ -357,6 +357,7 @@ class OpenAICodeInterpreterRuntime:
                     else:
                         warnings.append("A transient provider image URL was not retained because no durable bytes were available.")
 
+        input_hashes = {item.logical_filename: item.content_sha256 for item in request.input_files}
         cited_files: dict[str, str] = {}
         for item in list(getattr(response, "output", []) or []):
             if getattr(item, "type", None) != "message":
@@ -365,10 +366,13 @@ class OpenAICodeInterpreterRuntime:
                 if getattr(content, "type", None) != "output_text":
                     continue
                 text = str(getattr(content, "text", "") or "")
-                if text:
-                    sanitized_text = self._sanitize_provider_text(text)
-                    summary_failed = self._reports_execution_failure(sanitized_text)
-                    provider_execution_failed = provider_execution_failed or summary_failed
+                sanitized_text = self._sanitize_provider_text(text, input_filenames=set(input_hashes))
+                summary_failed = self._reports_execution_failure(sanitized_text)
+                provider_execution_failed = provider_execution_failed or summary_failed
+                # Un mensaje que solo enlaza ficheros no aporta nada más allá de los propios
+                # artefactos retenidos; conservarlo como `summary` solo añadía ruido (E3 en vivo).
+                link_only = not summary_failed and self._only_references_files(text)
+                if text and not link_only:
                     outputs.append(
                         ResearchScriptRuntimeOutput(
                             output_id=f"provider-summary-{sequence}",
@@ -395,7 +399,10 @@ class OpenAICodeInterpreterRuntime:
         after_files = self._container_files(binding.container_id)
         after_paths = {str(getattr(item, "id", "")): str(getattr(item, "path", "")) for item in after_files}
         upload_ids = {item.file_id for item in binding.uploads}
-        generated: dict[str, str] = dict(cited_files)
+        # Los ficheros subidos (fuente, manifiesto, entradas) nunca son resultados, aunque el modelo los cite.
+        generated: dict[str, str] = {
+            file_id: filename for file_id, filename in cited_files.items() if file_id not in upload_ids
+        }
         for item in after_files:
             file_id = str(getattr(item, "id", "") or "")
             if not file_id or file_id in before_ids or file_id in upload_ids:
@@ -406,10 +413,20 @@ class OpenAICodeInterpreterRuntime:
         max_outputs = int(request.limits.get("output_artifacts", 32))
         max_bytes = int(request.limits.get("total_output_bytes", 64 * 1024 * 1024))
         downloaded_bytes = 0
+        excluded_input_copies: list[dict[str, str]] = []
         for file_id, filename in generated.items():
+            content = self._download_container_file(binding.container_id, file_id)
+            # El wrapper copia cada entrada al workspace de la ejecución, por lo que el contenedor
+            # lista esas copias como ficheros nuevos. Una copia sin cambios (mismo nombre lógico y
+            # mismo hash) es una entrada, no un resultado: se deja constancia en `usage` y no se retiene.
+            # Si el script sobrescribe una entrada con otro contenido, se conserva como antes y E4
+            # sigue sin considerarla asociada a la ejecución.
+            logical_name = PurePosixPath(filename).name
+            if input_hashes.get(logical_name) == hashlib.sha256(content).hexdigest():
+                excluded_input_copies.append({"filename": logical_name, "content_sha256": input_hashes[logical_name]})
+                continue
             if len(outputs) >= max_outputs:
                 raise ValueError("provider_output_count_limit")
-            content = self._download_container_file(binding.container_id, file_id)
             downloaded_bytes += len(content)
             if downloaded_bytes > max_bytes:
                 raise ValueError("provider_output_size_limit")
@@ -470,6 +487,8 @@ class OpenAICodeInterpreterRuntime:
                     }
                     for item in binding.uploads
                 ],
+                # Copias sin cambios de las entradas halladas en el contenedor y no retenidas como resultados.
+                "excluded_input_copies": excluded_input_copies,
                 "code_interpreter_calls": [
                     {
                         "call_id": str(getattr(item, "id", "") or ""),
@@ -633,21 +652,48 @@ class OpenAICodeInterpreterRuntime:
         return text
 
     @classmethod
-    def _sanitize_provider_text(cls, value: str) -> str:
+    def _sanitize_provider_text(cls, value: str, *, input_filenames: set[str] | frozenset[str] = frozenset()) -> str:
         text = str(value or "")
+
+        def render_link(match: re.Match[str]) -> str:
+            # Cualquier enlace markdown a una ruta sandbox (con o sin «Download») se muestra como
+            # referencia legible al fichero. Antes solo se trataba «[Download X](…)» y un enlace
+            # «[comparison.csv](sandbox:…)» quedaba como la plantilla literal
+            # «[comparison.csv]({retained_artifact})» (E3 en vivo, 2026-10-16).
+            label = re.sub(r"^\s*download\s+", "", match.group(1), flags=re.IGNORECASE).strip()
+            name = cls._sandbox_filename(match.group(2)) or label
+            # Las entradas subidas no son artefactos de la ejecución: se etiquetan como tales.
+            return f"{'Input file' if name in input_filenames else 'Retained artifact'}: {name}"
+
+        text = re.sub(r"\[([^\]]*)\]\(sandbox:([^)]*)\)", render_link, text, flags=re.IGNORECASE)
+        # Una ruta sandbox suelta se reduce a su nombre de fichero; nunca se deja un marcador literal.
         text = re.sub(
-            r"\[Download\s+([^\]]+)\]\(sandbox:[^)]+\)",
-            r"Retained artifact: \1",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(
-            r"sandbox:(?:/mnt/data|/home/oai/share|/tmp)[^\s)\]]*",
-            "{retained_artifact}",
+            r"sandbox:((?:/mnt/data|/home/oai/share|/tmp)[^\s)\]]*)",
+            lambda match: cls._sandbox_filename(match.group(1)) or match.group(1),
             text,
             flags=re.IGNORECASE,
         )
         return cls._sanitize_wrapper(text)
+
+    @staticmethod
+    def _sandbox_filename(path: str) -> str:
+        """Nombre del fichero de una ruta sandbox, o cadena vacía si la ruta es solo una raíz del contenedor."""
+        normalized = str(path or "").strip().rstrip("/")
+        if normalized.lower() in {"", "/mnt/data", "/home/oai/share", "/tmp"}:
+            return ""
+        return PurePosixPath(normalized).name
+
+    @staticmethod
+    def _only_references_files(text: str) -> bool:
+        """Indica si el mensaje del proveedor solo contiene enlaces o rutas sandbox, viñetas y puntuación."""
+        residual = re.sub(
+            r"\[[^\]]*\]\(sandbox:[^)]*\)|sandbox:[^\s)\]]+",
+            " ",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
+        # Sin ninguna letra fuera de los enlaces, el mensaje no aporta nada a los artefactos retenidos.
+        return bool(str(text or "").strip()) and re.search(r"[^\W\d_]", residual) is None
 
     @staticmethod
     def _inline_image_output(value: Any, sequence: int, call_id: Any) -> ResearchScriptRuntimeOutput | None:

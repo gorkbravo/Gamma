@@ -99,7 +99,14 @@ class FakeResponses:
         status: str = "completed",
         summary_text: str | None = None,
         fence_returned_code: bool = False,
+        extra_files: tuple[tuple[str, bytes, bool], ...] = (),
+        cite_uploaded_inputs: bool = False,
     ) -> None:
+        # extra_files: (ruta bajo /mnt/data, contenido, citado) que la ejecución deja en el contenedor,
+        # p. ej. las copias de entrada que el wrapper hace en el workspace de la ejecución.
+        self.extra_files = extra_files
+        # cite_uploaded_inputs: el modelo cita también los ficheros de entrada subidos originalmente.
+        self.cite_uploaded_inputs = cite_uploaded_inputs
         self.fence_returned_code = fence_returned_code
         self.containers = containers
         self.expire_first = expire_first
@@ -133,6 +140,22 @@ class FakeResponses:
             file_id=generated.id,
             filename=self.annotation_filename or self.generated_filename,
         )
+        annotations = [annotation]
+        uploaded_inputs = [
+            row for row in self.containers.files.records.values()
+            if row.container_id == container_id and row.source == "user" and row.path.endswith(".csv")
+        ]
+        for path, content, cited in self.extra_files:
+            extra = self.containers.files.add_generated(container_id, path, content)
+            if cited:
+                annotations.append(SimpleNamespace(type="container_file_citation", container_id=container_id,
+                    file_id=extra.id, filename=path.rsplit("/", 1)[-1]))
+        if self.cite_uploaded_inputs:
+            annotations.extend(
+                SimpleNamespace(type="container_file_citation", container_id=container_id,
+                    file_id=row.id, filename=row.path.rsplit("/", 1)[-1])
+                for row in uploaded_inputs
+            )
         call = SimpleNamespace(
             type="code_interpreter_call",
             id=f"ci-{len(self.create_calls)}",
@@ -151,7 +174,7 @@ class FakeResponses:
                         f"(sandbox:/mnt/data/{self.generated_filename})\n"
                         "Generated the requested retained outputs."
                     ),
-                    annotations=[annotation],
+                    annotations=annotations,
                 )
             ],
         )
@@ -175,8 +198,11 @@ class FakeOpenAIClient:
         self.responses = FakeResponses(self.containers, **response_options)
 
 
+INPUT_BYTES = b"date,close\n2026-01-01,100\n"
+
+
 def request(*, run_id: str = "run-1", source: str = SOURCE) -> ResearchScriptRuntimeRequest:
-    input_bytes = b"date,close\n2026-01-01,100\n"
+    input_bytes = INPUT_BYTES
     source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
     manifest = {
         "contract_version": "research-script-input.v1",
@@ -280,6 +306,85 @@ def test_preexisting_provider_citation_cannot_establish_new_artifact_association
     result = adapter.start_run(request())
     retained = next(o for o in result.outputs if o.artifact_bytes is not None)
     assert retained.run_association_verified is False
+
+
+@pytest.mark.parametrize("cited", [False, True])
+def test_unchanged_input_copies_and_uploads_are_not_retained_as_run_outputs(cited):
+    # Regresión (E3 en vivo, 2026-10-16): el wrapper copia cada entrada al workspace de la ejecución
+    # y esas copias se retenían como salidas `file`. Una copia sin cambios es una entrada, citada o no.
+    client = FakeOpenAIClient(
+        generated_filename="gamma-run-run-1/comparison.csv",
+        annotation_filename="comparison.csv",
+        extra_files=(("gamma-run-run-1/prices.csv", INPUT_BYTES, cited),),
+        cite_uploaded_inputs=cited,
+    )
+    result = runtime(client).start_run(request())
+
+    assert result.status == "completed"
+    retained = [o for o in result.outputs if o.artifact_bytes is not None]
+    assert [o.filename for o in retained] == ["comparison.csv"]
+    # E4: el artefacto nuevo del workspace exacto sigue verificado como asociado a la ejecución.
+    assert retained[0].run_association_verified is True
+    assert not any("prices.csv" in warning for warning in result.warnings)
+    assert result.usage["excluded_input_copies"] == [
+        {"filename": "prices.csv", "content_sha256": hashlib.sha256(INPUT_BYTES).hexdigest()}
+    ]
+
+
+def test_input_copies_do_not_consume_the_output_artifact_limit():
+    client = FakeOpenAIClient(
+        generated_filename="gamma-run-run-1/comparison.csv",
+        annotation_filename="comparison.csv",
+        extra_files=(("gamma-run-run-1/prices.csv", INPUT_BYTES, False),),
+    )
+    limited = request()
+    # Límite = salidas reales (log + summary + tabla); la copia de entrada no debe hacerlo saltar.
+    limited = ResearchScriptRuntimeRequest(**{**limited.__dict__, "limits": {**limited.limits, "output_artifacts": 3}})
+    result = runtime(client).start_run(limited)
+
+    assert result.status == "completed"
+    assert [o.filename for o in result.outputs if o.artifact_bytes is not None] == ["comparison.csv"]
+
+
+def test_link_only_provider_message_is_not_retained_as_summary():
+    # Regresión (E3 en vivo, 2026-10-16): el mensaje «[comparison.csv](sandbox:…)» se retenía como
+    # `summary` con la plantilla literal «[comparison.csv]({retained_artifact})».
+    client = FakeOpenAIClient(
+        generated_filename="gamma-run-run-1/comparison.csv",
+        annotation_filename="comparison.csv",
+        summary_text=(
+            "[comparison.csv](sandbox:/mnt/data/gamma-run-run-1/comparison.csv)\n"
+            "- [prices.csv](sandbox:/mnt/data/gamma-run-run-1/prices.csv)"
+        ),
+    )
+    result = runtime(client).start_run(request())
+
+    assert result.status == "completed"
+    assert not any(o.kind == "summary" for o in result.outputs)
+    assert [o.filename for o in result.outputs if o.artifact_bytes is not None] == ["comparison.csv"]
+    assert "{retained_artifact}" not in repr(result)
+
+
+def test_provider_links_render_as_filenames_and_inputs_are_labeled():
+    client = FakeOpenAIClient(
+        generated_filename="gamma-run-run-1/returns.csv",
+        annotation_filename="returns.csv",
+        summary_text=(
+            "Computed monthly returns.\n"
+            "[returns.csv](sandbox:/mnt/data/gamma-run-run-1/returns.csv) derives from "
+            "[Download prices.csv](sandbox:/mnt/data/gamma-run-run-1/prices.csv); "
+            "raw path sandbox:/mnt/data/gamma-run-run-1/returns.csv"
+        ),
+    )
+    result = runtime(client).start_run(request())
+
+    summary = next(o for o in result.outputs if o.kind == "summary")
+    assert summary.text == (
+        "Computed monthly returns.\n"
+        "Retained artifact: returns.csv derives from Input file: prices.csv; raw path returns.csv"
+    )
+    for leaked in ("{retained_artifact}", "sandbox:", "/mnt/data", "]("):
+        assert leaked not in (summary.text or "")
 
 
 def test_request_is_exact_source_network_disabled_and_code_interpreter_only() -> None:
