@@ -109,6 +109,10 @@ def test_operator_loop_reports_missing_underlying_without_retaining_a_spy_draft(
             super().__init__(api_key="test-key", model="gpt-test-operator", reasoning_effort="low", store_responses=False)
             self.observations: list[dict] = []
 
+        def propose_equity_entity(self, *, request):
+            # Sin red: equivale al fallo controlado del proveedor, que el servicio convierte en aviso.
+            raise RuntimeError("Entity resolution is offline in tests.")
+
         def _post_json_stream(self, payload, emit, should_cancel):
             outputs = [json.loads(item["output"]) for item in payload["input"] if item.get("type") == "function_call_output"]
             if not outputs:

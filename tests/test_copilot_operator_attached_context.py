@@ -15,6 +15,7 @@ import re
 import pandas as pd
 import pytest
 
+from offline_fixtures import install_offline_market_fixtures
 from test_copilot import _build_test_client, _checkpoint7_final_card, _crypto_token_fixture
 from src.application.iv_service import IVSurfaceRequest
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
@@ -36,6 +37,8 @@ from src.utils.time import now_utc
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
     client, runtime = _build_test_client(tmp_path)
+    # Suite hermética: los venues de predicción vienen de fixtures offline, no de la red.
+    install_offline_market_fixtures(runtime)
 
     class CryptoFixture:
         def get_token_detail(self, token_id):
@@ -88,6 +91,10 @@ class _MessageOnlyModel(OpenAIResponsesCopilotProvider):
         self.decide = decide
         self.messages: list[dict] = []
         self.observations: list[dict] = []
+
+    def propose_equity_entity(self, *, request):
+        # Sin red: equivale al fallo controlado del proveedor, que el servicio convierte en aviso.
+        raise RuntimeError("Entity resolution is offline in tests.")
 
     def _post_json_stream(self, payload, emit, should_cancel):
         outputs = [json.loads(item["output"]) for item in payload["input"] if item.get("type") == "function_call_output"]
