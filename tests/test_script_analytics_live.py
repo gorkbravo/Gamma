@@ -40,6 +40,7 @@ print("Retained six calculated returns and total-return metric")
 '''
 
 
+@pytest.mark.live_network
 @pytest.mark.skipif(os.getenv("GAMMA_RUN_LIVE_SCRIPT_E4") != "true", reason="Explicit opt-in required")
 def test_configured_isolated_python_to_analytics(tmp_path):
     load_dotenv()
@@ -115,6 +116,7 @@ print("LIVE_LIFECYCLE_OK", len(returns), "calculated returns; supplied multiplie
 '''
 
 
+@pytest.mark.live_network
 @pytest.mark.skipif(os.getenv("GAMMA_RUN_LIVE_SCRIPT_E4_LIFECYCLE") != "true", reason="Explicit live lifecycle opt-in required")
 def test_live_complete_script_lifecycle(monkeypatch):
     """Three real executions, one configured owning-provider acquisition; no host source execution."""

@@ -884,7 +884,27 @@ Backend:
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-The test suite forces mock listed-market providers before application runtime import, regardless of local `.env` values. It uses a deterministic offline SPY benchmark derived from bundled sample histories, so tests cannot accidentally contact Yahoo Finance or TWS.
+The backend suite is hermetic: the result depends only on the checked-out tree, so it is the same in the main checkout, in a clean `git worktree` or on a CI runner, and it runs in a few minutes. `tests/conftest.py` enforces this before any application module is imported:
+
+- **No local configuration.** `.env` loading is disabled (`PYTHON_DOTENV_DISABLED=1`, which needs `python-dotenv>=1.2`; subprocesses inherit it), and Gamma settings and credentials exported in the shell (`GAMMA_*`, `IB_*`, `*_API_KEY`, `OPENAI_*`, ...) are removed. The suite then pins an explicit baseline: mock listed-market providers (with a deterministic SPY benchmark derived from the bundled sample histories), mock portfolio and Copilot providers, sample news, maritime and commodities, `BASE_CURRENCY=USD` and `IB_MARKET_DATA_MODE=auto`. A test that needs another value sets it with `monkeypatch`.
+- **No local state.** `CACHE_DIR`, `PORTFOLIO_HISTORY_DIR` and edgartools' `EDGAR_LOCAL_DATA_DIR` point to a temporary directory that is deleted after the run, and runtimes built in tests use `tmp_path`. Nothing reads or writes `cache/`, `data/` or `~/.edgar`.
+- **No network.** A guard blocks every non-loopback connection (sockets, asyncio, and curl_cffi for yfinance) plus the TWS/IB Gateway ports on loopback. A blocked attempt fails the test with the host it tried, even if the code swallowed the error. The external adapters that mock mode does not replace (FRED, Treasury, Fed/BLS/BEA calendars, DBnomics, Census, EIA, CoinGecko, Polymarket, Kalshi, RSS, SEC EDGAR, the fundamentals summary model) fail immediately, as in a provider outage. A test that needs provider data injects it: a fake fetcher, a stub service, or the deterministic prediction venues and Treasury curve in `tests/offline_fixtures.py`.
+
+Run it with `python -m pytest` from the root of the tree you want to test. `pythonpath = ["."]` in `pyproject.toml` makes `src` import from that tree, even from a worktree that reuses the main checkout's virtual environment:
+
+```powershell
+# From a worktree, using the main checkout's virtual environment
+C:\path\to\Gamma\.venv\Scripts\python.exe -m pytest
+```
+
+Live checks are opt-in. They are marked `@pytest.mark.live_network`, which restores network access, `.env` loading and the shell configuration for that test only:
+
+```powershell
+$env:GAMMA_RUN_LIVE_RESEARCH_SCRIPT_SMOKE="true"   # OpenAI Code Interpreter smoke
+$env:GAMMA_RUN_LIVE_SCRIPT_E4="true"               # configured Script runtime gate
+$env:GAMMA_RUN_LIVE_SCRIPT_E4_LIFECYCLE="true"     # full Script lifecycle with live providers
+.\.venv\Scripts\python.exe -m pytest -m live_network
+```
 
 Frontend and desktop checks:
 

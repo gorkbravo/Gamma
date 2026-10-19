@@ -17,7 +17,7 @@ dependencies = [
     "matplotlib>=3.8",
     "plotly>=5.18",
     "kaleido>=0.2.1",
-    "python-dotenv>=1.0",
+    "python-dotenv>=1.2",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "edgartools>=5.28.4,<6",
@@ -38,3 +38,5 @@ packages = ["src", "src.api", "src.api.routes", "src.api.schemas", "src.applicat
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Importa `src` del checkout o worktree que se prueba, no del paquete editable del venv.
+pythonpath = ["."]

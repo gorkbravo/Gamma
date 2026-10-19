@@ -113,6 +113,7 @@ print("WARNING: deterministic Gamma snapshot; no live market data or transaction
 '''
 
 
+@pytest.mark.live_network
 @pytest.mark.skipif(
     os.getenv("GAMMA_RUN_LIVE_RESEARCH_SCRIPT_SMOKE", "").strip().lower()
     not in {"1", "true", "yes", "on"},

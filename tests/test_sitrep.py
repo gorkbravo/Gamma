@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from offline_fixtures import install_offline_market_fixtures
 from src.api.main import create_app
 from src.application.runtime import build_runtime
 from src.application.sitrep_service import (
@@ -18,6 +19,7 @@ def _build_client(tmp_path) -> TestClient:
         history_dir=tmp_path / "data",
         sample_data_dir="sample_data",
     )
+    install_offline_market_fixtures(runtime)
     return TestClient(create_app(runtime))
 
 

@@ -11,6 +11,8 @@ import pytest
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from offline_fixtures import install_offline_market_fixtures
+
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.application.copilot_context_helpers import PLANNER_ONLY_WARNING
 from src.application.copilot_context_contracts import (
@@ -107,6 +109,7 @@ from src.models.macro import (
 )
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.models.provenance import FreshnessLabel
+from src.utils.time import now_utc
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.research_market_data import ResearchHistoryResult
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
@@ -639,6 +642,9 @@ class _StubMacroService:
 
     def get_series_history(self, series_id, *, region="US", timeframe="3M", force_refresh=False):
         del force_refresh
+        # Observaciones relativas a hoy: run_macro_series_analysis recorta a now_utc()
+        # menos el timeframe, y con fechas fijas la ventana "1Y" quedaría vacía en 2027.
+        latest = now_utc().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=110)
         return MacroSeriesHistory(
             series_id=series_id,
             title="US CPI YoY",
@@ -649,14 +655,14 @@ class _StubMacroService:
             mode_tags=["snapshot", "rates_policy"],
             points=[
                 MacroSeriesPoint(
-                    timestamp=datetime(2026, 1, 1, 0, 0, 0),
+                    timestamp=latest - timedelta(days=90),
                     value=3.1,
                     source_provider="fixture",
                     retrieved_at=self.retrieved_at,
                     origin="tests.copilot.macro_fixture",
                 ),
                 MacroSeriesPoint(
-                    timestamp=datetime(2026, 4, 1, 0, 0, 0),
+                    timestamp=latest,
                     value=3.4,
                     source_provider="fixture",
                     retrieved_at=self.retrieved_at,
@@ -2225,6 +2231,7 @@ def test_strategy_lab_copilot_route_uses_pending_and_resolved_handoff_context(tm
 
 def test_prediction_market_copilot_route_uses_prediction_tool_context(tmp_path):
     client, runtime = _build_test_client(tmp_path)
+    install_offline_market_fixtures(runtime)
     try:
         screener = client.post("/prediction-markets/screener", json={})
         assert screener.status_code == 200
@@ -2258,6 +2265,7 @@ def test_prediction_market_copilot_route_uses_prediction_tool_context(tmp_path):
 def test_prediction_market_tools_expose_windowed_history_and_comparison(tmp_path):
     """Checkpoint-5 re-check: the second-pass contracts must reach the model."""
     client, runtime = _build_test_client(tmp_path)
+    install_offline_market_fixtures(runtime)
     try:
         screener = client.post("/prediction-markets/screener", json={})
         assert screener.status_code == 200
@@ -4136,6 +4144,11 @@ def test_checkpoint7_responses_operator_closes_the_model_tool_model_loop(
             )
             self.payloads: list[dict[str, object]] = []
 
+        def _post_json(self, payload):
+            # Solo se guionizan las respuestas en streaming; el preflight de entidad
+            # recibe el mismo RuntimeError que un endpoint no disponible.
+            raise RuntimeError("Entity proposal is not scripted in this test.")
+
         def _post_json_stream(self, payload, emit, should_cancel):
             assert should_cancel() is False
             self.payloads.append(deepcopy(payload))
@@ -4265,6 +4278,11 @@ def test_planner_only_warning_stays_on_plan_preview_and_leaves_executed_operator
             )
             self.payloads: list[dict[str, object]] = []
 
+        def _post_json(self, payload):
+            # Solo se guionizan las respuestas en streaming; el preflight de entidad
+            # recibe el mismo RuntimeError que un endpoint no disponible.
+            raise RuntimeError("Entity proposal is not scripted in this test.")
+
         def _post_json_stream(self, payload, emit, should_cancel):
             self.payloads.append(deepcopy(payload))
             if len(self.payloads) == 1:
@@ -4348,6 +4366,11 @@ def test_checkpoint7_responses_operator_observes_validation_error_and_corrects(
                 store_responses=False,
             )
             self.turn = 0
+
+        def _post_json(self, payload):
+            # Solo se guionizan las respuestas en streaming; el preflight de entidad
+            # recibe el mismo RuntimeError que un endpoint no disponible.
+            raise RuntimeError("Entity proposal is not scripted in this test.")
 
         def _post_json_stream(self, payload, emit, should_cancel):
             assert should_cancel() is False
@@ -6297,6 +6320,7 @@ def test_checkpoint8h_research_basket_rejects_substitutions_and_bounds():
 
 def test_checkpoint8g_prediction_comparison_unloaded_exact_basket_and_lifecycle(tmp_path):
     client, runtime = _build_test_client(tmp_path)
+    install_offline_market_fixtures(runtime)
     try:
         markets = client.post("/prediction-markets/screener", json={}).json()["markets"]
         ids = [row["market_id"] for row in markets[1:3]]
@@ -6372,6 +6396,7 @@ def test_checkpoint8g_prediction_comparison_responses_observes_statistics(tmp_pa
 
     monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
     client, runtime = _build_test_client(tmp_path)
+    install_offline_market_fixtures(runtime)
     try:
         markets = client.post("/prediction-markets/screener", json={}).json()["markets"]
         ids = [row["market_id"] for row in markets[:2]]
@@ -6436,6 +6461,7 @@ def test_checkpoint8g_prediction_comparison_responses_observes_statistics(tmp_pa
 
 def test_checkpoint8g_prediction_comparison_rejects_invalid_inputs_and_retains_partial_evidence(tmp_path):
     client, runtime = _build_test_client(tmp_path)
+    install_offline_market_fixtures(runtime)
     try:
         service = runtime.copilot_service
         markets = client.post("/prediction-markets/screener", json={}).json()["markets"]
@@ -7774,6 +7800,7 @@ def test_sitrep_copilot_context_bundles_sections_warnings_and_follow_ups(tmp_pat
         history_dir=tmp_path / "data",
         sample_data_dir="sample_data",
     )
+    install_offline_market_fixtures(runtime)
     client = TestClient(create_app(runtime))
     try:
         created = client.post(
@@ -7814,6 +7841,7 @@ def test_sitrep_copilot_context_builder_summary_shape(tmp_path):
         history_dir=tmp_path / "data",
         sample_data_dir="sample_data",
     )
+    install_offline_market_fixtures(runtime)
     try:
         bundle = runtime.copilot_service._build_context_for_domain(
             "sitrep", CopilotRequestContext(current_tab="sitrep", workspace_mode="research")
