@@ -155,6 +155,13 @@ logger = logging.getLogger(__name__)
 
 MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
 
+# Sin símbolo de Opciones activo ni explícito, las herramientas de Opciones fallan con este
+# mensaje en lugar de sustituir un subyacente por defecto (antes, SPY de forma silenciosa).
+OPTIONS_SYMBOL_REQUIRED_MESSAGE = (
+    "No Options symbol is active and none was specified; Gamma did not substitute a default "
+    "underlying. Specify the underlying symbol."
+)
+
 # Lead-time calibration issues one provider history request per sampled
 # contract. The always-on prediction-market context therefore samples a small
 # set; the dedicated calibration tool exposes the full bounded range.
@@ -1485,7 +1492,10 @@ class CopilotService:
                         "properties": {
                             "symbol": {
                                 "type": ["string", "null"],
-                                "description": "Underlying ticker. Use null only when the active Options symbol is the intended underlying.",
+                                "description": (
+                                    "Underlying ticker. Use null only when the active Options symbol is the intended "
+                                    "underlying; with no active symbol Gamma rejects the call instead of substituting one."
+                                ),
                             },
                             "name": {
                                 "type": ["string", "null"],
@@ -1554,7 +1564,10 @@ class CopilotService:
                         "properties": {
                             "symbol": {
                                 "type": ["string", "null"],
-                                "description": "Optional ticker override. Use null to keep the active Options symbol.",
+                                "description": (
+                                    "Optional ticker override. Null keeps the active Options symbol; with no active "
+                                    "symbol Gamma rejects the call instead of substituting one."
+                                ),
                             },
                             "max_expiries": {
                                 "type": ["integer", "null"],
@@ -1614,7 +1627,10 @@ class CopilotService:
                         "properties": {
                             "symbol": {
                                 "type": ["string", "null"],
-                                "description": "Optional listed-equity symbol. Null keeps the active Options symbol.",
+                                "description": (
+                                    "Optional listed-equity symbol. Null keeps the active Options symbol; with no "
+                                    "active symbol Gamma returns unavailable instead of substituting one."
+                                ),
                             },
                             "expiry": {
                                 "type": ["string", "null"],
@@ -10058,7 +10074,12 @@ class CopilotService:
             summary = {
                 "symbol": target_symbol,
                 "snapshot_available": False,
-                "warnings": ["No active Options surface is loaded; operator tools may request a bounded service snapshot."],
+                "warnings": [
+                    "No active Options surface is loaded; operator tools may request a bounded service snapshot."
+                    if target_symbol
+                    # Sin subyacente no se pide ninguna superficie: el modelo debe pedirlo al usuario.
+                    else OPTIONS_SYMBOL_REQUIRED_MESSAGE
+                ],
             }
         summary["status"] = (
             "ready"
@@ -14106,16 +14127,16 @@ class CopilotService:
             or context.tool_state.get("target_symbol")
             or ""
         ).strip().upper()
-        normalized = self._normalize_options_realized_implied_arguments(
-            {
-                "symbol": symbol or None,
-                "max_expiries": max_expiries,
-                "depth_preset": "compact",
-                "market_data_mode": None,
-            },
-            context,
-        )
         try:
+            normalized = self._normalize_options_realized_implied_arguments(
+                {
+                    "symbol": symbol or None,
+                    "max_expiries": max_expiries,
+                    "depth_preset": "compact",
+                    "market_data_mode": None,
+                },
+                context,
+            )
             surface, service_warnings, service_messages = self._options_surface_for_operator(
                 normalized,
                 context,
@@ -15799,10 +15820,10 @@ class CopilotService:
         stops for more precise input instead of inventing contracts.
         """
         prompt = str(context.tool_state.get("prompt") or context.summary_data.get("prompt") or "")
+        # El símbolo llega del plan (ticker explícito del prompt) o del contexto de Opciones
+        # adjunto. Antes de 2026-10-19 aquí siempre llegaba SPY por defecto, así que la búsqueda de
+        # palabras en mayúsculas nunca se ejecutaba; no se reactiva para no adivinar subyacentes.
         symbol = str(context.summary_data.get("target_symbol") or "").strip().upper()
-        if not symbol:
-            tickers = re.findall(r"\b[A-Z]{1,6}(?:\.[A-Z])?\b", prompt)
-            symbol = tickers[0] if tickers else ""
         leg_pattern = re.compile(
             r"(?:(\d+)\s*x?\s+)?\b(long|short)\s+"
             r"(?:(call|put)\s+)?(\d{4}-?\d{2}-?\d{2})\s+"
@@ -16871,7 +16892,7 @@ class CopilotService:
         state: dict[str, Any],
         surface: dict[str, Any] | None,
         session: dict[str, Any] | None,
-    ) -> str:
+    ) -> str | None:
         active_surface = resolve_iv_surface(surface, session)
         candidates = [
             state.get("target_symbol"),
@@ -16883,7 +16904,9 @@ class CopilotService:
             symbol = str(candidate or "").strip().upper()
             if symbol:
                 return symbol
-        return "SPY"
+        # Sin símbolo pedido, de la superficie ni de la sesión no hay subyacente: devolver uno
+        # por defecto (antes SPY) analizaba un activo que el usuario no había pedido.
+        return None
 
     def _normalize_options_realized_implied_arguments(
         self,
@@ -16896,6 +16919,8 @@ class CopilotService:
         symbol = str(arguments.get("symbol") or target_symbol or "").strip().upper()
         if not symbol:
             symbol = self._iv_target_symbol_from_state({}, surface, session)
+        if not symbol:
+            raise ValueError(OPTIONS_SYMBOL_REQUIRED_MESSAGE)
         max_expiries = int(self._optional_float(arguments.get("max_expiries")) or 6)
         max_expiries = max(1, min(8, max_expiries))
         depth_preset = str(arguments.get("depth_preset") or "compact").strip().lower().replace("-", "_")
@@ -16907,7 +16932,7 @@ class CopilotService:
         elif market_data_mode not in {"live", "delayed", "auto"}:
             market_data_mode = None
         return {
-            "symbol": symbol or "SPY",
+            "symbol": symbol,
             "max_expiries": max_expiries,
             "depth_preset": depth_preset,
             "market_data_mode": market_data_mode,
@@ -16928,6 +16953,9 @@ class CopilotService:
         symbol = str(arguments.get("symbol") or target_symbol or "").strip().upper()
         if not symbol:
             symbol = self._iv_target_symbol_from_state({}, surface, session)
+        if not symbol:
+            # Un borrador sobre un subyacente que nadie pidió se retendría como análisis de trabajo.
+            raise ValueError(OPTIONS_SYMBOL_REQUIRED_MESSAGE)
         contracts = self._bounded_int(
             arguments.get("contracts"),
             default=1,
@@ -16984,7 +17012,7 @@ class CopilotService:
             raise ValueError("Option-set drafting requires at least one valid explicit option leg.")
         name = str(arguments.get("name") or "").strip()[:128] or f"{symbol} option set"
         return {
-            "symbol": symbol or "SPY",
+            "symbol": symbol,
             "name": name,
             "contracts": contracts,
             "depth_preset": depth_preset,
@@ -17145,10 +17173,12 @@ class CopilotService:
             if isinstance(active_surface, dict):
                 return active_surface, [], []
             raise ValueError("Options IV service is unavailable and no active IV surface is loaded.")
+        if not requested_symbol:
+            raise ValueError(OPTIONS_SYMBOL_REQUIRED_MESSAGE)
 
         result = self.iv_service.get_surface(
             IVSurfaceRequest(
-                symbol=requested_symbol or "SPY",
+                symbol=requested_symbol,
                 market_data_mode=str(normalized.get("market_data_mode") or self.iv_service.market_data_mode),
                 wait_seconds=20.0,
                 depth_preset=str(normalized.get("depth_preset") or "compact"),
@@ -17156,7 +17186,7 @@ class CopilotService:
         )
         if result.snapshot is None:
             return {
-                "symbol": requested_symbol or "SPY",
+                "symbol": requested_symbol,
                 "timestamp": now_utc(),
                 "retrieved_at": now_utc(),
                 "snapshot_available": False,

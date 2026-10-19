@@ -2,7 +2,95 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-16
+Last updated: 2026-10-19
+
+### Official guidance reviewed 2026-10-19 — No silent Options underlying default
+
+Re-fetched the current official [function calling](https://developers.openai.com/api/docs/guides/function-calling) guide. Review date: **2026-10-19**. Relevant points:
+
+- Optional strict parameters are expressed as nullable types; the guide does not say a null should mean a hidden default.
+- Each function should pass the "intern test": someone using only what the model was given should be able to call it correctly.
+- Function output formats, including error codes, are up to the application. The application parses and executes calls.
+
+**Defect.** When no symbol was supplied and no Options surface, session or plan ticker existed, `CopilotService._iv_target_symbol_from_state` returned `"SPY"`. `_build_iv_context` then put SPY into `target_symbol`, which every Options normalizer read first. A `symbol=null` call without Options context therefore drafted, compared or inspected SPY silently. A SPY draft was even retained as a working analysis. This was the unrelated-default substitution the Operator parameter contract forbids, and the schema text "null keeps the active Options symbol" failed the intern test when nothing was active.
+
+**Decision.** Without an explicit, active or plan-derived underlying, Gamma now fails closed with the typed `OPTIONS_SYMBOL_REQUIRED_MESSAGE`. It never requests any surface in that case:
+
+- **`draft_options_strategy`** returns an error observation, and no working analysis is retained.
+- **`run_options_realized_implied_comparison`** returns an error observation. A labeled SPY default was rejected: it would spend a slow IV-provider call and Operator budget on an asset the user did not ask about, and invite misattribution in the synthesis.
+- **`inspect_options_structure`** keeps its existing typed `unavailable` result with the warning.
+- **IV context.** It now reports `target_symbol: null` with the same warning.
+- **Deterministic option-set fallback.** It stops instead of reviving a capital-word ticker guess. That guess had never run, because SPY always masked it.
+
+Explicit symbols, the active surface or session symbol, and plan tickers resolve exactly as before. The three nullable `symbol` descriptions now say so. Benchmark defaults (`benchmark_symbol` defaults to SPY in the Research and Risk schemas) are documented, separate defaults and are unchanged. No model, framework, permission or orchestration change.
+
+Evidence: `tests/test_copilot_options_symbol_required.py` has 8 tests, covering the resolver, IV context, each Operator tool, the deterministic fallback, and a Responses-loop run whose model passes `symbol=null`. They assert that no surface request is made and nothing is retained. Seven of them fail on unmodified `HEAD`, where that loop run completed a SPY draft.
+
+Suites and evals, run in a clean worktree:
+
+- **Copilot suites:** 305 passed, 5 failed. They are the same five clean-checkout failures recorded on 2026-10-17. The Options one (8D) fails identically on `HEAD` because the IV service resolves `market_data_mode` to `delayed` instead of `auto` without local configuration.
+- **Script Operator eval:** 17/17.
+- **General Operator eval:** 31 cases, average 0.9083, unchanged. Only `hypothetical_portfolio_comparison`/custom fails, for the missing SPY history.
+
+### Official guidance reviewed 2026-10-17 — Attached context for every Operator tool
+
+Fetched the current official [function calling](https://developers.openai.com/api/docs/guides/function-calling), [agent runtime comparison](https://developers.openai.com/api/docs/guides/agents), [running agents](https://developers.openai.com/api/docs/guides/agents/running-agents) and [agent results and state](https://developers.openai.com/api/docs/guides/agents/results) pages directly (no Developer Docs connector was available in this session). Review date: **2026-10-17**. Relevant points:
+
+- The application executes function calls and returns `function_call_output` observations. Strict mode guarantees schema adherence, not authorization.
+- The function-calling best practices say: "Don't make the model fill arguments you already know". When the application already holds an identifier, it should pass it in code instead.
+- In both runtimes the application keeps ownership of context and state, tools, approvals and storage. The running-agents and results pages do not separate local run context from model input; whatever the model must reason about has to be in its input.
+
+**Defect generalized from Script E3.** The custom Responses loop (`_build_operator_user_message`) and the optional Agents SDK prompt (`_operator_prompt`) sent the task, plan and contracts, but not the request context the user had visibly attached. Plan `target_entities` carry selected ids only from the top-level context, and the comparison intent deliberately excludes them. As a result, a tool whose required argument exists only in UI state could not be completed. Deterministic tests missed this because fake providers inject ids directly. On 2026-10-16 the gap was fixed for Script only.
+
+**Decision.** One Gamma-owned builder, `src/application/copilot_operator_context.py::operator_attached_context`, emits `attached_context` per planned tool. The same block goes to both runtimes. Its rules:
+
+- **Resolution.** Each domain is resolved the same way as `_plan_execution_request_context`: the matching synthesis scope first, then the request context.
+- **Bounds.** It carries bounded identities and user-set inputs only: legs ≤25, positions ≤100, workbench legs ≤8, domains ≤16, ids truncated to 200 characters, plus truncation flags. It never carries outputs, series, marks, payoffs or metrics.
+- **Usage.** Each entry states its own usage. Explicit task values always win, and the selected prediction contract is added only when the task refers to it.
+- **Authority.** Gamma still validates every argument and grants no new authority.
+- **Script.** The Script block is unchanged and is still read only from `request.context`, consistent with `script_visible_to_request`.
+
+Where the attached selection is the unambiguous default, Gamma already follows the official guidance: nullable "keep the active selection" arguments are filled server-side. Where the attached object is only a candidate, the model has to decide whether the user means it, or which part to change. Examples are "compare the selected market with X" and "backtest the current composition". In those cases Gamma sends the identity and validates the result rather than hard-wiring it. No tool schema, model, framework or permission change. The Operator instructions gained one sentence explaining `attached_context`.
+
+**Inventory: Operator tools whose arguments can depend on attached UI state**
+
+| Tool | Identity argument(s) | Where the value lives | Model could obtain it before 2026-10-17? | Now |
+| --- | --- | --- | --- | --- |
+| `strategy_lab.run_research_script` | `script_id`, `revision_id`, `input_snapshot_id`, `source_sha256`, `manifest_sha256` | `strategy_lab_state.script_state`, or a draft observation in the same run | Yes, since 2026-10-16 (`attached_context.script_state`) | Unchanged |
+| `strategy_lab.script_inspect` / `script_add_input` / `script_read_inputs` / `script_draft_from_bundle` | `script_id`, snapshot ids, `expected_parent_sha256`; `object_id`, `preview_id` | `script_state`; discover/inspect/add observations | Yes, since 2026-10-16; catalog ids come from prior observations | Unchanged |
+| `strategy_lab.script_discover`, `strategy_lab.draft_research_script` | `domain`/`query` from the prompt; draft reads `script_state` server-side | Prompt / server | Yes | Unchanged |
+| `run_crypto_token_analysis` | `token_id` | Prompt (`crypto token <id>`) or the selected token (`crypto_token_id`) | Prompt: yes. Top-level selection: only as a plan target entity. Selection inside a multi-context (synthesis) scope: **no** | `attached_context.crypto.selected_token_id` |
+| `run_prediction_market_comparison` | `market_ids` (2–6 exact) | Prompt ids; the selected contract (`prediction_market_id`) | **No** for "the selected market": the comparison planner keeps only prompt ids | `attached_context.prediction_markets.selected_market_id`, used only when the task refers to it |
+| `run_macro_series_analysis` | `series_id`, `region`, `timeframe` | Series id: prompt only (the Macro tab has no series selection). Region/timeframe: prompt or the visible Macro view | **No** for "the current view" | `attached_context.macro_view` (region, timeframe) |
+| `draft_options_strategy` | `legs` (side, type, expiry, strike, quantity), `contracts`; `symbol` nullable | Prompt or the Options workbench (`iv_state.workbench`) | **No** for workbench legs or the selected expiry (the only planned tool; no read) | `attached_context.options`: active symbol, selected expiry, contracts, legs without premiums. A workbench for another underlying is dropped, as in the Options summary |
+| `run_strategy_lab_portfolio_backtest` | `legs`, `benchmark_symbol`, `lookback_days`, `min_observations` | Prompt or the current composition (`composition.portfolio_inputs`) | **No** for "the current composition" | `attached_context.strategy_lab_composition` (no return series) |
+| `run_research_basket_analysis` | `positions`, `benchmark_symbol`, `lookback_days` | Prompt or the active Research scope (`research_state.result.weights`) | **No** for "the current scope" | `attached_context.research_scope` (no metrics or curves) |
+| `get_synthesis_domain_context` | `domain` | The included synthesis scopes | Yes, through `get_synthesis_scope_summary` (same plan), at the cost of one budgeted call (Quick allows 3) | `attached_context.synthesis_scope.included_domains` |
+| `get_macro_series_history_summary` | `series_id` | No UI selection exists | Yes, from the `get_macro_workspace_drilldown` observation (`metrics[].series_id`, same plan) | Unchanged |
+| `read_working_analysis` | `analysis_id` | Prompt (the intent requires `work_<id>`) | Yes | Unchanged |
+| `run_hypothetical_portfolio_comparison` | `legs` | Prompt (the intent requires hypothetical wording) | Yes, by design | Unchanged |
+| `run_risk_scenario_analysis` | `symbol_shocks[].symbol` | Prompt; portfolio symbols | Yes: prompt, or the `get_portfolio_positions_summary` observation when planned | Unchanged |
+| `get_prediction_market_history_summary` | `outcome_id` (nullable) | Null uses the primary outcome | Default: yes. A specific outcome needs its id in the prompt | Unchanged |
+| `fundamentals.propose_dcf_update` / `fundamentals.apply_dcf_update` | `ticker`, scenario ids / `mutation_id`, token | `fundamentals_state` / the confirmation flow | Not exposed to the model: DCF drafts take the deterministic path with server-built arguments; apply needs confirmation | n/a |
+| Nullable "active selection" tools: `inspect_equity_research_context`, `run_research_scope_analysis`, `run_strategy_lab_backtest`, `inspect_commodity_curve_fundamentals`, `get_maritime_*`, `compare_prediction_markets`, `run_fundamentals_reverse_valuation`, `run_risk_contribution_analysis`, `inspect_options_structure`, `run_options_realized_implied_comparison` | Ids/symbols nullable | The context bundle Gamma builds | Yes: null keeps the active selection server-side | Unchanged |
+| No-argument context tools (portfolio, research summaries, fundamentals, crypto, risk, IV, macro drilldown, commodities, news, synthesis summary) | None | — | n/a | Unchanged |
+
+Saved research has no Operator tool that takes its id: scope analysis explicitly does not load saved objects.
+
+Evidence: `tests/test_copilot_operator_attached_context.py` has 17 tests. They assert each identity is in the built message and absent from the rest of it, and that outputs (premiums, payoff, return series, metrics) are absent. Per gap, a model-like fake reads only the built user message and completes the real Gamma call end to end: crypto in a synthesis scope, the selected prediction contract, the Options workbench, the Strategy Lab composition, the Research scope (over HTTP, where `scope_type` arrives as an Enum), the Macro view, and the synthesis domains. The Agents SDK prompt carries the same block. With the builder disabled, 14 of the 17 fail. No live paid call was made. Live/provider-backed smoke for these domains remains open, as in the E3 closure audit.
+
+Suites and evals, run in a clean worktree:
+
+- **Copilot suites:** 297 passed, 5 failed (`test_copilot.py` hypothetical-portfolio ×2, 8C temporary-portfolio risk, 8D Options working analysis; the eval-harness test).
+- **Script Operator eval:** 17/17 checks pass.
+- **General Operator eval:** 31 cases, average 0.9083. One case fails: `hypothetical_portfolio_comparison` on the custom path.
+
+Every one of these failures reproduces on unmodified `HEAD` in a clean checkout, so they are not regressions from this change. For the hypothetical comparison the error is "Comparison leg has no return stream: SPY": the clean checkout has no SPY history.
+
+Follow-ups, not changed here:
+
+- `draft_options_strategy` with `symbol=null` and no active Options context falls back to SPY (`_iv_target_symbol_from_state`), a silent default. Fixed on 2026-10-19; see the section above.
+- A Script attached inside a multi-context synthesis scope is neither attached nor authorized; this follows the existing visibility predicate.
 
 ### Official guidance reviewed 2026-10-16 — Script E3 live closure
 
