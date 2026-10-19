@@ -22,6 +22,9 @@ class CommodityCaptureRecordModel(BaseModel):
     version: int
     id: str
     captured_at: datetime
+    # Entorno que produjo la captura; mode_inferred marca registros antiguos clasificados por su evidencia.
+    mode: str = "live"
+    mode_inferred: bool = False
     payload: CommodityCapturePayloadModel
     checksum: str
 
@@ -56,8 +59,15 @@ class CommodityCalendarSpreadRecordModel(BaseModel):
     version: int
     id: str
     captured_at: datetime
+    mode: str = "live"
+    mode_inferred: bool = False
     payload: dict[str, Any]
     checksum: str
+
+
+class CommodityRecordDeleteModel(BaseModel):
+    id: str
+    deleted: bool
 
 
 class CommodityCalendarSpreadListModel(BaseModel):

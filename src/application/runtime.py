@@ -376,7 +376,8 @@ def build_runtime(
         prediction_market_service=prediction_market_service,
     )
     commodities_service = CommoditiesService(
-        curve_store=CommodityCurveStore(resolved_history_dir / "commodity_curves"),
+        # Las capturas mock y live comparten directorio pero nunca se mezclan: cada registro lleva su modo.
+        curve_store=CommodityCurveStore(resolved_history_dir / "commodity_curves", mode="mock" if mock_mode else "live"),
         provider=trace_provider(
             _build_commodities_provider(cache, client, market_data, live_mode=not bool(mock_mode)),
             provider_usage,

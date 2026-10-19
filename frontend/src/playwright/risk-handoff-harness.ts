@@ -1,14 +1,23 @@
 import "../lib/theme/tokens.css";
 import { mount } from "svelte";
-import RiskView from "../views/RiskView.svelte";
+import Harness from "./risk-handoff-harness.svelte";
 import type { PortfolioSnapshot, Position, RiskResult } from "../lib/api/types";
 import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
 declare global {
   interface Window {
-    __gammaRiskComputes: Array<{ sourceScope: string; riskSourceLabel: string; symbols: string[] }>;
+    __gammaRiskComputes: Array<{
+      sourceScope: string;
+      riskSourceLabel: string;
+      symbols: string[];
+      benchmarkSymbol: string;
+      lookbackDays: number;
+    }>;
   }
 }
+
+// ?snapshot=none reproduce una sesión sin snapshot de cuenta: el libro es la única fuente.
+const withoutAccount = new URLSearchParams(location.search).get("snapshot") === "none";
 
 window.__gammaRiskComputes = [];
 
@@ -76,7 +85,8 @@ const researchBook = {
   bookId: "book-gold-duration",
   sourceLabel: "BOOKLEG Gold vs Duration",
   snapshot: bookSnapshot,
-  benchmarkSymbol: "SPY",
+  // Benchmark y lookback distintos de los valores por defecto de Risk (SPY, 252D).
+  benchmarkSymbol: "QQQ",
   createdAt: "2026-09-03T15:00:00Z",
   warnings: [],
   object: {
@@ -97,8 +107,8 @@ const researchBook = {
     return_points: returnPoints,
     risk_legs: [],
   },
-  // RiskView reads sourceLabel, snapshot and the object; validation and
-  // composition are carried by the store and are not part of this regression.
+  // RiskView reads sourceLabel, snapshot, the object and the composition's
+  // lookback; validation is carried by the store and is not part of this regression.
   validation: {
     valid: true,
     errors: [],
@@ -111,7 +121,18 @@ const researchBook = {
     retrieved_at: "2026-09-03T15:00:00Z",
     origin: "strategy_lab",
   },
-  composition: null,
+  composition: { portfolio_inputs: { lookback_days: 126 }, benchmark_points: null },
+} as unknown as StrategyLabResearchBook;
+
+// Segundo experimento traspasado mientras Risk sigue montado con el primero seleccionado.
+const secondBook = {
+  ...researchBook,
+  bookId: "book-copper-curve",
+  sourceLabel: "BOOKLEG Copper Curve",
+  benchmarkSymbol: "IWM",
+  createdAt: "2026-09-04T15:00:00Z",
+  object: { ...researchBook.object, object_id: "strategy_lab:book-copper-curve", display_name: "BOOKLEG Copper Curve" },
+  composition: { portfolio_inputs: { lookback_days: 504 }, benchmark_points: null },
 } as unknown as StrategyLabResearchBook;
 
 const bookResult: RiskResult = {
@@ -195,22 +216,27 @@ const bookResult: RiskResult = {
   warnings: [],
 };
 
-mount(RiskView, {
+const secondResult: RiskResult = {
+  ...bookResult,
+  source_label: "BOOKLEG Copper Curve",
+  source_object_id: "strategy_lab:book-copper-curve",
+};
+
+mount(Harness, {
   target: document.getElementById("app")!,
   props: {
-    mode: "portfolio",
-    activeMode: "overview",
-    snapshot: accountSnapshot,
-    researchSnapshot: null,
-    strategyLabResearchBook: researchBook,
+    snapshot: withoutAccount ? null : accountSnapshot,
+    book: researchBook,
     result: bookResult,
-    workingAnalysis: null,
-    loading: false,
+    secondBook,
+    secondResult,
     onCompute: (options: RiskComputeOptions) => {
       window.__gammaRiskComputes.push({
         sourceScope: options.sourceScope ?? "",
         riskSourceLabel: options.riskSourceLabel ?? "",
         symbols: (options.snapshot?.positions ?? []).map((entry) => entry.symbol),
+        benchmarkSymbol: options.benchmarkSymbol,
+        lookbackDays: options.lookbackDays,
       });
     },
   },

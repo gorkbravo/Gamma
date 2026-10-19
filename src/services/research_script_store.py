@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any, Callable, TypeVar
 from uuid import uuid4
 
-from src.application.request_limits import MAX_RESEARCH_SCRIPT_RUN_HISTORY
+from src.application.request_limits import (
+    MAX_RESEARCH_SCRIPT_RUN_HISTORY,
+    MAX_RESEARCH_SCRIPT_UNREFERENCED_INPUT_SNAPSHOTS,
+)
 from src.models.research_script import (
     ResearchScript,
     ResearchScriptInputFile,
@@ -68,6 +71,7 @@ class ResearchScriptStore:
         base_dir: str | Path = "data/research_scripts",
         *,
         run_history_limit: int = MAX_RESEARCH_SCRIPT_RUN_HISTORY,
+        input_snapshot_retention: int = MAX_RESEARCH_SCRIPT_UNREFERENCED_INPUT_SNAPSHOTS,
     ) -> None:
         self.base_dir = Path(base_dir)
         self.scripts_dir = self.base_dir / "scripts"
@@ -77,6 +81,7 @@ class ResearchScriptStore:
         self.outputs_dir = self.base_dir / "outputs"
         self.quarantine_dir = self.base_dir / "quarantine"
         self.run_history_limit = max(int(run_history_limit), 1)
+        self.input_snapshot_retention = max(int(input_snapshot_retention), 1)
         self._lock = threading.RLock()
         self._storage_warnings: list[str] = []
         for path in (
@@ -307,7 +312,15 @@ class ResearchScriptStore:
         self,
         snapshot: ResearchScriptInputSnapshot,
         contents: dict[str, bytes],
-    ) -> None:
+        *,
+        reuse_snapshot_id: str | None = None,
+    ) -> list[str]:
+        """Escribe un snapshot inmutable y aplica la retención de su script.
+
+        Los ficheros idénticos a los del snapshot base (mismo sha256 y tamaño) se enlazan en duro en
+        lugar de copiarse, así que añadir o quitar un fichero ya no duplica todos los bytes del
+        paquete. Devuelve los snapshots podados.
+        """
         safe_snapshot_id = self._require_safe_id(snapshot.snapshot_id, "snapshot_id")
         snapshot_dir = self.inputs_dir / safe_snapshot_id
         manifest_path = snapshot_dir / "manifest.json"
@@ -316,13 +329,16 @@ class ResearchScriptStore:
                 raise ResearchScriptStoreConflictError(f"Input snapshot already exists: {snapshot.snapshot_id}")
             files_dir = snapshot_dir / "files"
             files_dir.mkdir(parents=True, exist_ok=True)
+            reusable = self._reusable_input_files_unlocked(reuse_snapshot_id)
             written: list[Path] = []
             try:
                 for item in snapshot.files:
                     if item.logical_filename not in contents:
                         raise ResearchScriptStoreError(f"Missing bytes for input file: {item.logical_filename}")
                     target = files_dir / self._require_safe_filename(item.logical_filename)
-                    self._write_bytes_atomic(target, contents[item.logical_filename])
+                    source = reusable.get((item.content_sha256, item.byte_size))
+                    if source is None or not self._link_verified_input(source, target, item):
+                        self._write_bytes_atomic(target, contents[item.logical_filename])
                     written.append(target)
                 self._write_record_atomic(manifest_path, "research_script_input", snapshot)
             except Exception:
@@ -330,6 +346,93 @@ class ResearchScriptStore:
                 for path in written:
                     path.unlink(missing_ok=True)
                 raise
+            return self._prune_input_snapshots_unlocked(snapshot.script_id)
+
+    def _reusable_input_files_unlocked(self, snapshot_id: str | None) -> dict[tuple[str, int], Path]:
+        safe_id = self._safe_id(snapshot_id)
+        if not safe_id:
+            return {}
+        base = self._load_record(self.inputs_dir / safe_id / "manifest.json", "research_script_input", self._parse_snapshot)
+        if base is None:
+            return {}
+        reusable: dict[tuple[str, int], Path] = {}
+        for item in base.files:
+            if not is_safe_research_script_filename(item.logical_filename):
+                continue
+            path = self.inputs_dir / safe_id / "files" / item.logical_filename
+            if path.is_file():
+                reusable.setdefault((item.content_sha256, item.byte_size), path)
+        return reusable
+
+    @staticmethod
+    def _link_verified_input(source: Path, target: Path, item: ResearchScriptInputFile) -> bool:
+        # Enlace duro y verificación del contenido; ante cualquier fallo (sistema de ficheros sin
+        # enlaces, límite de enlaces, bytes distintos) el llamador copia los bytes como antes.
+        try:
+            os.link(source, target)
+        except OSError:
+            return False
+        try:
+            content = target.read_bytes()
+            if len(content) == item.byte_size and hashlib.sha256(content).hexdigest() == item.content_sha256:
+                return True
+        except OSError:
+            pass
+        target.unlink(missing_ok=True)
+        return False
+
+    def _referenced_input_snapshot_ids_unlocked(self) -> set[str] | None:
+        """Snapshots citados por cualquier ejecución o revisión retenida, de cualquier script.
+
+        Devuelve None si algún registro no se puede leer: sin la lista completa de referencias no se poda.
+        """
+        referenced: set[str] = set()
+        for path in [*self.runs_dir.glob("*/*.json"), *self.revisions_dir.glob("*/*.json")]:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8")).get("payload")
+            except (OSError, ValueError, AttributeError):
+                return None
+            if not isinstance(payload, dict):
+                return None
+            if payload.get("input_snapshot_id"):
+                referenced.add(str(payload["input_snapshot_id"]))
+        return referenced
+
+    def _prune_input_snapshots_unlocked(self, script_id: str) -> list[str]:
+        """Retención acotada: se conservan los N snapshots más recientes del script y todos los
+        citados por ejecuciones o revisiones; el resto se borra empezando por el más antiguo."""
+        safe_script_id = self._safe_id(script_id)
+        referenced = self._referenced_input_snapshot_ids_unlocked()
+        if not safe_script_id or referenced is None:
+            return []
+        candidates: list[tuple[str, str, Path]] = []
+        for manifest_path in self.inputs_dir.glob("*/manifest.json"):
+            try:
+                payload = json.loads(manifest_path.read_text(encoding="utf-8")).get("payload")
+                if payload.get("script_id") != safe_script_id:
+                    continue
+                candidates.append((str(payload["created_at"]), str(payload["snapshot_id"]), manifest_path))
+            except (OSError, ValueError, AttributeError, KeyError, TypeError):
+                continue  # Un manifiesto ilegible no se poda: queda para el diagnóstico de almacenamiento.
+        candidates.sort(reverse=True)
+        pruned: list[str] = []
+        for _, snapshot_id, manifest_path in candidates[self.input_snapshot_retention:]:
+            if snapshot_id in referenced or manifest_path.parent.name != snapshot_id:
+                continue
+            # Primero el manifiesto: una poda interrumpida deja bytes huérfanos, nunca un manifiesto sin bytes.
+            manifest_path.unlink(missing_ok=True)
+            files_dir = manifest_path.parent / "files"
+            if files_dir.is_dir():
+                for file_path in files_dir.iterdir():
+                    if file_path.is_file():
+                        file_path.unlink(missing_ok=True)
+            for directory in (files_dir, manifest_path.parent):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            pruned.append(snapshot_id)
+        return pruned
 
     def load_input_snapshot(self, snapshot_id: str) -> ResearchScriptInputSnapshot | None:
         safe_id = self._safe_id(snapshot_id)
@@ -398,6 +501,8 @@ class ResearchScriptStore:
                     path.unlink(missing_ok=True)
                 raise
             self._prune_runs_unlocked(safe_script_id)
+            # Las ejecuciones podadas pueden haber sido la única cita de un snapshot antiguo.
+            self._prune_input_snapshots_unlocked(safe_script_id)
 
     def list_runs(self, script_id: str) -> list[ResearchScriptRun]:
         safe_id = self._safe_id(script_id)
