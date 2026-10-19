@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -22,6 +23,29 @@ from src.utils.time import now_utc
 
 class DatasetSelectionError(ValueError):
     """Safe, catalog-authored validation message (never provider exception text)."""
+
+
+class DatasetNotFoundError(DatasetSelectionError):
+    """El objeto exacto pedido no existe (p. ej. una captura retenida borrada); la API responde 404."""
+
+
+class DatasetServiceUnavailableError(DatasetSelectionError):
+    """El servicio propietario no está configurado en este runtime; no es un error del cliente (503)."""
+
+
+def first_non_finite(value, path="data"):
+    """Ruta del primer número NaN/Infinity del payload, o None si todos son finitos."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return path
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if (found := first_non_finite(item, f"{path}.{key}")) is not None:
+                return found
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            if (found := first_non_finite(item, f"{path}[{index}]")) is not None:
+                return found
+    return None
 
 
 DATASETS = {
@@ -187,7 +211,7 @@ class ScriptDatasetCatalog:
     def service(self, name):
         service = self.services.get(name)
         if service is None:
-            raise DatasetSelectionError("The owning service is unavailable.")
+            raise DatasetServiceUnavailableError("The owning service is unavailable.")
         return service
 
     def definitions(self):
@@ -297,7 +321,14 @@ class ScriptDatasetCatalog:
                 raise DatasetSelectionError("Company identity mismatch.")
             return result
         if domain == "options_capture":
-            result = self.service("options").load(identity)
+            # Una captura inexistente o corrupta es un error del objeto pedido, no una caída del proveedor.
+            options = self.service("options")  # Fuera del try: un servicio ausente sigue siendo 503.
+            try:
+                result = options.load(identity)
+            except FileNotFoundError as exc:
+                raise DatasetNotFoundError("The exact retained capture was not found; nothing was substituted.") from exc
+            except ValueError as exc:
+                raise DatasetSelectionError("The retained capture failed integrity validation; the original file is retained.") from exc
             if result.get("snapshot_id") != identity or not result.get("surface", {}).get("snapshot_available"):
                 raise DatasetSelectionError("The exact retained capture is unavailable.")
             return result
@@ -489,6 +520,10 @@ class ScriptDatasetCatalog:
         if not metadata["retrieval_times"]:
             metadata["warnings"].append("Upstream retrieval time is unavailable; materialized_at is the copy time only.")
         metadata["warnings"].append("Provider cache use may be implicit; original upstream retrieval timestamps are retained when supplied. Preview is a copied snapshot, not a live subscription.")
+        # NaN/Infinity no es JSON válido ni un valor que Gamma deba inventar: el dataset elegido no es exportable (422).
+        if (location := first_non_finite(payload)) is not None:
+            raise DatasetSelectionError(f"Dataset contains a non-finite number (NaN or Infinity) at {location}; Gamma does not "
+                                        "convert it to a value. Choose another object or range; existing inputs are unchanged.")
         encoded = json.dumps({"metadata": metadata, "data": payload}, sort_keys=False, ensure_ascii=False, allow_nan=False).encode("utf-8")
         from src.application.request_limits import MAX_RESEARCH_SCRIPT_INDIVIDUAL_INPUT_BYTES
         if len(encoded) > MAX_RESEARCH_SCRIPT_INDIVIDUAL_INPUT_BYTES:

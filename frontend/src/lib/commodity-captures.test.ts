@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { curveNodeQuality, commodityCaptureTime } from "./commodity-captures";
+import { curveNodeQuality, commodityCaptureTime, spreadPointNote, type CommoditySpreadHistory } from "./commodity-captures";
 import type { CommodityCurveNode } from "./api/types";
 
 describe("retained commodity quote evidence", () => {
@@ -19,5 +19,19 @@ describe("retained commodity quote evidence", () => {
     const quality = curveNodeQuality(node);
     expect(quality).toContain("cached"); expect(quality).toContain("delayed"); expect(quality).toContain("close");
     expect(quality).not.toContain("live");
+  });
+});
+
+// Revisión 2026-10-15: un spread con patas de distinta evidencia ya no se presenta como observado sin más.
+describe("calendar spread point notes", () => {
+  const point = { capture_id: "a", captured_at: "2026-10-02T15:00:00Z", as_of: "2026-10-02T15:00:00Z", left: null, right: null,
+    value: 1, status: "mixed_quote_evidence" } as CommoditySpreadHistory["points"][number];
+  it("names the leg evidence that differs and the superseded saves", () => {
+    const note = spreadPointNote({ ...point, evidence_mismatch: ["quote_field", "freshness_label"], superseded_capture_ids: ["b"] });
+    expect(note).toBe("Legs differ in quote field, freshness label · Latest of 2 saves at this observation time");
+  });
+  it("stays empty for a plain observed point and for records saved before the fields existed", () => {
+    expect(spreadPointNote({ ...point, status: "observed", evidence_mismatch: [], superseded_capture_ids: [] })).toBe("");
+    expect(spreadPointNote(point)).toBe("");
   });
 });

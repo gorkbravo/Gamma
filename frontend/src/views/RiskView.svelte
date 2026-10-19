@@ -26,7 +26,13 @@
     riskSourceScopeFor,
     type RiskSourceId,
   } from "../lib/risk-source";
-  import { strategyLabBenchmarkLabel, strategyLabBenchmarkPoints, strategyLabBookBenchmarkSymbol } from "../lib/risk-handoff";
+  import {
+    strategyLabBenchmarkLabel,
+    strategyLabBenchmarkPoints,
+    strategyLabBookControls,
+    strategyLabControlsToSeed,
+    type StrategyLabBookControls,
+  } from "../lib/risk-handoff";
   import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
@@ -94,6 +100,9 @@
   let selectedSource: RiskSourceId = "portfolio";
   let activeComputeMethod: ComputeMethod | null = null;
   let adoptedResult: RiskResult | null = null;
+  // Libro de Strategy Lab cuyo benchmark y lookback ocupan ahora los controles.
+  let seededBookKey: string | null = null;
+  const STANDARD_LOOKBACKS = [126, 252, 504];
 
   let computeSnapshot: PortfolioSnapshot | null = snapshot;
   let renderSnapshot: PortfolioSnapshot | null = snapshot;
@@ -214,10 +223,26 @@
     adoptedResult = result;
     const adopted = adoptRiskSourceFromResult({ selected: selectedSource, available: availableRiskSources, result });
     if (adopted) selectedSource = adopted;
-    if (adopted === "strategy_lab_book" && strategyLabResearchBook) {
-      benchmarkSymbol = strategyLabBookBenchmarkSymbol(strategyLabResearchBook);
-      lookbackDays = strategyLabResearchBook.composition?.portfolio_inputs?.lookback_days ?? lookbackDays;
+  }
+  // El benchmark y el lookback del libro se adoptan cuando cambia el libro, no
+  // solo cuando cambia la fuente: con el libro ya seleccionado (segundo traspaso
+  // o vista sin snapshot de cuenta) el siguiente recálculo usaría valores ajenos.
+  $: if (selectedSource !== "strategy_lab_book") {
+    seededBookKey = null;
+  } else {
+    const seed = strategyLabControlsToSeed({ selected: selectedSource, book: strategyLabResearchBook, seededKey: seededBookKey });
+    // Asignaciones en línea para que las sentencias reactivas dependientes se ordenen después.
+    if (seed) {
+      benchmarkSymbol = seed.benchmarkSymbol;
+      lookbackDays = seed.lookbackDays ?? lookbackDays;
+      seededBookKey = seed.key;
     }
+  }
+
+  function adoptBookControls(controls: StrategyLabBookControls) {
+    benchmarkSymbol = controls.benchmarkSymbol;
+    lookbackDays = controls.lookbackDays ?? lookbackDays;
+    seededBookKey = controls.key;
   }
   $: sourceView = resolveRiskSourceView({ selected: selectedSource, result });
   $: computeSnapshot = riskSnapshotFor(selectedSource, snapshot, researchSnapshot, strategyLabResearchBook);
@@ -290,6 +315,8 @@
   // so the shortcut selects and recomputes as one action.
   function loadStrategyBook() {
     selectedSource = "strategy_lab_book";
+    // La reactividad no corre antes de submit: se siembran ya los parámetros del libro.
+    if (strategyLabResearchBook) adoptBookControls(strategyLabBookControls(strategyLabResearchBook));
     return submit("core", "strategy_lab_book");
   }
 
@@ -771,7 +798,9 @@
       <label class="control"><span>Benchmark</span><input bind:value={benchmarkSymbol} /></label>
       <label class="control"><span>Lookback</span>
         <select bind:value={lookbackDays}>
-          <option value={126}>126D</option><option value={252}>252D</option><option value={504}>504D</option>
+          {#each STANDARD_LOOKBACKS as days}<option value={days}>{days}D</option>{/each}
+          <!-- Un lookback del libro fuera de la lista se muestra en vez de dejar el control en blanco. -->
+          {#if !STANDARD_LOOKBACKS.includes(lookbackDays)}<option value={lookbackDays}>{lookbackDays}D</option>{/if}
         </select>
       </label>
       <label class="control"><span>Frequency</span>

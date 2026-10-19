@@ -48,3 +48,12 @@ npm run build
 ```
 
 The focused backend set passed 72 tests, frontend set passed 34 tests, and typecheck/production build passed. Build diagnostics remain the existing Options SVG interaction and Surface3D unused-property warnings. Successful capture/replay acceptance is available in both deterministic inline-history and live IBKR modes. No order, routing, account mutation, rebalancing, or Copilot harness capability was added.
+
+## Follow-up — 2026-10-19 (2026-10-15 review)
+
+Risk adopted a Strategy Lab book's benchmark and lookback only when an arriving result changed the selected source. When the book was already selected, the controls kept the previous values, and the next **Compute Core**/**Run MC** sent them. That happened after a second experiment handoff while Risk stayed mounted, or in a session without an account snapshot, where the book is the only source from mount. **Load Strategy Book** also recomputed with the account values. It set the source but did not seed the controls before submitting.
+
+Risk now seeds the controls from the book's identity (`bookId` + `createdAt`, so a recomposed experiment counts as a new book) whenever the book is the selected source, not on a source change (`strategyLabControlsToSeed` in `frontend/src/lib/risk-handoff.ts`). A deliberate benchmark or lookback edit on the same book is kept. Selecting another source clears the seed, so reselecting the book restores its parameters. **Load Strategy Book** seeds before it submits. A book lookback outside 126/252/504 now appears in the Lookback control instead of leaving it blank.
+
+Tests: `risk-handoff.test.ts` covers the seeding rules. The Playwright harness (`e2e/risk-source-identity.spec.ts`, now a wrapper component that can simulate a second handoff and a `?snapshot=none` session) covers the no-account session, a second handoff after a user edit, and the Load Strategy Book parameters. These three browser tests fail against the previous `RiskView.svelte`. All six harness tests pass with the fix.
+

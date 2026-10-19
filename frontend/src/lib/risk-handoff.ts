@@ -26,6 +26,45 @@ export function strategyLabBenchmarkLabel(book: StrategyLabResearchBook, request
   return points && points.length === 0 ? NO_RETAINED_BENCHMARK_LABEL : requestedSymbol.trim().toUpperCase() || "SPY";
 }
 
+export interface StrategyLabBookControls {
+  /** Identidad del libro cuyos parámetros siembran los controles de Risk. */
+  key: string;
+  benchmarkSymbol: string;
+  lookbackDays: number | null;
+}
+
+// Un mismo experimento recompuesto conserva bookId pero cambia createdAt, y sus
+// parámetros pueden ser otros; ambos forman la identidad que siembra los controles.
+export function strategyLabBookControlsKey(book: StrategyLabResearchBook): string {
+  return `${book.bookId}|${book.createdAt}`;
+}
+
+export function strategyLabBookControls(book: StrategyLabResearchBook): StrategyLabBookControls {
+  return {
+    key: strategyLabBookControlsKey(book),
+    benchmarkSymbol: strategyLabBookBenchmarkSymbol(book),
+    lookbackDays: book.composition?.portfolio_inputs?.lookback_days ?? null,
+  };
+}
+
+/**
+ * Controles que Risk debe adoptar del libro de Strategy Lab, o null si ya los
+ * tiene. Se siembran por identidad del libro y no por cambio de fuente: un
+ * segundo traspaso con el libro ya seleccionado, o una vista sin snapshot de
+ * cuenta (donde el libro es la única fuente desde el montaje), dejaban el
+ * benchmark y el lookback anteriores para el siguiente recálculo. Una edición
+ * deliberada del usuario sobre el mismo libro no se sobrescribe.
+ */
+export function strategyLabControlsToSeed(input: {
+  selected: string;
+  book: StrategyLabResearchBook | null;
+  seededKey: string | null;
+}): StrategyLabBookControls | null {
+  if (input.selected !== "strategy_lab_book" || !input.book) return null;
+  const controls = strategyLabBookControls(input.book);
+  return controls.key === input.seededKey ? null : controls;
+}
+
 export function buildStrategyLabRiskRequest(book: StrategyLabResearchBook): RiskComputeOptions {
   const benchmarkSymbol = strategyLabBookBenchmarkSymbol(book);
   return {

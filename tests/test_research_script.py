@@ -705,3 +705,121 @@ def test_bundle_validation_is_atomic_and_previews_are_bounded(tmp_path: Path, mo
     service.archive_script(script_id)
     with pytest.raises(ResearchScriptConflictError):
         service.create_input_bundle(script_id, ResearchScriptInputBundleRequest())
+
+
+# --- Revisión 2026-10-15: crecimiento de los paquetes de entrada y avisos por fichero ---
+
+def text_file(name: str, content: bytes) -> ResearchScriptInputFileCreateRequest:
+    return ResearchScriptInputFileCreateRequest(logical_filename=name, media_type="text/csv", content=content)
+
+
+def stored_file(service: ResearchScriptService, snapshot_id: str, name: str) -> Path:
+    return service.store.inputs_dir / snapshot_id / "files" / name
+
+
+def test_bundle_edits_link_unchanged_bytes_instead_of_recopying(tmp_path: Path, monkeypatch) -> None:
+    service = make_service(tmp_path)
+    script_id = create_script(service).script.script_id
+    large = b"date,value\n" + b"2026-10-01,1\n" * 4000
+    base = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[text_file("large.csv", large)]))
+    added = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=base.snapshot_id, input_files=[text_file("small.csv", b"a,b\n1,2\n")]))
+    removed = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=added.snapshot_id, retained_filenames=["large.csv"]))
+    # Añadir y quitar enlazan el fichero sin cambios: los mismos bytes en disco, no una copia nueva.
+    assert stored_file(service, base.snapshot_id, "large.csv").samefile(stored_file(service, added.snapshot_id, "large.csv"))
+    assert stored_file(service, added.snapshot_id, "large.csv").samefile(stored_file(service, removed.snapshot_id, "large.csv"))
+    assert service.store.load_input_contents(removed) == {"large.csv": large}
+    assert removed.manifest_sha256 != added.manifest_sha256
+    # Sin enlaces duros (p. ej. FAT/exFAT) se copian los bytes como antes, con el mismo contenido verificado.
+    monkeypatch.setattr("src.services.research_script_store.os.link", lambda *args: (_ for _ in ()).throw(OSError("no links")))
+    copied = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=removed.snapshot_id, input_files=[text_file("other.csv", b"x\n")]))
+    assert not stored_file(service, removed.snapshot_id, "large.csv").samefile(stored_file(service, copied.snapshot_id, "large.csv"))
+    assert service.store.load_input_contents(copied)["large.csv"] == large
+
+
+def test_input_snapshot_retention_never_drops_snapshots_cited_by_runs_or_revisions(tmp_path: Path) -> None:
+    service = ResearchScriptService(
+        ResearchScriptStore(base_dir=tmp_path, run_history_limit=1, input_snapshot_retention=2), MockResearchScriptRuntime())
+    detail = create_script(service)
+    script_id = detail.script.script_id
+    other_script = create_script(service).script.script_id
+    foreign = service.create_input_bundle(other_script, ResearchScriptInputBundleRequest(input_files=[text_file("f.csv", b"f\n")]))
+    snapshots = [service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[text_file("v0.csv", b"0\n")]))]
+    run = service.create_run(script_id, ResearchScriptRunCreateRequest(input_snapshot_id=snapshots[0].snapshot_id))
+    snapshots.append(service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=snapshots[0].snapshot_id, input_files=[text_file("v1.csv", b"1\n")])))
+    service.stage_operator_revision(
+        script_id, source=SOURCE + "# staged\n", expected_parent_sha256=service.source_sha256(SOURCE),
+        change_summary="Use the second bundle", operator_run_id="operator-run-1", input_snapshot_id=snapshots[1].snapshot_id)
+    for index in (2, 3, 4):
+        snapshots.append(service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+            base_snapshot_id=snapshots[-1].snapshot_id, input_files=[text_file(f"v{index}.csv", f"{index}\n".encode())])))
+    kept = {item.snapshot_id for item in service.list_input_bundles(script_id)}
+    # Los dos más recientes, el citado por la ejecución y el citado por la revisión preparada.
+    assert kept == {snapshots[4].snapshot_id, snapshots[3].snapshot_id, snapshots[1].snapshot_id, snapshots[0].snapshot_id}
+    assert not (service.store.inputs_dir / snapshots[2].snapshot_id).exists()
+    for snapshot_id in kept:
+        assert service.store.load_input_contents(service.get_input_snapshot(snapshot_id))  # bytes enlazados intactos
+    assert service.get_run(run.run_id).input_snapshot_id == snapshots[0].snapshot_id
+    assert service.get_input_snapshot(foreign.snapshot_id).script_id == other_script
+    # Al podarse la única ejecución que lo citaba, el snapshot antiguo deja de estar protegido.
+    service.create_run(script_id, ResearchScriptRunCreateRequest(input_snapshot_id=snapshots[4].snapshot_id))
+    assert {item.snapshot_id for item in service.list_input_bundles(script_id)} == {
+        snapshots[4].snapshot_id, snapshots[3].snapshot_id, snapshots[1].snapshot_id}
+
+
+def test_input_snapshot_retention_skips_pruning_when_a_reference_is_unreadable(tmp_path: Path) -> None:
+    service = ResearchScriptService(ResearchScriptStore(base_dir=tmp_path, input_snapshot_retention=1), MockResearchScriptRuntime())
+    script_id = create_script(service).script.script_id
+    first = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[text_file("a.csv", b"a\n")]))
+    unreadable = service.store.runs_dir / script_id / "unreadable.json"
+    unreadable.parent.mkdir(parents=True, exist_ok=True)
+    unreadable.write_text("{not json", encoding="utf-8")
+    second = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(input_files=[text_file("b.csv", b"b\n")]))
+    # Sin la lista completa de referencias no se borra nada: podría estar citado por el registro ilegible.
+    assert {item.snapshot_id for item in service.list_input_bundles(script_id)} == {first.snapshot_id, second.snapshot_id}
+
+
+def test_removing_a_file_drops_only_the_warnings_it_contributed(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    script_id = create_script(service).script.script_id
+    base = service._create_input_snapshot(script_id, ResearchScriptRunCreateRequest(
+        input_files=[text_file("a.json", b"{}"), text_file("b.json", b"[]")],
+        dataset_refs=[{"logical_filename": "a.json", "warnings": ["only a", "shared"]},
+                      {"logical_filename": "b.json", "warnings": ["shared", "only b"]}],
+        source_refs=[{"logical_filename": "a.json", "warnings": ["only a"]}],
+    ), extra_warnings=["Bundle-level acquisition note", "only a", "shared", "only b"])
+    without_a = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=base.snapshot_id, retained_filenames=["b.json"]))
+    assert without_a.warnings == ["Bundle-level acquisition note", "shared", "only b"]
+    with_new = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=without_a.snapshot_id, input_files=[text_file("c.csv", b"c\n")]))
+    assert with_new.warnings == without_a.warnings
+
+
+class GappyResearchProvider(FakeResearchProvider):
+    """El propietario de cotizaciones avisa de un hueco propio de este fichero."""
+
+    def load_instrument_history_result(self, reference, lookback_days: int) -> ResearchHistoryResult:
+        return replace(super().load_instrument_history_result(reference, lookback_days),
+                       warnings=["SPY history has a provider gap on 2026-07-03."])
+
+
+def test_catalog_warnings_follow_their_file_out_of_the_bundle(tmp_path: Path) -> None:
+    service = ResearchScriptService(
+        ResearchScriptStore(tmp_path), MockResearchScriptRuntime(),
+        research_provider=GappyResearchProvider(), macro_service=FakeMacroService(),
+    )
+    script_id = create_script(service).script.script_id
+    equity = add_inspected(service, script_id, EXPORT_REQUESTS[0])
+    both = add_inspected(service, script_id, replace(EXPORT_REQUESTS[1], base_snapshot_id=equity.snapshot_id))
+    macro_warnings = set(next(ref for ref in both.dataset_refs if ref["logical_filename"] == "ust10y.json")["warnings"])
+    equity_only = set(equity.warnings) - macro_warnings
+    assert equity_only == {"SPY history has a provider gap on 2026-07-03."}
+    assert equity_only <= set(both.warnings)
+    reduced = service.create_input_bundle(script_id, ResearchScriptInputBundleRequest(
+        base_snapshot_id=both.snapshot_id, retained_filenames=["ust10y.json"]))
+    assert not equity_only & set(reduced.warnings)
+    assert macro_warnings <= set(reduced.warnings)

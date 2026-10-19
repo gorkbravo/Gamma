@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getJson, postJson } from "../lib/api/client";
+  import { deleteJson, getJson, postJson } from "../lib/api/client";
   import type { CommodityInstrument, CommodityCurveSnapshot, CommodityCoverageMetadata } from "../lib/api/types";
-  import { captureLabel, curveNodeQuality, commodityCaptureTime, type CommodityCurveCapture, type CommodityCurveComparison,
+  import { captureLabel, curveNodeQuality, commodityCaptureTime, spreadPointNote, type CommodityCurveCapture, type CommodityCurveComparison,
     type CommodityCalendarSpread, type CommoditySpreadHistory, type CommodityCapturePayload } from "../lib/commodity-captures";
 
   export let instrumentId: string;
@@ -15,6 +15,8 @@
   let retained: CommodityCurveCapture | null = null, comparison: CommodityCurveComparison | null = null;
   let history: CommoditySpreadHistory | null = null;
   let busy = false, error = "", notice = "", warnings: string[] = [];
+  // Borrado en dos pasos: el primer clic arma la confirmación para ese registro concreto.
+  let pendingDelete: { kind: "capture" | "spread"; id: string } | null = null;
   const number = (value: number | null | undefined) => value == null ? "N/A" : value.toFixed(3);
   const date = commodityCaptureTime;
   const status = (value: string) => value.replaceAll("_", " ");
@@ -73,6 +75,28 @@
   async function loadSpread() { await run(async () => {
     history = await getJson<CommoditySpreadHistory>(`/commodities/calendar-spreads/${spreadId}/history`);
   }); }
+  const armed = (kind: "capture" | "spread", id: string) => pendingDelete?.kind === kind && pendingDelete.id === id;
+  $: captureDeleteArmed = pendingDelete?.kind === "capture" && pendingDelete.id === comparisonId;
+  $: spreadDeleteArmed = pendingDelete?.kind === "spread" && pendingDelete.id === spreadId;
+  async function deleteRecord(kind: "capture" | "spread", id: string) {
+    if (!id) return;
+    if (!armed(kind, id)) { pendingDelete = { kind, id }; return; }
+    pendingDelete = null;
+    await run(async () => {
+      await deleteJson(kind === "capture" ? `/commodities/curve-captures/${id}` : `/commodities/calendar-spreads/${id}`);
+      if (kind === "capture") {
+        if (retained?.id === id) retained = null;
+        if (comparisonId === id) comparisonId = "";
+        if (baselineId === id) baselineId = "";
+        comparison = null;
+      } else {
+        if (spreadId === id) spreadId = "";
+        history = null;
+      }
+      await load();
+      notice = kind === "capture" ? "Deleted the retained curve capture." : "Deleted the calendar spread definition; its source captures remain.";
+    });
+  }
 </script>
 
 <article class="history-panel" aria-label="Commodity curve history">
@@ -88,6 +112,7 @@
       <option value="">Select capture</option>{#each captures as capture}<option value={capture.id}>{captureLabel(capture)}</option>{/each}</select></label>
     <button on:click={reopen} disabled={busy || !comparisonId}>Reopen Capture</button>
     <button on:click={compare} disabled={busy || !baselineId || !comparisonId}>Compare Captures</button>
+    <button on:click={() => deleteRecord("capture", comparisonId)} disabled={busy || !comparisonId}>{captureDeleteArmed ? "Confirm Delete Capture" : "Delete Capture"}</button>
   </div>
   {#if !captures.length}<p>{busy ? "Loading retained curves…" : "No saved curves for this instrument. Save the displayed curve to start a history."}</p>{/if}
   {#if comparison}
@@ -122,12 +147,13 @@
     <label><span>Saved calendar spread</span><select aria-label="Saved calendar spread" bind:value={spreadId} on:change={() => history = null} disabled={busy}>
       <option value="">Select spread</option>{#each spreads as spread}<option value={spread.id}>{spread.payload.label}</option>{/each}</select></label>
     <button on:click={loadSpread} disabled={busy || !spreadId}>Load Spread History</button>
+    <button on:click={() => deleteRecord("spread", spreadId)} disabled={busy || !spreadId}>{spreadDeleteArmed ? "Confirm Delete Spread" : "Delete Spread"}</button>
   </div>
   {#if history}
     <h4>{history.spread.payload.label} · Left − Right · {history.spread.payload.unit}</h4>
     <p>{history.spread.payload.left_contract.symbol} ({history.spread.payload.left_contract.contract_id}) − {history.spread.payload.right_contract.symbol} ({history.spread.payload.right_contract.contract_id})</p>
     <div class="table-wrap"><table><thead><tr><th>Observed / Saved</th><th>Left</th><th>Right</th><th>Spread</th><th>Coverage</th></tr></thead><tbody>
-      {#each history.points as point}<tr><td>{date(point.as_of)}<small>{date(point.captured_at)}</small></td><td title={curveNodeQuality(point.left)}>{number(point.left?.price)}</td><td title={curveNodeQuality(point.right)}>{number(point.right?.price)}</td><td>{number(point.value)}</td><td>{status(point.status)}</td></tr>{/each}
+      {#each history.points as point}<tr><td>{date(point.as_of)}<small>{date(point.captured_at)}</small></td><td title={curveNodeQuality(point.left)}>{number(point.left?.price)}</td><td title={curveNodeQuality(point.right)}>{number(point.right?.price)}</td><td>{number(point.value)}</td><td title={spreadPointNote(point)}>{status(point.status)}{#if spreadPointNote(point)}<small>{spreadPointNote(point)}</small>{/if}</td></tr>{/each}
     </tbody></table></div>
     {#each history.warnings as warning}<p>{warning}</p>{/each}
   {/if}

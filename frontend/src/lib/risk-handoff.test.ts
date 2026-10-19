@@ -7,7 +7,10 @@ import {
   buildStrategyLabRiskRequest,
   createRiskHandoffController,
   strategyLabBenchmarkLabel,
-  strategyLabBenchmarkPoints
+  strategyLabBenchmarkPoints,
+  strategyLabBookControls,
+  strategyLabBookControlsKey,
+  strategyLabControlsToSeed
 } from "./risk-handoff";
 
 describe("risk compute idempotency", () => {
@@ -189,6 +192,71 @@ describe("risk compute idempotency", () => {
     // Otro benchmark elegido en Risk usa la ruta del proveedor y conserva su símbolo.
     expect(strategyLabBenchmarkPoints(book, "IWM")).toBeNull();
     expect(strategyLabBenchmarkLabel(book, "iwm")).toBe("IWM");
+  });
+});
+
+// Revisión 2026-10-15: con el libro ya seleccionado, benchmark y lookback solo se
+// adoptaban al cambiar de fuente y el siguiente recálculo usaba valores anteriores.
+describe("strategyLabControlsToSeed", () => {
+  function book(overrides: Partial<StrategyLabResearchBook> & { lookbackDays?: number } = {}): StrategyLabResearchBook {
+    const { lookbackDays = 504, ...rest } = overrides;
+    return {
+      ...makeStrategyLabResearchBook(),
+      benchmarkSymbol: "qqq",
+      createdAt: "2026-10-15T10:00:00Z",
+      composition: { portfolio_inputs: { lookback_days: lookbackDays }, benchmark_points: null },
+      ...rest
+    } as unknown as StrategyLabResearchBook;
+  }
+
+  it("seeds the book's benchmark and lookback when the book is selected and nothing was seeded yet", () => {
+    // Sin snapshot de cuenta el libro es la fuente desde el montaje, sin cambio de fuente que lo dispare.
+    expect(strategyLabControlsToSeed({ selected: "strategy_lab_book", book: book(), seededKey: null })).toEqual({
+      key: "strategy-book:test|2026-10-15T10:00:00Z",
+      benchmarkSymbol: "QQQ",
+      lookbackDays: 504
+    });
+  });
+
+  it("seeds again on a second handoff even though the source stays selected", () => {
+    const first = book();
+    const second = book({ bookId: "strategy-book:other", benchmarkSymbol: "IWM", lookbackDays: 126 } as never);
+    const seeded = strategyLabControlsToSeed({ selected: "strategy_lab_book", book: first, seededKey: null })!;
+
+    expect(strategyLabControlsToSeed({ selected: "strategy_lab_book", book: second, seededKey: seeded.key })).toMatchObject({
+      benchmarkSymbol: "IWM",
+      lookbackDays: 126
+    });
+  });
+
+  it("treats a recomposed experiment with the same bookId as a new book", () => {
+    const first = book();
+    const recomposed = book({ createdAt: "2026-10-15T11:00:00Z", lookbackDays: 252 } as never);
+
+    expect(strategyLabControlsToSeed({
+      selected: "strategy_lab_book",
+      book: recomposed,
+      seededKey: strategyLabBookControlsKey(first)
+    })?.lookbackDays).toBe(252);
+  });
+
+  it("keeps a deliberate Risk edit for the book that already seeded the controls", () => {
+    const current = book();
+    expect(strategyLabControlsToSeed({
+      selected: "strategy_lab_book",
+      book: current,
+      seededKey: strategyLabBookControlsKey(current)
+    })).toBeNull();
+  });
+
+  it("never seeds while another source is selected or without a book", () => {
+    expect(strategyLabControlsToSeed({ selected: "portfolio", book: book(), seededKey: null })).toBeNull();
+    expect(strategyLabControlsToSeed({ selected: "strategy_lab_book", book: null, seededKey: null })).toBeNull();
+  });
+
+  it("leaves the lookback to the caller when the experiment did not record one", () => {
+    const withoutLookback = { ...book(), composition: null } as unknown as StrategyLabResearchBook;
+    expect(strategyLabBookControls(withoutLookback).lookbackDays).toBeNull();
   });
 });
 

@@ -816,7 +816,7 @@ class ResearchScriptService:
                 )
             datasets = [dict(ref) for ref in base.dataset_refs if included(ref)] + datasets
             sources = [dict(ref) for ref in base.source_refs if included(ref)] + sources
-            warnings = list(base.warnings) + warnings if retained else warnings
+            warnings = self._warnings_after_removal(base, retained) + warnings if retained else warnings
         return self._create_input_snapshot(
             script_id,
             ResearchScriptRunCreateRequest(
@@ -825,7 +825,32 @@ class ResearchScriptService:
                 source_refs=sources,
             ),
             extra_warnings=list(dict.fromkeys(warnings)),
+            reuse_snapshot_id=request.base_snapshot_id,
         )
+
+    @staticmethod
+    def _warnings_after_removal(base: ResearchScriptInputSnapshot, retained: set[str]) -> list[str]:
+        """Avisos del paquete base que siguen vigentes con los ficheros conservados.
+
+        Las referencias del catálogo llevan los avisos de su fichero (logical_filename + warnings). Un
+        aviso que solo aportaban ficheros retirados desaparece con ellos; los avisos de nivel de paquete
+        (sin referencia que los atribuya) y los que comparte un fichero conservado se mantienen.
+        """
+        def ref_warnings(refs: list[dict[str, Any]], keep: bool) -> set[str]:
+            found: set[str] = set()
+            for ref in refs:
+                filename = ref.get("logical_filename")
+                if filename is None or (filename in retained) != keep or not isinstance(ref.get("warnings"), list):
+                    continue
+                found.update(str(item) for item in ref["warnings"])
+            return found
+
+        refs = [*base.dataset_refs, *base.source_refs]
+        removed_only = ref_warnings(refs, keep=False) - ref_warnings(refs, keep=True)
+        # Las referencias heredadas sin logical_filename siguen aplicando a todo el paquete.
+        removed_only -= {str(item) for ref in refs if "logical_filename" not in ref
+                         and isinstance(ref.get("warnings"), list) for item in ref["warnings"]}
+        return [warning for warning in base.warnings if warning not in removed_only]
 
     def list_input_bundles(self, script_id: str) -> list[ResearchScriptInputSnapshot]:
         self.get_script(script_id)
@@ -1010,6 +1035,7 @@ class ResearchScriptService:
         request: ResearchScriptRunCreateRequest,
         *,
         extra_warnings: list[str] | None = None,
+        reuse_snapshot_id: str | None = None,
     ) -> ResearchScriptInputSnapshot:
         errors: list[str] = []
         if len(request.input_files) > MAX_RESEARCH_SCRIPT_INPUT_FILES:
@@ -1108,7 +1134,8 @@ class ResearchScriptService:
             origin="research_script_service.create_input_snapshot",
             transformation_note="Immutable copied input manifest for a bounded research-script run.",
         )
-        self.store.create_input_snapshot(snapshot, contents)
+        # Los ficheros idénticos del snapshot base se enlazan en vez de recopiarse; el store aplica la retención.
+        self.store.create_input_snapshot(snapshot, contents, reuse_snapshot_id=reuse_snapshot_id)
         return snapshot
 
     @staticmethod

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from src.application.script_dataset_catalog import DatasetSelectionError
+from src.application.script_dataset_catalog import (
+    DatasetNotFoundError,
+    DatasetSelectionError,
+    DatasetServiceUnavailableError,
+)
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
@@ -331,6 +335,11 @@ def script_dataset_definitions(request: Request):
 def script_dataset_search(request: Request, domain: str = Query(max_length=64), query: str = Query(default="", max_length=128)):
     try:
         return request.app.state.runtime.research_script_service.dataset_catalog.search(domain, query)
+    except DatasetServiceUnavailableError:
+        return {"items": [], "warnings": ["Dataset discovery is unavailable. Retry or use external files; existing inputs are unchanged."], "status": "unavailable"}
+    except DatasetSelectionError as exc:
+        # Dominio o consulta no válidos: error del cliente, no una caída del descubrimiento.
+        raise HTTPException(422, str(exc)) from exc
     except Exception:
         # Adapter exceptions can contain URLs or provider diagnostics; never echo secrets.
         return {"items": [], "warnings": ["Dataset discovery is unavailable. Retry or use external files; existing inputs are unchanged."], "status": "unavailable"}
@@ -342,6 +351,10 @@ def script_dataset_preview(script_id: str, payload: ResearchScriptDataExportRequ
         return request.app.state.runtime.research_script_service.dataset_catalog.preview(script_id, payload.to_domain())
     except ResearchScriptNotFoundError as exc:
         _raise_script_http_error(exc)
+    except DatasetNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except DatasetServiceUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
     except DatasetSelectionError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:

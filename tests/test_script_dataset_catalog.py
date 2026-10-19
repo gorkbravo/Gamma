@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from src.application.script_dataset_catalog import DATASETS, DatasetSelectionError, describe
+from src.application.script_dataset_catalog import DATASETS, DatasetNotFoundError, DatasetSelectionError, describe
 from src.application.research_script_service import ResearchScriptService, ResearchScriptValidationError
 from src.models.research_script import ResearchScriptCreateRequest, ResearchScriptDataExportRequest, ResearchScriptRunCreateRequest
 from src.services.iv_snapshot_store import IVSnapshotStore
@@ -331,7 +331,7 @@ def test_window_parameters_a_domain_does_not_apply_are_labeled(tmp_path):
 
 def test_missing_capture_and_unknown_objects_never_substitute(tmp_path):
     service, script, capture = setup(tmp_path)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(DatasetNotFoundError):
         service.dataset_catalog.preview(script, replace(request_for("options_capture", capture), object_id="a" * 32))
     assert service.dataset_catalog.search("equity_history", "unknown-security")["items"] == []
     assert not service.list_input_bundles(script)
@@ -363,3 +363,42 @@ def test_api_discovery_preview_add_and_sanitized_provider_failure(tmp_path, monk
     response = client.get(base + "/script-datasets/search?domain=crypto_history")
     assert response.json()["status"] == "unavailable"
     assert "secret-provider-credential" not in response.text
+
+
+# Revisión 2026-10-15: los errores del cliente o del objeto pedido no son caídas del proveedor.
+def test_api_classifies_invalid_domain_missing_capture_nan_and_unavailable_service(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.api.main import create_app
+    from dataclasses import asdict
+    service, script, capture = setup(tmp_path)
+    client = TestClient(create_app(SimpleNamespace(research_script_service=service), session_token="e2-test"))
+    client.headers["X-Gamma-Session"] = "e2-test"
+    base = "/research/strategy-lab"
+    invalid = client.get(base + "/script-datasets/search?domain=not-a-domain")
+    assert invalid.status_code == 422 and invalid.json()["detail"] == "Unsupported dataset."
+    missing = client.post(f"{base}/scripts/{script}/dataset-preview",
+                          json=asdict(replace(request_for("options_capture", capture), object_id="a" * 32)))
+    assert missing.status_code == 404 and "not found" in missing.json()["detail"]
+    path = tmp_path / "options" / f"{capture}.json"
+    damaged = json.loads(path.read_text())
+    damaged["surface"]["iv_grid"] = [[.99]]
+    path.write_text(json.dumps(damaged))
+    corrupt = client.post(f"{base}/scripts/{script}/dataset-preview", json=asdict(request_for("options_capture", capture)))
+    assert corrupt.status_code == 422 and "integrity" in corrupt.json()["detail"]
+    monkeypatch.setattr(service.dataset_catalog, "acquire", lambda req: {"unit": "USD", "points": [
+        {"timestamp": STAMP.isoformat(), "close": 1.0}, {"timestamp": STAMP.isoformat(), "close": float("nan")}]})
+    nan = client.post(f"{base}/scripts/{script}/dataset-preview", json=asdict(request_for("crypto_history", capture)))
+    assert nan.status_code == 422
+    assert "non-finite" in nan.json()["detail"] and "data.points[1].close" in nan.json()["detail"]
+    monkeypatch.undo()
+    service.dataset_catalog.services.pop("options")
+    unavailable = client.post(f"{base}/scripts/{script}/dataset-preview", json=asdict(request_for("options_capture", capture)))
+    assert unavailable.status_code == 503
+    assert client.get(base + "/script-datasets/search?domain=options_capture").json()["status"] == "unavailable"
+    assert not service.list_input_bundles(script)
+
+
+def test_first_non_finite_reports_the_exact_location():
+    from src.application.script_dataset_catalog import first_non_finite
+    assert first_non_finite({"a": [1.0, {"b": float("inf")}]}) == "data.a[1].b"
+    assert first_non_finite({"a": [1.0, None, "nan"]}) is None

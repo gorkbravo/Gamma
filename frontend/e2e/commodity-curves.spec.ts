@@ -20,9 +20,20 @@ test("retain two displayed curves and an exact calendar pair", async ({ page }) 
   const captures: CommodityCurveCapture[] = [];
   for (let i = 0; i < 2; i++) {
     if (i) {
-      const refreshed = page.waitForResponse(r => r.url().endsWith("/commodities/workspace"));
-      await page.getByRole("button", { name: "Refresh", exact: true }).click();
-      expect((await refreshed).status()).toBe(200);
+      // La segunda captura debe ser otra observación: el mismo as_of cuenta una sola vez en la historia,
+      // y el proveedor de muestra fija as_of al segundo, así que se refresca hasta que cambie.
+      const first = captures[0].payload;
+      let asOf = first.curve.as_of;
+      for (let attempt = 0; attempt < 20 && asOf === first.curve.as_of; attempt++) {
+        if (attempt) await page.waitForTimeout(500);
+        const refreshed = page.waitForResponse(r => r.url().endsWith("/commodities/workspace"));
+        await page.getByRole("button", { name: "Refresh", exact: true }).click();
+        const workspace = await refreshed;
+        expect(workspace.status()).toBe(200);
+        const body = await workspace.json() as { curves: Array<{ instrument_id: string; as_of: string }> };
+        asOf = body.curves.find(curve => curve.instrument_id === first.instrument.instrument_id)?.as_of ?? asOf;
+      }
+      expect(asOf, "the refreshed curve must be a new observation").not.toBe(first.curve.as_of);
     }
     const saved = page.waitForResponse(r => r.url().endsWith("/commodities/curve-captures") && r.request().method() === "POST");
     await panel.getByRole("button", { name: "Save Current Curve" }).click();
@@ -66,16 +77,24 @@ test("reopen after restart, compare exact contracts and replay the retained pair
   const history = await (await historical).json();
   expect(history.points).toHaveLength(2);
   expect(history.spread).toEqual(evidence.spread);
-  expect(history.points.every((p: { status: string }) => p.status === "observed")).toBe(true);
+  // Un punto cuyas patas difieren en campo de precio, retraso o frescura se etiqueta
+  // mixed_quote_evidence (conserva el valor); con datos de muestra ambas patas comparten evidencia.
+  const accepted = process.env.GAMMA_CURVES_LIVE === "1" ? ["observed", "mixed_quote_evidence"] : ["observed"];
+  expect(history.points.every((p: { status: string; value: number | null }) => accepted.includes(p.status) && p.value != null)).toBe(true);
+  let gapCaptureId = "";
   if (process.env.GAMMA_CURVES_LIVE !== "1") {
     // Exercise a roll-shaped gap with sample data only. Live evidence remains untouched.
     const rolled = structuredClone(evidence.captures[1].payload);
     rolled.curve.nodes.shift(); rolled.curve.nodes[0].contract.is_front_month = true;
+    // Observación posterior: con el mismo as_of contaría como un nuevo guardado de la misma observación.
+    const observed = rolled.curve.as_of;
+    rolled.curve.as_of = new Date(Date.parse(/(Z|[+-]\d{2}:\d{2})$/.test(observed) ? observed : `${observed}Z`) + 60_000).toISOString();
     const missing = await page.request.post(`${api}/commodities/curve-captures`, {
       headers: { "X-Gamma-Session": process.env.GAMMA_CURVES_TOKEN! }, data: rolled
     });
     expect(missing.status()).toBe(200);
     const gapCapture = await missing.json();
+    gapCaptureId = gapCapture.id;
     await panel.getByRole("button", { name: "Refresh Saved" }).click();
     await panel.getByRole("combobox", { name: "Comparison capture", exact: true }).selectOption(gapCapture.id);
     const gapResponse = page.waitForResponse(r => r.url().endsWith("/commodities/curve-captures/compare"));
@@ -83,6 +102,7 @@ test("reopen after restart, compare exact contracts and replay the retained pair
     expect((await (await gapResponse).json()).rows[0].status).toBe("absent_from_comparison");
     await expect(panel).toContainText("contract not in capture");
     await expect(panel).toContainText("absent from comparison");
+    await expect(panel).not.toContainText("share observation time");
   }
   for (const width of [1440, 1000, 390]) {
     await page.setViewportSize({ width, height: 1000 });
@@ -95,5 +115,23 @@ test("reopen after restart, compare exact contracts and replay the retained pair
   await page.route("**/commodities/curve-captures/compare", route => route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ detail: "Capture units differ." }) }));
   await panel.getByRole("button", { name: "Compare Captures" }).click();
   await expect(panel.getByRole("alert")).toContainText("Capture units differ");
+  await page.unroute("**/commodities/curve-captures/compare");
+  if (gapCaptureId) {
+    // Borrado en dos pasos, solo con datos de muestra: el primer clic arma la confirmación.
+    const comparisonSelect = panel.getByRole("combobox", { name: "Comparison capture", exact: true });
+    await comparisonSelect.selectOption(gapCaptureId);
+    await panel.getByRole("button", { name: "Delete Capture", exact: true }).click();
+    const deleted = page.waitForResponse(r => r.url().endsWith(`/commodities/curve-captures/${gapCaptureId}`) && r.request().method() === "DELETE");
+    await panel.getByRole("button", { name: "Confirm Delete Capture" }).click();
+    expect((await deleted).status()).toBe(200);
+    await expect(panel.getByRole("status")).toContainText("Deleted the retained curve capture");
+    await expect(comparisonSelect.locator(`option[value="${gapCaptureId}"]`)).toHaveCount(0);
+    // La captura origen del spread no se borra mientras el spread exista (409 visible).
+    await comparisonSelect.selectOption(evidence.spread.payload.source_capture_id);
+    await panel.getByRole("button", { name: "Delete Capture", exact: true }).click();
+    await panel.getByRole("button", { name: "Confirm Delete Capture" }).click();
+    await expect(panel.getByRole("alert")).toContainText("delete those spreads first");
+    await expect(comparisonSelect.locator(`option[value="${evidence.spread.payload.source_capture_id}"]`)).toHaveCount(1);
+  }
   expect(errors).toEqual([]);
 });

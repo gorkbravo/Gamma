@@ -18,8 +18,9 @@ from src.api.schemas.commodity_captures import (
     CommodityCapturePayloadModel, CommodityCaptureRecordModel, CommodityCaptureListModel,
     CommodityCaptureCompareRequestModel, CommodityCaptureComparisonModel,
     CommodityCalendarSpreadCreateModel, CommodityCalendarSpreadRecordModel,
-    CommodityCalendarSpreadListModel, CommodityCalendarSpreadHistoryModel,
+    CommodityCalendarSpreadListModel, CommodityCalendarSpreadHistoryModel, CommodityRecordDeleteModel,
 )
+from src.services.commodity_curve_store import CommodityRecordInUseError, CommodityRetentionLimitError
 
 router = APIRouter(tags=["commodities"])
 
@@ -32,6 +33,9 @@ def _retained(request: Request, action):
         return action(store)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Retained commodity record not found.") from None
+    except (CommodityRecordInUseError, CommodityRetentionLimitError) as error:
+        # Petición válida que choca con el estado retenido (procedencia citada o retención llena).
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except (ValueError, KeyError, TypeError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except OSError as error:
@@ -59,6 +63,11 @@ def load_curve_capture(identity: str, request: Request):
     return _retained(request, lambda store: store.load("captures", identity))
 
 
+@router.delete("/commodities/curve-captures/{identity}", response_model=CommodityRecordDeleteModel)
+def delete_curve_capture(identity: str, request: Request):
+    return _retained(request, lambda store: store.delete("captures", identity))
+
+
 @router.post("/commodities/calendar-spreads", response_model=CommodityCalendarSpreadRecordModel)
 def save_calendar_spread(payload: CommodityCalendarSpreadCreateModel, request: Request):
     return _retained(request, lambda store: store.save_spread(payload.capture_id, payload.left_contract_id, payload.right_contract_id, payload.label))
@@ -73,6 +82,11 @@ def list_calendar_spreads(request: Request, instrument_id: str | None = Query(de
 @router.get("/commodities/calendar-spreads/{identity}/history", response_model=CommodityCalendarSpreadHistoryModel)
 def calendar_spread_history(identity: str, request: Request):
     return _retained(request, lambda store: store.spread_history(identity))
+
+
+@router.delete("/commodities/calendar-spreads/{identity}", response_model=CommodityRecordDeleteModel)
+def delete_calendar_spread(identity: str, request: Request):
+    return _retained(request, lambda store: store.delete("spreads", identity))
 
 
 @router.post("/commodities/workspace", response_model=CommodityWorkspaceResponseModel)
