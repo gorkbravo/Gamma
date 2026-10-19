@@ -11,6 +11,10 @@ from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
+from src.application.copilot_operator_context import (
+    MAX_ATTACHED_SCRIPT_SOURCE_CHARS,
+    operator_attached_context,
+)
 from src.models.copilot import (
     CopilotContextBundle,
     CopilotEquityEntityProposal,
@@ -75,7 +79,6 @@ RESEARCH_CARD_SCHEMA: dict[str, Any] = {
 
 SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
 MAX_OPERATOR_OBSERVATION_BYTES = 50_000
-MAX_ATTACHED_SCRIPT_SOURCE_CHARS = 8_000
 MAX_OPERATOR_OUTPUT_TOKENS = 1_600
 # La guía oficial de razonamiento recomienda reservar al menos 25.000 tokens para
 # razonamiento y salida; max_output_tokens incluye ambos.
@@ -1148,15 +1151,11 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 "summary is not a successful answer."
             ),
         }
-        attached = self._operator_attached_script(request, plan)
+        # Identidades que el usuario adjuntó de forma visible y que las herramientas planificadas
+        # necesitan como argumentos; sin ellas el modelo no puede completar la llamada.
+        attached = operator_attached_context(request, plan)
         if attached is not None:
-            body["attached_context"] = {
-                "script_state": attached,
-                "note": (
-                    "Visibly attached by the user in Strategy Lab. Use these exact ids and "
-                    "hashes in tool arguments; never invent or substitute them."
-                ),
-            }
+            body["attached_context"] = attached
         return {
             "role": "user",
             "content": [
@@ -1175,31 +1174,6 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         if plan.intent == "research_script_workflow":
             return MAX_SCRIPT_OPERATOR_OUTPUT_TOKENS
         return MAX_OPERATOR_OUTPUT_TOKENS
-
-    @staticmethod
-    def _operator_attached_script(
-        request: CopilotResearchCardRequest,
-        plan: CopilotOperatorPlan,
-    ) -> dict[str, Any] | None:
-        # Sin estas identidades el modelo no puede rellenar script_id ni los hashes exactos
-        # que exigen las herramientas Script (validación en vivo 2026-10-15). Solo se
-        # incluyen identidades y el código canónico acotado, no salidas ni datos.
-        if plan.intent != "research_script_workflow":
-            return None
-        state = request.context.strategy_lab_state if request.context is not None else None
-        script = state.get("script_state") if isinstance(state, dict) else None
-        if not isinstance(script, dict) or not str(script.get("script_id") or "").strip():
-            return None
-        keys = (
-            "script_id", "canonical_revision_id", "source_sha256", "input_snapshot_id",
-            "manifest_sha256", "selected_run_id", "selected_run_status",
-        )
-        attached: dict[str, Any] = {key: script[key] for key in keys if script.get(key) is not None}
-        source = script.get("canonical_source")
-        if isinstance(source, str):
-            attached["canonical_source"] = source[:MAX_ATTACHED_SCRIPT_SOURCE_CHARS]
-            attached["canonical_source_truncated"] = len(source) > MAX_ATTACHED_SCRIPT_SOURCE_CHARS
-        return attached
 
     @staticmethod
     def _build_operator_instructions(plan: CopilotOperatorPlan) -> str:
@@ -1230,6 +1204,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "For custom research, discover exact catalog identities, inspect schema/units/coverage, add previews "
             "to retained immutable bundles and read actual filenames before drafting. Preview tokens are temporary. "
             "External files must already be supplied by the user; read them from retained bundles. "
+            "attached_context holds identities the user visibly attached in Gamma; follow each entry's "
+            "usage and copy its ids exactly, and explicit task values always win. "
             "If attached_context.script_state identifies a Script, use its exact ids and hashes; "
             "draft an initial empty-input Script only if no Script is attached, then prepare its inputs. "
             "Revisions against acquired bundles use script_draft_from_bundle and require user acceptance; stop there. "

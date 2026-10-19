@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.application.copilot_context_helpers import dedupe_warnings, without_planner_only_warning
 from src.application.copilot_model_policy import OPENAI_BASELINE_MODEL
+from src.application.copilot_operator_context import operator_attached_context
 from src.application.research_action_registry import (
     ResearchActionArgumentError,
     ResearchActionPermissionError,
@@ -975,6 +976,10 @@ class CopilotAgentsOperatorService:
                 "returned by the tools."
             ),
         }
+        # Mismo bloque de identidades adjuntas que recibe el bucle Responses.
+        attached = operator_attached_context(request, plan)
+        if attached is not None:
+            payload["attached_context"] = attached
         return cls._json_dumps(payload)
 
     def _model_settings_kwargs(self, *, reasoning_effort: str | None = None) -> dict[str, Any]:
