@@ -2338,10 +2338,12 @@ All of that is now built and live-verified. The remaining distance to "without c
 
 ## Workstream 11 - Beta Readiness
 
-_Status: In progress (~25%)_
+_Status: In progress (~35%)_
 _Dependency marker: Parallelizable, but final release polish depends on product stability_
 _Parallelization note: Installer and tutorial planning can begin early; final beta packaging should wait until core workflows are stable._
-_Recent progress: Gamma has mock/demo defaults, system health/status routes, `/diagnostics` and `/diagnostics/run`, `/system/provider-usage`, provider capability metadata, provider usage summaries and activation-aware health labels in Settings, read-only boundary metadata, market-data mode and base-currency controls, account-subscribe diagnostics helpers, local persistence stores for portfolio history/research/fundamentals/Copilot, and clearer provider warnings across several V2 tabs. A recurring live-IBKR usability audit loop (June-September 2026 runs under `docs/audits/usability/`) is now feeding structured findings into hardening passes, and several beta-facing empty/error states and honest cached-vs-fresh labels came out of it. Gamma is still not packaged as an installer and does not yet have a real first-run setup or guided tutorial._
+_Recent progress: Gamma has mock/demo defaults, system health/status routes, `/diagnostics` and `/diagnostics/run`, `/system/provider-usage`, provider capability metadata, provider usage summaries and activation-aware health labels in Settings, read-only boundary metadata, market-data mode and base-currency controls, account-subscribe diagnostics helpers, local persistence stores for portfolio history/research/fundamentals/Copilot, and clearer provider warnings across several V2 tabs. A recurring live-IBKR usability audit loop (June-September 2026 runs under `docs/audits/usability/`) is now feeding structured findings into hardening passes, and several beta-facing empty/error states and honest cached-vs-fresh labels came out of it. Gamma is still not packaged as an installer and does not yet have a guided tutorial._
+
+_2026-10-19 first-run setup and intentional demo mode (not committed at the time of writing; ~25% → ~35%): a first-run setup dialog opens automatically until it is completed or skipped, and can be reopened from the landing page and Settings. It chooses demo or live data, base currency and market-data mode, shows the TWS connection steps and status, renders a per-tab source map (sample, public, IBKR, mixed, model or unavailable) for both modes so the choice is made before the restart, lists optional provider keys and the Copilot provider without ever returning key values, and saves the user's own SEC EDGAR identity. Choices persist in a versioned `data/setup/setup.json` (corrupt files are quarantined, newer schemas are never overwritten) and apply at startup with the precedence environment / `.env` > saved setup > defaults; values fixed by the environment are shown as locked. Base currency and market-data mode now also persist when changed in Settings, which closes the restart-reverts-currency gap. The topbar and landing page say `Demo` instead of `Mock`. API: `GET/POST /system/setup`. Evidence: 15 backend setup tests and the full backend suite (985 passed, 3 opt-in live skips), 503 frontend tests, typecheck, production build, and a browser pass against an isolated no-`.env` backend covering the live-path steps, a saved demo run, validation, persistence across reload, Settings re-entry, keyboard containment and 375-pixel layout. Open: switching demo/live still needs a manual app restart (no in-app backend restart yet); API keys are still configured only through environment variables (no secure key entry); demo sample depth was not expanded beyond the existing sample providers; the hard-coded development SEC identity fallback was removed the same day (without an identity Gamma makes no sec.gov request; Fundamentals answers HTTP 428 with a `Set SEC identity` action, and Copilot company lookup, Script Fundamentals exports and the SEC press-release feed report the missing identity; 991 backend and 507 frontend tests pass); no native screen-reader pass was run._
 
 ### Why this workstream matters
 
@@ -2391,6 +2393,8 @@ First-run setup should guide the user through:
 
 The app should be usable in a limited mode even without every provider configured.
 
+_Status 2026-10-19: first pass shipped (see Recent progress). Remaining: in-app restart after a demo/live switch, secure API-key entry (for example OS keychain-backed) instead of environment-only configuration, Copilot provider selection in the dialog, and a link to diagnostics._
+
 #### 3. Tutorial
 
 The tutorial should introduce:
@@ -2435,6 +2439,8 @@ It should include:
 - later commodities/maritime samples.
 
 The goal is for a tester to understand the app before connecting real providers.
+
+_Status 2026-10-19: demo mode is now an explicit, persisted choice with `Demo` labeling and a per-tab source map. The sample datasets themselves were not expanded: research history is synthetic, and Macro, Prediction Markets, Crypto and Fundamentals rely on free public providers rather than offline samples, so a fully offline demo is not available yet._
 
 #### 5. Diagnostics and error states
 

@@ -3,7 +3,7 @@ import { writable } from "svelte/store";
 export const lastError = writable<string>("");
 
 export const loading = writable<Record<string, boolean>>({
-  status: false, diagnostics: false, providerUsage: false, diagnosticsAction: false,
+  status: false, diagnostics: false, providerUsage: false, diagnosticsAction: false, setup: false,
   portfolio: false, portfolioAction: false, researchOverview: false, research: false,
   strategyLab: false, strategyLabHandoff: false, compareScenario: false, savedResearch: false,
   macro: false, macroHistory: false, news: false, commodities: false, maritime: false,

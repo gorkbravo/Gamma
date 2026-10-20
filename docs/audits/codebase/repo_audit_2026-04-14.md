@@ -78,8 +78,9 @@ Severity: High for privacy/configuration hygiene.
 
 `src/services/fundamentals_adapters.py` still contains a TODO and defaults to:
 
-- `Gorka Bravo`
-- `gorka.bravo1@gmail.com`
+- [developer identity, redacted 2026-10-19]
+
+Resolved 2026-10-19: the fallback was removed; without a configured identity Gamma makes no SEC request and points the user to Setup.
 
 The adapter writes that value to `EDGAR_IDENTITY` and calls `set_identity(...)`. The value also appears in test and smoke logs.
 

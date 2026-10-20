@@ -549,6 +549,27 @@ def _extract_item_1_business_text(html: str, *, max_chars: int = 24_000) -> str 
     return None
 
 
+SEC_IDENTITY_MISSING_CODE = "sec_identity_missing"
+SEC_IDENTITY_MISSING_MESSAGE = (
+    "SEC EDGAR needs your name and email before Gamma can request filings. "
+    "Add them in Setup (Settings > Run Setup)."
+)
+
+
+class SecIdentityMissingError(ValueError):
+    """No hay identidad SEC configurada: Gamma no hace ninguna petición a sec.gov.
+
+    Hereda de ValueError para que los caminos que ya convierten ValueError en un estado
+    tipado (tarjetas de Copilot, observaciones de herramientas) muestren el mensaje tal cual.
+    La API lo traduce a HTTP 428 con ``code=sec_identity_missing``.
+    """
+
+    code = SEC_IDENTITY_MISSING_CODE
+
+    def __init__(self, message: str = SEC_IDENTITY_MISSING_MESSAGE) -> None:
+        super().__init__(message)
+
+
 def _load_edgar_tools() -> tuple[Any, Any, Any]:
     from edgar import Company, set_identity
     from edgar.reference.tickers import get_company_tickers
@@ -557,23 +578,66 @@ def _load_edgar_tools() -> tuple[Any, Any, Any]:
 
 
 class SecFundamentalsAdapter:
-    def __init__(self, cache: CacheService) -> None:
+    def __init__(self, cache: CacheService, *, identity: tuple[str, str] | None = None) -> None:
         self.cache = cache
-        # TODO: Replace this development-time SEC identity fallback with a user-configurable Gamma setting.
-        self.identity_name = os.getenv("GAMMA_SEC_USER_NAME", "").strip() or "Gorka Bravo"
-        self.identity_email = (
-            os.getenv("GAMMA_SEC_USER_EMAIL", "").strip() or "gorka.bravo1@gmail.com"
-        )
         self._reference_rows: list[dict[str, str | None]] | None = None
         self._reference_retrieved_at: datetime | None = None
         self._company_cache: dict[str, SecCompanyData] = {}
         self._edgar_configured = False
+        self.identity_source = "missing"
+        self.identity_name: str | None = None
+        self.identity_email: str | None = None
+        self.partial_environment = False
+        self._resolve_identity(identity)
+
+    def _resolve_identity(self, identity: tuple[str, str] | None) -> None:
+        # Precedencia: variables de entorno (ambas) > identidad guardada en el asistente > sin identidad.
+        # No hay identidad por defecto: la SEC pide que cada usuario identifique sus propias peticiones.
+        env_name = os.getenv("GAMMA_SEC_USER_NAME", "").strip()
+        env_email = os.getenv("GAMMA_SEC_USER_EMAIL", "").strip()
+        # Una sola variable definida es una configuración incompleta: se ignora y se informa.
+        self.partial_environment = bool(env_name) != bool(env_email)
+        if env_name and env_email:
+            name, email, source = env_name, env_email, "environment"
+        elif identity is not None and identity[0].strip() and identity[1].strip():
+            name, email, source = identity[0].strip(), identity[1].strip(), "setup"
+        else:
+            name, email, source = None, None, "missing"
+        self.identity_name = name
+        self.identity_email = email
+        self.identity_source = source
+
+    @property
+    def has_identity(self) -> bool:
+        return self.identity_name is not None and self.identity_email is not None
+
+    def user_agent(self) -> str | None:
+        """Cabecera User-Agent para sec.gov ("Nombre email"), o None si no hay identidad."""
+        if not self.has_identity:
+            return None
+        return f"{self.identity_name} {self.identity_email}"
+
+    def apply_identity(self, identity: tuple[str, str] | None) -> str:
+        """Aplica una identidad guardada por el usuario; el entorno sigue teniendo prioridad."""
+        self._resolve_identity(identity)
+        # EdgarTools debe reconfigurarse en la siguiente llamada con la identidad nueva.
+        self._edgar_configured = False
+        if not self.has_identity:
+            # Sin identidad no debe quedar ninguna heredada en el proceso para EdgarTools.
+            os.environ.pop("EDGAR_IDENTITY", None)
+        return self.identity_source
+
+    def _require_identity(self) -> str:
+        user_agent = self.user_agent()
+        if user_agent is None:
+            raise SecIdentityMissingError()
+        return user_agent
 
     def _configure_edgar_tools(self) -> None:
+        identity = self._require_identity()
         if self._edgar_configured:
             return
         _, set_identity, _ = _load_edgar_tools()
-        identity = f"{self.identity_name} {self.identity_email}".strip()
         os.environ["EDGAR_IDENTITY"] = identity
         set_identity(identity)
         self._edgar_configured = True
@@ -585,6 +649,7 @@ class SecFundamentalsAdapter:
         limit: int = 12,
         force_refresh: bool = False,
     ) -> list[FundamentalsSearchResult]:
+        self._require_identity()
         rows = list(self._load_reference_rows(force_refresh=force_refresh))
         query_text = str(query or "").strip().upper()
         if query_text:
@@ -636,6 +701,7 @@ class SecFundamentalsAdapter:
         if cached is not None:
             return cached
 
+        self._require_identity()
         company = self._load_company(requested_ticker)
         if company is None:
             return None
@@ -715,12 +781,13 @@ class SecFundamentalsAdapter:
         source_url = self._filing_document_url(company.cik, annual.accession_number, annual.primary_document)
         if source_url is None:
             return None
+        user_agent = self._require_identity()
         retrieved_at = now_utc()
         try:
             request = Request(
                 source_url,
                 headers={
-                    "User-Agent": f"{self.identity_name} {self.identity_email}".strip(),
+                    "User-Agent": user_agent,
                     "Accept-Encoding": "identity",
                 },
             )
@@ -752,6 +819,8 @@ class SecFundamentalsAdapter:
     def _load_reference_rows(self, *, force_refresh: bool) -> list[dict[str, str | None]]:
         if self._reference_rows is not None and not force_refresh:
             return self._reference_rows
+        # EdgarTools puede recurrir a sec.gov para la tabla de tickers: también exige identidad.
+        self._configure_edgar_tools()
         _, _, get_company_tickers = _load_edgar_tools()
         df = get_company_tickers(as_dataframe=True, clean_name=False, clean_suffix=False)
         rows: list[dict[str, str | None]] = []

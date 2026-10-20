@@ -73,6 +73,9 @@
   };
   export let saving = false;
   export let loadWarnings: string[] = [];
+  // Sin identidad SEC el backend no consulta sec.gov (HTTP 428); la vista lleva al asistente.
+  export let secIdentityMissing = false;
+  export let onOpenSecIdentitySetup: () => void = () => {};
   export let onSearch: (options?: FundamentalsSearchOptions) => Promise<unknown> | void;
   export let onSelectCompany: (ticker: string, options?: FundamentalsSelectOptions) => Promise<unknown> | void;
   export let onSavePeerBasket: (ticker: string, peerTickers: string[]) => Promise<unknown> | void;
@@ -584,7 +587,11 @@
   $: searchResults = search?.results ?? [];
   $: searchLoading = searchState.loading;
   $: searchHasStaleResults = searchState.loading && searchResults.length > 0;
-  $: searchEmptyLabel = searchState.error ? "Search unavailable" : "No SEC matches";
+  $: searchEmptyLabel = secIdentityMissing
+    ? "SEC identity required"
+    : searchState.error
+      ? "Search unavailable"
+      : "No SEC matches";
   $: searchDropdownResults = searchResults.map((result) => ({
     id: result.ticker,
     primary: `${result.ticker}${result.exchange ? ` | ${result.exchange}` : ""}`,
@@ -735,6 +742,16 @@
     </div>
 
     <div class="search-strip">
+      {#if secIdentityMissing}
+        <div class="context-warning sec-identity" role="status">
+          <span class="focus-label">SEC identity</span>
+          <p>
+            SEC EDGAR needs your name and email before Gamma can search companies or load filings. They are sent
+            only to sec.gov and kept on this computer.
+          </p>
+          <button type="button" class="secondary" on:click={onOpenSecIdentitySetup}>Set SEC identity</button>
+        </div>
+      {/if}
       <div class="search-actions">
         <div class="search-control filter-wide">
           <div class="search-heading">
@@ -2337,6 +2354,15 @@
     color: var(--text-1);
     font-size: var(--text-sm);
     line-height: var(--leading-snug);
+  }
+
+  .context-warning.sec-identity {
+    align-items: center;
+  }
+
+  .context-warning.sec-identity button {
+    flex-shrink: 0;
+    margin-left: auto;
   }
 
   .header-panel .title {

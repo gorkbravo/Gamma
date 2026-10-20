@@ -55,8 +55,8 @@ Data-source strategy:
 
 Temporary EDGAR identity note:
 - Until Gamma has user-configurable SEC identity settings, use this identity for edgartools / SEC automated-access configuration:
-  - `Gorka Bravo`
-  - `gorka.bravo1@gmail.com`
+  - [developer identity, redacted 2026-10-19]
+  - (superseded on 2026-10-19: Gamma now requires each user's own identity, saved in Setup)
 - Use it explicitly where SEC identity configuration is required for development.
 - Do not invent a different identity.
 - Also preserve a clear TODO or config seam so this can later become user-configurable rather than hard-coded forever.

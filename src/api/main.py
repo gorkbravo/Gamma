@@ -24,6 +24,7 @@ from src.api.routes import (
     system_router,
 )
 from src.application.runtime import ApplicationRuntime, get_runtime
+from src.services.fundamentals_adapters import SecIdentityMissingError
 
 
 def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str | None = None) -> FastAPI:
@@ -64,6 +65,9 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
         allow_headers=["Content-Type", GAMMA_SESSION_HEADER],
     )
     app.add_middleware(GammaSessionMiddleware, session_token=resolved_session_token)
+    # Sin identidad SEC no se llama a sec.gov: se responde 428 con un código estable para
+    # que la interfaz ofrezca abrir el asistente en el paso de identidad.
+    app.add_exception_handler(SecIdentityMissingError, _sec_identity_missing_response)
     app.include_router(system_router)
     app.include_router(copilot_router)
     app.include_router(commodities_router)
@@ -79,6 +83,14 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
     app.include_router(risk_router)
     app.include_router(iv_router)
     return app
+
+
+
+async def _sec_identity_missing_response(_request, exc: Exception) -> GammaJSONResponse:
+    return GammaJSONResponse(
+        status_code=428,
+        content={"detail": str(exc), "code": getattr(exc, "code", "sec_identity_missing")},
+    )
 
 
 app = create_app()

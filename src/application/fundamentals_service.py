@@ -1558,11 +1558,12 @@ class FundamentalsService:
         return rows
 
     def _provider_config_warnings(self) -> list[str]:
-        identity_name = str(getattr(self.sec_adapter, "identity_name", "") or "").strip()
-        identity_email = str(getattr(self.sec_adapter, "identity_email", "") or "").strip()
-        if identity_name == "Gorka Bravo" and identity_email == "gorka.bravo1@gmail.com":
+        # Sin identidad el adaptador ya lanza SecIdentityMissingError antes de llegar aquí;
+        # solo queda avisar de una configuración de entorno a medias que se está ignorando.
+        if getattr(self.sec_adapter, "partial_environment", False):
             return [
-                "SEC EDGAR access is using the existing EdgarTools development identity fallback; move to GAMMA_SEC_USER_NAME/GAMMA_SEC_USER_EMAIL when user configuration is available."
+                "Only one of GAMMA_SEC_USER_NAME / GAMMA_SEC_USER_EMAIL is set, so the environment identity is ignored; "
+                "set both or use the identity saved in Setup."
             ]
         return []
 

@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from dotenv import load_dotenv
 
@@ -32,6 +32,7 @@ from src.application.provider_capability_registry import (
 from src.application.research_service import ResearchService
 from src.application.research_script_service import ResearchScriptService
 from src.application.risk_service import RiskService
+from src.application.setup_service import StartupSettings, resolve_startup_settings, sec_identity_tuple
 from src.application.sitrep_service import SitrepService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
@@ -95,6 +96,7 @@ from src.services.provider_usage import ProviderActivationCondition, ProviderUsa
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
 from src.services.prediction_research_store import PredictionResearchStore
+from src.services.setup_store import SetupStore
 from src.services.sitrep_follow_up_store import SitrepFollowUpStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
@@ -149,6 +151,11 @@ class ApplicationRuntime:
     iv_service: IVService
     iv_snapshot_store: IVSnapshotStore
     desktop: DesktopRuntimeState | None = None
+    # Preferencias del asistente de primer arranque y origen de cada ajuste de inicio.
+    setup_store: SetupStore | None = None
+    startup_settings: StartupSettings | None = None
+    # Referencia directa (sin trazar) para aplicar en caliente la identidad SEC guardada.
+    sec_fundamentals_adapter: SecFundamentalsAdapter | None = None
 
     @property
     def app_context(self) -> AppDataContext | None:
@@ -208,26 +215,33 @@ def build_runtime(
     load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
     setup_logging()
 
-    base_currency = os.getenv("BASE_CURRENCY", "EUR")
     auto_refresh = int(os.getenv("AUTO_REFRESH_SECONDS", "60") or 0)
     lookback = int(os.getenv("HIST_LOOKBACK_DAYS_DEFAULT", "252") or 252)
     quote_timeout = validate_portfolio_quote_timeout(
         float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
     )
-    market_data_mode = normalize_market_data_mode(os.getenv("IB_MARKET_DATA_MODE", "delayed"))
 
-    if mock_mode is None:
-        mock_env = os.getenv("MOCK_DATA")
-        mock_mode = True if mock_env is None else mock_env.lower() == "true"
+    resolved_cache_dir = Path(cache_dir or os.getenv("CACHE_DIR", "cache"))
+    resolved_history_dir = Path(history_dir or os.getenv("PORTFOLIO_HISTORY_DIR", "data"))
+    resolved_sample_data_dir = Path(sample_data_dir or os.getenv("SAMPLE_DATA_DIR", "sample_data"))
+
+    # Modo demo/live, divisa base y modo de datos de mercado: argumento > entorno (.env) >
+    # preferencia guardada por el asistente de primer arranque > valor por defecto.
+    setup_store = SetupStore(resolved_history_dir / "setup")
+    setup_load = setup_store.load()
+    startup_settings = resolve_startup_settings(
+        setup_load.preferences,
+        mock_mode_argument=mock_mode,
+        warnings=setup_load.warnings,
+    )
+    mock_mode = startup_settings.mock_mode
+    base_currency = startup_settings.base_currency
+    market_data_mode = startup_settings.market_data_mode
 
     host = os.getenv("IB_HOST", "127.0.0.1")
     port = int(os.getenv("IB_PORT", "7497"))
     client_id = int(os.getenv("IB_CLIENT_ID", "1"))
     account = (os.getenv("IB_ACCOUNT", "") or "").strip() or None
-
-    resolved_cache_dir = Path(cache_dir or os.getenv("CACHE_DIR", "cache"))
-    resolved_history_dir = Path(history_dir or os.getenv("PORTFOLIO_HISTORY_DIR", "data"))
-    resolved_sample_data_dir = Path(sample_data_dir or os.getenv("SAMPLE_DATA_DIR", "sample_data"))
     research_defaults = InstrumentDefaults(
         provider=os.getenv("RESEARCH_DEFAULT_PROVIDER", "research"),
         sec_type=os.getenv("RESEARCH_DEFAULT_SEC_TYPE", "STK"),
@@ -399,9 +413,12 @@ def build_runtime(
             GeckoTerminalAdapter(cache), provider_usage, endpoint_prefix="crypto", provider_id="geckoterminal"
         ),
     )
+    sec_fundamentals_adapter = SecFundamentalsAdapter(
+        cache, identity=sec_identity_tuple(startup_settings.preferences)
+    )
     fundamentals_service = FundamentalsService(
         sec_adapter=trace_provider(
-            SecFundamentalsAdapter(cache), provider_usage, endpoint_prefix="fundamentals", provider_id="sec"
+            sec_fundamentals_adapter, provider_usage, endpoint_prefix="fundamentals", provider_id="sec"
         ),
         valuation_adapter=trace_provider(
             IbkrValuationAdapter(
@@ -418,7 +435,10 @@ def build_runtime(
     news_service = NewsService(
         [
             trace_provider(provider, provider_usage, endpoint_prefix="news")
-            for provider in _build_news_providers(live_mode=not bool(mock_mode))
+            for provider in _build_news_providers(
+                live_mode=not bool(mock_mode),
+                sec_user_agent=sec_fundamentals_adapter.user_agent,
+            )
         ]
     )
     sitrep_service = SitrepService(
@@ -514,6 +534,9 @@ def build_runtime(
         iv_service=iv_service,
         desktop=desktop,
         iv_snapshot_store=iv_snapshot_store,
+        setup_store=setup_store,
+        startup_settings=startup_settings,
+        sec_fundamentals_adapter=sec_fundamentals_adapter,
     )
 
 
@@ -965,7 +988,11 @@ def _build_maritime_provider(*, live_mode: bool = False):
     )
 
 
-def _build_news_providers(*, live_mode: bool = False) -> list[NewsEventProvider]:
+def _build_news_providers(
+    *,
+    live_mode: bool = False,
+    sec_user_agent: Callable[[], str | None] | None = None,
+) -> list[NewsEventProvider]:
     configured = (os.getenv("NEWS_PROVIDER", "sample") or "sample").strip().lower()
     provider_ids = [item.strip() for item in configured.split(",") if item.strip()]
     providers: list[NewsEventProvider] = []
@@ -974,6 +1001,7 @@ def _build_news_providers(*, live_mode: bool = False) -> list[NewsEventProvider]
             providers.append(
                 RssNewsEventProvider(
                     timeout_seconds=float(os.getenv("RSS_NEWS_TIMEOUT_SECONDS", "6") or 6.0),
+                    sec_user_agent=sec_user_agent,
                 )
             )
         elif provider_id in {"sample", "mock", "offline", "demo", "sample_news"}:

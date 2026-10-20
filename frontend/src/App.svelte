@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import CopilotResearchCard from "./components/CopilotResearchCard.svelte";
   import LandingPage from "./components/LandingPage.svelte";
+  import SetupWizard from "./components/SetupWizard.svelte";
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
@@ -237,6 +238,14 @@
     restoreWorkspaceTabOrders,
     workspaceTabOrders,
   } from "./lib/stores/navigation";
+  import {
+    finishSetup,
+    loadSetupReport,
+    setupError,
+    setupReport,
+    skipSetup,
+  } from "./lib/stores/setup";
+  import { isSecIdentityMissingError, type SetupChoices, type SetupStepId } from "./lib/setup-wizard";
   import type {
     CopilotBaseDomain,
     CopilotDomain,
@@ -356,6 +365,14 @@
   let latestCopilotHandoff: CrossTabHandoffEnvelope | null = null;
   let preserveOptionsHandoffScope = false;
   let settingsOpen = false;
+  // Asistente de primer arranque: se abre solo si el backend informa first_run, o desde Settings.
+  let setupOpen = false;
+  let setupFirstRun = false;
+  let setupAutoOpened = false;
+  let setupInitialStep: SetupStepId | null = null;
+  // La identidad SEC falta según el informe del asistente o porque la búsqueda respondió 428.
+  $: secIdentityMissing =
+    $setupReport?.sec_identity.status === "missing" || isSecIdentityMissingError($fundamentalsSearchState.error);
   let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
   let tabBarTabs: TabBarItem[] = [];
   let synthesisScopeOptions: CopilotGroundingScopeOption[] = [];
@@ -1459,9 +1476,77 @@
   }
 
   async function bootstrapApp() {
+    void openSetupIfFirstRun();
     const status = await refreshSystemStatus();
     if (!restoredWorkspaceState) return;
     await hydrateTab(restoredWorkspaceState.activeTab, status);
+  }
+
+  async function openSetupIfFirstRun() {
+    const report = await loadSetupReport();
+    if (report?.first_run && !setupAutoOpened) {
+      setupAutoOpened = true;
+      setupFirstRun = true;
+      setupInitialStep = null;
+      setupOpen = true;
+    }
+  }
+
+  function handleOpenSetup() {
+    void openSetup(null);
+  }
+
+  function handleOpenSecIdentitySetup() {
+    void openSetup("identity");
+  }
+
+  async function openSetup(step: SetupStepId | null) {
+    setupInitialStep = step;
+    settingsOpen = false;
+    sidebarOpen = false;
+    copilotOpen = false;
+    setupFirstRun = Boolean($setupReport?.first_run);
+    // El asistente crea su borrador con el primer informe que recibe: se fuerza uno fresco.
+    setupReport.set(null);
+    setupError.set("");
+    setupOpen = true;
+    await loadSetupReport();
+  }
+
+  function handleCloseSetup() {
+    setupOpen = false;
+  }
+
+  async function handleSetupFinish(choices: SetupChoices) {
+    const identityWasMissing = $setupReport?.sec_identity.status === "missing";
+    const result = await finishSetup(choices);
+    if (result.ok) {
+      await loadDiagnostics();
+      // Con la identidad SEC recién guardada, Fundamentals puede volver a consultar sin recargar.
+      if (
+        identityWasMissing &&
+        $setupReport?.sec_identity.status === "configured" &&
+        workspaceMode != null &&
+        $activeTab === "fundamentals"
+      ) {
+        await hydrateTab("fundamentals");
+      }
+      if (
+        result.currencyChanged &&
+        workspaceMode === "portfolio" &&
+        ($systemStatus?.mock_mode || $systemStatus?.connection.connected)
+      ) {
+        await loadPortfolioSnapshot();
+      }
+    }
+    return result;
+  }
+
+  async function handleSetupTestConnection() {
+    if (!$systemStatus?.connection.connected) {
+      await handleConnectionToggle();
+    }
+    await loadSetupReport();
   }
 
   async function hydrateTab(tab: TabId, status: SystemStatus | null = $systemStatus) {
@@ -2731,7 +2816,8 @@
   }
 
   async function handleAppKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented) {
+    // Con el asistente abierto (modal) los atajos globales no deben actuar detrás de él.
+    if (event.defaultPrevented || setupOpen) {
       return;
     }
 
@@ -2859,6 +2945,7 @@
     onConnect={handleConnectionToggle}
     onEnterPortfolio={() => enterWorkspace("portfolio")}
     onEnterResearch={() => enterWorkspace("research")}
+    onOpenSetup={handleOpenSetup}
   />
 {:else}
   <Shell
@@ -2902,6 +2989,7 @@
         onChangeView={handleChangeView}
         onToggleSettings={handleToggleSettings}
         onOpenKeyBindings={handleOpenKeyBindings}
+        onOpenSetup={handleOpenSetup}
       />
     </svelte:fragment>
 
@@ -3142,6 +3230,8 @@
             loading={$loading.fundamentals}
             searchState={$fundamentalsSearchState}
             loadWarnings={$fundamentalsLoadWarnings}
+            secIdentityMissing={secIdentityMissing}
+            onOpenSecIdentitySetup={handleOpenSecIdentitySetup}
             saving={$loading.fundamentalsSave}
             onSearch={loadFundamentalsSearch}
             onSelectCompany={selectFundamentalsCompanyFromView}
@@ -3272,6 +3362,23 @@
       onClose={() => copilotOpen = false}
     />
   </Shell>
+{/if}
+
+{#if setupOpen}
+  <SetupWizard
+    report={$setupReport}
+    status={$systemStatus}
+    firstRun={setupFirstRun}
+    initialStep={setupInitialStep}
+    loading={$loading.setup}
+    loadError={$setupError}
+    connectionBusy={$loading.status}
+    onClose={handleCloseSetup}
+    onSkip={skipSetup}
+    onFinish={handleSetupFinish}
+    onTestConnection={handleSetupTestConnection}
+    onRetry={() => void loadSetupReport()}
+  />
 {/if}
 
 <style>

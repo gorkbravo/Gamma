@@ -4,6 +4,7 @@ from collections.abc import Callable
 import re
 from typing import Any
 
+from src.services.fundamentals_adapters import SecIdentityMissingError
 from src.models.copilot import (
     CopilotEntityResolution,
     CopilotEntityResolutionCandidate,
@@ -378,6 +379,15 @@ def _safe_search(
 ) -> list[FundamentalsSearchResult]:
     try:
         return list(search_companies(query, limit=12))
+    except SecIdentityMissingError:
+        # Sin identidad SEC no hay búsqueda: se dice qué falta y dónde configurarlo.
+        warning = (
+            "Gamma cannot resolve company names until your SEC EDGAR identity is set in Setup "
+            "(Settings > Run Setup). Give the ticker explicitly or add the identity."
+        )
+        if warning not in warnings:
+            warnings.append(warning)
+        return []
     except Exception:
         warning = "SEC company identity lookup was unavailable during Copilot entity resolution."
         if warning not in warnings:
