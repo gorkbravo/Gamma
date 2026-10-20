@@ -49,6 +49,27 @@ class FundamentalsResearchStore:
         safe_snapshot_id = self._safe_key(snapshot_id)
         self._write_json(self.dcf_snapshot_dir / self._safe_key(ticker) / f"{safe_snapshot_id}.json", payload)
 
+    def create_dcf_snapshot(self, ticker: str, snapshot_id: str, payload: dict[str, Any]) -> bool:
+        """Crea la instantánea solo si su id no existe todavía; nunca sobrescribe.
+
+        Devuelve ``False`` si ya hay una instantánea con ese id (comparado tras
+        ``_safe_key``, igual que al cargarla), para que quien llama elija otro id.
+        """
+        safe_snapshot_id = self._safe_key(snapshot_id)
+        path = self.dcf_snapshot_dir / self._safe_key(ticker) / f"{safe_snapshot_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Se serializa antes de crear el fichero para no dejar un id ocupado por un JSON vacío
+        # si el payload no es serializable.
+        text = json.dumps(payload, indent=2, sort_keys=True)
+        try:
+            # El modo "x" (O_CREAT | O_EXCL) reserva el nombre de forma atómica: dos guardados
+            # concurrentes con el mismo id no pueden pisarse entre sí.
+            with path.open("x", encoding="utf-8") as handle:
+                handle.write(text)
+        except FileExistsError:
+            return False
+        return True
+
     def load_company_summary(self, ticker: str, accession_number: str | None) -> dict[str, Any] | None:
         safe_accession = self._safe_key(accession_number or "metadata")
         return self._load_json(self.summary_dir / self._safe_key(ticker) / f"{safe_accession}.json")

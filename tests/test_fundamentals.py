@@ -398,6 +398,57 @@ def test_fundamentals_dcf_snapshots_save_list_and_load_model(tmp_path):
     assert loaded.active_scenario_id == snapshot.active_scenario_id
 
 
+def test_fundamentals_dcf_snapshots_same_name_in_same_tick_do_not_overwrite(tmp_path, monkeypatch):
+    # Regresión: el id era "marca de tiempo + slug del nombre". Con el reloj grueso de Windows,
+    # dos guardados con el mismo nombre en el mismo tick compartían id y el segundo sobrescribía
+    # al primero en el store. Se congela el reloj para reproducir la colisión sin depender del azar.
+    monkeypatch.setattr("src.application.fundamentals_service.now_utc", lambda: NOW)
+    service = _build_service(tmp_path)
+
+    first = service.save_dcf_snapshot("AAPL", name="Base checkpoint")
+    # Se cambia el escenario activo entre guardados para que cada instantánea tenga contenido
+    # distinguible: si una pisara a otra, la carga devolvería el escenario equivocado.
+    initial = service.get_dcf_model("AAPL")
+    assert initial is not None
+    assert initial.active_scenario_id == "base"
+    service.save_dcf_model(
+        "AAPL",
+        {
+            "active_scenario_id": "bull",
+            "projection_years": list(initial.projection_years),
+            "scenarios": {
+                scenario.scenario_id: {
+                    "assumptions": deepcopy(scenario.assumptions),
+                    "overrides": deepcopy(scenario.overrides),
+                }
+                for scenario in initial.scenarios
+            },
+        },
+    )
+    second = service.save_dcf_snapshot("AAPL", name="Base checkpoint")
+    third = service.save_dcf_snapshot("AAPL", name="Base checkpoint")
+
+    assert first is not None and second is not None and third is not None
+    # El primer id conserva el formato histórico, de modo que los ids ya guardados siguen siendo válidos;
+    # las colisiones reciben un sufijo correlativo en lugar de sobrescribir.
+    assert first.snapshot_id == "20260409T120000000000Z-base-checkpoint"
+    assert second.snapshot_id == "20260409T120000000000Z-base-checkpoint-2"
+    assert third.snapshot_id == "20260409T120000000000Z-base-checkpoint-3"
+    assert first.created_at == second.created_at == third.created_at == NOW
+
+    listed = service.list_dcf_snapshots("AAPL")
+    assert listed is not None
+    assert sorted(item.snapshot_id for item in listed) == sorted(
+        [first.snapshot_id, second.snapshot_id, third.snapshot_id]
+    )
+
+    first_model = service.load_dcf_snapshot_model("AAPL", first.snapshot_id)
+    second_model = service.load_dcf_snapshot_model("AAPL", second.snapshot_id)
+    assert first_model is not None and second_model is not None
+    assert first_model.active_scenario_id == "base"
+    assert second_model.active_scenario_id == "bull"
+
+
 def test_fundamentals_dcf_model_reanchors_stale_projection_years_from_store(tmp_path):
     service = _build_service(tmp_path)
 
