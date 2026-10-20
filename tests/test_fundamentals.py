@@ -55,8 +55,13 @@ def test_fundamentals_overview_builds_company_context_and_peer_heatmap(tmp_path)
     assert overview.peer_heatmap.transformation_note is not None
 
 
+# Identidad SEC ficticia: el adaptador ya no tiene una identidad por defecto y rechaza
+# cualquier búsqueda sin ella (ver tests/test_system_setup.py).
+TEST_SEC_IDENTITY = ("Gamma Test Suite", "tests@example.com")
+
+
 def test_sec_search_ranks_exact_ticker_before_popular_name_matches(tmp_path):
-    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
+    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"), identity=TEST_SEC_IDENTITY)
     adapter._reference_retrieved_at = NOW
     adapter._load_reference_rows = lambda *, force_refresh: [
         {

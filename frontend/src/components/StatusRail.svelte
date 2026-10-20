@@ -23,6 +23,7 @@
   export let onChangeView: () => void;
   export let onToggleSettings: () => void = () => {};
   export let onOpenKeyBindings: () => void = () => {};
+  export let onOpenSetup: () => void = () => {};
 
   const baseCurrencyOptions = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"];
   let selectedBaseCurrency = status?.base_currency ?? "USD";
@@ -87,9 +88,14 @@
 
 <section class="rail">
   <div class="actions">
-    <div class="conn-chip" title={status?.connection.status_text ?? "Waiting for backend status"}>
+    <div
+      class="conn-chip"
+      title={status?.mock_mode
+        ? "Demo mode: sample portfolio and synthetic prices. Public research sources stay live when reachable."
+        : status?.connection.status_text ?? "Waiting for backend status"}
+    >
       <span class="conn-dot" class:on={status?.connection.connected}></span>
-      <span class="conn-label" class:mock={status?.mock_mode}>{status?.mock_mode ? "Mock" : "Live"}</span>
+      <span class="conn-label" class:mock={status?.mock_mode}>{status?.mock_mode ? "Demo" : "Live"}</span>
     </div>
     <button class="ghost" on:click={onChangeView}>Change View</button>
     <button class="accent" on:click={onRefresh} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
@@ -138,8 +144,10 @@
           </div>
           <div class="row">
             <span class="label">Mode</span>
-            <strong>{status?.mock_mode ? "Mock" : "Live"}</strong>
+            <strong>{status?.mock_mode ? "Demo" : "Live"}</strong>
           </div>
+          <small>Choose demo or live data, check providers and set your SEC identity.</small>
+          <button class="ghost wide" type="button" on:click={onOpenSetup}>Run Setup</button>
         </div>
 
         <div class="settings-section">

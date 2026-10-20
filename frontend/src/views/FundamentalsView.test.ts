@@ -54,6 +54,45 @@ describe("FundamentalsView", () => {
     expect(body).not.toContain("Refreshing</span><span");
   });
 
+  it("asks for the SEC identity and links to setup when it is missing", () => {
+    const { body } = render(FundamentalsView, {
+      props: {
+        search: null,
+        selectedTicker: null,
+        overview: null,
+        financials: null,
+        dcfModel: null,
+        peers: null,
+        reverseValuation: null,
+        reference: null,
+        dcfSnapshots: null,
+        loading: false,
+        searchState: {
+          query: "",
+          loading: false,
+          refreshing: false,
+          stale: false,
+          error: "428 Precondition Required: SEC EDGAR needs your name and email before Gamma can request filings.",
+          requestedAt: null,
+          completedAt: "2026-10-19T10:00:00Z"
+        },
+        saving: false,
+        secIdentityMissing: true,
+        onOpenSecIdentitySetup: vi.fn(),
+        onSearch: vi.fn(),
+        onSelectCompany: vi.fn(),
+        onSavePeerBasket: vi.fn(),
+        onSaveDcfModel: vi.fn(),
+        onSaveDcfSnapshot: vi.fn(),
+        onLoadDcfSnapshot: vi.fn()
+      }
+    });
+
+    expect(body).toContain("SEC identity");
+    expect(body).toContain("only to sec.gov");
+    expect(body).toContain("Set SEC identity");
+  });
+
   it("renders DCF editable cells with visible affordances and descriptive labels", () => {
     const { body } = render(FundamentalsView, {
       props: {

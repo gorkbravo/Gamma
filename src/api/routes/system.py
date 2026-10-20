@@ -16,9 +16,19 @@ from src.api.schemas.system import (
     ProviderCapabilityModel,
     ProviderUsageResponseModel,
     ReadOnlyBoundaryModel,
+    SetupReportModel,
+    SetupUpdateRequestModel,
+    SetupUpdateResponseModel,
     SystemStatusResponseModel,
 )
+from src.application.setup_service import (
+    SetupUpdate,
+    apply_setup_update,
+    build_setup_report,
+    persist_runtime_preference,
+)
 from src.models.platform_boundary import build_gamma_read_only_boundary
+from src.services.setup_store import SetupStoreError
 from src.utils.time import now_utc
 
 
@@ -114,7 +124,9 @@ def set_market_data_mode(
     request: Request,
 ) -> SystemStatusResponseModel:
     runtime = request.app.state.runtime
-    runtime.set_market_data_mode(payload.market_data_mode)
+    mode = runtime.set_market_data_mode(payload.market_data_mode)
+    # El cambio desde Settings sobrevive al reinicio salvo que IB_MARKET_DATA_MODE lo fije.
+    persist_runtime_preference(runtime, market_data_mode=mode)
     return _system_status_response(runtime)
 
 
@@ -125,10 +137,43 @@ def set_base_currency(
 ) -> BaseCurrencyResponseModel:
     runtime = request.app.state.runtime
     try:
-        _, lines = runtime.set_base_currency(payload.base_currency)
+        currency, lines = runtime.set_base_currency(payload.base_currency)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Persistir evita que un reinicio vuelva a otra divisa con el histórico ya archivado.
+    persist_runtime_preference(runtime, base_currency=currency)
     return BaseCurrencyResponseModel(**_system_status_response(runtime).model_dump(), lines=lines)
+
+
+@router.get("/system/setup", response_model=SetupReportModel)
+def setup_report(request: Request) -> SetupReportModel:
+    runtime = request.app.state.runtime
+    return SetupReportModel.from_domain(build_setup_report(runtime))
+
+
+@router.post("/system/setup", response_model=SetupUpdateResponseModel)
+def update_setup(payload: SetupUpdateRequestModel, request: Request) -> SetupUpdateResponseModel:
+    """Guarda las elecciones del asistente de primer arranque.
+
+    Nunca recibe claves de API: estas siguen configurándose por variables de entorno.
+    """
+    runtime = request.app.state.runtime
+    update = SetupUpdate(
+        data_mode=payload.data_mode,
+        base_currency=payload.base_currency,
+        market_data_mode=payload.market_data_mode,
+        sec_identity=(payload.sec_identity.name, payload.sec_identity.email) if payload.sec_identity else None,
+        clear_sec_identity=payload.clear_sec_identity,
+        complete=payload.complete,
+    )
+    try:
+        lines = apply_setup_update(runtime, update)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SetupStoreError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    report = SetupReportModel.from_domain(build_setup_report(runtime))
+    return SetupUpdateResponseModel(**report.model_dump(), lines=lines)
 
 
 def _system_status_response(runtime) -> SystemStatusResponseModel:

@@ -8,6 +8,7 @@ from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
 from typing import Callable, Protocol
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
@@ -38,6 +39,10 @@ class RssFeedConfig:
 FeedFetcher = Callable[[RssFeedConfig, float, str], bytes]
 
 RSS_USER_AGENT = "GammaResearch/0.1 read-only RSS news adapter"
+SEC_FEED_SKIPPED_WARNING = (
+    "SEC press releases were skipped: sec.gov asks automated tools to identify the requester. "
+    "Add your SEC EDGAR identity in Setup (Settings > Run Setup)."
+)
 MAX_RSS_FEED_BYTES = 5 * 1024 * 1024
 SUMMARY_MAX_CHARS = 420
 
@@ -282,11 +287,15 @@ class RssNewsEventProvider:
         timeout_seconds: float = 6.0,
         user_agent: str = RSS_USER_AGENT,
         fetcher: FeedFetcher | None = None,
+        sec_user_agent: Callable[[], str | None] | None = None,
     ) -> None:
         self.feeds = tuple(feeds)
         self.timeout_seconds = max(0.5, float(timeout_seconds))
         self.user_agent = str(user_agent or RSS_USER_AGENT).strip() or RSS_USER_AGENT
         self.fetcher = fetcher or _default_feed_fetcher
+        # Devuelve la identidad SEC configurada ("Nombre email") o None; se consulta en cada
+        # carga para recoger cambios hechos en el asistente sin reiniciar.
+        self.sec_user_agent = sec_user_agent
 
     def latest(self, *, limit: int = 25) -> NewsEventFeed:
         requested_limit = max(int(limit or 0), 0)
@@ -295,8 +304,16 @@ class RssNewsEventProvider:
         items: list[NewsEventItem] = []
 
         for feed in self.feeds:
+            user_agent = self.user_agent
+            if _is_sec_host(feed.url):
+                sec_identity = self.sec_user_agent() if self.sec_user_agent is not None else None
+                if not sec_identity:
+                    # sec.gov exige un User-Agent con contacto: sin identidad no se pide el feed.
+                    warnings.append(SEC_FEED_SKIPPED_WARNING)
+                    continue
+                user_agent = sec_identity
             try:
-                content = self.fetcher(feed, self.timeout_seconds, self.user_agent)
+                content = self.fetcher(feed, self.timeout_seconds, user_agent)
                 parsed_items, feed_warnings = _parse_feed_items(feed, content, retrieved_at)
                 items.extend(parsed_items)
                 warnings.extend(feed_warnings)
@@ -405,6 +422,11 @@ class SampleNewsEventProvider:
             warnings=["Sample news items are static contract fixtures, not live news coverage."],
             transformation_note="Sample provider emits deterministic normalized news/event items for backend and UI integration.",
         )
+
+
+def _is_sec_host(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return host == "sec.gov" or host.endswith(".sec.gov")
 
 
 def _default_feed_fetcher(feed: RssFeedConfig, timeout_seconds: float, user_agent: str) -> bytes:

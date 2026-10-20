@@ -1075,7 +1075,7 @@ Potential sources include:
 A practical implementation path now uses SEC-native ingestion through EdgarTools plus the existing IBKR market context, while keeping any later standardized-provider or estimate layers optional and additive rather than the foundation of the tab.
 
 Implementation note:
-- the current first-pass implementation uses `edgartools`, and before a user-configurable SEC identity setting exists the temporary development identity remains `Gorka Bravo gorka.bravo1@gmail.com`
+- the current first-pass implementation uses `edgartools`, and before a user-configurable SEC identity setting exists the temporary development identity remains [developer identity, redacted 2026-10-19] (removed from code on 2026-10-19; each user now saves their own identity in Setup)
 - this should remain a temporary development default only and must later move behind an explicit app/user configuration path rather than stay hard-coded
 
 ### Deliverable of the phase

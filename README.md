@@ -791,6 +791,16 @@ pip install -e .[dev]
 copy .env.example .env
 ```
 
+First-run setup and demo mode:
+
+- On first launch Gamma opens a setup dialog. It can be reopened from `Run setup` on the landing page and from `Settings`. The dialog chooses `Demo` or `Live data`, base currency and (for live data) market-data mode, shows which source each tab will use in each mode, lists optional provider keys and saves the user's SEC EDGAR identity.
+- Choices are saved in `<PORTFOLIO_HISTORY_DIR>/setup/setup.json` (default `data/setup/setup.json`; the desktop app uses its app-data directory). API keys are never stored there; they stay in environment variables or `.env`.
+- Precedence is environment or `.env` (`MOCK_DATA`, `BASE_CURRENCY`, `IB_MARKET_DATA_MODE`, `GAMMA_SEC_USER_NAME` / `GAMMA_SEC_USER_EMAIL`) > saved setup > defaults (demo, EUR, delayed). Values fixed by the environment are shown as locked in the dialog. Unset `MOCK_DATA` to let the saved choice decide.
+- Switching between demo and live data takes effect after a restart, because the IBKR client and providers are built for one mode. Base currency and market-data mode apply immediately; changing them in `Settings` is now saved too.
+- Demo mode means a sample account, synthetic prices and option surfaces, and sample commodities, maritime and news data. Free public sources (FRED, US Treasury, DB.nomics, Polymarket, Kalshi, CoinGecko, GeckoTerminal, SEC EDGAR) stay live when the network is reachable. Copilot still needs `OPENAI_API_KEY`, or `GAMMA_COPILOT_PROVIDER=mock` for canned demo answers.
+- SEC EDGAR asks automated tools to identify the requester, so Gamma has no default SEC identity. Until the user saves a name and email in Setup (or sets both `GAMMA_SEC_USER_NAME` and `GAMMA_SEC_USER_EMAIL`), Gamma makes no request to sec.gov: Fundamentals routes answer HTTP 428 with `code: sec_identity_missing` and the tab shows a `Set SEC identity` action that opens Setup on that step; Copilot company-name lookup, Script Fundamentals discovery/preview and the SEC press-release RSS feed report the same missing identity instead of failing generically. The identity is sent only to sec.gov, in the User-Agent header.
+- API: `GET /system/setup` returns the readiness report (key presence only, never key values); `POST /system/setup` saves choices.
+
 Backend:
 
 ```powershell

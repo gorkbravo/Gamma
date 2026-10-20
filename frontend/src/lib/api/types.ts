@@ -299,6 +299,102 @@ export interface BaseCurrencyResponse extends SystemStatus {
   lines: string[];
 }
 
+// Asistente de primer arranque (GET/POST /system/setup). Nunca contiene valores de claves de API.
+export type SetupDataMode = "demo" | "live";
+export type SetupValueSource = "argument" | "environment" | "setup" | "default";
+export type SetupCoverageSource = "sample" | "public" | "broker" | "mixed" | "model" | "unavailable";
+
+export interface SetupDataModeState {
+  current: SetupDataMode;
+  preference: SetupDataMode | null;
+  source: SetupValueSource;
+  restart_required: boolean;
+  locked_by: string | null;
+  detail: string;
+}
+
+export interface SetupValueState {
+  current: string;
+  source: SetupValueSource;
+  locked_by: string | null;
+  options: string[];
+}
+
+export interface SetupIbkrState {
+  status: "demo" | "connected" | "disconnected";
+  host: string;
+  port: number;
+  client_id: number;
+  account_configured: boolean;
+  detail: string;
+  steps: string[];
+}
+
+export interface SetupSecIdentityState {
+  status: "configured" | "missing";
+  source: "environment" | "setup" | "missing";
+  locked_by: string | null;
+  name: string | null;
+  email: string | null;
+  detail: string;
+}
+
+export interface SetupCopilotState {
+  status: "configured" | "demo" | "missing_key" | "disabled" | "unavailable";
+  provider: string;
+  detail: string;
+  env_vars: string[];
+}
+
+export interface SetupProviderRow {
+  provider_id: string;
+  display_name: string;
+  configured: boolean;
+  env_vars: string[];
+  unlocks: string;
+}
+
+export interface SetupCoverageRow {
+  tab_id: TabId;
+  label: string;
+  source: SetupCoverageSource;
+  detail: string;
+}
+
+export interface SetupReport {
+  generated_at: string;
+  schema_version: number;
+  first_run: boolean;
+  completed_at: string | null;
+  data_mode: SetupDataModeState;
+  base_currency: SetupValueState;
+  market_data_mode: SetupValueState;
+  ibkr: SetupIbkrState;
+  sec_identity: SetupSecIdentityState;
+  copilot: SetupCopilotState;
+  providers: SetupProviderRow[];
+  coverage_by_mode: Record<SetupDataMode, SetupCoverageRow[]>;
+  config: {
+    env_file_path: string | null;
+    env_file_present: boolean;
+    setup_file_path: string;
+  };
+  warnings: string[];
+}
+
+export interface SetupUpdateRequest {
+  data_mode?: SetupDataMode;
+  base_currency?: string;
+  market_data_mode?: string;
+  sec_identity?: { name: string; email: string };
+  clear_sec_identity?: boolean;
+  complete?: boolean;
+}
+
+export interface SetupUpdateResponse extends SetupReport {
+  lines: string[];
+}
+
 export interface DiagnosticsResponse {
   generated_at: string;
   mock_mode: boolean;

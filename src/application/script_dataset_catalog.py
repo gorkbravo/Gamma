@@ -17,6 +17,7 @@ from threading import RLock
 from uuid import uuid4
 
 from src.models.research_overview import RESEARCH_OVERVIEW_UNIVERSES
+from src.services.fundamentals_adapters import SecIdentityMissingError
 from src.models.research_script import ResearchScriptInputFileCreateRequest
 from src.utils.time import now_utc
 
@@ -241,7 +242,12 @@ class ScriptDatasetCatalog:
             for item in self.service("research").list_saved_research():
                 add(item.id, f"{item.title} · {item.object_type}")
         elif domain == "fundamentals":
-            for item in self.service("fundamentals").search_companies(query, limit=20):
+            try:
+                companies = self.service("fundamentals").search_companies(query, limit=20)
+            except SecIdentityMissingError as exc:
+                # Mensaje redactado por Gamma (sin datos del proveedor): se puede mostrar tal cual.
+                return {"items": [], "warnings": [str(exc)], "limitations": DATASETS[domain][1], "status": "unavailable"}
+            for item in companies:
                 add(item.ticker, f"{item.ticker} · {item.name} · CIK {item.cik}")
         elif domain == "options_capture":
             records, warnings = self.service("options").records()
@@ -316,7 +322,10 @@ class ScriptDatasetCatalog:
         if domain == "saved_research":
             return self.service("research").load_saved_research(identity)
         if domain == "fundamentals":
-            result = self.service("fundamentals").get_financials(identity)
+            try:
+                result = self.service("fundamentals").get_financials(identity)
+            except SecIdentityMissingError as exc:
+                raise DatasetServiceUnavailableError(str(exc)) from exc
             if result is not None and result.company.ticker.upper() != identity.upper():
                 raise DatasetSelectionError("Company identity mismatch.")
             return result

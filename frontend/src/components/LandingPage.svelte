@@ -6,6 +6,7 @@
   export let onConnect: () => void;
   export let onEnterPortfolio: () => void;
   export let onEnterResearch: () => void;
+  export let onOpenSetup: () => void = () => {};
 
   const connectedLabel = (status: SystemStatus | null) => {
     if (!status) {
@@ -20,6 +21,10 @@
   };
 
   const connectionActionLabel = (status: SystemStatus | null) => {
+    // En demo no hay broker al que conectar; el botón deshabilitado debe decir por qué.
+    if (status?.mock_mode) {
+      return "Demo mode: no broker connection";
+    }
     if (status?.connection.connected) {
       return "Disconnect from IBKR";
     }
@@ -33,7 +38,7 @@
         { label: "Backend", value: status.backend, tone: status.healthy ? "ok" : "warn" },
         {
           label: "Data",
-          value: status.mock_mode ? "Mock" : status.market_data_mode || "Live",
+          value: status.mock_mode ? "Demo" : status.market_data_mode || "Live",
           tone: status.mock_mode ? "warn" : "ok"
         },
         { label: "Base currency", value: status.base_currency, tone: "" },
@@ -101,7 +106,10 @@
       </button>
     </div>
 
-    <p class="boundary">Read-only. Gamma never places orders or moves funds.</p>
+    <div class="boundary">
+      <p>Read-only. Gamma never places orders or moves funds.</p>
+      <button type="button" class="link" on:click={onOpenSetup}>Run setup</button>
+    </div>
   </article>
 </section>
 
@@ -299,11 +307,26 @@
   }
 
   .boundary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-5);
     color: var(--text-2);
     font-family: var(--display-font);
     font-size: var(--text-xs);
     padding-top: var(--space-5);
     border-top: 1px solid var(--panel-border);
+  }
+
+  .boundary .link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.75rem;
+    padding: 0 var(--space-4);
+    background: transparent;
+    border-color: var(--panel-border);
+    color: var(--text-1);
+    font-size: var(--text-xs);
   }
 
   @media (max-width: 640px) {

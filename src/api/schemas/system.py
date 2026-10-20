@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 from src.models.platform_boundary import ReadOnlyBoundary
 from src.models.provider_capabilities import ProviderCapability
+from src.models.setup import SetupReport
 from src.models.provider_usage import ProviderUsageCall, ProviderUsageHealth, ProviderUsageSnapshot, ProviderUsageSummary
 
 
@@ -214,3 +216,110 @@ class ReadOnlyBoundaryModel(BaseModel):
     @classmethod
     def from_domain(cls, row: ReadOnlyBoundary) -> "ReadOnlyBoundaryModel":
         return cls(**row.__dict__)
+
+
+# ── Asistente de primer arranque ──────────────────────────────────────────
+
+
+class SetupDataModeStateModel(BaseModel):
+    current: str
+    preference: str | None = None
+    source: str
+    restart_required: bool = False
+    locked_by: str | None = None
+    detail: str
+
+
+class SetupValueStateModel(BaseModel):
+    current: str
+    source: str
+    locked_by: str | None = None
+    options: list[str] = Field(default_factory=list)
+
+
+class SetupIbkrStateModel(BaseModel):
+    status: str
+    host: str
+    port: int
+    client_id: int
+    account_configured: bool
+    detail: str
+    steps: list[str] = Field(default_factory=list)
+
+
+class SetupSecIdentityStateModel(BaseModel):
+    status: str
+    source: str
+    locked_by: str | None = None
+    name: str | None = None
+    email: str | None = None
+    detail: str
+
+
+class SetupCopilotStateModel(BaseModel):
+    status: str
+    provider: str
+    detail: str
+    env_vars: list[str] = Field(default_factory=list)
+
+
+class SetupProviderRowModel(BaseModel):
+    provider_id: str
+    display_name: str
+    configured: bool
+    env_vars: list[str] = Field(default_factory=list)
+    unlocks: str
+
+
+class SetupCoverageRowModel(BaseModel):
+    tab_id: str
+    label: str
+    source: str
+    detail: str
+
+
+class SetupConfigLocationModel(BaseModel):
+    env_file_path: str | None = None
+    env_file_present: bool = False
+    setup_file_path: str
+
+
+class SetupReportModel(BaseModel):
+    generated_at: datetime
+    schema_version: int
+    first_run: bool
+    completed_at: datetime | None = None
+    data_mode: SetupDataModeStateModel
+    base_currency: SetupValueStateModel
+    market_data_mode: SetupValueStateModel
+    ibkr: SetupIbkrStateModel
+    sec_identity: SetupSecIdentityStateModel
+    copilot: SetupCopilotStateModel
+    providers: list[SetupProviderRowModel] = Field(default_factory=list)
+    coverage_by_mode: dict[str, list[SetupCoverageRowModel]] = Field(default_factory=dict)
+    config: SetupConfigLocationModel
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = "gamma"
+    origin: str = "gamma.system.setup"
+
+    @classmethod
+    def from_domain(cls, report: SetupReport) -> "SetupReportModel":
+        return cls.model_validate(asdict(report))
+
+
+class SetupSecIdentityRequestModel(BaseModel):
+    name: str = Field(max_length=200)
+    email: str = Field(max_length=200)
+
+
+class SetupUpdateRequestModel(BaseModel):
+    data_mode: str | None = None
+    base_currency: str | None = None
+    market_data_mode: str | None = None
+    sec_identity: SetupSecIdentityRequestModel | None = None
+    clear_sec_identity: bool = False
+    complete: bool | None = None
+
+
+class SetupUpdateResponseModel(SetupReportModel):
+    lines: list[str] = Field(default_factory=list)

@@ -85,11 +85,11 @@ Similarly, `_is_cash()` / `_is_cash_position()` and `_is_valid_currency_code()` 
 `src/services/fundamentals_adapters.py:310-312`:
 ```python
 # TODO: Replace this development-time SEC identity fallback
-name = os.getenv("GAMMA_SEC_USER_NAME", "Gorka Bravo")
-email = os.getenv("GAMMA_SEC_USER_EMAIL", "gorka.bravo1@gmail.com")
+name = os.getenv("GAMMA_SEC_USER_NAME", "<developer name>")
+email = os.getenv("GAMMA_SEC_USER_EMAIL", "<developer email>")
 ```
 
-Personal information as hardcoded defaults. SEC requests from other users would be made under this identity if env vars aren't set.
+Personal information as hardcoded defaults. SEC requests from other users would be made under this identity if env vars aren't set. Resolved 2026-10-19: the fallback was removed; without a configured identity Gamma makes no SEC request and points the user to Setup.
 
 ---
 
