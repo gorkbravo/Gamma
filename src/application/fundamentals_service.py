@@ -711,11 +711,11 @@ class FundamentalsService:
         market_context = self._build_market_context(sec_data, price_context)
         raw_model = self.store.load_dcf_model(sec_data.company.ticker) or self._create_default_dcf_payload(sec_data, market_context)
         materialized = self._materialize_dcf_model(sec_data, market_context, raw_model)
-        created_at = datetime.now(timezone.utc)
+        created_at = now_utc()
         clean_name = str(name or "").strip() or f"{materialized.active_scenario_id.title()} snapshot"
-        snapshot_id = self._build_snapshot_id(created_at, clean_name)
+        base_snapshot_id = self._build_snapshot_id(created_at, clean_name)
         payload = {
-            "snapshot_id": snapshot_id,
+            "snapshot_id": base_snapshot_id,
             "ticker": sec_data.company.ticker,
             "name": clean_name,
             "created_at": created_at.isoformat(),
@@ -737,7 +737,15 @@ class FundamentalsService:
             "origin": "fundamentals.dcf.snapshot",
             "transformation_note": "Gamma snapshots the locally persisted DCF scenario inputs with the then-current computed scenario summaries for later read-only recall.",
         }
-        self.store.save_dcf_snapshot(sec_data.company.ticker, snapshot_id, payload)
+        # El id base (marca de tiempo + slug del nombre) puede repetirse: el reloj de Windows
+        # tiene una resolución gruesa y dos guardados con el mismo nombre caen en el mismo
+        # tick. En vez de sobrescribir la instantánea anterior, se reserva el id de forma
+        # atómica y, si ya existe, se prueba con un sufijo correlativo (-2, -3, ...). El
+        # primer id conserva el formato histórico, así que los ids ya guardados siguen cargando.
+        attempt = 1
+        while not self.store.create_dcf_snapshot(sec_data.company.ticker, payload["snapshot_id"], payload):
+            attempt += 1
+            payload["snapshot_id"] = f"{base_snapshot_id}-{attempt}"
         return self._snapshot_record_from_payload(payload)
 
     def load_dcf_snapshot_model(
