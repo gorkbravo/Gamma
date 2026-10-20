@@ -907,6 +907,8 @@ npm run desktop:smoke:bundle
 
 If the splash reports a startup failure, the reason is also written to `logs\shell-startup-failure.txt` in the app-data folder below, next to `backend-failure.txt` and `backend-stderr.log`.
 
+`frontend/scripts/installer-lifecycle.ps1` installs the built installer silently, starts the installed app, reinstalls over it (checking that app data survives) and uninstalls it. It changes the machine it runs on, so use it only on a disposable machine. The `Installer smoke (Windows)` workflow (`.github/workflows/installer-smoke.yml`) runs the whole pipeline plus that script on a clean GitHub-hosted Windows runner when a `claude/installer-ci-*` branch is pushed (or manually once the workflow is on the default branch). It uploads only logs and a summary, never the installer.
+
 The installer is written to `frontend/src-tauri/target/release/bundle/nsis/`. The installed app keeps its data, logs and an optional `.env` in `%APPDATA%\com.gamma.shell\runtime`; it never reads the repository `.env`. A tester sets API keys either as Windows environment variables or in that `.env` (the setup dialog shows the exact path), then restarts Gamma. Test installs on a separate Windows user account or a virtual machine so the developer `.env` and app data do not leak into the result.
 
 ## Validation
