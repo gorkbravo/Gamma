@@ -221,6 +221,37 @@ describe("risk workspace view-model", () => {
     expect(model.alerts.some((alert) => alert.includes("Missing/stale data"))).toBe(true);
   });
 
+  it("splits the historical expected shortfall across positions", () => {
+    const withEs: RiskResult = {
+      ...riskResult,
+      component_es_tail_days: 13,
+      contributions: [
+        { ...riskResult.contributions[0], component_es: 1500 },
+        { ...riskResult.contributions[1], component_es: 500 },
+      ],
+    };
+    const model = buildRiskWorkspaceModel(snapshot, withEs, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.contributionTailDays).toBe(13);
+    expect(model.riskContributors.map((row) => [row.symbol, row.componentEs, row.esShare])).toEqual([
+      ["AAPL", 1500, 0.75],
+      ["MSFT", 500, 0.25],
+    ]);
+
+    // Sin desglose del ES (respuesta antigua) las columnas quedan vacías en vez de inventar un reparto.
+    const legacy = buildRiskWorkspaceModel(snapshot, riskResult, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+    expect(legacy.contributionTailDays).toBeNull();
+    expect(legacy.riskContributors.every((row) => row.componentEs === null && row.esShare === null)).toBe(true);
+  });
+
   it("labels Strategy Lab research-book sources distinctly", () => {
     const model = buildRiskWorkspaceModel(snapshot, {
       ...riskResult,
@@ -335,6 +366,36 @@ describe("risk workspace view-model", () => {
       { key: "portfolio:stk:aapl", label: "AAPL" },
       { key: "portfolio:stk:msft", label: "MSFT" },
     ]);
+  });
+
+  it("pairs research-book legs by the matrix key, not the instrument id", () => {
+    const bookResult: RiskResult = {
+      ...riskResult,
+      source_scope: "research_book",
+      correlation_matrix: {
+        assets: [
+          { key: "1:leg:xom", symbol: "XOM", instrument_id: "leg:xom", display_symbol: "XOM" },
+          { key: "2:leg:amd", symbol: "AMD", instrument_id: "leg:amd", display_symbol: "AMD" },
+        ],
+        cells: [
+          { row: "1:leg:xom", column: "1:leg:xom", correlation: 1 },
+          { row: "1:leg:xom", column: "2:leg:amd", correlation: -0.42 },
+          { row: "2:leg:amd", column: "1:leg:xom", correlation: -0.42 },
+          { row: "2:leg:amd", column: "2:leg:amd", correlation: 1 },
+        ],
+      },
+    };
+    const model = buildRiskWorkspaceModel(snapshot, bookResult, {
+      sourceScope: "research_book",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.correlationMatrix.assets).toEqual([
+      { key: "1:leg:xom", label: "XOM" },
+      { key: "2:leg:amd", label: "AMD" },
+    ]);
+    expect(model.correlatedPairs[0].cells.slice(0, 2)).toEqual(["XOM / AMD", "-0.42"]);
   });
 
   it("surfaces the backend frontier reason when no frontier points are returned", () => {

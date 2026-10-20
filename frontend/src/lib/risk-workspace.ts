@@ -37,6 +37,8 @@ export interface RiskWorkspaceModel {
   holdings: HoldingRiskRow[];
   exposureBreakdown: ExposureBreakdownRow[];
   riskContributors: RiskContributionRow[];
+  // Días de cola del ES histórico por posición (null si no hay desglose).
+  contributionTailDays: number | null;
   largestMovers: RiskTableRow[];
   concentrationFlags: RiskTableRow[];
   coverageWarnings: string[];
@@ -92,6 +94,9 @@ export interface RiskContributionRow {
   volatility: number | null;
   contribution: number | null;
   componentVar: number | null;
+  // Pérdida media de la posición en los días de cola (CVaR histórico) y su peso sobre el total.
+  componentEs: number | null;
+  esShare: number | null;
 }
 
 export interface DrawdownEpisode {
@@ -238,6 +243,7 @@ export function buildRiskWorkspaceModel(
     holdings,
     exposureBreakdown,
     riskContributors,
+    contributionTailDays: result?.component_es_tail_days ?? null,
     largestMovers: buildLargestMovers(holdings),
     concentrationFlags: buildConcentrationFlags(holdings, exposureBreakdown),
     coverageWarnings,
@@ -321,12 +327,18 @@ function qualityFlag(position: Position, contribution: RiskContribution | null, 
 }
 
 function buildRiskContributors(result: RiskResult | null): RiskContributionRow[] {
-  return [...(result?.contributions ?? [])].map((row) => ({
+  const rows = result?.contributions ?? [];
+  // El reparto del ES solo tiene sentido si el total es una pérdida (positivo); si no, se muestra N/A.
+  const esTotal = rows.reduce((sum, row) => sum + (row.component_es ?? 0), 0);
+  const hasEs = rows.some((row) => row.component_es != null) && esTotal > 0;
+  return [...rows].map((row) => ({
     symbol: row.display_symbol ?? row.symbol,
     weight: row.weight,
     volatility: row.daily_vol == null ? null : row.daily_vol * Math.sqrt(252),
     contribution: row.variance_contribution_pct,
     componentVar: row.component_var,
+    componentEs: row.component_es ?? null,
+    esShare: hasEs && row.component_es != null ? row.component_es / esTotal : null,
   }));
 }
 
@@ -483,7 +495,7 @@ function buildUnavailableRows(messages: string[]): RiskTableRow[] {
 function buildCorrelationMatrix(matrix: RiskCorrelationMatrix | null | undefined): RiskCorrelationMatrixView {
   const assets = (matrix?.assets ?? [])
     .map((asset) => ({
-      key: asset.instrument_id ?? asset.symbol,
+      key: asset.key ?? asset.instrument_id ?? asset.symbol,
       label: asset.display_symbol ?? asset.symbol,
     }))
     .filter((asset) => asset.key && asset.label)

@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
+from src.analytics.risk_metrics import portfolio_returns
+from src.analytics.var import historical_es_contributions, historical_var_cvar, monte_carlo_var_cvar, parametric_var
 
 
 def test_historical_var_cvar_simple():
@@ -155,3 +156,43 @@ def test_monte_carlo_invalid_inputs_return_none():
         100,
         1,
     ) is None
+
+
+def test_historical_es_contributions_add_up_to_the_portfolio_cvar():
+    idx = pd.date_range("2026-01-02", periods=40, freq="B")
+    rng = np.random.default_rng(7)
+    asset_returns = pd.DataFrame(
+        {"A": rng.normal(0.0, 0.02, 40), "B": rng.normal(0.0, 0.01, 40), "C": rng.normal(0.0, 0.03, 40)},
+        index=idx,
+    )
+    weights = pd.Series({"A": 0.7, "B": 0.5, "C": -0.2})
+
+    contributions, tail_days = historical_es_contributions(asset_returns, weights, 0.95)
+    _, cvar = historical_var_cvar(portfolio_returns(asset_returns, weights), 0.95)
+
+    assert list(contributions.index) == ["A", "B", "C"]
+    assert tail_days == 2
+    assert abs(contributions.sum() - cvar) < 1e-12
+
+
+def test_historical_es_contributions_treat_missing_returns_like_portfolio_returns():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    asset_returns = pd.DataFrame(
+        {"A": [0.01, -0.04, np.nan, 0.02, -0.01, 0.0], "B": [0.0, -0.01, -0.06, 0.01, np.nan, 0.02]},
+        index=idx,
+    )
+    weights = pd.Series({"A": 0.5, "B": 0.5})
+
+    contributions, _ = historical_es_contributions(asset_returns, weights, 0.8)
+    _, cvar = historical_var_cvar(portfolio_returns(asset_returns, weights), 0.8)
+
+    assert abs(contributions.sum() - cvar) < 1e-12
+    # El peor día es una caída de B con A sin dato: casi toda la pérdida de la cola es de B.
+    assert contributions["B"] > contributions["A"]
+
+
+def test_historical_es_contributions_handle_empty_inputs():
+    empty, days = historical_es_contributions(pd.DataFrame(), pd.Series({"A": 1.0}), 0.95)
+    assert empty.empty and days == 0
+    unmatched, days = historical_es_contributions(pd.DataFrame({"B": [0.01, -0.02]}), pd.Series({"A": 1.0}), 0.95)
+    assert unmatched.empty and days == 0

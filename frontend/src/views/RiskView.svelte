@@ -862,7 +862,7 @@
         {:else}
           <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
         {/if}
-        {@render RiskContributorsTable(workspace.riskContributors)}
+        {@render RiskContributorsTable(workspace.riskContributors, workspace.contributionTailDays)}
         </div>
         <aside class="support-column">
         {@render RankPanel("Top Risk Contributors", riskContributionBars)}
@@ -1023,12 +1023,25 @@
   </article>
 {/snippet}
 
-{#snippet RiskContributorsTable(rows: RiskContributionRow[])}
+{#snippet RiskContributorsTable(rows: RiskContributionRow[], tailDays: number | null)}
   <article class="panel table-panel">
-    <header class="table-panel-header">Contribution Detail<span>{rows.length} rows</span></header>
+    <header class="table-panel-header">
+      Contribution Detail
+      <span>{rows.length} rows{tailDays ? ` · ES over ${tailDays} worst days` : ""}</span>
+    </header>
     <table>
-      <thead><tr><th>Symbol</th><th>Weight</th><th>Vol</th><th>Var %</th><th>Component VaR</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={pct(row.volatility) === "N/A"}>{pct(row.volatility)}</td><td class:absent={pct(row.contribution) === "N/A"}>{pct(row.contribution)}</td><td class:absent={currency(row.componentVar) === "N/A"}>{currency(row.componentVar)}</td></tr>{/each}</tbody>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Weight</th>
+          <th>Vol</th>
+          <th title="Share of portfolio variance (parametric, assumes normal returns).">Var %</th>
+          <th title="Parametric component VaR: adds up to the parametric VaR.">Param VaR</th>
+          <th title="Share of the historical expected shortfall (CVaR).">ES %</th>
+          <th title="Average loss of the position on the worst historical days; adds up to the historical CVaR.">Tail ES</th>
+        </tr>
+      </thead>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={pct(row.volatility) === "N/A"}>{pct(row.volatility)}</td><td class:absent={pct(row.contribution) === "N/A"}>{pct(row.contribution)}</td><td class:absent={currency(row.componentVar) === "N/A"}>{currency(row.componentVar)}</td><td class:absent={pct(row.esShare) === "N/A"}>{pct(row.esShare)}</td><td class:absent={currency(row.componentEs) === "N/A"}>{currency(row.componentEs)}</td></tr>{/each}</tbody>
     </table>
   </article>
 {/snippet}

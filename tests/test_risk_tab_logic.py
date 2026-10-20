@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from src.analytics.var import parametric_var
 from src.application.portfolio_service import PortfolioPerformanceRequest, PortfolioService
+from src.api.schemas.risk import RiskComputeResponseModel
 from src.application.risk_service import RiskComputeRequest, RiskService
 from src.models.instruments import InstrumentDefaults
 from src.models.portfolio import PortfolioSnapshot, PositionItem
@@ -1003,3 +1005,152 @@ def test_analysis_window_fields_handle_an_empty_run():
     assert fields["requested_lookback_days"] == 126
     assert fields["effective_start_date"] is None
     assert fields["dropped_observation_count"] == 0
+
+
+
+def _research_book_request(legs, aggregate):
+    snapshot = _make_snapshot(
+        [
+            PositionItem(
+                "STRATEGY_BOOK", "BOOK", "USD", 1, None, 100000, 100000, None,
+                weight=1.0, base_market_value=100000.0, instrument_id="strategy_research_book:test",
+            ),
+        ],
+        net_liq=100000.0,
+    )
+    return RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=20,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        recommended_min_obs=3,
+        source_scope="research_book",
+        research_book_returns=aggregate,
+        research_book_legs=legs,
+    )
+
+
+def _book_legs(returns_by_symbol, weights):
+    return [
+        ResearchBookRiskLeg(
+            leg_id=f"{index}:leg:{symbol.lower()}",
+            label=symbol,
+            symbol=symbol,
+            instrument_id=f"leg:{symbol.lower()}",
+            weight=weights[symbol],
+            return_points=[
+                ResearchObjectReturnPoint(timestamp=timestamp.isoformat(), value=float(value))
+                for timestamp, value in returns_by_symbol[symbol].items()
+            ],
+        )
+        for index, symbol in enumerate(returns_by_symbol, start=1)
+    ]
+
+
+def _random_leg_returns(symbols, periods=80, seed=11):
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2025-06-02", periods=periods, freq="B")
+    common = rng.normal(0.0, 0.01, periods)
+    return {
+        symbol: pd.Series(common * (0.5 + index * 0.3) + rng.normal(0.0, 0.012, periods), index=idx)
+        for index, symbol in enumerate(symbols)
+    }
+
+
+def test_research_book_historical_es_contributions_add_up_to_book_cvar():
+    returns = _random_leg_returns(["XOM", "AMD"])
+    weights = {"XOM": 0.6, "AMD": -0.4}
+    aggregate = returns["XOM"] * 0.6 + returns["AMD"] * -0.4
+
+    payload = _make_risk_service().compute(_research_book_request(_book_legs(returns, weights), aggregate))
+
+    assert payload.component_es is not None
+    assert set(payload.component_es.index) == {"1:leg:xom", "2:leg:amd"}
+    assert payload.component_es.sum() == pytest.approx(payload.results.historical_cvar, rel=1e-12)
+    assert payload.component_es_tail_days == 4
+    assert not any("do not add up" in warning for warning in payload.results.warnings)
+
+    response = RiskComputeResponseModel.from_service_payload(payload)
+    rows = {row.symbol: row for row in response.contributions}
+    assert rows["XOM"].component_es == pytest.approx(payload.component_es["1:leg:xom"])
+    assert response.component_es_tail_days == 4
+
+
+def test_research_book_correlation_and_network_describe_the_legs():
+    returns = _random_leg_returns(["XOM", "AMD", "TLT"])
+    weights = {"XOM": 0.5, "AMD": 0.3, "TLT": 0.2}
+    aggregate = sum(returns[symbol] * weight for symbol, weight in weights.items())
+
+    payload = _make_risk_service().compute(_research_book_request(_book_legs(returns, weights), aggregate))
+
+    assert list(payload.correlation_matrix.columns) == ["1:leg:xom", "2:leg:amd", "3:leg:tlt"]
+    assert sorted(node.label for node in payload.dependency_network.nodes) == ["AMD", "TLT", "XOM"]
+    assert all(node.is_portfolio for node in payload.dependency_network.nodes)
+    assert payload.frontier_points, "a long-only book with leg history should draw its frontier"
+    assert not any("short legs" in warning for warning in payload.results.warnings)
+
+    response = RiskComputeResponseModel.from_service_payload(payload)
+    assert [asset.symbol for asset in response.correlation_matrix.assets] == ["XOM", "AMD", "TLT"]
+    # Las celdas se refieren a la clave de cada activo (leg_id), no a su instrument_id.
+    keys = [asset.key for asset in response.correlation_matrix.assets]
+    assert keys == ["1:leg:xom", "2:leg:amd", "3:leg:tlt"]
+    assert {cell.row for cell in response.correlation_matrix.cells} == set(keys)
+
+
+def test_research_book_with_short_legs_skips_the_long_only_frontier():
+    returns = _random_leg_returns(["XOM", "AMD", "TLT"])
+    weights = {"XOM": 0.6, "AMD": -0.3, "TLT": 0.1}
+    aggregate = sum(returns[symbol] * weight for symbol, weight in weights.items())
+
+    payload = _make_risk_service().compute(_research_book_request(_book_legs(returns, weights), aggregate))
+
+    assert payload.frontier_points == []
+    assert any(
+        warning.startswith("Efficient frontier unavailable") and "short legs" in warning
+        for warning in payload.results.warnings
+    )
+    # Correlaciones y red siguen disponibles con cortos.
+    assert payload.correlation_matrix.shape == (3, 3)
+    assert len(payload.dependency_network.nodes) == 3
+
+
+def test_research_book_es_reports_when_leg_history_is_shorter_than_the_book():
+    returns = _random_leg_returns(["XOM", "AMD"])
+    weights = {"XOM": 0.5, "AMD": 0.5}
+    aggregate = returns["XOM"] * 0.5 + returns["AMD"] * 0.5
+    # Una posición sin los 20 primeros días: el desglose cubre menos días que el CVaR del libro.
+    returns["AMD"] = returns["AMD"].iloc[20:]
+
+    payload = _make_risk_service().compute(_research_book_request(_book_legs(returns, weights), aggregate))
+
+    assert payload.component_es is not None and not payload.component_es.empty
+    assert any("do not add up exactly" in warning for warning in payload.results.warnings)
+
+
+def test_compute_portfolio_historical_es_contributions_add_up_to_historical_cvar():
+    idx = pd.date_range("2026-01-02", periods=30, freq="B")
+    rng = np.random.default_rng(3)
+    prices = {
+        "A": pd.Series(100 * np.cumprod(1 + rng.normal(0, 0.02, 30)), index=idx),
+        "B": pd.Series(50 * np.cumprod(1 + rng.normal(0, 0.01, 30)), index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=60.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=40.0),
+        ],
+        net_liq=100.0,
+    )
+
+    payload = _compute_payload(prices, snapshot, recommended_min_obs=3)
+
+    assert payload.component_es is not None
+    assert set(payload.component_es.index) == {"A", "B"}
+    assert payload.component_es.sum() == pytest.approx(payload.results.historical_cvar, rel=1e-12)
