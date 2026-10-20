@@ -886,6 +886,29 @@ $env:MOCK_DATA="true"
 npm run tauri:dev
 ```
 
+Windows installer (local build, nothing is published):
+
+Requirements: the repository `.venv` with `pip install pyinstaller`, Node dependencies in `frontend/`, and a Rust toolchain (`cargo`). The first release build compiles the Rust shell and takes several minutes.
+
+```powershell
+cd frontend
+# 1. Package the FastAPI backend with PyInstaller into src-tauri/resources/backend/gamma-backend
+npm run backend:package
+# 2. Smoke-test the packaged backend: demo mode, temporary folders, and authenticated routes that load
+#    the lazily imported modules (portfolio, IV surface, Copilot, Script, Fundamentals 428 without an SEC identity)
+npm run backend:smoke -- --skip-build
+# 3. Build the NSIS installer (repackages the backend first unless GAMMA_SKIP_BACKEND_PACKAGE=true)
+$env:GAMMA_SKIP_BACKEND_PACKAGE="true"
+npm run tauri:build
+# 4. Smoke-test the release shell without installing it: it must start the packaged backend,
+#    load the main window and exit (a release build never falls back to the repository backend)
+npm run desktop:smoke:bundle
+```
+
+If the splash reports a startup failure, the reason is also written to `logs\shell-startup-failure.txt` in the app-data folder below, next to `backend-failure.txt` and `backend-stderr.log`.
+
+The installer is written to `frontend/src-tauri/target/release/bundle/nsis/`. The installed app keeps its data, logs and an optional `.env` in `%APPDATA%\com.gamma.shell\runtime`; it never reads the repository `.env`. A tester sets API keys either as Windows environment variables or in that `.env` (the setup dialog shows the exact path), then restarts Gamma. Test installs on a separate Windows user account or a virtual machine so the developer `.env` and app data do not leak into the result.
+
 ## Validation
 
 Backend:

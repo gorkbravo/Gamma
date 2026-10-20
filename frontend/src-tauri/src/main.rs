@@ -90,6 +90,9 @@ fn main() {
                 if let Err(error) = bootstrap_backend(&app_handle) {
                     let detail = format!("{error}\n\nExpected host: {API_HOST}");
                     update_splash(&app_handle, "Backend startup failed", &detail);
+                    // El splash desaparece al cerrar la app: se deja constancia en los logs
+                    // para poder diagnosticar el fallo después (y desde los smoke tests).
+                    record_startup_failure(&app_handle, &detail);
                 }
             });
             Ok(())
@@ -225,10 +228,12 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
     let failure_report = log_dir.join("backend-failure.txt");
     let stdout_log = log_dir.join("backend-stdout.log");
     let stderr_log = log_dir.join("backend-stderr.log");
+    let shell_failure = log_dir.join("shell-startup-failure.txt");
     clear_startup_artifacts([
         failure_report.as_path(),
         stdout_log.as_path(),
         stderr_log.as_path(),
+        shell_failure.as_path(),
     ])?;
 
     if let Some(executable) = bundled_backend_executable(app)? {
@@ -241,13 +246,21 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
                 )
             })?
             .to_path_buf();
-        let sample_data_dir = working_dir.join("sample_data");
-        if !sample_data_dir.exists() {
-            return Err(format!(
-                "Bundled backend sample data directory is missing at {}",
-                sample_data_dir.display()
-            ));
-        }
+        // PyInstaller 6 deja los datos añadidos con --add-data dentro de "_internal"; las
+        // versiones anteriores los dejaban junto al ejecutable. Se aceptan ambas ubicaciones.
+        let sample_data_candidates = [
+            working_dir.join("_internal").join("sample_data"),
+            working_dir.join("sample_data"),
+        ];
+        let sample_data_dir = match sample_data_candidates.iter().find(|path| path.exists()) {
+            Some(path) => path.clone(),
+            None => {
+                return Err(format!(
+                    "Bundled backend sample data directory is missing under {}",
+                    working_dir.display()
+                ))
+            }
+        };
         return Ok(BackendLaunch {
             mode: BackendMode::Bundled,
             executable,
@@ -261,6 +274,17 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
             stdout_log,
             stderr_log,
         });
+    }
+
+    if !allow_repository_backend() {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|_| "<unknown>".to_string());
+        return Err(format!(
+            "The packaged Gamma backend is missing from this installation (looked under {resource_dir}). Reinstall Gamma."
+        ));
     }
 
     let repo_root = find_repo_root().ok_or_else(|| {
@@ -307,20 +331,43 @@ fn app_data_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+fn record_startup_failure(app: &AppHandle, detail: &str) {
+    let Ok(root) = app_data_root(app) else {
+        return;
+    };
+    let log_dir = root.join("logs");
+    if fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+    let _ = fs::write(log_dir.join("shell-startup-failure.txt"), detail);
+}
+
 fn bundled_backend_executable(app: &AppHandle) -> Result<Option<PathBuf>, String> {
     let resource_dir = match app.path().resource_dir() {
         Ok(path) => path,
         Err(_) => return Ok(None),
     };
-    let executable = resource_dir
-        .join("backend")
-        .join(BUNDLED_BACKEND_NAME)
-        .join(executable_name(BUNDLED_BACKEND_NAME));
-    if executable.exists() {
-        Ok(Some(executable))
-    } else {
-        Ok(None)
-    }
+    // tauri.conf.json declara los recursos con el patrón "resources/**/*", que conserva la
+    // carpeta "resources" dentro del directorio de recursos instalado. Se aceptan ambas
+    // ubicaciones para no depender de cómo el empaquetador aplane las rutas.
+    let candidates = [
+        resource_dir.join("backend"),
+        resource_dir.join("resources").join("backend"),
+    ];
+    Ok(candidates
+        .iter()
+        .map(|base| {
+            base.join(BUNDLED_BACKEND_NAME)
+                .join(executable_name(BUNDLED_BACKEND_NAME))
+        })
+        .find(|executable| executable.exists()))
+}
+
+/// En una build de release el backend debe venir empaquetado: recurrir al repositorio solo
+/// tiene sentido en desarrollo o si se pide explícitamente con GAMMA_REPO_ROOT. Así una app
+/// instalada nunca usa en silencio el backend de desarrollo del equipo que la compiló.
+fn allow_repository_backend() -> bool {
+    cfg!(debug_assertions) || env::var("GAMMA_REPO_ROOT").is_ok()
 }
 
 fn clear_startup_artifacts<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Result<(), String> {
@@ -628,10 +675,15 @@ fn find_repo_root() -> Option<PathBuf> {
             candidates.push(ancestor.to_path_buf());
         }
     }
-    let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..");
-    candidates.push(manifest_root);
+    // La ruta del repositorio en la máquina que compila solo se incluye en builds de desarrollo:
+    // en release no debe quedar compilada en el binario que se distribuye.
+    #[cfg(debug_assertions)]
+    {
+        let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        candidates.push(manifest_root);
+    }
 
     candidates
         .into_iter()

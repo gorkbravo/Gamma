@@ -19,6 +19,7 @@ cambia, este mapa debe actualizarse (lo cubren los tests de ``tests/test_system_
 """
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -47,8 +48,29 @@ from src.utils.time import now_utc
 if TYPE_CHECKING:
     from src.application.runtime import ApplicationRuntime
 
-# Mismo fichero que carga ``build_runtime`` con load_dotenv.
-ENV_FILE_PATH = Path(__file__).resolve().parents[2] / ".env"
+# .env de la raíz del repositorio: el que se usa en desarrollo.
+REPO_ENV_FILE_PATH = Path(__file__).resolve().parents[2] / ".env"
+
+
+def resolve_env_file_path() -> Path:
+    """Fichero .env que lee ``build_runtime`` (y que el asistente indica al usuario).
+
+    - ``GAMMA_ENV_FILE``, si se define, tiene prioridad.
+    - En el backend empaquetado con PyInstaller no hay repositorio: la ruta relativa al código
+      caería dentro de ``_internal``. Se usa ``<GAMMA_APP_DATA_DIR>/.env``, la carpeta de datos
+      que la app de escritorio pasa al backend (``%APPDATA%/com.gamma.shell/runtime``), o
+      la carpeta del ejecutable si no se recibe.
+    - En desarrollo, el ``.env`` de la raíz del repositorio.
+    """
+    explicit = (os.getenv("GAMMA_ENV_FILE") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    if getattr(sys, "frozen", False):
+        app_data = (os.getenv("GAMMA_APP_DATA_DIR") or "").strip()
+        if app_data:
+            return Path(app_data).expanduser() / ".env"
+        return Path(sys.executable).resolve().parent / ".env"
+    return REPO_ENV_FILE_PATH
 BASE_CURRENCY_OPTIONS = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"]
 MARKET_DATA_MODE_OPTIONS = ["delayed", "live", "auto"]
 DEFAULT_BASE_CURRENCY = "EUR"
@@ -147,6 +169,7 @@ def build_setup_report(runtime: "ApplicationRuntime") -> SetupReport:
     )
     copilot = _copilot_state(mock_mode)
     connected = bool(not mock_mode and _safe_is_connected(runtime))
+    env_file = resolve_env_file_path()
 
     warnings = [*load.warnings]
     if startup is not None:
@@ -194,8 +217,8 @@ def build_setup_report(runtime: "ApplicationRuntime") -> SetupReport:
             "live": _coverage_rows(mock_mode=False, connected=connected, copilot=_copilot_state(False)),
         },
         config=SetupConfigLocation(
-            env_file_path=str(ENV_FILE_PATH),
-            env_file_present=ENV_FILE_PATH.exists(),
+            env_file_path=str(env_file),
+            env_file_present=env_file.exists(),
             setup_file_path=str(store.path),
         ),
         warnings=warnings,

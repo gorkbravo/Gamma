@@ -2379,6 +2379,8 @@ The installer should provide:
 
 The installer should not require the user to understand the repo layout.
 
+_Status 2026-10-20: a local NSIS installer (`Gamma_0.1.0_x64-setup.exe`, ~78 MB) now builds and its release shell is smoke-tested in installed mode. The validation found that the packaged path had never worked: Tauri keeps the `resources/` prefix, so the shell never found the bundled backend; PyInstaller 6 puts `sample_data` under `_internal`, so the shell aborted before starting it; and release builds silently fell back to the repository backend through a compiled-in developer path. All three are fixed. The release shell now only uses the bundled backend (the repository fallback needs a debug build or `GAMMA_REPO_ROOT`), and startup failures are also written to `logs/shell-startup-failure.txt`. The backend package dropped the unused Qt client (PySide6, matplotlib, plotly) and is 222 MB. An installed app reads its optional `.env` from `%APPDATA%/com.gamma.shell/runtime`. Commands and smoke tests (`backend:package`, `backend:smoke`, `tauri:build`, `desktop:smoke:bundle`) are in the README. Open: the installer was not installed or uninstalled on a clean account, so upgrade and uninstall behavior is unverified; it is unsigned, so SmartScreen warns on other machines; the EdgarTools path was not exercised in the packaged build, because that needs a real SEC identity and network access._
+
 #### 2. First-run setup
 
 First-run setup should guide the user through:

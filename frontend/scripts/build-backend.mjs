@@ -44,6 +44,10 @@ function buildBackend() {
     `${path.join(repoRoot, "sample_data")}${dataSeparator}sample_data`,
     "--collect-data",
     "edgar",
+    // El backend FastAPI no usa el cliente Qt antiguo: build_desktop_runtime solo importa
+    // PySide6 (AppDataContext) para ese cliente, pero PyInstaller lo detecta y empaquetaría
+    // Qt y WebEngine enteros. matplotlib/plotly/tkinter son del mismo cliente; pytest es de desarrollo.
+    ...["PySide6", "shiboken6", "matplotlib", "plotly", "tkinter", "pytest"].flatMap((name) => ["--exclude-module", name]),
     "--hidden-import",
     "uvicorn.logging",
     "--hidden-import",
