@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from statistics import NormalDist
 from typing import Dict, List, Literal, Tuple
 
@@ -25,6 +26,15 @@ from src.application.request_limits import (
     MAX_RISK_LOOKBACK_DAYS,
     MAX_RISK_MC_HORIZON_DAYS,
     MAX_RISK_MC_SIMULATIONS,
+    MAX_STRESS_REPLAY_LOOKBACK_DAYS,
+)
+from src.analytics.stress import (
+    HISTORICAL_STRESS_EPISODES,
+    EpisodeReplayResult,
+    StressEpisode,
+    VolatilityRegimeAnalysis,
+    replay_episode,
+    volatility_regimes,
 )
 from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot, PositionItem, RiskResults
@@ -40,6 +50,7 @@ from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.risk_free_rate import RiskFreeRateService
+from src.utils.time import now_utc
 
 
 @dataclass(frozen=True)
@@ -71,6 +82,38 @@ class RiskComputeRequest:
         object.__setattr__(self, "mc_horizon_days", min(max(int(self.mc_horizon_days), 1), MAX_RISK_MC_HORIZON_DAYS))
         object.__setattr__(self, "mc_num_simulations", min(max(int(self.mc_num_simulations), 100), MAX_RISK_MC_SIMULATIONS))
         object.__setattr__(self, "beta_window", min(max(int(self.beta_window), 20), MAX_RISK_BETA_WINDOW_DAYS))
+
+
+@dataclass(frozen=True)
+class RiskStressReplayRequest:
+    snapshot: PortfolioSnapshot
+    benchmark_symbol: str
+    base_currency: str
+    source_scope: Literal["portfolio", "research", "research_book"] = "portfolio"
+    research_book_legs: list[ResearchBookRiskLeg] | None = None
+    episodes: tuple[StressEpisode, ...] = HISTORICAL_STRESS_EPISODES
+    # Fecha de referencia para calcular cuánta historia pedir; por defecto, hoy.
+    as_of: date | None = None
+
+
+@dataclass(frozen=True)
+class RiskStressReplayResult:
+    episodes: list[EpisodeReplayResult]
+    leg_metadata: dict[str, dict[str, str | None]]
+    portfolio_value: float
+    base_currency: str
+    benchmark_symbol: str
+    lookback_days: int
+    warnings: list[str] = field(default_factory=list)
+    method: str = (
+        "Current weights are held through each documented episode (S&P 500 close-to-close peak to trough) "
+        "with each position's own price history converted to the base currency; no rebalancing. "
+        "A position without history for a window is treated as flat and reported; no proxy is substituted."
+    )
+
+
+# Clases de activo de Strategy Lab cuyas posiciones son instrumentos cotizados con historia larga.
+_LISTED_BOOK_ASSET_CLASSES = {"equity", "etf"}
 
 
 @dataclass
@@ -110,6 +153,8 @@ class RiskComputationPayload:
     # Contribución de cada posición al CVaR histórico (moneda base); suma el CVaR de la cartera.
     component_es: pd.Series | None = None
     component_es_tail_days: int | None = None
+    # Riesgo de la cartera en días tranquilos frente a días de alta volatilidad del benchmark.
+    regime_analysis: VolatilityRegimeAnalysis | None = None
 
 
 @dataclass(frozen=True)
@@ -578,7 +623,222 @@ class RiskService:
             source_origin=request.source_origin,
             component_es=component_es,
             component_es_tail_days=component_es_tail_days,
+            regime_analysis=volatility_regimes(port_ret, benchmark.returns, request.alpha),
         )
+
+    def compute_stress_replay(
+        self,
+        request: RiskStressReplayRequest,
+        data_provider: AppDataProvider | None = None,
+    ) -> RiskStressReplayResult:
+        """Replay histórico: los pesos actuales a través de episodios de crisis documentados."""
+        warnings: list[str] = []
+        snapshot = request.snapshot
+        portfolio_value = snapshot.net_liquidation
+        if portfolio_value is None:
+            portfolio_value = (snapshot.total_market_value or 0.0) + (snapshot.total_cash or 0.0)
+        portfolio_value = float(portfolio_value or 0.0)
+        if request.source_scope == "research_book":
+            replay_snapshot, weights, metadata, missing_notes = self._stress_book_inputs(request, portfolio_value)
+        else:
+            replay_snapshot, weights, metadata, missing_notes = self._stress_portfolio_inputs(snapshot, portfolio_value)
+
+        as_of = request.as_of or now_utc().date()
+        earliest = min(episode.start for episode in request.episodes) if request.episodes else as_of
+        needed = int(np.busday_count(earliest - timedelta(days=14), as_of)) + 10
+        lookback_days = max(20, min(needed, MAX_STRESS_REPLAY_LOOKBACK_DAYS))
+        if needed > MAX_STRESS_REPLAY_LOOKBACK_DAYS:
+            warnings.append(
+                f"Price history is requested for at most {MAX_STRESS_REPLAY_LOOKBACK_DAYS} sessions; "
+                "older episodes may be unavailable."
+            )
+
+        prices: dict[str, pd.Series] = {}
+        if replay_snapshot.positions:
+            raw_prices, missing = self._load_prices(replay_snapshot, lookback_days, data_provider=data_provider)
+            warnings.extend(self._drain_provider_history_warnings(data_provider))
+            normalized = normalize_snapshot_price_histories(
+                replay_snapshot,
+                raw_prices,
+                lookback_days,
+                self.market_data,
+            )
+            prices = dict(normalized.prices)
+            warnings.extend(normalized.warnings)
+            if missing:
+                warnings.append(f"Missing long price history for: {', '.join(missing)}")
+
+        benchmark_prices = self._stress_benchmark_prices(request, lookback_days, data_provider, warnings)
+        episodes = [
+            replay_episode(
+                prices,
+                weights,
+                episode,
+                portfolio_value=portfolio_value,
+                benchmark_prices=benchmark_prices,
+                missing_notes=missing_notes,
+            )
+            for episode in request.episodes
+        ]
+        return RiskStressReplayResult(
+            episodes=episodes,
+            leg_metadata=metadata,
+            portfolio_value=portfolio_value,
+            base_currency=request.base_currency,
+            benchmark_symbol=request.benchmark_symbol,
+            lookback_days=lookback_days,
+            warnings=list(dict.fromkeys(warnings)),
+        )
+
+    def _stress_portfolio_inputs(
+        self,
+        snapshot: PortfolioSnapshot,
+        portfolio_value: float,
+    ) -> tuple[PortfolioSnapshot, pd.Series, dict[str, dict[str, str | None]], dict[str, str]]:
+        # Peso = valor en moneda base / valor de la cartera; la caja es plana y no se replica.
+        weights: dict[str, float] = {}
+        metadata: dict[str, dict[str, str | None]] = {}
+        missing_notes: dict[str, str] = {}
+        positions = []
+        for position in snapshot.positions:
+            if self._is_cash(position):
+                continue
+            instrument_id = position.resolved_instrument_id()
+            metadata[instrument_id] = {
+                "instrument_id": instrument_id,
+                "symbol": position.resolved_symbol(),
+                "display_symbol": position.resolved_display_symbol(),
+            }
+            if position.base_market_value is None or not portfolio_value:
+                weights[instrument_id] = 0.0
+                missing_notes[instrument_id] = "Base-currency market value unavailable for this position."
+                continue
+            weights[instrument_id] = float(position.base_market_value) / portfolio_value
+            positions.append(position)
+        replay_snapshot = PortfolioSnapshot(
+            timestamp=snapshot.timestamp,
+            base_currency=snapshot.base_currency,
+            account_summary={},
+            positions=positions,
+            net_liquidation=snapshot.net_liquidation,
+            total_market_value=snapshot.total_market_value,
+            total_cash=snapshot.total_cash,
+        )
+        return replay_snapshot, pd.Series(weights, dtype=float), metadata, missing_notes
+
+    def _stress_book_inputs(
+        self,
+        request: RiskStressReplayRequest,
+        portfolio_value: float,
+    ) -> tuple[PortfolioSnapshot, pd.Series, dict[str, dict[str, str | None]], dict[str, str]]:
+        # Las posiciones de un libro solo traen historia del periodo compuesto; para los episodios
+        # se cargan precios largos de las cotizadas (renta variable y ETF) por su símbolo.
+        legs = list(request.research_book_legs or [])
+        gross = float(sum(abs(float(leg.weight)) for leg in legs)) or 1.0
+        weights: dict[str, float] = {}
+        metadata: dict[str, dict[str, str | None]] = {}
+        missing_notes: dict[str, str] = {}
+        positions: list[PositionItem] = []
+        for leg in legs:
+            leg_id = str(leg.leg_id or "").strip()
+            if not leg_id:
+                continue
+            weight = float(leg.weight) / gross
+            weights[leg_id] = weight
+            label = str(leg.label or leg.symbol or leg_id)
+            metadata[leg_id] = {"instrument_id": leg_id, "symbol": str(leg.symbol or label), "display_symbol": label}
+            asset_class = self._book_leg_asset_class(leg_id)
+            symbol = str(leg.symbol or "").strip().upper()
+            if asset_class not in _LISTED_BOOK_ASSET_CLASSES or not symbol:
+                missing_notes[leg_id] = (
+                    f"No long price history for {asset_class or 'non-listed'} legs; treated as flat."
+                )
+                continue
+            value = weight * portfolio_value
+            positions.append(
+                PositionItem(
+                    symbol,
+                    "STK",
+                    "USD",
+                    1,
+                    None,
+                    value,
+                    value,
+                    None,
+                    weight=weight,
+                    base_market_value=value,
+                    instrument_id=leg_id,
+                    display_symbol=label,
+                    exchange="SMART",
+                )
+            )
+        replay_snapshot = PortfolioSnapshot(
+            timestamp=request.snapshot.timestamp,
+            base_currency=request.snapshot.base_currency,
+            account_summary={},
+            positions=positions,
+            net_liquidation=request.snapshot.net_liquidation,
+            total_market_value=request.snapshot.total_market_value,
+            total_cash=0.0,
+        )
+        return replay_snapshot, pd.Series(weights, dtype=float), metadata, missing_notes
+
+    @staticmethod
+    def _book_leg_asset_class(leg_id: str) -> str | None:
+        # Formato de Strategy Lab: "<n>:strategy_portfolio_leg:<clase>:<identificador>:<inicio>:<fin>".
+        parts = leg_id.split(":")
+        if len(parts) >= 4 and parts[1] == "strategy_portfolio_leg":
+            return parts[2].strip().lower() or None
+        return None
+
+    def _stress_benchmark_prices(
+        self,
+        request: RiskStressReplayRequest,
+        lookback_days: int,
+        data_provider: AppDataProvider | None,
+        warnings: list[str],
+    ) -> pd.Series | None:
+        symbol = str(request.benchmark_symbol or "SPY").strip().upper()
+        instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
+        key = f"stress_benchmark:{symbol}"
+        if data_provider is not None:
+            benchmark_snapshot = PortfolioSnapshot(
+                timestamp=request.snapshot.timestamp,
+                base_currency=request.base_currency,
+                account_summary={},
+                positions=[
+                    PositionItem(
+                        symbol,
+                        instrument.sec_type or "STK",
+                        instrument.currency or "USD",
+                        1,
+                        None,
+                        1.0,
+                        1.0,
+                        None,
+                        weight=1.0,
+                        base_market_value=1.0,
+                        instrument_id=key,
+                        display_symbol=symbol,
+                        exchange=instrument.exchange or "SMART",
+                    )
+                ],
+                net_liquidation=1.0,
+                total_market_value=1.0,
+                total_cash=0.0,
+            )
+            raw, _ = self._load_prices(benchmark_snapshot, lookback_days, data_provider=data_provider)
+            self._drain_provider_history_warnings(data_provider)
+            normalized = normalize_snapshot_price_histories(benchmark_snapshot, raw, lookback_days, self.market_data)
+            series = normalized.prices.get(key)
+            if series is not None and not series.empty:
+                return series
+        returns, benchmark_warnings = self._load_benchmark_returns(lookback_days, request.base_currency, symbol)
+        if returns is None or returns.empty:
+            warnings.extend(benchmark_warnings)
+            warnings.append(f"Benchmark history for {symbol} is unavailable; episode benchmark returns are omitted.")
+            return None
+        return (1.0 + returns).cumprod()
 
     def _compute_research_book(
         self,
@@ -852,6 +1112,7 @@ class RiskService:
             contribution_metadata=contribution_metadata,
             component_es=component_es,
             component_es_tail_days=component_es_tail_days,
+            regime_analysis=volatility_regimes(port_ret, benchmark.returns, request.alpha),
         )
 
     @staticmethod

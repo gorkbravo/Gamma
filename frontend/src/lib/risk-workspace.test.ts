@@ -368,6 +368,93 @@ describe("risk workspace view-model", () => {
     ]);
   });
 
+  it("builds Scenarios from the measured replay, regimes and beta, never from proxy shocks", () => {
+    const replay = {
+      episodes: [
+        {
+          episode_id: "covid_2020", label: "COVID crash", start: "2020-02-19", end: "2020-03-23",
+          description: "S&P 500 close-to-close peak to trough.", status: "partial",
+          book_return: -0.18, book_pnl: -18900, benchmark_return: -0.34, active_return: 0.16,
+          max_drawdown: -0.2, worst_day_return: -0.07, worst_day_date: "2020-03-16",
+          covered_gross_weight: 0.8, gross_weight: 1, observation_count: 23, note: "80% covered",
+          legs: [
+            { symbol: "AAPL", instrument_id: "a", display_symbol: "AAPL", weight: 0.5, status: "covered", episode_return: -0.3, pnl: -15750, contribution_share: 0.83, start_price_date: "2020-02-19", end_price_date: "2020-03-23", note: null },
+            { symbol: "NEW", instrument_id: "n", display_symbol: "NEW", weight: 0.2, status: "missing", episode_return: null, pnl: null, contribution_share: null, start_price_date: null, end_price_date: null, note: "Price history starts 2021-01-04, after the episode began." },
+            { symbol: "MSFT", instrument_id: "m", display_symbol: "MSFT", weight: 0.3, status: "covered", episode_return: -0.1, pnl: -3150, contribution_share: 0.17, start_price_date: "2020-02-19", end_price_date: "2020-03-23", note: null },
+          ],
+        },
+        {
+          episode_id: "tariffs_2025", label: "2025 tariff shock", start: "2025-02-19", end: "2025-04-08",
+          description: "S&P 500 close-to-close peak to trough.", status: "full",
+          book_return: -0.05, book_pnl: -5250, benchmark_return: -0.19, active_return: 0.14,
+          max_drawdown: -0.08, worst_day_return: -0.04, worst_day_date: "2025-04-04",
+          covered_gross_weight: 1, gross_weight: 1, observation_count: 33, note: null, legs: [],
+        },
+        {
+          episode_id: "gfc_2007_2009", label: "Global financial crisis", start: "2007-10-09", end: "2009-03-09",
+          description: "S&P 500 close-to-close peak to trough.", status: "unavailable",
+          book_return: null, book_pnl: null, benchmark_return: null, active_return: null,
+          max_drawdown: null, worst_day_return: null, worst_day_date: null,
+          covered_gross_weight: 0, gross_weight: 1, observation_count: 0, note: "No position has price history covering this window.", legs: [],
+        },
+      ],
+      portfolio_value: 105000, base_currency: "USD", benchmark_symbol: "SPY", lookback_days: 5040,
+      method: "Current weights are held through each documented episode.", warnings: [],
+    };
+    const withRegimes: RiskResult = {
+      ...riskResult,
+      regime_analysis: {
+        status: "available", window_days: 21, threshold_annual_vol: 0.16, observation_count: 200, note: null,
+        method: "Days are split at the median of the benchmark's trailing 21-day realized volatility.",
+        regimes: [
+          { regime: "calm", observation_count: 100, annual_vol: 0.12, historical_var: 0.012, historical_cvar: 0.015, benchmark_correlation: 0.6, benchmark_annual_vol: 0.1 },
+          { regime: "stressed", observation_count: 100, annual_vol: 0.24, historical_var: 0.025, historical_cvar: 0.032, benchmark_correlation: 0.85, benchmark_annual_vol: 0.22 },
+        ],
+      },
+    };
+    const model = buildRiskWorkspaceModel(snapshot, withRegimes, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+      stressReplay: replay,
+    });
+
+    expect(model.stressState).toBe("ready");
+    expect(model.stressEpisodes.map((row) => row.episodeId)).toEqual(["covid_2020", "tariffs_2025", "gfc_2007_2009"]);
+    // Por defecto se elige el peor episodio cubierto.
+    expect(model.selectedEpisode?.episodeId).toBe("covid_2020");
+    expect(model.stressLegs.map((row) => row.symbol)).toEqual(["AAPL", "MSFT", "NEW"]);
+    expect(model.stressEpisodes[0].coverage).toBe(0.8);
+    expect(model.scenarioKpis.find((kpi) => kpi.label === "Episodes covered")?.value).toBe("2 / 3");
+    expect(model.scenarioKpis.find((kpi) => kpi.label === "Worst episode")?.sublabel).toBe("COVID crash");
+    expect(model.regimeRows.map((row) => row.cells[0])).toEqual(["Calm", "High vol"]);
+    expect(model.correlationKpis.find((kpi) => kpi.label === "Stressed-regime corr")?.value).toBe("0.85");
+    expect(model.betaShockRows).toHaveLength(3);
+    // Ninguna fila inventada: no quedan los antiguos proxies de COVID, tipos, USD o petróleo.
+    const text = JSON.stringify(model);
+    expect(text).not.toContain("COVID-style");
+    expect(text).not.toContain("Oil +20%");
+    expect(text).not.toContain("Stress corr estimate");
+
+    const chosen = buildRiskWorkspaceModel(snapshot, withRegimes, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+      stressReplay: replay,
+      selectedEpisodeId: "tariffs_2025",
+    });
+    expect(chosen.selectedEpisode?.episodeId).toBe("tariffs_2025");
+
+    const loading = buildRiskWorkspaceModel(snapshot, withRegimes, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+      stressReplayLoading: true,
+    });
+    expect(loading.stressState).toBe("loading");
+    expect(loading.stressEpisodes).toEqual([]);
+  });
+
   it("pairs research-book legs by the matrix key, not the instrument id", () => {
     const bookResult: RiskResult = {
       ...riskResult,

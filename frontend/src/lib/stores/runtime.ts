@@ -11,7 +11,7 @@ export const loading = writable<Record<string, boolean>>({
   predictionCalibration: false, predictionEventBook: false, predictionSaved: false,
   crypto: false, cryptoDetail: false,
   cryptoPortfolio: false, fundamentals: false, fundamentalsSave: false, copilot: false,
-  risk: false, iv: false, ivSession: false
+  risk: false, riskStress: false, iv: false, ivSession: false
 });
 
 const loadingActivityCounts = new Map<string, number>();

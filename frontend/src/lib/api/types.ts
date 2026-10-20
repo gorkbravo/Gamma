@@ -1299,6 +1299,73 @@ export interface RiskResult {
   warnings: string[];
   // Días de cola sobre los que se reparte el CVaR histórico.
   component_es_tail_days?: number | null;
+  // Riesgo en días tranquilos frente a días de alta volatilidad del benchmark.
+  regime_analysis?: RiskRegimeAnalysis;
+}
+
+export interface RiskRegimeStats {
+  regime: "calm" | "stressed" | string;
+  observation_count: number;
+  annual_vol: number | null;
+  historical_var: number | null;
+  historical_cvar: number | null;
+  benchmark_correlation: number | null;
+  benchmark_annual_vol: number | null;
+}
+
+export interface RiskRegimeAnalysis {
+  status: "available" | "unavailable" | string;
+  window_days: number;
+  threshold_annual_vol: number | null;
+  regimes: RiskRegimeStats[];
+  observation_count: number;
+  note: string | null;
+  method: string | null;
+}
+
+export interface RiskStressLeg {
+  symbol: string;
+  instrument_id: string | null;
+  display_symbol: string | null;
+  weight: number;
+  status: "covered" | "missing" | string;
+  episode_return: number | null;
+  pnl: number | null;
+  contribution_share: number | null;
+  start_price_date: string | null;
+  end_price_date: string | null;
+  note: string | null;
+}
+
+export interface RiskStressEpisode {
+  episode_id: string;
+  label: string;
+  start: string;
+  end: string;
+  description: string;
+  status: "full" | "partial" | "unavailable" | string;
+  book_return: number | null;
+  book_pnl: number | null;
+  benchmark_return: number | null;
+  active_return: number | null;
+  max_drawdown: number | null;
+  worst_day_return: number | null;
+  worst_day_date: string | null;
+  covered_gross_weight: number;
+  gross_weight: number;
+  observation_count: number;
+  legs: RiskStressLeg[];
+  note: string | null;
+}
+
+export interface RiskStressReplay {
+  episodes: RiskStressEpisode[];
+  portfolio_value: number;
+  base_currency: string;
+  benchmark_symbol: string;
+  lookback_days: number;
+  method: string;
+  warnings: string[];
 }
 
 export interface PredictionMarketOutcome {

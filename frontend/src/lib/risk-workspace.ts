@@ -1,4 +1,4 @@
-import type { PortfolioSnapshot, Position, RiskContribution, RiskCorrelationMatrix, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint } from "./api/types";
+import type { PortfolioSnapshot, Position, RiskContribution, RiskCorrelationMatrix, RiskDependencyNetwork, RiskFrontierPoint, RiskRegimeStats, RiskResult, RiskStressReplay, TimeSeriesPoint } from "./api/types";
 
 export type RiskMode = "overview" | "exposures" | "drawdowns" | "correlation" | "scenarios" | "optimization";
 export type ReturnFrequency = "daily" | "weekly" | "monthly";
@@ -53,8 +53,14 @@ export interface RiskWorkspaceModel {
   dependencyNeighborRows: RiskTableRow[];
   diversificationWarnings: RiskTableRow[];
   benchmarkSensitivity: RiskTableRow[];
-  scenarios: ScenarioResult[];
-  scenarioImpacts: ScenarioImpactRow[];
+  // Replay histórico de episodios (backend) y estado de carga del modo Scenarios.
+  stressState: "idle" | "loading" | "ready";
+  stressEpisodes: StressEpisodeRow[];
+  selectedEpisode: StressEpisodeRow | null;
+  stressLegs: StressLegRow[];
+  regimeRows: RiskTableRow[];
+  regimeNote: string | null;
+  betaShockRows: RiskTableRow[];
   scenarioAssumptions: string[];
   frontierPoints: RiskFrontierPoint[];
   frontierMessage: string | null;
@@ -109,22 +115,31 @@ export interface DrawdownEpisode {
   contributors: string;
 }
 
-export interface ScenarioResult {
-  scenario: string;
-  portfolioReturn: number | null;
+export interface StressEpisodeRow {
+  episodeId: string;
+  label: string;
+  window: string;
+  description: string;
+  status: string;
+  bookReturn: number | null;
+  bookPnl: number | null;
   benchmarkReturn: number | null;
   activeReturn: number | null;
-  worstContributor: string;
-  bestHedge: string;
+  maxDrawdown: number | null;
+  worstDay: number | null;
+  worstDayDate: string | null;
+  coverage: number | null;
+  note: string | null;
 }
 
-export interface ScenarioImpactRow {
+export interface StressLegRow {
   symbol: string;
-  weight: number | null;
-  shock: string;
-  estimatedReturn: number | null;
-  pnlImpact: number | null;
-  contributionPct: number | null;
+  weight: number;
+  episodeReturn: number | null;
+  pnl: number | null;
+  contributionShare: number | null;
+  status: string;
+  note: string | null;
 }
 
 export interface CandidateAllocationRow {
@@ -147,7 +162,15 @@ const UNKNOWN = "N/A";
 export function buildRiskWorkspaceModel(
   snapshot: PortfolioSnapshot | null,
   result: RiskResult | null,
-  options: { sourceScope: RiskSourceScope; sourceLabel?: string | null; benchmarkSymbol: string; returnFrequency: ReturnFrequency }
+  options: {
+    sourceScope: RiskSourceScope;
+    sourceLabel?: string | null;
+    benchmarkSymbol: string;
+    returnFrequency: ReturnFrequency;
+    stressReplay?: RiskStressReplay | null;
+    stressReplayLoading?: boolean;
+    selectedEpisodeId?: string | null;
+  }
 ): RiskWorkspaceModel {
   const portfolioValue = result?.metrics.portfolio_value ?? snapshotValue(snapshot);
   const coverage = result?.metrics.risk_coverage_ratio ?? null;
@@ -157,7 +180,18 @@ export function buildRiskWorkspaceModel(
   const returns = result?.portfolio_return_points ?? [];
   const benchmarkReturns = result?.benchmark_return_points ?? [];
   const drawdowns = buildDrawdownEpisodes(returns, benchmarkReturns, riskContributors);
-  const scenarios = buildScenarios(result, holdings, portfolioValue);
+  const stressEpisodes = buildStressEpisodes(result ? options.stressReplay ?? null : null);
+  const selectedEpisode = selectStressEpisode(stressEpisodes, options.selectedEpisodeId ?? null);
+  const stressLegs = buildStressLegs(options.stressReplay ?? null, selectedEpisode);
+  const regimes = result?.regime_analysis;
+  const calmRegime = regimes?.regimes.find((row) => row.regime === "calm") ?? null;
+  const stressedRegime = regimes?.regimes.find((row) => row.regime === "stressed") ?? null;
+  const coveredEpisodes = stressEpisodes.filter((row) => row.bookReturn != null);
+  const worstEpisode = [...coveredEpisodes].sort((left, right) => (left.bookReturn ?? 0) - (right.bookReturn ?? 0))[0] ?? null;
+  const worstEpisodeDay = minNumber(coveredEpisodes.map((row) => row.worstDay));
+  const oneDayVarReturn = result?.metrics.historical_var != null && portfolioValue
+    ? result.metrics.historical_var / portfolioValue
+    : null;
   const frontierPoints = result?.frontier_points ?? [];
   const frontierMessage = buildFrontierMessage(result, frontierPoints);
   const candidates = buildCandidateAllocations(holdings, frontierPoints);
@@ -173,7 +207,6 @@ export function buildRiskWorkspaceModel(
   const worstReturn = minNumber(returns.map((point) => point.value));
   const worstWeek = worstWindowReturn(returns, 5);
   const downsideVol = downsideVolatility(returns);
-  const scenarioPnl = scenarios[0]?.portfolioReturn != null && portfolioValue != null ? scenarios[0].portfolioReturn * portfolioValue : null;
   const minVolPoint = frontierPoints.find((point) => point.label === "Min Vol");
   const maxSharpePoint = frontierPoints.find((point) => point.label === "Max Sharpe");
   const optimizedVol = minVolPoint?.annual_vol ?? (result?.metrics.annual_vol == null ? null : result.metrics.annual_vol * 0.9);
@@ -221,15 +254,15 @@ export function buildRiskWorkspaceModel(
       kpi("Diversification ratio", formatNumber(diversificationRatio(holdings), 2)),
       kpi("Independent bets", formatNumber(result?.metrics.effective_bets, 1)),
       kpi("Benchmark corr", formatNumber(result?.metrics.correlation, 2), options.benchmarkSymbol),
-      kpi("Stress corr estimate", stressCorrelationLabel(result?.metrics.correlation), "proxy from benchmark corr"),
+      kpi("Stressed-regime corr", formatNumber(stressedRegime?.benchmark_correlation, 2), "high-vol days, measured"),
     ],
     scenarioKpis: [
-      kpi("Scenario P&L", formatCurrency(scenarioPnl, snapshot?.base_currency), scenarios[0]?.scenario),
-      kpi("Scenario return", formatPercent(scenarios[0]?.portfolioReturn), undefined, "negative"),
-      kpi("Worst position impact", scenarios[0]?.worstContributor ?? UNKNOWN),
-      kpi("Benchmark scenario", formatPercent(scenarios[0]?.benchmarkReturn), options.benchmarkSymbol),
-      kpi("Active scenario", formatPercent(scenarios[0]?.activeReturn)),
-      kpi("VaR breach", scenarioBreachLabel(scenarios[0]?.portfolioReturn, result, portfolioValue), "historical VaR proxy"),
+      kpi("Worst episode", formatPercent(worstEpisode?.bookReturn), worstEpisode?.label ?? "no covered episode", (worstEpisode?.bookReturn ?? 0) < 0 ? "negative" : ""),
+      kpi("Worst episode P&L", formatCurrency(worstEpisode?.bookPnl, snapshot?.base_currency), worstEpisode?.window),
+      kpi("Episodes covered", `${coveredEpisodes.length} / ${stressEpisodes.length}`, "with price history"),
+      kpi("Worst day in episodes", formatPercent(worstEpisodeDay), `1d hist VaR ${formatPercent(oneDayVarReturn == null ? null : -oneDayVarReturn)}`),
+      kpi("Stressed-regime vol", formatPercent(stressedRegime?.annual_vol), `calm ${formatPercent(calmRegime?.annual_vol)}`),
+      kpi("Stressed-regime 1d ES", formatCurrency(stressedRegime?.historical_cvar != null && portfolioValue ? stressedRegime.historical_cvar * portfolioValue : null, snapshot?.base_currency), "historical, high-vol days"),
     ],
     optimizationKpis: [
       kpi("Current expected vol", formatPercent(result?.metrics.annual_vol)),
@@ -258,9 +291,14 @@ export function buildRiskWorkspaceModel(
     dependencyNeighborRows: buildDependencyNeighborRows(dependencyNetwork),
     diversificationWarnings: buildDiversificationWarnings(holdings, exposureBreakdown, result),
     benchmarkSensitivity: buildBenchmarkSensitivity(holdings, result),
-    scenarios,
-    scenarioImpacts: scenarios[0] ? buildScenarioImpacts(holdings, scenarios[0], portfolioValue) : [],
-    scenarioAssumptions: buildScenarioAssumptions(result, coverage),
+    stressState: !result ? "idle" : options.stressReplayLoading && !options.stressReplay ? "loading" : options.stressReplay ? "ready" : "idle",
+    stressEpisodes,
+    selectedEpisode,
+    stressLegs,
+    regimeRows: buildRegimeRows(regimes?.regimes ?? [], portfolioValue, snapshot?.base_currency),
+    regimeNote: regimes?.status === "available" ? null : regimes?.note ?? null,
+    betaShockRows: buildBetaShockRows(result?.metrics.beta ?? null, portfolioValue, snapshot?.base_currency, options.benchmarkSymbol),
+    scenarioAssumptions: buildScenarioAssumptions(result, coverage, options.stressReplay ?? null),
     frontierPoints,
     frontierMessage,
     candidates,
@@ -633,53 +671,87 @@ function buildBenchmarkSensitivity(holdings: HoldingRiskRow[], result: RiskResul
   }));
 }
 
-function buildScenarios(result: RiskResult | null, holdings: HoldingRiskRow[], portfolioValue: number | null): ScenarioResult[] {
-  const beta = result?.metrics.beta ?? 1;
-  const equityWeight = holdings.filter((row) => row.assetClass === "Equity" || row.assetClass === "ETF").reduce((sum, row) => sum + Math.max(row.weight ?? 0, 0), 0);
-  const ratesWeight = holdings.filter((row) => row.assetClass === "Fixed Income").reduce((sum, row) => sum + Math.max(row.weight ?? 0, 0), 0);
-  const scenarios = [
-    { scenario: "Equity market -5%", benchmarkReturn: -0.05, factor: -0.05 * beta * Math.max(equityWeight, 0.35) },
-    { scenario: "Rates +100 bps", benchmarkReturn: -0.02, factor: -0.03 * Math.max(ratesWeight, 0.1) - 0.01 * equityWeight },
-    { scenario: "USD +5%", benchmarkReturn: -0.01, factor: -0.01 * holdings.filter((row) => row.assetClass !== "Cash").reduce((sum, row) => sum + Math.abs(row.weight ?? 0), 0) },
-    { scenario: "Oil +20%", benchmarkReturn: -0.01, factor: -0.008 * equityWeight },
-    { scenario: "COVID-style risk shock", benchmarkReturn: -0.11, factor: -0.11 * beta * Math.max(equityWeight, 0.4) },
-    { scenario: "2022 rates shock", benchmarkReturn: -0.07, factor: -0.045 * equityWeight - 0.04 * ratesWeight },
-  ];
-  return scenarios.map((scenario) => {
-    const worst = holdings.filter((row) => row.assetClass !== "Cash").sort((left, right) => Math.abs(right.weight ?? 0) - Math.abs(left.weight ?? 0))[0];
+function buildStressEpisodes(replay: RiskStressReplay | null): StressEpisodeRow[] {
+  return (replay?.episodes ?? []).map((episode) => ({
+    episodeId: episode.episode_id,
+    label: episode.label,
+    window: `${episode.start} to ${episode.end}`,
+    description: episode.description,
+    status: episode.status,
+    bookReturn: episode.book_return,
+    bookPnl: episode.book_pnl,
+    benchmarkReturn: episode.benchmark_return,
+    activeReturn: episode.active_return,
+    maxDrawdown: episode.max_drawdown,
+    worstDay: episode.worst_day_return,
+    worstDayDate: episode.worst_day_date,
+    coverage: episode.gross_weight > 0 ? episode.covered_gross_weight / episode.gross_weight : null,
+    note: episode.note,
+  }));
+}
+
+/** Episodio elegido por el usuario; si no, el peor de los cubiertos; si no, el primero. */
+function selectStressEpisode(rows: StressEpisodeRow[], requested: string | null): StressEpisodeRow | null {
+  const chosen = requested ? rows.find((row) => row.episodeId === requested) : undefined;
+  if (chosen) return chosen;
+  const covered = rows.filter((row) => row.bookReturn != null).sort((left, right) => (left.bookReturn ?? 0) - (right.bookReturn ?? 0));
+  return covered[0] ?? rows[0] ?? null;
+}
+
+function buildStressLegs(replay: RiskStressReplay | null, selected: StressEpisodeRow | null): StressLegRow[] {
+  const episode = replay?.episodes.find((row) => row.episode_id === selected?.episodeId);
+  return [...(episode?.legs ?? [])]
+    .map((leg) => ({
+      symbol: leg.display_symbol ?? leg.symbol,
+      weight: leg.weight,
+      episodeReturn: leg.episode_return,
+      pnl: leg.pnl,
+      contributionShare: leg.contribution_share,
+      status: leg.status,
+      note: leg.note,
+    }))
+    // Primero las pérdidas mayores; las posiciones sin historia, al final.
+    .sort((left, right) => (left.pnl ?? Number.POSITIVE_INFINITY) - (right.pnl ?? Number.POSITIVE_INFINITY));
+}
+
+function buildRegimeRows(regimes: RiskRegimeStats[], portfolioValue: number | null, baseCurrency?: string): RiskTableRow[] {
+  return regimes.map((row) => ({
+    cells: [
+      row.regime === "stressed" ? "High vol" : "Calm",
+      String(row.observation_count),
+      formatPercent(row.annual_vol),
+      formatCurrency(row.historical_var != null && portfolioValue ? row.historical_var * portfolioValue : null, baseCurrency),
+      formatCurrency(row.historical_cvar != null && portfolioValue ? row.historical_cvar * portfolioValue : null, baseCurrency),
+      formatNumber(row.benchmark_correlation, 2),
+    ],
+    tone: row.regime === "stressed" ? "warning" as const : "" as const,
+  }));
+}
+
+/** Choques del benchmark como estimación lineal por beta: no son simulaciones ni replays. */
+function buildBetaShockRows(beta: number | null, portfolioValue: number | null, baseCurrency: string | undefined, benchmarkSymbol: string): RiskTableRow[] {
+  return [-0.05, -0.1, -0.2].map((shock) => {
+    const estimate = beta == null ? null : beta * shock;
     return {
-      scenario: scenario.scenario,
-      portfolioReturn: Number.isFinite(scenario.factor) ? scenario.factor : null,
-      benchmarkReturn: scenario.benchmarkReturn,
-      activeReturn: Number.isFinite(scenario.factor) ? scenario.factor - scenario.benchmarkReturn : null,
-      worstContributor: worst?.symbol ?? UNKNOWN,
-      bestHedge: holdings.find((row) => row.assetClass === "Cash")?.symbol ?? (portfolioValue ? "Cash / lower beta sleeve" : UNKNOWN),
+      cells: [
+        `${benchmarkSymbol} ${formatPercent(shock)}`,
+        formatPercent(estimate),
+        formatCurrency(estimate != null && portfolioValue != null ? estimate * portfolioValue : null, baseCurrency),
+      ],
+      tone: estimate != null && estimate < 0 ? "negative" as const : "" as const,
     };
   });
 }
 
-function buildScenarioImpacts(holdings: HoldingRiskRow[], scenario: ScenarioResult, portfolioValue: number | null): ScenarioImpactRow[] {
-  const totalWeight = holdings.reduce((sum, row) => sum + Math.abs(row.weight ?? 0), 0) || 1;
-  return holdings.slice(0, 10).map((row) => {
-    const shockReturn = row.assetClass === "Cash" ? 0 : (scenario.portfolioReturn ?? 0) * (Math.abs(row.weight ?? 0) / totalWeight) * 2;
-    const pnlImpact = portfolioValue == null || row.weight == null ? null : portfolioValue * row.weight * shockReturn;
-    return {
-      symbol: row.symbol,
-      weight: row.weight,
-      shock: scenario.scenario,
-      estimatedReturn: shockReturn,
-      pnlImpact,
-      contributionPct: scenario.portfolioReturn ? (row.weight ?? 0) * shockReturn / scenario.portfolioReturn : null,
-    };
-  });
-}
-
-function buildScenarioAssumptions(result: RiskResult | null, coverage: number | null) {
+function buildScenarioAssumptions(result: RiskResult | null, coverage: number | null, replay: RiskStressReplay | null) {
+  const beta = result?.metrics.beta;
   return [
-    "Historical replay labels are represented as transparent proxy shocks until provider-backed crisis windows are available.",
-    "Factor shocks use current weights, aggregate beta/correlation, and asset-class labels from the portfolio snapshot.",
-    `Return-history coverage: ${coverage == null ? "unknown" : formatPercent(coverage)}; low coverage reduces confidence.`,
-    `Benchmark overlap: ${result?.metrics.benchmark_overlap_count ?? 0} observations.`,
+    replay?.method ?? "Historical replay runs when the Scenarios mode opens; it loads long price history for each position.",
+    "Episodes are S&P 500 close-to-close peak-to-trough windows; a position without history for a window is shown as missing.",
+    result?.regime_analysis?.method ?? "Volatility regimes appear after a risk computation with benchmark history.",
+    `Benchmark shocks are linear estimates (beta ${beta == null ? "N/A" : formatNumber(beta, 2)} times the move), not simulations.`,
+    `Return-history coverage of the risk window: ${coverage == null ? "unknown" : formatPercent(coverage)}.`,
+    ...(replay?.warnings ?? []),
   ];
 }
 
@@ -827,7 +899,7 @@ function buildProvenance(
     describeAnalysisWindow(result),
     `Benchmark used: ${benchmarkSymbol}; overlap ${result?.metrics.benchmark_overlap_count ?? 0} observations.`,
     `Base currency: ${snapshot?.base_currency ?? "USD"}; conversion caveats are carried in warnings when present.`,
-    "Model assumptions: historical and parametric VaR from backend risk service; scenarios and optimization candidates are transparent research proxies.",
+    "Model assumptions: historical and parametric VaR, stress replays and volatility regimes come from the backend risk service; benchmark shocks are linear beta estimates and optimization candidates are research diagnostics.",
   ];
 }
 
@@ -909,16 +981,6 @@ function diversificationRatio(holdings: HoldingRiskRow[]) {
   const weights = holdings.map((row) => Math.abs(row.weight ?? 0));
   const hhi = weights.reduce((sum, weight) => sum + weight ** 2, 0);
   return hhi > 0 ? 1 / hhi : null;
-}
-
-function stressCorrelationLabel(correlation: number | null | undefined) {
-  if (correlation == null) return UNKNOWN;
-  return formatNumber(Math.min(0.95, correlation + 0.15), 2);
-}
-
-function scenarioBreachLabel(returnValue: number | null | undefined, result: RiskResult | null, portfolioValue: number | null) {
-  if (returnValue == null || portfolioValue == null || result?.metrics.historical_var == null) return UNKNOWN;
-  return Math.abs(returnValue * portfolioValue) > Math.abs(result.metrics.historical_var) ? "Breach" : "Inside VaR";
 }
 
 function riskAdjustedScore(points: TimeSeriesPoint[], vol: number | null | undefined) {
