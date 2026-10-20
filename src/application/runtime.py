@@ -32,7 +32,12 @@ from src.application.provider_capability_registry import (
 from src.application.research_service import ResearchService
 from src.application.research_script_service import ResearchScriptService
 from src.application.risk_service import RiskService
-from src.application.setup_service import StartupSettings, resolve_startup_settings, sec_identity_tuple
+from src.application.setup_service import (
+    StartupSettings,
+    resolve_env_file_path,
+    resolve_startup_settings,
+    sec_identity_tuple,
+)
 from src.application.sitrep_service import SitrepService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
@@ -212,7 +217,8 @@ def build_runtime(
     sample_data_dir: str | Path | None = None,
     include_desktop_session: bool = False,
 ) -> ApplicationRuntime:
-    load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+    # En la app instalada el .env vive en la carpeta de datos de la app (ver resolve_env_file_path).
+    load_dotenv(dotenv_path=resolve_env_file_path())
     setup_logging()
 
     auto_refresh = int(os.getenv("AUTO_REFRESH_SECONDS", "60") or 0)

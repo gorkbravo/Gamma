@@ -449,3 +449,26 @@ def test_sec_press_release_feed_uses_identity_or_is_skipped():
     seen.clear()
     RssNewsEventProvider(feeds=(sec_feed,), fetcher=fetcher, sec_user_agent=lambda: "Ada Tester ada@example.com").latest()
     assert seen == [("sec_press_releases", "Ada Tester ada@example.com")]
+
+
+# ── Ruta del .env ────────────────────────────────────────────────────────
+
+
+def test_env_file_path_follows_app_data_in_packaged_builds(tmp_path, monkeypatch):
+    import sys
+
+    from src.application.setup_service import REPO_ENV_FILE_PATH, resolve_env_file_path
+
+    monkeypatch.delenv("GAMMA_ENV_FILE", raising=False)
+    monkeypatch.delenv("GAMMA_APP_DATA_DIR", raising=False)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert resolve_env_file_path() == REPO_ENV_FILE_PATH
+
+    # Backend empaquetado: no hay repositorio y la app de escritorio pasa su carpeta de datos.
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("GAMMA_APP_DATA_DIR", str(tmp_path / "runtime"))
+    assert resolve_env_file_path() == tmp_path / "runtime" / ".env"
+
+    # Una ruta explícita manda en cualquier modo.
+    monkeypatch.setenv("GAMMA_ENV_FILE", str(tmp_path / "custom.env"))
+    assert resolve_env_file_path() == tmp_path / "custom.env"

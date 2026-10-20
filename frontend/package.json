@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "desktop:check": "node ./scripts/check-tauri.mjs",
     "desktop:smoke": "node ./scripts/smoke-desktop-launcher.mjs",
+    "desktop:smoke:bundle": "node ./scripts/smoke-desktop-bundle.mjs",
     "backend:package": "node ./scripts/build-backend.mjs",
     "backend:smoke": "node ./scripts/smoke-packaged-backend.mjs",
     "tauri:dev": "node ./scripts/run-tauri.mjs dev",

@@ -1,39 +1,56 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Smoke test del backend empaquetado con PyInstaller.
+//
+// Arranca gamma-backend.exe en modo demo con carpetas temporales y comprueba, además de
+// /health, rutas autenticadas que cargan los módulos importados de forma diferida (pandas,
+// scipy, Copilot, Script...). Un import que falte en el paquete solo aparece al llamarlas.
+// Ninguna de las rutas comprobadas contacta con proveedores externos.
+//
+// Uso: node ./scripts/smoke-packaged-backend.mjs [--skip-build]
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendDir = path.resolve(scriptDir, "..");
 const backendBuildScript = path.join(scriptDir, "build-backend.mjs");
 const backendExe = path.join(frontendDir, "src-tauri", "resources", "backend", "gamma-backend", executableName("gamma-backend"));
+const skipBuild = process.argv.includes("--skip-build");
 
 await main();
 
 async function main() {
-  const packageResult = spawnSync(process.execPath, [backendBuildScript], {
-    cwd: frontendDir,
-    env: { ...process.env },
-    stdio: "inherit"
-  });
-  if (packageResult.status !== 0) {
-    process.exit(packageResult.status ?? 1);
+  if (!skipBuild) {
+    const packageResult = spawnSync(process.execPath, [backendBuildScript], {
+      cwd: frontendDir,
+      env: { ...process.env },
+      stdio: "inherit"
+    });
+    if (packageResult.status !== 0) {
+      process.exit(packageResult.status ?? 1);
+    }
   }
 
   const port = await freePort();
+  const token = randomBytes(24).toString("hex");
   const tempRoot = mkdtempSync(path.join(os.tmpdir(), "gamma-packaged-backend-"));
+  const appDataDir = path.join(tempRoot, "app-data");
   const logDir = path.join(tempRoot, "logs");
   const failureReport = path.join(logDir, "backend-failure.txt");
   const child = spawn(backendExe, [], {
     cwd: path.dirname(backendExe),
     env: {
-      ...process.env,
+      ...cleanEnvironment(process.env),
       MOCK_DATA: "true",
       GAMMA_API_PORT: String(port),
+      GAMMA_SESSION_TOKEN: token,
+      GAMMA_APP_DATA_DIR: appDataDir,
       CACHE_DIR: path.join(tempRoot, "cache"),
       PORTFOLIO_HISTORY_DIR: path.join(tempRoot, "data"),
-      SAMPLE_DATA_DIR: path.join(path.dirname(backendExe), "sample_data"),
+      // Sin SAMPLE_DATA_DIR: se prueba la ruta por defecto del backend empaquetado (_internal/sample_data).
       GAMMA_LOG_DIR: logDir,
       GAMMA_BACKEND_FAILURE_REPORT: failureReport
     },
@@ -42,7 +59,9 @@ async function main() {
 
   try {
     await waitForHealth(port, child, failureReport);
-    console.log(`Packaged backend smoke check passed on http://127.0.0.1:${port}/health`);
+    console.log(`Packaged backend health passed on http://127.0.0.1:${port}/health`);
+    await runRouteChecks(port, token, appDataDir);
+    console.log("Packaged backend smoke check passed.");
   } finally {
     child.kill();
     await onceExit(child);
@@ -50,8 +69,74 @@ async function main() {
   }
 }
 
+// Quita del entorno heredado lo que haría depender el resultado de la máquina del desarrollador:
+// claves de API, identidad SEC y ajustes de arranque que el smoke fija explícitamente.
+function cleanEnvironment(env) {
+  const cleaned = {};
+  for (const [key, value] of Object.entries(env)) {
+    const upper = key.toUpperCase();
+    if (/_API_KEY$|_TOKEN$|_SECRET$/.test(upper)) continue;
+    if (upper.startsWith("GAMMA_") || upper.startsWith("IB_") || upper === "EDGAR_IDENTITY") continue;
+    if (["MOCK_DATA", "BASE_CURRENCY", "PYTHON_DOTENV_DISABLED"].includes(upper)) continue;
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+async function runRouteChecks(port, token, appDataDir) {
+  const base = `http://127.0.0.1:${port}`;
+  const get = async (route) => {
+    const response = await fetch(`${base}${route}`, { headers: { "X-Gamma-Session": token } });
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    return { status: response.status, body };
+  };
+  const checks = [
+    ["/system/status", (r) => r.status === 200 && r.body?.mock_mode === true, "demo status"],
+    [
+      "/system/setup",
+      (r) =>
+        r.status === 200 &&
+        r.body?.first_run === true &&
+        r.body?.data_mode?.current === "demo" &&
+        r.body?.sec_identity?.status === "missing" &&
+        String(r.body?.config?.env_file_path ?? "").startsWith(appDataDir),
+      "first-run report with the .env in the app-data folder"
+    ],
+    [
+      "/fundamentals/search?query=AAPL",
+      (r) => r.status === 428 && r.body?.code === "sec_identity_missing",
+      "no SEC request without an identity"
+    ],
+    ["/portfolio/snapshot", (r) => r.status === 200, "sample portfolio"],
+    ["/iv/surface?symbol=SPY", (r) => r.status === 200, "synthetic IV surface (numpy/scipy)"],
+    ["/maritime/workspace", (r) => r.status === 200, "sample maritime workspace"],
+    ["/news/latest", (r) => r.status === 200, "sample news"],
+    ["/copilot/diagnostics", (r) => r.status === 200, "Copilot diagnostics"],
+    ["/research/strategy-lab/script-datasets", (r) => r.status === 200, "Script dataset catalog"]
+  ];
+  const failures = [];
+  for (const [route, ok, label] of checks) {
+    const result = await get(route);
+    if (ok(result)) {
+      console.log(`  ok   ${route} (${label})`);
+    } else {
+      const detail = result.body?.detail ? `: ${JSON.stringify(result.body.detail).slice(0, 300)}` : "";
+      console.log(`  FAIL ${route} -> ${result.status}${detail}`);
+      failures.push(route);
+    }
+  }
+  if (failures.length) {
+    throw new Error(`Packaged backend route checks failed: ${failures.join(", ")}`);
+  }
+}
+
 async function waitForHealth(port, child, failureReport) {
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + 60000;
   let lastError = "health endpoint not reachable yet";
 
   while (Date.now() < deadline) {
@@ -72,7 +157,7 @@ async function waitForHealth(port, child, failureReport) {
     await sleep(250);
   }
 
-  throw new Error(`Timed out waiting for packaged backend health: ${lastError}`);
+  throw new Error(`Timed out waiting for packaged backend health: ${lastError}. ${safeRead(failureReport)}`.trim());
 }
 
 function safeRead(filePath) {

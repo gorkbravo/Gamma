@@ -35,7 +35,10 @@ def _clear_failure_report() -> None:
 
 def _default_sample_data_dir() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "sample_data"
+        # PyInstaller 6 deja los datos de --add-data en la carpeta de contenidos ("_internal"),
+        # que expone como sys._MEIPASS; las versiones anteriores los dejaban junto al ejecutable.
+        bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        return bundle_dir / "sample_data"
     return Path.cwd() / "sample_data"
 
 
