@@ -1,0 +1,101 @@
+# Construye el instalador NSIS de Gamma en un runner Windows limpio y prueba su ciclo de vida:
+# backend empaquetado, instalador, arranque instalado, reinstalación y desinstalación.
+#
+# Se ejecuta a mano (workflow_dispatch, cuando el fichero esté en la rama por defecto) o al subir
+# una rama claude/installer-ci-*. No usa secretos: todo corre en modo demo.
+# El instalador NO se sube como artefacto: en un repositorio público sería publicarlo.
+name: Installer smoke (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "claude/installer-ci-**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install backend dependencies (with PyInstaller)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Toolchain versions
+        run: |
+          python --version
+          node --version
+          cargo --version
+          rustc --version
+
+      - name: Package backend with PyInstaller
+        working-directory: frontend
+        env:
+          GAMMA_PYTHON: python
+        run: npm run backend:package
+
+      - name: Smoke packaged backend
+        working-directory: frontend
+        run: npm run backend:smoke -- --skip-build
+
+      - name: Build NSIS installer
+        id: build
+        working-directory: frontend
+        env:
+          GAMMA_SKIP_BACKEND_PACKAGE: "true"
+        run: npm run tauri:build
+
+      - name: Smoke release shell (not installed)
+        id: bundle_smoke
+        continue-on-error: true
+        working-directory: frontend
+        run: npm run desktop:smoke:bundle
+
+      - name: Install, reinstall and uninstall
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: frontend
+        run: ./scripts/installer-lifecycle.ps1 -OutputDir "${{ runner.temp }}/installer-lifecycle"
+
+      - name: Upload lifecycle logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-lifecycle-logs
+          path: ${{ runner.temp }}/installer-lifecycle
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Report release shell smoke result
+        if: ${{ !cancelled() && steps.bundle_smoke.outcome == 'failure' }}
+        run: |
+          Write-Host "The release shell smoke failed; see its step log. The lifecycle step above still ran."
+          exit 1
