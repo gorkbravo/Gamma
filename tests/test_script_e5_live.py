@@ -54,7 +54,9 @@ print("E5_LIVE_OK lookback", lookback)
 '''
 
 DATES = business_days(date(2026, 7, 1), 40)
-PRICES = [100 * math.exp(sum(0.01 * math.sin(i / 3) + 0.004 * math.cos(i * 1.7) for i in range(k + 1))) for k in range(len(DATES))]
+# Redondeados a 6 decimales: son exactamente los valores del CSV que lee el script.
+PRICES = [round(100 * math.exp(sum(0.01 * math.sin(i / 3) + 0.004 * math.cos(i * 1.7) for i in range(k + 1))), 6)
+          for k in range(len(DATES))]
 
 
 @pytest.mark.live_network
@@ -89,7 +91,7 @@ def test_live_parameters_sweep_weight_book_and_walk_forward(tmp_path):
     returns = [(d, p / q - 1) for d, p, q in zip(DATES[1:], PRICES[1:], PRICES)]
     payload_weights = [(o["date"], o["value"]) for o in artifact["results"][1]["result"]["observations"]]
     expected = compute_weight_book({"research:asset": payload_weights}, {"research:asset": returns}, BookOptions(1, 5))
-    assert [row["value"] for row in book["mapping"]["rows"]] == pytest.approx([row["value"] for row in expected.rows], abs=1e-9)
+    assert [row["value"] for row in book["mapping"]["rows"]] == pytest.approx([row["value"] for row in expected.rows], abs=1e-12)
 
     report = script_experiments.walk_forward_sweep(service, sweep.sweep_id,
         script_experiments.EvaluationTarget("weight_book", book_options=BookOptions(1, 5)), WalkForwardConfig(20, 5))

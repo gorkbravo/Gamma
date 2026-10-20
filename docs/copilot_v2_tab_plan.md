@@ -16,7 +16,7 @@ Fetched the current official [Code Interpreter](https://developers.openai.com/ap
 
 **Operator.** No tool or scope changes. Operator exact runs remain parameterless; parameters, sweeps, comparison and walk-forward are user actions in Strategy Lab / Script. When the Operator observes a run, its existing bounded analytical observation now carries the run's parameter provenance for E5 runs and the causal weight book, with book rows and rebalances truncated to 20 like other observed series. The E4 weight book and E5 reports are deterministic server computations over retained, validated bytes; they grant no acquisition, execution, saving or trading authority.
 
-**Live status.** The parameter wrapper path is covered by fake-client tests only. The opt-in `GAMMA_RUN_LIVE_SCRIPT_E5=true` gate (two real Code Interpreter runs) was written but not run in this session. See the Script plan.
+**Live status.** At the user's request the opt-in `GAMMA_RUN_LIVE_SCRIPT_E5=true` gate ran on the unchanged configuration (`gpt-6.1-sol`, network disabled) and passed (1 passed in 34.92s): two real Code Interpreter executions returned the parameterized wrapper verbatim, verified and copied `gamma_parameters.json`, and did not retain it as an output. A first attempt failed only in the test's own rounding reference. See the Script plan.
 
 ### Official guidance reviewed 2026-10-19 — No silent Options underlying default
 
