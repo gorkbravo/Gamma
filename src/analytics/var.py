@@ -36,6 +36,42 @@ def historical_var_cvar(portfolio_returns: pd.Series, alpha: float) -> Tuple[flo
     return var, cvar
 
 
+def historical_es_contributions(
+    asset_returns: pd.DataFrame,
+    weights: pd.Series,
+    alpha: float,
+) -> Tuple[pd.Series, int]:
+    """Contribución de cada activo al ES (CVaR) histórico de la cartera.
+
+    La cartera es Σ w_i·r_i, igual que ``portfolio_returns`` (un NaN cuenta como 0), y la cola es
+    la misma que usa ``historical_var_cvar``: días con rendimiento <= cuantil (1 - alpha). La
+    contribución del activo i es -media(w_i·r_i) en esos días, así que las contribuciones suman
+    exactamente el CVaR histórico de la cartera (en unidades de rendimiento; positivo = pérdida).
+    A diferencia del VaR por componente paramétrico, no supone normalidad: refleja qué posición
+    pierde en los peores días observados, incluidas colas gruesas y posiciones cortas.
+
+    Devuelve (contribuciones indexadas como ``weights``, número de días de cola). Si no hay datos
+    suficientes devuelve una serie vacía y 0.
+    """
+    if asset_returns is None or asset_returns.empty or weights is None or weights.empty:
+        return pd.Series(dtype=float), 0
+    columns = [column for column in weights.index if column in asset_returns.columns]
+    if not columns:
+        return pd.Series(dtype=float), 0
+    numeric = asset_returns[columns].apply(pd.to_numeric, errors="coerce")
+    weighted = numeric.mul(weights.reindex(columns).astype(float), axis=1).fillna(0.0)
+    portfolio = weighted.sum(axis=1)
+    if portfolio.empty:
+        return pd.Series(dtype=float), 0
+    quantile = portfolio.quantile(1 - alpha)
+    tail_mask = portfolio <= quantile
+    tail_days = int(tail_mask.sum())
+    if tail_days == 0:
+        return pd.Series(dtype=float), 0
+    contributions = -weighted.loc[tail_mask].mean(axis=0)
+    return contributions.astype(float), tail_days
+
+
 def parametric_var(weights: np.ndarray, cov: np.ndarray, alpha: float) -> float | None:
     if weights is None or cov is None:
         return None

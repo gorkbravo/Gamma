@@ -1161,6 +1161,8 @@ export interface RiskContribution {
   variance_contribution_pct: number | null;
   marginal_contribution_to_risk: number | null;
   component_var: number | null;
+  // Contribución al CVaR histórico (moneda base); suma el CVaR histórico de la cartera.
+  component_es?: number | null;
 }
 
 export interface IndexedValuePoint {
@@ -1209,6 +1211,8 @@ export interface RiskFrontierPoint {
 }
 
 export interface RiskCorrelationAsset {
+  // Columna a la que se refieren las celdas; en libros de investigación es el leg_id.
+  key?: string | null;
   symbol: string;
   instrument_id: string | null;
   display_symbol: string | null;
@@ -1293,6 +1297,8 @@ export interface RiskResult {
   dependency_network: RiskDependencyNetwork;
   excluded_assets: ExcludedAsset[];
   warnings: string[];
+  // Días de cola sobre los que se reparte el CVaR histórico.
+  component_es_tail_days?: number | null;
 }
 
 export interface PredictionMarketOutcome {

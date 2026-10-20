@@ -17,7 +17,7 @@ from src.analytics.risk_metrics import (
     realized_vol,
     risk_contributions,
 )
-from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
+from src.analytics.var import historical_es_contributions, historical_var_cvar, monte_carlo_var_cvar, parametric_var
 from src.application.instrument_identity import identity_for_position
 from src.application.request_limits import (
     MAX_RISK_BETA_WINDOW_DAYS,
@@ -27,7 +27,7 @@ from src.application.request_limits import (
     MAX_RISK_MC_SIMULATIONS,
 )
 from src.models.instruments import InstrumentDefaults, InstrumentReference
-from src.models.portfolio import PortfolioSnapshot, RiskResults
+from src.models.portfolio import PortfolioSnapshot, PositionItem, RiskResults
 from src.models.research_lab import ResearchBookRiskLeg
 from src.services.data_providers import (
     AppDataProvider,
@@ -107,6 +107,9 @@ class RiskComputationPayload:
     source_origin: str | None = None
     contribution_returns_df: pd.DataFrame | None = None
     contribution_metadata: dict[str, dict[str, str | None]] | None = None
+    # Contribución de cada posición al CVaR histórico (moneda base); suma el CVaR de la cartera.
+    component_es: pd.Series | None = None
+    component_es_tail_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -499,6 +502,14 @@ class RiskService:
             else:
                 warnings.append("Risk contributions unavailable: non-positive portfolio variance")
 
+        # Misma cartera Σ w·r y misma cola que el CVaR histórico: las contribuciones lo suman exactamente.
+        component_es_returns, component_es_tail_days = historical_es_contributions(
+            risk_returns_df,
+            weights_aligned,
+            request.alpha,
+        )
+        component_es = component_es_returns * covered_portfolio_value
+
         frontier_universe_returns, frontier_universe_warnings = self._load_frontier_universe_returns(
             request=request,
             data_provider=data_provider,
@@ -565,6 +576,8 @@ class RiskService:
             source_label=request.source_label,
             source_object_id=request.source_object_id,
             source_origin=request.source_origin,
+            component_es=component_es,
+            component_es_tail_days=component_es_tail_days,
         )
 
     def _compute_research_book(
@@ -763,29 +776,59 @@ class RiskService:
                     index=contribution_weights.index,
                 )
 
-        frontier_universe_returns = None
-        risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
-            request=request,
-            returns_df=returns_df,
+        component_es, component_es_tail_days = self._research_book_component_es(
+            contribution_returns_df=contribution_returns_df,
+            contribution_weights=contribution_weights,
+            alpha=request.alpha,
+            total_portfolio_value=total_portfolio_value,
+            book_cvar_return=hist_cvar_r,
+            book_observation_count=int(len(port_ret)),
+            warnings=warnings,
         )
-        warnings.extend(risk_free_warnings)
-        frontier_points, frontier_warnings = self._build_efficient_frontier(
-            snapshot=snapshot,
-            returns_df=returns_df,
-            weights=weights,
-            risk_free_rate_annual=risk_free_rate_annual,
-            reference_returns_df=frontier_universe_returns,
-        )
-        warnings.extend(frontier_warnings)
-        dependency_network = self._build_dependency_network(
-            snapshot=snapshot,
-            portfolio_returns_df=returns_df,
-            weights=weights,
-            contributions=contributions,
-            reference_returns_df=frontier_universe_returns,
-        )
-        if dependency_network.warnings:
-            warnings.extend(dependency_network.warnings)
+
+        if contribution_metadata is not None:
+            # Con historia por posición, correlaciones, red de dependencias y frontera describen las
+            # posiciones del libro (como en una cartera) y no la serie agregada de una sola columna.
+            legs_snapshot = self._research_book_legs_snapshot(
+                snapshot,
+                contribution_weights,
+                contribution_metadata,
+                total_portfolio_value,
+            )
+            frontier_points, dependency_network, correlation_matrix = self._research_book_leg_analytics(
+                request=request,
+                data_provider=data_provider,
+                legs_snapshot=legs_snapshot,
+                leg_returns_df=contribution_returns_df,
+                leg_weights=contribution_weights,
+                contributions=contributions,
+                warnings=warnings,
+            )
+        else:
+            frontier_universe_returns = None
+            risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
+                request=request,
+                returns_df=returns_df,
+            )
+            warnings.extend(risk_free_warnings)
+            frontier_points, frontier_warnings = self._build_efficient_frontier(
+                snapshot=snapshot,
+                returns_df=returns_df,
+                weights=weights,
+                risk_free_rate_annual=risk_free_rate_annual,
+                reference_returns_df=frontier_universe_returns,
+            )
+            warnings.extend(frontier_warnings)
+            dependency_network = self._build_dependency_network(
+                snapshot=snapshot,
+                portfolio_returns_df=returns_df,
+                weights=weights,
+                contributions=contributions,
+                reference_returns_df=frontier_universe_returns,
+            )
+            if dependency_network.warnings:
+                warnings.extend(dependency_network.warnings)
+            correlation_matrix = self._correlation_matrix(returns_df, snapshot)
         results.warnings = list(dict.fromkeys(warnings))
 
         return RiskComputationPayload(
@@ -799,7 +842,7 @@ class RiskService:
             marginal_contribution_to_risk=marginal_contribution_to_risk,
             component_var=component_var,
             frontier_points=frontier_points,
-            correlation_matrix=self._correlation_matrix(returns_df, snapshot),
+            correlation_matrix=correlation_matrix,
             dependency_network=dependency_network,
             source_scope=request.source_scope,
             source_label=request.source_label,
@@ -807,7 +850,159 @@ class RiskService:
             source_origin=request.source_origin,
             contribution_returns_df=contribution_returns_df,
             contribution_metadata=contribution_metadata,
+            component_es=component_es,
+            component_es_tail_days=component_es_tail_days,
         )
+
+    @staticmethod
+    def _research_book_component_es(
+        *,
+        contribution_returns_df: pd.DataFrame,
+        contribution_weights: pd.Series,
+        alpha: float,
+        total_portfolio_value: float,
+        book_cvar_return: float | None,
+        book_observation_count: int,
+        warnings: list[str],
+    ) -> tuple[pd.Series, int | None]:
+        if contribution_returns_df is None or contribution_returns_df.empty or contribution_weights.empty:
+            return pd.Series(dtype=float), None
+        es_returns, tail_days = historical_es_contributions(contribution_returns_df, contribution_weights, alpha)
+        if es_returns.empty:
+            return pd.Series(dtype=float), None
+        # El CVaR del libro se mide sobre su serie agregada validada; las posiciones solo se alinean en
+        # los días en que todas tienen historia. Si no coinciden, se dice en vez de mostrar un desglose
+        # que no suma el total publicado.
+        if book_cvar_return is not None:
+            gap = abs(float(es_returns.sum()) - float(book_cvar_return))
+            if gap > 1e-6 * max(1.0, abs(float(book_cvar_return))):
+                warnings.append(
+                    f"Historical ES contributions use the {len(contribution_returns_df)} days where every leg has "
+                    f"history ({book_observation_count} in the book stream), so they do not add up exactly to the "
+                    "book's historical CVaR."
+                )
+        return es_returns * total_portfolio_value, tail_days
+
+    @staticmethod
+    def _research_book_legs_snapshot(
+        snapshot: PortfolioSnapshot,
+        weights: pd.Series,
+        metadata: dict[str, dict[str, str | None]],
+        total_portfolio_value: float,
+    ) -> PortfolioSnapshot:
+        """Snapshot sintético con una posición por posición del libro (id = leg_id).
+
+        Solo sirve para reutilizar la frontera, la red y la matriz de correlación, que identifican
+        los activos a través de las posiciones del snapshot. Las etiquetas se hacen únicas para que
+        dos posiciones con el mismo símbolo no se fusionen en la red.
+        """
+        positions: list[PositionItem] = []
+        used_labels: dict[str, int] = {}
+        for leg_id, weight in weights.items():
+            meta = metadata.get(str(leg_id), {})
+            base_label = str(meta.get("display_symbol") or meta.get("symbol") or leg_id).strip().upper()
+            used_labels[base_label] = used_labels.get(base_label, 0) + 1
+            label = base_label if used_labels[base_label] == 1 else f"{base_label} #{used_labels[base_label]}"
+            value = float(weight) * float(total_portfolio_value or 0.0)
+            positions.append(
+                PositionItem(
+                    label,
+                    "STK",
+                    snapshot.base_currency,
+                    1,
+                    None,
+                    value,
+                    value,
+                    None,
+                    weight=float(weight),
+                    base_market_value=value,
+                    instrument_id=str(leg_id),
+                    display_symbol=label,
+                )
+            )
+        return PortfolioSnapshot(
+            timestamp=snapshot.timestamp,
+            base_currency=snapshot.base_currency,
+            account_summary={},
+            positions=positions,
+            net_liquidation=snapshot.net_liquidation,
+            total_market_value=snapshot.total_market_value,
+            total_cash=0.0,
+        )
+
+    def _research_book_leg_analytics(
+        self,
+        *,
+        request: RiskComputeRequest,
+        data_provider: AppDataProvider | None,
+        legs_snapshot: PortfolioSnapshot,
+        leg_returns_df: pd.DataFrame,
+        leg_weights: pd.Series,
+        contributions: pd.Series,
+        warnings: list[str],
+    ) -> tuple[list["RiskFrontierPoint"], "RiskDependencyNetwork", pd.DataFrame]:
+        """Frontera, red de dependencias y correlaciones con las posiciones del libro.
+
+        Usa el mismo universo de referencia que una cartera para dar contexto a la red. La frontera
+        se omite si el libro tiene cortos: el optimizador es solo largo y la comparación engañaría.
+        """
+        frontier_universe_returns, frontier_universe_warnings = self._load_frontier_universe_returns(
+            request=request,
+            data_provider=data_provider,
+        )
+        warnings.extend(frontier_universe_warnings)
+        cached_equity_returns, cached_equity_metadata, cached_equity_warnings = self._load_cached_equity_reference_returns(
+            request=request,
+        )
+        warnings.extend(cached_equity_warnings)
+        (
+            aligned_leg_returns,
+            frontier_universe_returns,
+            cached_equity_returns,
+            frontier_window_warnings,
+        ) = self._align_frontier_return_windows(
+            portfolio_returns_df=leg_returns_df,
+            reference_returns_df=frontier_universe_returns,
+            cached_equity_returns_df=cached_equity_returns,
+        )
+        warnings.extend(frontier_window_warnings)
+
+        if bool((leg_weights < 0).any()):
+            frontier_points: list[RiskFrontierPoint] = []
+            # Mismo prefijo que el resto de avisos de frontera, que la vista muestra tal cual.
+            warnings.append(
+                "Efficient frontier unavailable: it is long-only and this research book has short legs."
+            )
+        else:
+            risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
+                request=request,
+                returns_df=aligned_leg_returns,
+            )
+            warnings.extend(risk_free_warnings)
+            frontier_points, frontier_warnings = self._build_efficient_frontier(
+                snapshot=legs_snapshot,
+                returns_df=aligned_leg_returns,
+                weights=leg_weights,
+                risk_free_rate_annual=risk_free_rate_annual,
+                reference_returns_df=frontier_universe_returns,
+                cached_equity_returns_df=cached_equity_returns,
+                cached_equity_metadata=cached_equity_metadata,
+            )
+            warnings.extend(frontier_warnings)
+
+        dependency_network = self._build_dependency_network(
+            snapshot=legs_snapshot,
+            portfolio_returns_df=aligned_leg_returns,
+            weights=leg_weights,
+            contributions=contributions,
+            reference_returns_df=frontier_universe_returns,
+            cached_equity_returns_df=cached_equity_returns,
+            cached_equity_metadata=cached_equity_metadata,
+        )
+        if dependency_network.warnings:
+            warnings.extend(dependency_network.warnings)
+        correlation_matrix = self._correlation_matrix(leg_returns_df, legs_snapshot)
+        return frontier_points, dependency_network, correlation_matrix
 
     @staticmethod
     def _research_book_contribution_inputs(

@@ -93,6 +93,8 @@ class RiskContributionModel(BaseModel):
     variance_contribution_pct: float | None = None
     marginal_contribution_to_risk: float | None = None
     component_var: float | None = None
+    # Contribución al CVaR histórico en moneda base: pérdida media de la posición en los días de cola.
+    component_es: float | None = None
 
 
 class IndexedValuePoint(BaseModel):
@@ -137,6 +139,9 @@ class RiskCorrelationAssetModel(BaseModel):
     symbol: str
     instrument_id: str | None = None
     display_symbol: str | None = None
+    # Identificador de columna al que se refieren las celdas (row/column). En una cartera coincide
+    # con instrument_id; en un libro de investigación es el leg_id de la posición.
+    key: str | None = None
 
 
 class RiskCorrelationCellModel(BaseModel):
@@ -211,6 +216,8 @@ class RiskComputeResponseModel(BaseModel):
     dependency_network: RiskDependencyNetworkModel = Field(default_factory=RiskDependencyNetworkModel)
     excluded_assets: list[ExcludedAssetModel]
     warnings: list[str] = Field(default_factory=list)
+    # Días de cola (peor (1 - alpha) de la muestra) sobre los que se reparte el CVaR histórico.
+    component_es_tail_days: int | None = None
 
     @classmethod
     def from_service_payload(cls, payload: RiskComputationPayload) -> "RiskComputeResponseModel":
@@ -237,6 +244,9 @@ class RiskComputeResponseModel(BaseModel):
                     variance_contribution_pct=_to_float(payload.contributions.get(symbol)),
                     marginal_contribution_to_risk=_to_float(payload.marginal_contribution_to_risk.get(symbol)),
                     component_var=_to_float(payload.component_var.get(symbol)),
+                    component_es=(
+                        _to_float(payload.component_es.get(symbol)) if payload.component_es is not None else None
+                    ),
                 )
             )
         return cls(
@@ -298,6 +308,7 @@ class RiskComputeResponseModel(BaseModel):
                 for symbol, reason in sorted(results.excluded_assets.items())
             ],
             warnings=list(results.warnings),
+            component_es_tail_days=payload.component_es_tail_days,
         )
 
 
@@ -325,14 +336,18 @@ def _correlation_matrix_to_payload(payload: RiskComputationPayload) -> RiskCorre
     if frame is None or frame.empty:
         return RiskCorrelationMatrixModel()
     columns = [str(column) for column in frame.columns]
-    assets = [
-        RiskCorrelationAssetModel(
-            symbol=_position_meta(payload.snapshot, column).get("symbol") or column,
-            instrument_id=_position_meta(payload.snapshot, column).get("instrument_id"),
-            display_symbol=_position_meta(payload.snapshot, column).get("display_symbol"),
+    assets = []
+    for column in columns:
+        # En un libro de investigación las columnas son posiciones (leg_id), no filas del snapshot.
+        meta = (payload.contribution_metadata or {}).get(column) or _position_meta(payload.snapshot, column)
+        assets.append(
+            RiskCorrelationAssetModel(
+                symbol=meta.get("symbol") or column,
+                instrument_id=meta.get("instrument_id"),
+                display_symbol=meta.get("display_symbol"),
+                key=column,
+            )
         )
-        for column in columns
-    ]
     cells: list[RiskCorrelationCellModel] = []
     for row in columns:
         for column in columns:
