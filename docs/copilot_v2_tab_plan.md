@@ -2,7 +2,21 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-19
+Last updated: 2026-10-20
+
+### Official guidance reviewed 2026-10-20 — Script E4 weight book and E5 parameters
+
+Fetched the current official [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter) guide and the [Create container file](https://developers.openai.com/api/reference/resources/containers/subresources/files/methods/create) reference directly (no Developer Docs connector was available in this session). Review date: **2026-10-20**. Relevant points:
+
+- Files are added to an explicit container with "Create container file" (multipart or `file_id`); the returned object carries `id` and the container `path`.
+- A container expires after 20 idle minutes and cannot be revived; files must be uploaded again to a new container. The guide still recommends treating containers as ephemeral.
+- Generated files come back as `container_file_citation` annotations and are retrieved with "Retrieve container file content".
+
+**Decision.** E5 delivers run parameters as one extra container file, not as source edits. Gamma canonicalizes the flat JSON object, hashes the exact bytes, uploads `gamma-parameters-<sha16>.json` once per container and parameter hash, and the existing exact wrapper gains lines that verify that hash and copy the bytes to `gamma_parameters.json` in the run directory before the initial-file snapshot. Runs without parameters use the unchanged wrapper. The copy is excluded from retained outputs and from current-run artifact association exactly like copied inputs. The container binding stays keyed by source and manifest hash, so a sweep reuses one container; an expired container replays with fresh uploads. No model, network policy, memory, timeout, retry, tool, orchestration or permission change.
+
+**Operator.** No tool or scope changes. Operator exact runs remain parameterless; parameters, sweeps, comparison and walk-forward are user actions in Strategy Lab / Script. When the Operator observes a run, its existing bounded analytical observation now carries the run's parameter provenance for E5 runs and the causal weight book, with book rows and rebalances truncated to 20 like other observed series. The E4 weight book and E5 reports are deterministic server computations over retained, validated bytes; they grant no acquisition, execution, saving or trading authority.
+
+**Live status.** The parameter wrapper path is covered by fake-client tests only. The opt-in `GAMMA_RUN_LIVE_SCRIPT_E5=true` gate (two real Code Interpreter runs) was written but not run in this session. See the Script plan.
 
 ### Official guidance reviewed 2026-10-19 — No silent Options underlying default
 

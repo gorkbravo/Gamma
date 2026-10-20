@@ -16,6 +16,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from src.application.script_parameters import PARAMETERS_FILENAME
 from src.models.research_script import ResearchScriptRunStatus
 from src.services.research_script_runtime import (
     ResearchScriptRuntimeCancelResult,
@@ -84,6 +85,8 @@ class OpenAICodeInterpreterRuntime:
         self._api_key_present = bool(str(api_key or "").strip())
         self._client = client
         self._bindings: dict[str, _ContainerBinding] = {}
+        # E5: cada conjunto de parámetros se sube una vez por contenedor (clave: contenedor + SHA-256).
+        self._parameter_uploads: dict[tuple[str, str], _UploadedFile] = {}
         self._results: dict[str, tuple[str, ResearchScriptRuntimeResult]] = {}
         self._response_ids: dict[str, str] = {}
         self._cancelled_runs: set[str] = set()
@@ -181,6 +184,17 @@ class OpenAICodeInterpreterRuntime:
                 )
                 self._remember_result(request.run_id, fingerprint, result)
                 return result
+        if (request.parameters_content is None) != (request.parameters_sha256 is None) or (
+            request.parameters_content is not None
+            and hashlib.sha256(request.parameters_content).hexdigest() != request.parameters_sha256
+        ):
+            result = self._unavailable_result(
+                request,
+                "Gamma rejected dispatch because the run parameters hash did not match.",
+                status="incomplete",
+            )
+            self._remember_result(request.run_id, fingerprint, result)
+            return result
 
         replayed = False
         try:
@@ -269,6 +283,7 @@ class OpenAICodeInterpreterRuntime:
         replayed: bool,
     ) -> ResearchScriptRuntimeResult:
         binding = self._container_binding(request, manifest_bytes)
+        parameters_upload = self._parameters_upload(binding.container_id, request)
         before_ids = self._container_file_ids(binding.container_id)
         wrapper = self._execution_wrapper(
             binding.source_path,
@@ -281,7 +296,9 @@ class OpenAICodeInterpreterRuntime:
                 if item.role == "input"
             ],
             request.run_id,
+            parameters=(parameters_upload.provider_path, parameters_upload.content_sha256) if parameters_upload else None,
         )
+        uploads = (*binding.uploads, *((parameters_upload,) if parameters_upload else ()))
         with audit_response("strategy_lab.script", self.model) as audit:
             response = self._client.responses.create(
                 model=self.model,
@@ -358,6 +375,9 @@ class OpenAICodeInterpreterRuntime:
                         warnings.append("A transient provider image URL was not retained because no durable bytes were available.")
 
         input_hashes = {item.logical_filename: item.content_sha256 for item in request.input_files}
+        if request.parameters_sha256:
+            # La copia de gamma_parameters.json en el workspace es una entrada, nunca un resultado.
+            input_hashes[PARAMETERS_FILENAME] = request.parameters_sha256
         cited_files: dict[str, str] = {}
         for item in list(getattr(response, "output", []) or []):
             if getattr(item, "type", None) != "message":
@@ -398,7 +418,7 @@ class OpenAICodeInterpreterRuntime:
 
         after_files = self._container_files(binding.container_id)
         after_paths = {str(getattr(item, "id", "")): str(getattr(item, "path", "")) for item in after_files}
-        upload_ids = {item.file_id for item in binding.uploads}
+        upload_ids = {item.file_id for item in uploads}
         # Los ficheros subidos (fuente, manifiesto, entradas) nunca son resultados, aunque el modelo los cite.
         generated: dict[str, str] = {
             file_id: filename for file_id, filename in cited_files.items() if file_id not in upload_ids
@@ -441,7 +461,8 @@ class OpenAICodeInterpreterRuntime:
             expected_path = f"/mnt/data/gamma-run-{request.run_id[:16]}/{artifact.filename}"
             outputs.append(replace(artifact, run_association_verified=(
                 file_id not in before_ids and file_id not in upload_ids
-                and artifact.filename not in {item.logical_filename for item in request.input_files}
+                and artifact.filename not in {*(item.logical_filename for item in request.input_files),
+                                              *((PARAMETERS_FILENAME,) if request.parameters_sha256 else ())}
                 and after_paths.get(file_id) == expected_path
             )))
             sequence += 1
@@ -485,7 +506,7 @@ class OpenAICodeInterpreterRuntime:
                         "filename": item.filename,
                         "content_sha256": item.content_sha256,
                     }
-                    for item in binding.uploads
+                    for item in uploads
                 ],
                 # Copias sin cambios de las entradas halladas en el contenedor y no retenidas como resultados.
                 "excluded_input_copies": excluded_input_copies,
@@ -506,6 +527,7 @@ class OpenAICodeInterpreterRuntime:
                 "wrapper_hash_basis": "normalized_code",
                 "source_sha256": request.source_sha256,
                 "input_manifest_sha256": request.input_manifest_sha256,
+                "parameters_sha256": request.parameters_sha256,
                 "expired_container_replay": replayed,
             }
         )
@@ -569,6 +591,25 @@ class OpenAICodeInterpreterRuntime:
             self._bindings[key] = binding
         return binding
 
+    def _parameters_upload(self, container_id: str, request: ResearchScriptRuntimeRequest) -> _UploadedFile | None:
+        if request.parameters_content is None or not request.parameters_sha256:
+            return None
+        key = (container_id, request.parameters_sha256)
+        with self._lock:
+            existing = self._parameter_uploads.get(key)
+        if existing is not None:
+            return existing
+        uploaded = self._upload(
+            container_id,
+            "parameters",
+            f"gamma-parameters-{request.parameters_sha256[:16]}.json",
+            request.parameters_content,
+            "application/json",
+        )
+        with self._lock:
+            self._parameter_uploads[key] = uploaded
+        return uploaded
+
     def _upload(self, container_id: str, role: str, filename: str, content: bytes, media_type: str) -> _UploadedFile:
         uploaded = self._client.containers.files.create(
             container_id=container_id,
@@ -612,7 +653,18 @@ class OpenAICodeInterpreterRuntime:
         manifest_hash: str,
         inputs: list[tuple[str, str, str]],
         run_id: str,
+        *,
+        parameters: tuple[str, str] | None = None,
     ) -> str:
+        # Sin parámetros el wrapper es idéntico al de E1-E4; con parámetros se verifican y copian
+        # como gamma_parameters.json antes de fijar los ficheros iniciales del workspace.
+        parameter_lines = [] if parameters is None else [
+            f"parameters_path = {parameters[0]!r}",
+            f"assert hashlib.sha256(open(parameters_path, 'rb').read()).hexdigest() == {parameters[1]!r}",
+            f"copied_parameters = os.path.join(workspace, {PARAMETERS_FILENAME!r})",
+            "shutil.copyfile(parameters_path, copied_parameters)",
+            f"assert hashlib.sha256(open(copied_parameters, 'rb').read()).hexdigest() == {parameters[1]!r}",
+        ]
         return "\n".join(
             [
                 "import hashlib, os, runpy, shutil",
@@ -628,6 +680,7 @@ class OpenAICodeInterpreterRuntime:
                 "    copied_path = os.path.join(workspace, logical_name)",
                 "    shutil.copyfile(provider_path, copied_path)",
                 "    assert hashlib.sha256(open(copied_path, 'rb').read()).hexdigest() == expected_hash",
+                *parameter_lines,
                 "initial_files = set(os.listdir(workspace))",
                 "os.chdir(workspace)",
                 "runpy.run_path(source_path, run_name='__main__')",
@@ -929,6 +982,7 @@ class OpenAICodeInterpreterRuntime:
             "source_sha256": request.source_sha256,
             "input_snapshot_id": request.input_snapshot_id,
             "input_manifest_sha256": request.input_manifest_sha256,
+            "parameters_sha256": request.parameters_sha256,
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")

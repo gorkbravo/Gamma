@@ -17,7 +17,9 @@ import {
   selectResearchScriptRun,
   updateResearchScriptInput,
   useSelectedRunResearchScriptInputs,
-  loadResearchScript
+  loadResearchScript,
+  parseResearchScriptParameters,
+  updateResearchScriptParameters
 } from "./research-script";
 
 const detail = (revisionNumber = 1, source = "print('preview')\n"): ResearchScriptDetail => {
@@ -369,4 +371,34 @@ describe("research script workspace store", () => {
     expect(get(researchScriptWorkspace).error).toContain("Save your canonical edits");
   });
 
+  it("sends run parameters separately from the source and blocks invalid parameters before any request", async () => {
+    loadedWorkspace(bundle("base", ["spy.csv"]));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ...run(), revision_id: "revision-1", parameters: { lookback: 20 }, parameters_sha256: "c".repeat(64) }, 201, "Created"))
+      .mockResolvedValueOnce(jsonResponse(bundle("base", ["spy.csv"])))
+      .mockResolvedValueOnce(jsonResponse(diagnostics()))
+      .mockResolvedValueOnce(jsonResponse({ ...run(), revision_id: "revision-1" }, 201, "Created"))
+      .mockResolvedValueOnce(jsonResponse(bundle("base", ["spy.csv"])))
+      .mockResolvedValueOnce(jsonResponse(diagnostics()));
+    vi.stubGlobal("fetch", fetchMock);
+    updateResearchScriptParameters('{"lookback": [1, 2]}');
+    await runSelectedResearchScript();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(get(researchScriptWorkspace).error).toContain("number, text, boolean or null");
+    updateResearchScriptParameters('{"lookback": 20}');
+    await runSelectedResearchScript();
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.parameters).toEqual({ lookback: 20 });
+    expect(get(researchScriptWorkspace).selectedRun?.parameters_sha256).toBe("c".repeat(64));
+    updateResearchScriptParameters("{}");
+    await runSelectedResearchScript();
+    expect("parameters" in JSON.parse(fetchMock.mock.calls[3][1].body as string)).toBe(false);
+  });
+
+  it("parses only flat JSON objects as run parameters", () => {
+    expect(parseResearchScriptParameters("")).toEqual({ ok: true, values: {} });
+    expect(parseResearchScriptParameters('{"a": 1, "b": "x", "c": null, "d": true}')).toMatchObject({ ok: true });
+    expect(parseResearchScriptParameters("[1]")).toMatchObject({ ok: false });
+    expect(parseResearchScriptParameters("{bad")).toMatchObject({ ok: false, error: expect.stringContaining("valid JSON") });
+  });
 });
