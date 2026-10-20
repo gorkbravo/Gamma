@@ -230,6 +230,8 @@
     strategyLabResult,
     systemStatus,
     toggleConnection,
+    riskStressReplay,
+    loadRiskStressReplay,
     startNewCopilotSession
   } from "./lib/stores/app";
   import {
@@ -3312,6 +3314,9 @@
             workingAnalysis={riskWorkingAnalysis}
             loading={$loading.risk}
             onCompute={computeRisk}
+            stressReplay={$riskStressReplay}
+            stressReplayLoading={$loading.riskStress}
+            onLoadStressReplay={loadRiskStressReplay}
           />
         {:else}
           <svelte:component

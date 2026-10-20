@@ -14,7 +14,8 @@ from src.application.request_limits import (
     MAX_RISK_MC_SIMULATIONS,
     MAX_STRATEGY_LAB_ROWS,
 )
-from src.application.risk_service import RiskComputationPayload
+from src.analytics.stress import VolatilityRegimeAnalysis
+from src.application.risk_service import RiskComputationPayload, RiskStressReplayResult
 from src.models.portfolio import RiskResults
 
 
@@ -36,6 +37,149 @@ class RiskComputeRequestModel(BaseModel):
     beta_window: int = Field(default=126, ge=20, le=MAX_RISK_BETA_WINDOW_DAYS)
     benchmark_symbol: str = Field(default="SPY", min_length=1, max_length=32)
     include_monte_carlo: bool = True
+
+
+class RiskStressReplayRequestModel(BaseModel):
+    snapshot: PortfolioSnapshotModel
+    source_scope: str = Field(default="portfolio", max_length=32, pattern="^(portfolio|research|research_book)$")
+    research_book_legs: list[ResearchBookRiskLegModel] = Field(default_factory=list, max_length=100)
+    benchmark_symbol: str = Field(default="SPY", min_length=1, max_length=32)
+
+
+class RiskRegimeStatsModel(BaseModel):
+    regime: str
+    observation_count: int
+    annual_vol: float | None = None
+    historical_var: float | None = None
+    historical_cvar: float | None = None
+    benchmark_correlation: float | None = None
+    benchmark_annual_vol: float | None = None
+
+
+class RiskRegimeAnalysisModel(BaseModel):
+    status: str = "unavailable"
+    window_days: int = 21
+    threshold_annual_vol: float | None = None
+    regimes: list[RiskRegimeStatsModel] = Field(default_factory=list)
+    observation_count: int = 0
+    note: str | None = None
+    method: str | None = None
+
+    @classmethod
+    def from_domain(cls, analysis: VolatilityRegimeAnalysis | None) -> "RiskRegimeAnalysisModel":
+        if analysis is None:
+            return cls()
+        return cls(
+            status=analysis.status,
+            window_days=analysis.window_days,
+            threshold_annual_vol=analysis.threshold_annual_vol,
+            regimes=[RiskRegimeStatsModel(**row.__dict__) for row in analysis.regimes],
+            observation_count=analysis.observation_count,
+            note=analysis.note,
+            method=analysis.method,
+        )
+
+
+class RiskStressLegModel(BaseModel):
+    symbol: str
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    weight: float
+    status: str
+    episode_return: float | None = None
+    pnl: float | None = None
+    contribution_share: float | None = None
+    start_price_date: str | None = None
+    end_price_date: str | None = None
+    note: str | None = None
+
+
+class RiskStressEpisodeModel(BaseModel):
+    episode_id: str
+    label: str
+    start: str
+    end: str
+    description: str
+    status: str
+    book_return: float | None = None
+    book_pnl: float | None = None
+    benchmark_return: float | None = None
+    active_return: float | None = None
+    max_drawdown: float | None = None
+    worst_day_return: float | None = None
+    worst_day_date: str | None = None
+    covered_gross_weight: float = 0.0
+    gross_weight: float = 0.0
+    observation_count: int = 0
+    legs: list[RiskStressLegModel] = Field(default_factory=list)
+    note: str | None = None
+
+
+class RiskStressReplayResponseModel(BaseModel):
+    episodes: list[RiskStressEpisodeModel] = Field(default_factory=list)
+    portfolio_value: float
+    base_currency: str
+    benchmark_symbol: str
+    lookback_days: int
+    method: str
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, result: RiskStressReplayResult) -> "RiskStressReplayResponseModel":
+        def iso(value) -> str | None:
+            return value.isoformat() if value is not None else None
+
+        episodes = []
+        for row in result.episodes:
+            legs = []
+            for leg in row.legs:
+                meta = result.leg_metadata.get(leg.key, {})
+                legs.append(
+                    RiskStressLegModel(
+                        symbol=meta.get("symbol") or leg.key,
+                        instrument_id=meta.get("instrument_id"),
+                        display_symbol=meta.get("display_symbol"),
+                        weight=float(leg.weight),
+                        status=leg.status,
+                        episode_return=_to_float(leg.episode_return),
+                        pnl=_to_float(leg.pnl),
+                        contribution_share=_to_float(leg.contribution_share),
+                        start_price_date=iso(leg.start_price_date),
+                        end_price_date=iso(leg.end_price_date),
+                        note=leg.note,
+                    )
+                )
+            episodes.append(
+                RiskStressEpisodeModel(
+                    episode_id=row.episode.episode_id,
+                    label=row.episode.label,
+                    start=row.episode.start.isoformat(),
+                    end=row.episode.end.isoformat(),
+                    description=row.episode.description,
+                    status=row.status,
+                    book_return=_to_float(row.book_return),
+                    book_pnl=_to_float(row.book_pnl),
+                    benchmark_return=_to_float(row.benchmark_return),
+                    active_return=_to_float(row.active_return),
+                    max_drawdown=_to_float(row.max_drawdown),
+                    worst_day_return=_to_float(row.worst_day_return),
+                    worst_day_date=iso(row.worst_day_date),
+                    covered_gross_weight=float(row.covered_gross_weight),
+                    gross_weight=float(row.gross_weight),
+                    observation_count=int(row.observation_count),
+                    legs=legs,
+                    note=row.note,
+                )
+            )
+        return cls(
+            episodes=episodes,
+            portfolio_value=float(result.portfolio_value),
+            base_currency=result.base_currency,
+            benchmark_symbol=result.benchmark_symbol,
+            lookback_days=int(result.lookback_days),
+            method=result.method,
+            warnings=list(result.warnings),
+        )
 
 
 class RiskMetricsModel(BaseModel):
@@ -218,6 +362,7 @@ class RiskComputeResponseModel(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     # Días de cola (peor (1 - alpha) de la muestra) sobre los que se reparte el CVaR histórico.
     component_es_tail_days: int | None = None
+    regime_analysis: RiskRegimeAnalysisModel = Field(default_factory=RiskRegimeAnalysisModel)
 
     @classmethod
     def from_service_payload(cls, payload: RiskComputationPayload) -> "RiskComputeResponseModel":
@@ -309,6 +454,7 @@ class RiskComputeResponseModel(BaseModel):
             ],
             warnings=list(results.warnings),
             component_es_tail_days=payload.component_es_tail_days,
+            regime_analysis=RiskRegimeAnalysisModel.from_domain(payload.regime_analysis),
         )
 
 

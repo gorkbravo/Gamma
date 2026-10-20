@@ -144,7 +144,9 @@ import type {
   ResearchCompareResult,
   ResearchOverviewResponse,
   ResearchResult,
+  ResearchBookRiskLeg,
   RiskResult,
+  RiskStressReplay,
   SavedResearchDeleteResponse,
   SavedResearchItem,
   SavedResearchListResponse,
@@ -3520,6 +3522,41 @@ export async function loadFundamentalsDcfSnapshot(ticker: string, snapshotId: st
   }
 }
 
+// Replay histórico de episodios de estrés: se pide aparte (carga historia larga) y solo al
+// abrir el modo Scenarios, con la misma base (snapshot, alcance, posiciones, benchmark) que el
+// último cálculo de Risk.
+export const riskStressReplay = writable<RiskStressReplay | null>(null);
+let riskStressBasis: {
+  snapshot: PortfolioSnapshot;
+  source_scope: "portfolio" | "research" | "research_book";
+  research_book_legs: ResearchBookRiskLeg[];
+  benchmark_symbol: string;
+} | null = null;
+let riskStressBasisKey: string | null = null;
+
+export async function loadRiskStressReplay() {
+  const basis = riskStressBasis;
+  if (!basis) return null;
+  const requestKey = stableJson(basis);
+  if (requestKey === riskStressBasisKey && get(riskStressReplay)) return get(riskStressReplay);
+  return requestCoordinator.run("risk-stress-replay", requestKey, async (signal) => {
+    setLoading("riskStress", true);
+    try {
+      const result = await postJson<RiskStressReplay>("/risk/stress-replay", basis, { signal });
+      if (signal.aborted) return null;
+      riskStressReplay.set(result);
+      riskStressBasisKey = requestKey;
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!signal.aborted) setError(error);
+      return null;
+    } finally {
+      setLoading("riskStress", false);
+    }
+  });
+}
+
 export async function computeRisk(options: RiskComputeOptions) {
   const snapshot = options.snapshot ?? get(portfolioSnapshot) ?? get(researchResult)?.snapshot ?? null;
   if (!snapshot) {
@@ -3556,6 +3593,14 @@ export async function computeRisk(options: RiskComputeOptions) {
       riskResult.set(result);
       riskSnapshotBasis.set(snapshot);
       riskWorkspaceBasis.set(snapshotWorkspace);
+      // Un cálculo nuevo invalida el replay anterior; se recalcula al volver a Scenarios.
+      riskStressBasis = {
+        snapshot,
+        source_scope: snapshotWorkspace,
+        research_book_legs: options.researchBookRiskLegs ?? [],
+        benchmark_symbol: options.benchmarkSymbol,
+      };
+      if (stableJson(riskStressBasis) !== riskStressBasisKey) riskStressReplay.set(null);
       resetCopilotCard("risk");
       lastError.set("");
       return result;

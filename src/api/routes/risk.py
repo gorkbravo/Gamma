@@ -3,8 +3,13 @@ from __future__ import annotations
 import pandas as pd
 from fastapi import APIRouter, Request
 
-from src.api.schemas.risk import RiskComputeRequestModel, RiskComputeResponseModel
-from src.application.risk_service import RiskComputeRequest
+from src.api.schemas.risk import (
+    RiskComputeRequestModel,
+    RiskComputeResponseModel,
+    RiskStressReplayRequestModel,
+    RiskStressReplayResponseModel,
+)
+from src.application.risk_service import RiskComputeRequest, RiskStressReplayRequest
 
 
 router = APIRouter(tags=["risk"])
@@ -48,6 +53,32 @@ def compute_risk(
         data_provider=data_provider,
     )
     return RiskComputeResponseModel.from_service_payload(result)
+
+
+@router.post("/risk/stress-replay", response_model=RiskStressReplayResponseModel)
+def stress_replay(
+    payload: RiskStressReplayRequestModel,
+    request: Request,
+) -> RiskStressReplayResponseModel:
+    """Replay histórico de episodios de estrés con los pesos actuales.
+
+    Va aparte de /risk/compute porque carga historia larga (hasta ~20 años) de cada posición;
+    la vista lo pide solo al abrir el modo Scenarios.
+    """
+    runtime = request.app.state.runtime
+    source_scope = str(payload.source_scope or "portfolio").strip().lower()
+    data_provider = runtime.portfolio_provider if source_scope == "portfolio" else runtime.research_provider
+    result = runtime.risk_service.compute_stress_replay(
+        RiskStressReplayRequest(
+            snapshot=payload.snapshot.to_domain(),
+            benchmark_symbol=payload.benchmark_symbol,
+            base_currency=payload.snapshot.base_currency,
+            source_scope=source_scope,
+            research_book_legs=[leg.to_domain() for leg in payload.research_book_legs],
+        ),
+        data_provider=data_provider,
+    )
+    return RiskStressReplayResponseModel.from_domain(result)
 
 
 def _points_to_series(points) -> pd.Series | None:

@@ -17,8 +17,8 @@
     type RiskContributionRow,
     type RiskCorrelationMatrixView,
     type RiskTableRow,
-    type ScenarioImpactRow,
-    type ScenarioResult,
+    type StressEpisodeRow,
+    type StressLegRow,
   } from "../lib/risk-workspace";
   import {
     adoptRiskSourceFromResult,
@@ -33,7 +33,7 @@
     strategyLabControlsToSeed,
     type StrategyLabBookControls,
   } from "../lib/risk-handoff";
-  import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
+  import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, RiskStressReplay, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
   export let mode: WorkspaceMode | null = "portfolio";
@@ -45,6 +45,18 @@
   export let workingAnalysis: CopilotWorkingAnalysis | null = null;
   export let loading = false;
   export let onCompute: (options: RiskComputeOptions) => Promise<void> | void;
+  // Replay histórico: se pide al abrir Scenarios porque carga historia larga de cada posición.
+  export let stressReplay: RiskStressReplay | null = null;
+  export let stressReplayLoading = false;
+  export let onLoadStressReplay: () => Promise<unknown> | void = () => {};
+
+  let selectedEpisodeId: string | null = null;
+  let stressRequestedFor: RiskResult | null = null;
+  $: if (activeMode === "scenarios" && result && stressRequestedFor !== result) {
+    stressRequestedFor = result;
+    selectedEpisodeId = null;
+    void onLoadStressReplay();
+  }
 
   type ComputeMethod = "core" | "monteCarlo";
   type FrontierPlotPoint = {
@@ -257,6 +269,9 @@
     sourceLabel: renderedSourceLabel,
     benchmarkSymbol: benchmarkLabel,
     returnFrequency,
+    stressReplay,
+    stressReplayLoading,
+    selectedEpisodeId,
   });
 
   $: headerKpis = (() => {
@@ -735,11 +750,11 @@
     meta: `${pct(item.volatilityContribution)} risk contribution`,
   }));
 
-  $: scenarioBars = workspace.scenarioImpacts.slice(0, 10).map((item) => ({
+  $: scenarioBars = workspace.stressLegs.filter((item) => item.pnl != null).slice(0, 10).map((item) => ({
     label: item.symbol,
-    value: item.pnlImpact ?? 0,
-    tone: (item.pnlImpact ?? 0) >= 0 ? "positive" : "negative",
-    meta: `${pct(item.estimatedReturn)} shock | ${pct(item.weight)} weight`,
+    value: item.pnl ?? 0,
+    tone: (item.pnl ?? 0) >= 0 ? "positive" : "negative",
+    meta: `${pct(item.episodeReturn)} in episode | ${pct(item.weight)} weight`,
   }));
 
   $: optimizationBars = workspace.candidates.slice(0, 10).map((item) => ({
@@ -932,13 +947,15 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
-          {@render RankPanel("Scenario Waterfall", scenarioBars, "currency")}
-          {@render ScenarioTable(workspace.scenarios)}
-          {@render ScenarioImpactTable(workspace.scenarioImpacts)}
+          {@render StressEpisodeTable(workspace.stressEpisodes, workspace.selectedEpisode, workspace.stressState)}
+          {@render RankPanel(`Episode P&L by Position${workspace.selectedEpisode ? ` · ${workspace.selectedEpisode.label}` : ""}`, scenarioBars, "currency")}
+          {@render StressLegTable(workspace.stressLegs, workspace.selectedEpisode)}
         </div>
         <aside class="support-column">
-          {@render RankPanel("Shock Impact by Asset Class", exposureBars.map((item) => ({ ...item, value: item.value * (workspace.scenarios[0]?.portfolioReturn ?? 0) })))}
-          {@render ListPanel("Scenario Assumptions", workspace.scenarioAssumptions)}
+          {@render SimpleTable("Volatility Regimes", ["Regime", "Days", "Ann. vol", "1d VaR", "1d ES", "Corr"], workspace.regimeRows)}
+          {#if workspace.regimeNote}<p class="muted regime-note">{workspace.regimeNote}</p>{/if}
+          {@render SimpleTable("Benchmark Shocks (beta estimate)", ["Shock", "Book", "P&L"], workspace.betaShockRows)}
+          {@render ListPanel("Scenario Method", workspace.scenarioAssumptions)}
           {@render SharedAlerts()}
         </aside>
       </div>
@@ -1066,22 +1083,75 @@
   </article>
 {/snippet}
 
-{#snippet ScenarioTable(rows: ScenarioResult[])}
+{#snippet StressEpisodeTable(rows: StressEpisodeRow[], selected: StressEpisodeRow | null, state: "idle" | "loading" | "ready")}
   <article class="panel table-panel">
-    <header class="table-panel-header">Scenario Results<span>{rows.length} rows</span></header>
+    <header class="table-panel-header">
+      Historical Stress Replay
+      <span>{state === "loading" ? "LOADING..." : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
+    </header>
     <table>
-      <thead><tr><th>Scenario</th><th>Portfolio</th><th>Benchmark</th><th>Active</th><th>Worst contributor</th><th>Best hedge</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.scenario}</td><td class={row.portfolioReturn == null ? "" : row.portfolioReturn >= 0 ? "positive" : "negative"}>{pct(row.portfolioReturn)}</td><td class:absent={pct(row.benchmarkReturn) === "N/A"}>{pct(row.benchmarkReturn)}</td><td class:absent={pct(row.activeReturn) === "N/A"}>{pct(row.activeReturn)}</td><td>{row.worstContributor}</td><td>{row.bestHedge}</td></tr>{/each}</tbody>
+      <thead>
+        <tr>
+          <th>Episode</th>
+          <th>Window</th>
+          <th>Book</th>
+          <th>Benchmark</th>
+          <th>Active</th>
+          <th title="Largest peak-to-trough fall of the book inside the episode.">Max DD</th>
+          <th>Worst day</th>
+          <th title="Share of gross exposure with price history for the window.">Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#if rows.length}
+          {#each rows as row}
+            <tr class:selected-row={selected?.episodeId === row.episodeId} title={row.note ?? row.description}>
+              <td>
+                <button
+                  type="button"
+                  class="row-select"
+                  aria-pressed={selected?.episodeId === row.episodeId}
+                  on:click={() => (selectedEpisodeId = row.episodeId)}
+                >{row.label}</button>
+              </td>
+              <td>{row.window}</td>
+              <td class={row.bookReturn == null ? "absent" : row.bookReturn >= 0 ? "positive" : "negative"}>{row.bookReturn == null ? (row.status === "unavailable" ? "No history" : "N/A") : pct(row.bookReturn)}</td>
+              <td class:absent={pct(row.benchmarkReturn) === "N/A"}>{pct(row.benchmarkReturn)}</td>
+              <td class={row.activeReturn == null ? "absent" : row.activeReturn >= 0 ? "positive" : "negative"}>{pct(row.activeReturn)}</td>
+              <td class:absent={pct(row.maxDrawdown) === "N/A"}>{pct(row.maxDrawdown)}</td>
+              <td class:absent={pct(row.worstDay) === "N/A"}>{pct(row.worstDay)}</td>
+              <td class:warning={row.coverage != null && row.coverage < 1} class:absent={pct(row.coverage, 0) === "N/A"}>{pct(row.coverage, 0)}</td>
+            </tr>
+          {/each}
+        {:else}
+          <tr><td colspan="8" class="empty">{state === "loading" ? "LOADING..." : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
+        {/if}
+      </tbody>
     </table>
   </article>
 {/snippet}
 
-{#snippet ScenarioImpactTable(rows: ScenarioImpactRow[])}
+{#snippet StressLegTable(rows: StressLegRow[], selected: StressEpisodeRow | null)}
   <article class="panel table-panel">
-    <header class="table-panel-header">Position-Level Impact<span>{rows.length} rows</span></header>
+    <header class="table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
     <table>
-      <thead><tr><th>Symbol</th><th>Current weight</th><th>Shock assumption</th><th>Estimated return</th><th>P&L impact</th><th>Contribution %</th></tr></thead>
-      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td>{row.shock}</td><td class:absent={pct(row.estimatedReturn) === "N/A"}>{pct(row.estimatedReturn)}</td><td class:absent={currency(row.pnlImpact) === "N/A"}>{currency(row.pnlImpact)}</td><td class:absent={pct(row.contributionPct) === "N/A"}>{pct(row.contributionPct)}</td></tr>{/each}</tbody>
+      <thead><tr><th>Position</th><th>Weight</th><th>Episode return</th><th>P&L</th><th>Share of result</th><th>Status</th></tr></thead>
+      <tbody>
+        {#if rows.length}
+          {#each rows as row}
+            <tr title={row.note ?? ""}>
+              <td>{row.symbol}</td>
+              <td>{pct(row.weight)}</td>
+              <td class={row.episodeReturn == null ? "absent" : row.episodeReturn >= 0 ? "positive" : "negative"}>{pct(row.episodeReturn)}</td>
+              <td class={row.pnl == null ? "absent" : row.pnl >= 0 ? "positive" : "negative"}>{currency(row.pnl)}</td>
+              <td class:absent={pct(row.contributionShare) === "N/A"}>{pct(row.contributionShare)}</td>
+              <td class:warning={row.status !== "covered"}>{row.status === "covered" ? "Covered" : "No history"}</td>
+            </tr>
+          {/each}
+        {:else}
+          <tr><td colspan="6" class="empty">No position results for this episode.</td></tr>
+        {/if}
+      </tbody>
     </table>
   </article>
 {/snippet}
@@ -1990,5 +2060,35 @@
     .mode-bar button:nth-child(-n + 3) { border-bottom: 1px solid var(--panel-strong); }
     .control, input, select { width: 100%; }
     .actions { margin-left: 0; border-left: 0; padding-left: 0; flex: 1 1 100%; }
+  }
+
+  .row-select {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-0);
+    font: inherit;
+    font-family: var(--display-font);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .row-select:hover,
+  .row-select[aria-pressed="true"] {
+    color: var(--accent);
+  }
+
+  .row-select:focus-visible {
+    outline: 1px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  tr.selected-row td {
+    background: var(--active-bg);
+  }
+
+  .regime-note {
+    margin: 0;
+    font-size: var(--text-xs);
   }
 </style>
