@@ -6453,6 +6453,14 @@ class CopilotService:
                     item["result"]["observations"] = observations[:20]
                 if item["mapping"]:
                     item["mapping"]["rows"] = item["mapping"]["rows"][:20]
+            # El libro causal de pesos (E4) se acota igual que cualquier resultado observado.
+            book = artifact.get("weight_book")
+            if book and book.get("mapping"):
+                rows = book["mapping"]["rows"]
+                book["observation_count"] = len(rows)
+                book["observations_truncated"] = len(rows) > 20
+                book["mapping"]["rows"] = rows[:20]
+                book["mapping"]["details"]["rebalances"] = book["mapping"]["details"]["rebalances"][:20]
         output = {
             "script_id": run.script_id,
             "revision_id": run.revision_id,

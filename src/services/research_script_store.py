@@ -22,6 +22,9 @@ from src.models.research_script import (
     ResearchScriptRevision,
     ResearchScriptRun,
     ResearchScriptStorageDiagnostics,
+    ResearchScriptSweep,
+    ResearchScriptSweepAxis,
+    ResearchScriptSweepPoint,
 )
 from src.utils.time import now_utc
 
@@ -79,6 +82,7 @@ class ResearchScriptStore:
         self.inputs_dir = self.base_dir / "inputs"
         self.runs_dir = self.base_dir / "runs"
         self.outputs_dir = self.base_dir / "outputs"
+        self.sweeps_dir = self.base_dir / "sweeps"
         self.quarantine_dir = self.base_dir / "quarantine"
         self.run_history_limit = max(int(run_history_limit), 1)
         self.input_snapshot_retention = max(int(input_snapshot_retention), 1)
@@ -90,6 +94,7 @@ class ResearchScriptStore:
             self.inputs_dir,
             self.runs_dir,
             self.outputs_dir,
+            self.sweeps_dir,
             self.quarantine_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
@@ -382,12 +387,15 @@ class ResearchScriptStore:
         return False
 
     def _referenced_input_snapshot_ids_unlocked(self) -> set[str] | None:
-        """Snapshots citados por cualquier ejecución o revisión retenida, de cualquier script.
+        """Snapshots citados por cualquier ejecución, revisión o barrido retenido, de cualquier script.
 
-        Devuelve None si algún registro no se puede leer: sin la lista completa de referencias no se poda.
+        Un barrido sin ejecuciones todavía también fija su paquete: sus puntos deben poder ejecutarse
+        sobre las mismas entradas. Devuelve None si algún registro no se puede leer: sin la lista
+        completa de referencias no se poda.
         """
         referenced: set[str] = set()
-        for path in [*self.runs_dir.glob("*/*.json"), *self.revisions_dir.glob("*/*.json")]:
+        for path in [*self.runs_dir.glob("*/*.json"), *self.revisions_dir.glob("*/*.json"),
+                     *self.sweeps_dir.glob("*/*.json")]:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8")).get("payload")
             except (OSError, ValueError, AttributeError):
@@ -527,6 +535,40 @@ class ResearchScriptStore:
                 path = script_dir / f"{safe_id}.json"
                 if path.exists():
                     return self._load_record(path, "research_script_run", self._parse_run)
+        return None
+
+    def create_sweep(self, sweep: ResearchScriptSweep) -> None:
+        safe_script_id = self._require_safe_id(sweep.script_id, "script_id")
+        safe_sweep_id = self._require_safe_id(sweep.sweep_id, "sweep_id")
+        path = self.sweeps_dir / safe_script_id / f"{safe_sweep_id}.json"
+        with self._lock:
+            if path.exists():
+                raise ResearchScriptStoreConflictError(f"Research script sweep already exists: {sweep.sweep_id}")
+            self._write_record_atomic(path, "research_script_sweep", sweep)
+
+    def list_sweeps(self, script_id: str) -> list[ResearchScriptSweep]:
+        safe_id = self._safe_id(script_id)
+        if not safe_id:
+            return []
+        with self._lock:
+            sweeps = [
+                item
+                for path in sorted((self.sweeps_dir / safe_id).glob("*.json"))
+                if (item := self._load_record(path, "research_script_sweep", self._parse_sweep)) is not None
+            ]
+        return sorted(sweeps, key=lambda item: (item.created_at, item.sweep_id), reverse=True)
+
+    def load_sweep(self, sweep_id: str) -> ResearchScriptSweep | None:
+        safe_id = self._safe_id(sweep_id)
+        if not safe_id:
+            return None
+        with self._lock:
+            for script_dir in sorted(self.sweeps_dir.iterdir()):
+                if not script_dir.is_dir() or not self._safe_id(script_dir.name):
+                    continue
+                path = script_dir / f"{safe_id}.json"
+                if path.exists():
+                    return self._load_record(path, "research_script_sweep", self._parse_sweep)
         return None
 
     def load_output_artifact(self, run_id: str, output_id: str, filename: str) -> bytes | None:
@@ -893,6 +935,34 @@ class ResearchScriptStore:
             limits={str(key): value for key, value in dict(payload.get("limits", {})).items()},
             source_provider=str(payload["source_provider"]),
             origin=str(payload["origin"]),
+            transformation_note=payload.get("transformation_note"),
+            contract_version=str(payload["contract_version"]),
+            parameters=dict(payload["parameters"]) if isinstance(payload.get("parameters"), dict) else None,
+            parameters_sha256=payload.get("parameters_sha256"),
+            sweep_id=payload.get("sweep_id"),
+            sweep_point_index=int(payload["sweep_point_index"]) if payload.get("sweep_point_index") is not None else None,
+        )
+
+    @classmethod
+    def _parse_sweep(cls, payload: dict[str, Any]) -> ResearchScriptSweep:
+        return ResearchScriptSweep(
+            sweep_id=str(payload["sweep_id"]),
+            script_id=str(payload["script_id"]),
+            revision_id=str(payload["revision_id"]),
+            source_sha256=str(payload["source_sha256"]),
+            input_snapshot_id=str(payload["input_snapshot_id"]),
+            input_manifest_sha256=str(payload["input_manifest_sha256"]),
+            base_parameters=dict(payload.get("base_parameters", {})),
+            axes=[ResearchScriptSweepAxis(name=str(item["name"]), values=list(item["values"])) for item in payload["axes"]],
+            points=[
+                ResearchScriptSweepPoint(index=int(item["index"]), parameters=dict(item["parameters"]),
+                                         parameters_sha256=str(item["parameters_sha256"]))
+                for item in payload["points"]
+            ],
+            definition_sha256=str(payload["definition_sha256"]),
+            created_at=cls._parse_datetime(payload["created_at"]),
+            created_by=payload.get("created_by", "user"),
+            origin=str(payload.get("origin", "research_script_service.create_sweep")),
             transformation_note=payload.get("transformation_note"),
             contract_version=str(payload["contract_version"]),
         )

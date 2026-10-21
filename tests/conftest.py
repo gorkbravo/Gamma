@@ -443,6 +443,7 @@ def blocked_network_attempts():
 @pytest.fixture(autouse=True)
 def pin_script_runtime_for_deterministic_tests(monkeypatch, request):
     # A user's live Script preference must not turn routine test runs into API
-    # execution. Only E4's explicitly opted-in configured-runtime gate reads it.
-    if request.node.module.__name__ != "test_script_analytics_live":
+    # execution. Only the explicitly opted-in configured-runtime gates (E4 and
+    # E5, each behind its own GAMMA_RUN_LIVE_* flag) read it.
+    if request.node.module.__name__ not in {"test_script_analytics_live", "test_script_e5_live"}:
         monkeypatch.setenv("GAMMA_RESEARCH_SCRIPT_RUNTIME", "mock")

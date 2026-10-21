@@ -321,4 +321,22 @@ describe("StrategyScriptWorkspace", () => {
     expect(body).toContain("Clean orphaned outputs");
     expect(body).toContain("One recoverable orphan was found.");
   });
+
+  it("keeps run parameters beside the source and blocks running invalid parameters", () => {
+    const detail = activeDetail();
+    const base = { ...initialResearchScriptWorkspaceState(), initialized: true, detail,
+      sourceDraft: detail.revisions[0].source, selectedRevisionId: "revision-1" };
+    const invalid = render(StrategyScriptWorkspace, { props: { snapshot: { ...base, parametersDraft: "[1, 2]" } } }).body;
+    expect(invalid).toContain("Run parameters · JSON object, separate from the source");
+    expect(invalid).toContain("flat JSON object");
+    expect(invalid).toMatch(/class="run-button[^"]*"[^>]*disabled/);
+    const valid = render(StrategyScriptWorkspace, { props: { snapshot: { ...base, parametersDraft: '{"lookback": 20}' } } }).body;
+    expect(valid).toContain("1 parameter →");
+    const selectedRun = run({ parameters: { lookback: 20 }, parameters_sha256: "c".repeat(64), sweep_id: "sweep-1", sweep_point_index: 2 });
+    const bound = render(StrategyScriptWorkspace, { props: { snapshot: { ...base, runs: [selectedRun], selectedRun } } }).body;
+    expect(bound).toContain("Parameters SHA");
+    expect(bound).toContain("cccccccccccc");
+    expect(bound).toContain("sweep #2");
+    expect(bound).toContain("Parameter sweep &amp; walk-forward");
+  });
 });

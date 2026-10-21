@@ -27,6 +27,7 @@ import {
 } from "../api/research-scripts";
 import type {
   ResearchScript,
+  ResearchScriptParameterValue,
   ResearchScriptDetail,
   ResearchScriptInputSnapshot,
   ResearchScriptRevision,
@@ -62,6 +63,8 @@ export interface ResearchScriptWorkspaceState {
   includeArchived: boolean;
   inputFilename: string;
   inputContent: string;
+  /** E5: objeto JSON plano que el servidor entrega como gamma_parameters.json; "{}" = sin parámetros. */
+  parametersDraft: string;
   loading: "list" | "load" | "create" | "save" | "run" | "decision" | "input" | "lifecycle" | "compare" | "cleanup" | null;
   error: string;
   notice: string;
@@ -87,6 +90,7 @@ export const initialResearchScriptWorkspaceState = (): ResearchScriptWorkspaceSt
   includeArchived: false,
   inputFilename: "",
   inputContent: "",
+  parametersDraft: "{}",
   loading: null,
   error: "",
   notice: ""
@@ -125,6 +129,57 @@ export function resetResearchScriptWorkspace() {
 
 export function updateResearchScriptDraft(sourceDraft: string) {
   researchScriptWorkspace.update((state) => ({ ...state, sourceDraft, error: "", notice: "" }));
+}
+
+export type ParsedResearchScriptParameters =
+  | { ok: true; values: Record<string, ResearchScriptParameterValue> }
+  | { ok: false; error: string };
+
+/** Validación local mínima; el servidor canoniza, aplica los límites completos y calcula el hash. */
+export function parseResearchScriptParameters(text: string): ParsedResearchScriptParameters {
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: true, values: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    return { ok: false, error: `Parameters must be valid JSON: ${messageOf(error)}` };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "Parameters must be a flat JSON object, for example {\"lookback\": 20}." };
+  }
+  for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (value !== null && typeof value === "object") {
+      return { ok: false, error: `Parameter "${name}" must be a number, text, boolean or null.` };
+    }
+  }
+  return { ok: true, values: parsed as Record<string, ResearchScriptParameterValue> };
+}
+
+export function updateResearchScriptParameters(parametersDraft: string) {
+  researchScriptWorkspace.update((state) => ({ ...state, parametersDraft, error: "", notice: "" }));
+}
+
+export function useSelectedRunResearchScriptParameters() {
+  researchScriptWorkspace.update((state) => ({
+    ...state,
+    parametersDraft: JSON.stringify(state.selectedRun?.parameters ?? {}, null, 2),
+    notice: state.selectedRun?.parameters ? "Loaded the selected run's parameters for the next run." : "The selected run had no parameters."
+  }));
+}
+
+/** Incorpora ejecuciones creadas fuera del botón Run (puntos de un barrido) sin perder la selección. */
+export function recordResearchScriptRuns(runs: ResearchScriptRun[], options: { select?: boolean } = {}) {
+  if (!runs.length) return;
+  researchScriptWorkspace.update((state) => {
+    if (!state.detail || runs.some((run) => run.script_id !== state.detail?.script.script_id)) return state;
+    const ids = new Set(runs.map((run) => run.run_id));
+    return {
+      ...state,
+      runs: [...runs].reverse().concat(state.runs.filter((run) => !ids.has(run.run_id))),
+      selectedRun: options.select ? runs[runs.length - 1] : state.selectedRun
+    };
+  });
 }
 
 export function updateResearchScriptInput(inputFilename: string, inputContent: string) {
@@ -228,6 +283,8 @@ export async function loadResearchScript(scriptId: string) {
       selectedRevisionId: revision?.revision_id ?? null,
       runs: runResponse.items,
       selectedRun: runResponse.items[0] ?? null,
+      // Los parámetros de la ejecución más reciente son el punto de partida de la siguiente.
+      parametersDraft: JSON.stringify(runResponse.items[0]?.parameters ?? {}, null, 2),
       preparedInputSnapshot: inputBundles[0] ?? null,
       inputBundles,
       selectedRunInputSnapshot: null,
@@ -316,12 +373,18 @@ export async function runSelectedResearchScript() {
     researchScriptWorkspace.update((current) => ({ ...current, error: "Add the pasted input to the bundle, or clear it, before running." }));
     return null;
   }
+  const parameters = parseResearchScriptParameters(state.parametersDraft);
+  if (!parameters.ok) {
+    researchScriptWorkspace.update((current) => ({ ...current, error: parameters.error }));
+    return null;
+  }
   setBusy("run");
   try {
     const run = await createResearchScriptRun(state.detail.script.script_id, {
       revision_id: revision.revision_id,
       input_snapshot_id: state.preparedInputSnapshot?.snapshot_id,
-      input_files: []
+      input_files: [],
+      ...(Object.keys(parameters.values).length ? { parameters: parameters.values } : {})
     });
     researchScriptWorkspace.update((current) => ({
       ...current,

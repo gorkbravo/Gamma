@@ -62,6 +62,7 @@ from src.services.research_script_store import (
     ResearchScriptStoreConflictError,
     is_safe_research_script_filename,
 )
+from src.application.script_parameters import PARAMETERS_FILENAME, canonical_parameters, parameter_changes
 from src.utils.time import now_utc
 
 
@@ -505,10 +506,26 @@ class ResearchScriptService:
             ),
         )
 
-    def create_run(self, script_id: str, request: ResearchScriptRunCreateRequest) -> ResearchScriptRun:
+    def create_run(
+        self,
+        script_id: str,
+        request: ResearchScriptRunCreateRequest,
+        *,
+        _sweep_point: tuple[str, int] | None = None,
+    ) -> ResearchScriptRun:
         detail = self.get_script(script_id)
         if detail.script.status in {"archived", "discarded"}:
             raise ResearchScriptConflictError("Restore the archived script before creating a run.")
+        # E5: los parámetros se validan antes de crear snapshots o llamar al runtime. Un objeto vacío
+        # equivale a no entregar gamma_parameters.json.
+        parameters = parameters_content = parameters_hash = None
+        if request.parameters:
+            try:
+                parameters, parameters_content, parameters_hash = canonical_parameters(request.parameters)
+            except ValueError as exc:
+                raise ResearchScriptValidationError([str(exc)]) from exc
+        elif request.parameters is not None and not isinstance(request.parameters, dict):
+            raise ResearchScriptValidationError(["Parameters must be a flat JSON object."])
         revision_id = request.revision_id or detail.script.canonical_revision_id
         revision = self.store.load_revision(detail.script.script_id, revision_id)
         if revision is None:
@@ -535,6 +552,10 @@ class ResearchScriptService:
         else:
             snapshot = self._create_input_snapshot(detail.script.script_id, request)
 
+        if parameters_hash and any(item.logical_filename.casefold() == PARAMETERS_FILENAME for item in snapshot.files):
+            raise ResearchScriptValidationError([
+                f"{PARAMETERS_FILENAME} is reserved for run parameters. Rename that input file or run without parameters."
+            ])
         input_contents = self.store.load_input_contents(snapshot)
         input_manifest = self._input_manifest_identity(snapshot)
         computed_manifest_hash = self.manifest_sha256(input_manifest)
@@ -565,6 +586,8 @@ class ResearchScriptService:
             limits=self.limits(),
             started_at=started_at,
             scenario=request.runtime_scenario,
+            parameters_content=parameters_content,
+            parameters_sha256=parameters_hash,
         )
         result = self.runtime.start_run(runtime_request)
         capabilities = self.capabilities()
@@ -652,6 +675,10 @@ class ResearchScriptService:
                 if capabilities.executes_source is False
                 else "Normalized provider runtime outputs for the immutable source and input snapshot."
             ),
+            parameters=parameters,
+            parameters_sha256=parameters_hash,
+            sweep_id=_sweep_point[0] if _sweep_point else None,
+            sweep_point_index=_sweep_point[1] if _sweep_point else None,
         )
         try:
             self.store.create_run(run, artifacts)
@@ -914,6 +941,8 @@ class ResearchScriptService:
             output_count_delta=len(comparison.outputs) - len(base.outputs),
             warning_count_delta=len(comparison.warnings) - len(base.warnings),
             metric_deltas=metric_deltas,
+            same_parameters=base.parameters_sha256 == comparison.parameters_sha256,
+            parameter_changes=parameter_changes(base.parameters, comparison.parameters),
         )
 
     def export_run_bundle(self, run_id: str) -> tuple[str, bytes]:
@@ -936,6 +965,12 @@ class ResearchScriptService:
             )
             for logical_filename, content in input_contents.items():
                 bundle.writestr(f"input/files/{logical_filename}", content)
+            if run.parameters_sha256:
+                # Mismos bytes canónicos que recibió el runtime como gamma_parameters.json.
+                _, parameter_bytes, parameter_hash = canonical_parameters(run.parameters or {})
+                if parameter_hash != run.parameters_sha256:
+                    raise ResearchScriptServiceError("Run parameters no longer match their recorded hash.")
+                bundle.writestr(f"input/{PARAMETERS_FILENAME}", parameter_bytes)
             bundle.writestr(
                 "run.json",
                 json.dumps(asdict(run), indent=2, sort_keys=True, default=self._json_default),

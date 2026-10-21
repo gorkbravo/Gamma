@@ -3,6 +3,7 @@
 
   import type { ResearchScriptOutput, StrategyLabResult } from "../lib/api/types";
   import ScriptAnalyticalResults from "./ScriptAnalyticalResults.svelte";
+  import ScriptParameterSweep from "./ScriptParameterSweep.svelte";
   import {
     fetchResearchScriptOutput,
     fetchResearchScriptRunExport
@@ -35,6 +36,9 @@
     setWorkspaceResearchScriptArchived,
     updateResearchScriptDraft,
     updateResearchScriptInput,
+    parseResearchScriptParameters,
+    updateResearchScriptParameters,
+    useSelectedRunResearchScriptParameters,
     type ResearchScriptWorkspaceState
   } from "../lib/stores/research-script";
 
@@ -60,6 +64,8 @@
   );
   $: draftIsDirty = Boolean(canonicalRevision && workspace.sourceDraft !== canonicalRevision.source);
   $: selectedSourceIsDirty = Boolean(selectedRevision && workspace.sourceDraft !== selectedRevision.source);
+  $: parsedParameters = parseResearchScriptParameters(workspace.parametersDraft);
+  $: parameterCount = parsedParameters.ok ? Object.keys(parsedParameters.values).length : 0;
   $: runtimeAvailable = workspace.capabilities?.available ?? true;
   $: executesSource = workspace.capabilities?.executes_source ?? false;
   $: selectedRunDuration = workspace.selectedRun?.completed_at
@@ -198,6 +204,28 @@
         <span>SHA {shortHash(selectedRevision?.source_sha256)}</span>
       </div>
 
+      <label class="parameters-field">
+        <span>Run parameters · JSON object, separate from the source</span>
+        <textarea
+          rows="3"
+          spellcheck="false"
+          value={workspace.parametersDraft}
+          on:input={(event) => updateResearchScriptParameters((event.currentTarget as HTMLTextAreaElement).value)}
+          disabled={workspace.loading !== null}
+          aria-label="Run parameters JSON"
+          aria-describedby="parameters-status"
+        ></textarea>
+        <small id="parameters-status" class:invalid={!parsedParameters.ok}>
+          {#if !parsedParameters.ok}
+            {parsedParameters.error}
+          {:else if parameterCount}
+            {parameterCount} parameter{parameterCount === 1 ? "" : "s"} → <code>gamma_parameters.json</code> in the run directory; the source hash is unchanged.
+          {:else}
+            No parameters: the run receives no <code>gamma_parameters.json</code>.
+          {/if}
+        </small>
+      </label>
+
       <div class="action-row">
         <button
           type="button"
@@ -210,7 +238,7 @@
           type="button"
           class="run-button"
           on:click={() => void runSelectedResearchScript()}
-          disabled={!workspace.detail || workspace.detail.script.status === "archived" || !selectedRevision || selectedSourceIsDirty || workspace.loading !== null || !runtimeAvailable}
+          disabled={!workspace.detail || workspace.detail.script.status === "archived" || !selectedRevision || selectedSourceIsDirty || workspace.loading !== null || !runtimeAvailable || !parsedParameters.ok}
         >
           {workspace.loading === "run" ? "Running…" : executesSource ? "Run immutable revision" : "Run safe preview"}
         </button>
@@ -250,6 +278,10 @@
             <tbody>
               <tr><td>Revision</td><td>{workspace.runComparison.same_revision ? "Same immutable revision" : "Changed"}</td></tr>
               <tr><td>Input snapshot</td><td>{workspace.runComparison.same_input_snapshot ? "Same immutable snapshot" : "Changed"}</td></tr>
+              <tr>
+                <td>Parameters</td>
+                <td>{workspace.runComparison.same_parameters !== false ? "Same parameters" : (workspace.runComparison.parameter_changes ?? []).map((change) => `${change.name}: ${change.base_present ? JSON.stringify(change.base) : "absent"} → ${change.comparison_present ? JSON.stringify(change.comparison) : "absent"}`).join(" · ")}</td>
+              </tr>
               <tr><td>Status</td><td>{workspace.runComparison.status_changed ? "Changed" : "Unchanged"}</td></tr>
               <tr><td>Duration</td><td>{workspace.runComparison.duration_delta_seconds === null ? "—" : `${workspace.runComparison.duration_delta_seconds.toFixed(2)} s`}</td></tr>
               <tr><td>Input tokens</td><td>{workspace.runComparison.input_token_delta ?? "—"}</td></tr>
@@ -370,6 +402,16 @@
         <p class="artifact-error" role="alert">Artifact action failed: {artifactActionError}</p>
       {/if}
     </article>
+
+    <ScriptParameterSweep
+      scriptId={workspace.detail?.script.script_id ?? null}
+      revisionId={workspace.selectedRevisionId}
+      revisionNumber={selectedRevision?.revision_number ?? null}
+      inputSnapshotId={workspace.preparedInputSnapshot?.snapshot_id ?? null}
+      baseParameters={parsedParameters.ok ? parsedParameters.values : null}
+      runs={workspace.runs}
+      disabled={!workspace.detail || workspace.detail.script.status === "archived" || selectedSourceIsDirty || workspace.loading !== null || !runtimeAvailable || !parsedParameters.ok}
+    />
   </div>
 
   <aside class="support-column">
@@ -593,6 +635,10 @@
           <strong>{shortHash(workspace.selectedRun?.source_sha256 ?? selectedRevision?.source_sha256)}</strong>
         </div>
         <div class="row"><span>Input SHA</span><strong>{shortHash(workspace.selectedRun?.input_manifest_sha256)}</strong></div>
+        <div class="row"><span>Parameters SHA</span><strong>{workspace.selectedRun ? workspace.selectedRun.parameters_sha256 ? shortHash(workspace.selectedRun.parameters_sha256) : "None" : "—"}</strong></div>
+        {#if workspace.selectedRun?.sweep_id}
+          <div class="row"><span>Sweep point</span><strong>#{workspace.selectedRun.sweep_point_index} · {shortHash(workspace.selectedRun.sweep_id)}</strong></div>
+        {/if}
         <div class="row"><span>Duration</span><strong>{selectedRunDuration === null ? "—" : `${selectedRunDuration.toFixed(2)} s`}</strong></div>
         <div class="row"><span>Input tokens</span><strong>{usageValue(workspace.selectedRun?.usage?.input_tokens)}</strong></div>
         <div class="row"><span>Output tokens</span><strong>{usageValue(workspace.selectedRun?.usage?.output_tokens)}</strong></div>
@@ -621,6 +667,10 @@
           <p class="muted">Selected run inputs: {workspace.selectedRunInputSnapshot.files.map((file) => file.logical_filename).join(", ") || "No input files"}</p>
           <button type="button" on:click={useSelectedRunResearchScriptInputs} disabled={workspace.loading !== null}>Use selected run inputs</button>
         {/if}
+        {#if workspace.selectedRun?.parameters}
+          <p class="muted">Selected run parameters: {Object.entries(workspace.selectedRun.parameters).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(" · ")}</p>
+          <button type="button" on:click={useSelectedRunResearchScriptParameters} disabled={workspace.loading !== null}>Use selected run parameters</button>
+        {/if}
         <div class="run-list">
           {#each workspace.runs as run}
             <button
@@ -628,8 +678,8 @@
               class:selected={workspace.selectedRun?.run_id === run.run_id}
               on:click={() => selectResearchScriptRun(run.run_id)}
             >
-              <span>{run.status}</span>
-              <small>{shortDate(run.started_at)} · {shortHash(run.source_sha256)} · {run.outputs.length} outputs</small>
+              <span>{run.status}{typeof run.sweep_point_index === "number" ? ` · sweep #${run.sweep_point_index}` : ""}</span>
+              <small>{shortDate(run.started_at)} · {shortHash(run.source_sha256)}{run.parameters_sha256 ? ` · params ${shortHash(run.parameters_sha256).slice(0, 8)}` : ""} · {run.outputs.length} outputs</small>
             </button>
           {/each}
         </div>
@@ -766,6 +816,10 @@
   select { min-height: 30px; }
 
   .source-field { display: grid; gap: var(--space-2); }
+  .parameters-field textarea { font-family: var(--app-font); font-size: var(--text-xs); resize: vertical; }
+  .parameters-field small { color: var(--text-2); font-size: var(--text-xs); line-height: 1.4; }
+  .parameters-field small.invalid { color: var(--negative); }
+  .parameters-field code { font-family: var(--app-font); }
 
   input:focus-visible,
   select:focus-visible,

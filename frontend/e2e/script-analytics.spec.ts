@@ -83,11 +83,12 @@ test("late validation response cannot rebind another selected run", async ({ pag
   let reached!: () => void;
   const started = new Promise<void>(resolve => { reached = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
-  await page.route("**/analytics", async route => { reached(); await gate; await route.continue(); });
+  // La inspección lleva las opciones del libro de pesos en la query (E4 cierre del traspaso de pesos).
+  await page.route(/\/analytics(\?|$)/, async route => { reached(); await gate; await route.continue(); });
   await page.getByRole("button", { name: "Inspect analytical output", exact: true }).click();
   await started;
   await page.getByLabel("Loaded script").selectOption({ label: "E4 invalid optional output" });
-  const response = page.waitForResponse(r => r.url().endsWith("/analytics"));
+  const response = page.waitForResponse(r => /\/analytics(\?|$)/.test(r.url()));
   release();
   await response;
   await expect(page.getByRole("button", { name: "Inspect analytical output", exact: true })).toBeEnabled();

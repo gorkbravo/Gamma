@@ -21,6 +21,18 @@
       "runtimeArgs": ["C:/Users/User/Desktop/Gamma/frontend/node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"],
       "port": 4173,
       "cwd": "frontend"
+    },
+    {
+      "name": "script-e5-fixture",
+      "runtimeExecutable": "C:/Users/User/Desktop/Gamma/.venv/Scripts/python.exe",
+      "runtimeArgs": ["tests/script_e5_browser_server.py"],
+      "port": 8775
+    },
+    {
+      "name": "script-e4-fixture",
+      "runtimeExecutable": "C:/Users/User/Desktop/Gamma/.venv/Scripts/python.exe",
+      "runtimeArgs": ["tests/script_analytics_browser_server.py"],
+      "port": 8774
     }
   ]
 }

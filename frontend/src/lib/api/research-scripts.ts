@@ -7,6 +7,7 @@ import type {
   ResearchScriptRun,
   ResearchScriptRunComparison,
   ResearchScriptRunListResponse,
+  ResearchScriptParameterValue,
   ResearchScriptRuntimeCapabilities,
   ResearchScriptStorageDiagnostics
 } from "./types";
@@ -18,18 +19,102 @@ export interface ScriptAnalyticalItem {
   can_open: boolean;
   unsupported_reason: string | null;
 }
+/** Opciones del libro causal de pesos; forman parte del hash de la vista previa. */
+export interface ScriptBookOptions { execution_lag: number; cost_bps: number }
+export interface ScriptWeightBookRebalance {
+  decision_date: string; effective_period_start: string; effective_period_end: string; turnover: number;
+  cost_fraction: number; gross_exposure: number; net_exposure: number; cash_weight: number;
+}
+export interface ScriptWeightBook {
+  book_id: "weight_book"; options: ScriptBookOptions; weight_result_ids: string[]; return_result_ids: string[];
+  instruments: string[]; preview_sha256: string; can_open: boolean; unsupported_reason: string | null;
+  mapping: (Record<string, unknown> & {
+    rows: Array<{ date: string; value: number }>; assumptions: string[];
+    details: { calendar_start: string; calendar_end: string; trimmed_observations: Record<string, number>;
+      rebalances: ScriptWeightBookRebalance[]; superseded_decisions: string[]; ignored_decisions: string[];
+      total_turnover: number; total_cost_fraction: number; max_gross_exposure: number; warnings: string[] };
+  }) | null;
+}
 export interface ScriptAnalyticalReport {
   run_id: string; execution_status: string; executes_source: boolean;
   artifacts: Array<{ output_id: string; valid: boolean; eligible: boolean; errors: string[]; warnings: string[];
-    provenance: Record<string, unknown>; instruments?: Record<string, unknown>[]; results: ScriptAnalyticalItem[] }>;
+    provenance: Record<string, unknown>; instruments?: Record<string, unknown>[]; results: ScriptAnalyticalItem[];
+    weight_book?: ScriptWeightBook | null }>;
 }
-export const inspectScriptAnalytics = (runId: string) => getJson<ScriptAnalyticalReport>(
-  `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/analytics`
+export const DEFAULT_BOOK_OPTIONS: ScriptBookOptions = { execution_lag: 1, cost_bps: 0 };
+export const inspectScriptAnalytics = (runId: string, options: ScriptBookOptions = DEFAULT_BOOK_OPTIONS) => getJson<ScriptAnalyticalReport>(
+  `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/analytics?execution_lag=${encodeURIComponent(options.execution_lag)}&cost_bps=${encodeURIComponent(options.cost_bps)}`
 );
-export const openScriptAnalytics = (runId: string, outputId: string, resultId: string, previewHash: string) => postJson<StrategyLabResult>(
+export const openScriptAnalytics = (
+  runId: string, outputId: string, resultId: string, previewHash: string,
+  book?: ScriptBookOptions
+) => postJson<StrategyLabResult>(
   `/research/strategy-lab/script-runs/${encodeURIComponent(runId)}/analytics/open`,
-  { output_id: outputId, result_id: resultId, preview_sha256: previewHash }
+  book
+    ? { output_id: outputId, result_id: resultId, preview_sha256: previewHash, target: "weight_book", ...book }
+    : { output_id: outputId, result_id: resultId, preview_sha256: previewHash }
 );
+
+// ---- E5: barridos de parámetros y validación walk-forward ----
+export type ScriptParameters = Record<string, ResearchScriptParameterValue>;
+export interface ScriptSweep {
+  sweep_id: string; script_id: string; revision_id: string; source_sha256: string;
+  input_snapshot_id: string; input_manifest_sha256: string; base_parameters: ScriptParameters;
+  axes: Array<{ name: string; values: ResearchScriptParameterValue[] }>;
+  points: Array<{ index: number; parameters: ScriptParameters; parameters_sha256: string }>;
+  definition_sha256: string; created_at: string; created_by: string; origin: string;
+  transformation_note: string | null; contract_version: string;
+}
+export interface ScriptEvaluationTarget {
+  target: "returns_result" | "weight_book"; result_id?: string; execution_lag?: number; cost_bps?: number;
+}
+export interface ScriptDescriptiveMetrics {
+  observations: number; start?: string; end?: string; total_return?: number | null; annual_return?: number | null;
+  annual_volatility?: number | null; sharpe_ratio?: number | null; max_drawdown?: number | null;
+}
+export interface ScriptSweepEvaluationPoint {
+  index: number; parameters: ScriptParameters; parameters_sha256: string; run_id: string | null;
+  run_status: string | null; state: string; reason: string | null;
+  coverage: { start: string; end: string; observations: number } | null; metrics: ScriptDescriptiveMetrics | null;
+}
+export interface ScriptSweepEvaluation {
+  contract_version: string; sweep_id: string; definition_sha256: string; trials: number; ready_points: number;
+  evaluation: ScriptEvaluationTarget & { timing: { enforced_by_gamma: boolean; note: string; execution_lag?: number } };
+  common_window: { start: string; end: string; observations: number } | null; in_sample_label: string; warnings: string[];
+  points: ScriptSweepEvaluationPoint[];
+}
+export interface ScriptWalkForwardFold {
+  fold: number; train_start: string; train_end: string; train_observations: number; test_start: string; test_end: string;
+  test_observations: number; partial: boolean; selected_point: number; selected_parameters: ScriptParameters;
+  selected_train_metric: number | null; train_metrics: Record<string, number | null>; test_return: number; causal: boolean;
+}
+export interface ScriptWalkForwardReport {
+  contract_version: string; sweep_id: string; definition_sha256: string; report_sha256: string; trials: number;
+  config: { train_observations: number; test_observations: number; window: "anchored" | "rolling"; selection_metric: "sharpe" | "total_return"; tie_break: string };
+  evaluation: ScriptSweepEvaluation["evaluation"];
+  common_window: { start: string; end: string; observations: number };
+  folds: ScriptWalkForwardFold[]; selection_frequency: Record<string, number>;
+  out_of_sample: ScriptDescriptiveMetrics & { selection_metric_value: number | null; rows: Array<{ date: string; value: number }> };
+  in_sample_selected_mean_metric: number | null;
+  in_sample_reference: { point_index: number | null; metric: string; value: number | null; label: string; parameters: ScriptParameters | null };
+  causality: { rule: string; verified: boolean }; warnings: string[];
+}
+export interface ScriptWalkForwardRequest {
+  evaluation: ScriptEvaluationTarget; train_observations: number; test_observations: number;
+  window: "anchored" | "rolling"; selection_metric: "sharpe" | "total_return";
+}
+export const createResearchScriptSweep = (scriptId: string, payload: {
+  revision_id: string; input_snapshot_id: string; base_parameters: ScriptParameters;
+  axes: Array<{ name: string; values: ResearchScriptParameterValue[] }>;
+}) => postJson<ScriptSweep>(`/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/sweeps`, payload);
+export const listResearchScriptSweeps = (scriptId: string) =>
+  getJson<ScriptSweep[]>(`/research/strategy-lab/scripts/${encodeURIComponent(scriptId)}/sweeps`);
+export const runResearchScriptSweepPoint = (sweepId: string, index: number) => postJson<ResearchScriptRun>(
+  `/research/strategy-lab/script-sweeps/${encodeURIComponent(sweepId)}/points/${index}/run`, {}, { timeoutMs: 130_000 });
+export const evaluateResearchScriptSweep = (sweepId: string, evaluation: ScriptEvaluationTarget) =>
+  postJson<ScriptSweepEvaluation>(`/research/strategy-lab/script-sweeps/${encodeURIComponent(sweepId)}/evaluate`, evaluation);
+export const walkForwardResearchScriptSweep = (sweepId: string, request: ScriptWalkForwardRequest) =>
+  postJson<ScriptWalkForwardReport>(`/research/strategy-lab/script-sweeps/${encodeURIComponent(sweepId)}/walk-forward`, request);
 
 export interface CreateResearchScriptPayload {
   session_id: string;
@@ -46,6 +131,7 @@ export interface CreateResearchScriptRevisionPayload {
 export interface CreateResearchScriptRunPayload {
   revision_id: string;
   input_snapshot_id?: string;
+  parameters?: Record<string, ResearchScriptParameterValue>;
   input_files?: Array<{
     logical_filename: string;
     media_type: string;

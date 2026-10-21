@@ -44,6 +44,10 @@ from src.api.schemas.research_script import (
     ResearchScriptRunModel,
     ResearchScriptRuntimeCapabilitiesModel,
     ResearchScriptStorageDiagnosticsModel,
+    ResearchScriptSweepCreateRequestModel,
+    ResearchScriptSweepModel,
+    ResearchScriptEvaluationModel,
+    ResearchScriptWalkForwardRequestModel,
 )
 from src.application.research_script_service import (
     ResearchScriptConflictError,
@@ -53,7 +57,11 @@ from src.application.research_script_service import (
 from src.application.research_service import ResearchAnalysisRequest
 from src.application.research_validation import ResearchValidationError
 from src.models.research_overview import ResearchOverviewRequest
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from src.analytics.script_walk_forward import WalkForwardConfig
+from src.analytics.script_weight_book import BookOptions
+from src.application import script_experiments
 from src.application.script_analytics import inspect_analytics, open_analytics
 
 
@@ -65,6 +73,10 @@ class ScriptAnalyticalOpenRequest(BaseModel):
     output_id: str = Field(min_length=1, max_length=128)
     result_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     preview_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    # E4 libro de pesos: el destino y sus opciones forman parte del hash de la vista previa.
+    target: Literal["result", "weight_book"] = "result"
+    execution_lag: int = Field(default=1, ge=1, le=5)
+    cost_bps: float = Field(default=0.0, ge=0.0, le=1000.0, allow_inf_nan=False)
 
 
 @router.get("/research/strategy-lab/scripts/analytical-contract")
@@ -74,9 +86,15 @@ def script_analytical_contract():
 
 
 @router.get("/research/strategy-lab/script-runs/{run_id}/analytics")
-def inspect_script_analytics(run_id: str, request: Request):
+def inspect_script_analytics(
+    run_id: str,
+    request: Request,
+    execution_lag: int = Query(default=1, ge=1, le=5),
+    cost_bps: float = Query(default=0.0, ge=0.0, le=1000.0, allow_inf_nan=False),
+):
     try:
-        return inspect_analytics(request.app.state.runtime.research_script_service, run_id)
+        return inspect_analytics(request.app.state.runtime.research_script_service, run_id,
+                                 BookOptions(execution_lag=execution_lag, cost_bps=cost_bps))
     except (ResearchScriptNotFoundError, ResearchScriptValidationError) as exc:
         _raise_script_http_error(exc)
 
@@ -85,12 +103,77 @@ def inspect_script_analytics(run_id: str, request: Request):
 def open_script_analytics(run_id: str, payload: ScriptAnalyticalOpenRequest, request: Request):
     try:
         analysis, provenance = open_analytics(request.app.state.runtime.research_script_service,
-            run_id, payload.output_id, payload.result_id, payload.preview_sha256)
+            run_id, payload.output_id, payload.result_id, payload.preview_sha256, target=payload.target,
+            book_options=BookOptions(execution_lag=payload.execution_lag, cost_bps=payload.cost_bps))
         return StrategyLabAnalyzeResponseModel.from_domain(analysis).model_copy(update={"analytical_provenance": provenance})
     except (ResearchScriptNotFoundError, ResearchScriptValidationError) as exc:
         _raise_script_http_error(exc)
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
+
+
+def _evaluation_target(model: ResearchScriptEvaluationModel) -> script_experiments.EvaluationTarget:
+    return script_experiments.EvaluationTarget(
+        target=model.target, result_id=model.result_id,
+        book_options=BookOptions(execution_lag=model.execution_lag, cost_bps=model.cost_bps),
+    )
+
+
+@router.post("/research/strategy-lab/scripts/{script_id}/sweeps", response_model=ResearchScriptSweepModel, status_code=201)
+def create_research_script_sweep(script_id: str, payload: ResearchScriptSweepCreateRequestModel, request: Request):
+    try:
+        sweep = script_experiments.create_sweep(request.app.state.runtime.research_script_service, script_id, payload.to_domain())
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptSweepModel.from_domain(sweep)
+
+
+@router.get("/research/strategy-lab/scripts/{script_id}/sweeps", response_model=list[ResearchScriptSweepModel])
+def list_research_script_sweeps(script_id: str, request: Request):
+    try:
+        sweeps = script_experiments.list_sweeps(request.app.state.runtime.research_script_service, script_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return [ResearchScriptSweepModel.from_domain(item) for item in sweeps]
+
+
+@router.get("/research/strategy-lab/script-sweeps/{sweep_id}", response_model=ResearchScriptSweepModel)
+def get_research_script_sweep(sweep_id: str, request: Request):
+    try:
+        sweep = script_experiments.get_sweep(request.app.state.runtime.research_script_service, sweep_id)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptSweepModel.from_domain(sweep)
+
+
+@router.post("/research/strategy-lab/script-sweeps/{sweep_id}/points/{point_index}/run", response_model=ResearchScriptRunModel)
+def run_research_script_sweep_point(sweep_id: str, point_index: int, request: Request):
+    try:
+        run = script_experiments.run_sweep_point(request.app.state.runtime.research_script_service, sweep_id, point_index)
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+    return ResearchScriptRunModel.from_domain(run)
+
+
+@router.post("/research/strategy-lab/script-sweeps/{sweep_id}/evaluate")
+def evaluate_research_script_sweep(sweep_id: str, payload: ResearchScriptEvaluationModel, request: Request):
+    try:
+        return script_experiments.evaluate_sweep(request.app.state.runtime.research_script_service, sweep_id,
+                                                 _evaluation_target(payload))
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
+
+
+@router.post("/research/strategy-lab/script-sweeps/{sweep_id}/walk-forward")
+def walk_forward_research_script_sweep(sweep_id: str, payload: ResearchScriptWalkForwardRequestModel, request: Request):
+    try:
+        return script_experiments.walk_forward_sweep(
+            request.app.state.runtime.research_script_service, sweep_id, _evaluation_target(payload.evaluation),
+            WalkForwardConfig(train_observations=payload.train_observations, test_observations=payload.test_observations,
+                              window=payload.window, selection_metric=payload.selection_metric),
+        )
+    except (ResearchScriptNotFoundError, ResearchScriptConflictError, ResearchScriptValidationError) as exc:
+        _raise_script_http_error(exc)
 
 
 def _raise_script_http_error(exc: Exception) -> None:
@@ -624,9 +707,12 @@ def create_saved_research(
         try:
             if not isinstance(evidence, dict) or payload.object_type != "strategy_lab":
                 raise ResearchScriptValidationError(["Script analytical saving requires its retained provenance and Strategy Lab object type."])
+            options = evidence.get("book_options") if isinstance(evidence.get("book_options"), dict) else {}
             analysis, provenance = open_analytics(runtime.research_script_service,
                 str(evidence.get("run_id", "")), str(evidence.get("output_id", "")),
-                str(evidence.get("result_id", "")), str(evidence.get("preview_sha256", "")))
+                str(evidence.get("result_id", "")), str(evidence.get("preview_sha256", "")),
+                target=str(evidence.get("target", "result")),
+                book_options=BookOptions(execution_lag=options.get("execution_lag", 1), cost_bps=options.get("cost_bps", 0.0)))
             expected = StrategyLabAnalyzeResponseModel.from_domain(analysis).model_dump(mode="json")
             expected["analytical_provenance"] = provenance
             allowed = set(expected) | {"saved_from_mode"}

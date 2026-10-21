@@ -203,7 +203,14 @@ export interface ResearchScriptRun {
   origin: string;
   transformation_note: string | null;
   contract_version: string;
+  /** E5: parámetros separados de la fuente (null en ejecuciones sin parámetros o heredadas). */
+  parameters?: Record<string, ResearchScriptParameterValue> | null;
+  parameters_sha256?: string | null;
+  sweep_id?: string | null;
+  sweep_point_index?: number | null;
 }
+
+export type ResearchScriptParameterValue = string | number | boolean | null;
 
 export interface ResearchScriptListResponse {
   items: ResearchScript[];
@@ -241,6 +248,8 @@ export interface ResearchScriptRunComparison {
   warning_count_delta: number;
   metric_deltas: Array<Record<string, unknown>>;
   contract_version: string;
+  same_parameters?: boolean;
+  parameter_changes?: Array<{ name: string; base: ResearchScriptParameterValue; comparison: ResearchScriptParameterValue; base_present: boolean; comparison_present: boolean }>;
 }
 
 export interface ResearchScriptStorageDiagnostics {

@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- Arnés E5: la API de fixtures se indica con ?api=http://127.0.0.1:8775 (solo hosts locales). -->
+<script>
+  const api = new URLSearchParams(location.search).get("api");
+  if (api && /^http:\/\/127\.0\.0\.1:\d+$/.test(api)) window.__GAMMA_API_BASE__ = api;
+</script></head><body><div id="app"></div><script type="module" src="/src/playwright/script-analytics-harness.ts"></script></body></html>

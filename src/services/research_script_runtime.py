@@ -47,6 +47,9 @@ class ResearchScriptRuntimeRequest:
     limits: dict[str, int | float]
     started_at: datetime
     scenario: ResearchScriptMockScenario = "success"
+    # E5: bytes canónicos de gamma_parameters.json y su SHA-256; None si la ejecución no lleva parámetros.
+    parameters_content: bytes | None = None
+    parameters_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,16 +174,22 @@ class MockResearchScriptRuntime:
             f"SAFE PREVIEW {html.escape(hash_prefix)}</text>"
             '</svg>'
         ).encode("utf-8")
-        manifest_artifact = json.dumps(
-            {
-                "source_sha256": request.source_sha256,
-                "input_manifest_sha256": request.input_manifest_sha256,
-                "input_file_count": len(request.input_files),
-                "executed": False,
-            },
-            indent=2,
-            sort_keys=True,
-        ).encode("utf-8")
+        manifest_identity = {
+            "source_sha256": request.source_sha256,
+            "input_manifest_sha256": request.input_manifest_sha256,
+            "input_file_count": len(request.input_files),
+            "executed": False,
+        }
+        identity_rows = [
+            {"field": "source_sha256", "value": request.source_sha256},
+            {"field": "input_manifest_sha256", "value": request.input_manifest_sha256},
+            {"field": "input_files", "value": len(request.input_files)},
+            {"field": "executed", "value": False},
+        ]
+        if request.parameters_sha256:
+            manifest_identity["parameters_sha256"] = request.parameters_sha256
+            identity_rows.insert(2, {"field": "parameters_sha256", "value": request.parameters_sha256})
+        manifest_artifact = json.dumps(manifest_identity, indent=2, sort_keys=True).encode("utf-8")
         outputs = [
             ResearchScriptRuntimeOutput(
                 output_id="output-001",
@@ -206,12 +215,7 @@ class MockResearchScriptRuntime:
                 sequence=3,
                 media_type="application/json",
                 columns=["field", "value"],
-                rows=[
-                    {"field": "source_sha256", "value": request.source_sha256},
-                    {"field": "input_manifest_sha256", "value": request.input_manifest_sha256},
-                    {"field": "input_files", "value": len(request.input_files)},
-                    {"field": "executed", "value": False},
-                ],
+                rows=identity_rows,
                 transformation_note="Deterministic table derived from the immutable run request.",
             ),
             ResearchScriptRuntimeOutput(
@@ -261,6 +265,7 @@ class MockResearchScriptRuntime:
                 "input_files": len(request.input_files),
                 "source_hash_prefix": hash_prefix,
                 "manifest_hash_prefix": manifest_prefix,
+                **({"parameters_hash_prefix": request.parameters_sha256[:12]} if request.parameters_sha256 else {}),
             },
             completed_at=request.started_at,
         )

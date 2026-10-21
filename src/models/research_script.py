@@ -155,6 +155,11 @@ class ResearchScriptRun:
     origin: str = "research_script_service.run"
     transformation_note: str | None = None
     contract_version: str = "research-script-run.v1"
+    # E5: parámetros separados de la fuente. None en ejecuciones sin parámetros (incluidas las heredadas).
+    parameters: dict[str, Any] | None = None
+    parameters_sha256: str | None = None
+    sweep_id: str | None = None
+    sweep_point_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +202,7 @@ class ResearchScriptRunCreateRequest:
     dataset_refs: list[dict[str, Any]] = field(default_factory=list)
     source_refs: list[dict[str, Any]] = field(default_factory=list)
     runtime_scenario: ResearchScriptMockScenario = "success"
+    parameters: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -236,6 +242,49 @@ class ResearchScriptRunComparison:
     warning_count_delta: int
     metric_deltas: list[dict[str, Any]] = field(default_factory=list)
     contract_version: str = "research-script-run-comparison.v1"
+    same_parameters: bool = True
+    parameter_changes: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ResearchScriptSweepAxis:
+    name: str
+    values: list[Any]
+
+
+@dataclass(frozen=True)
+class ResearchScriptSweepPoint:
+    index: int
+    parameters: dict[str, Any]
+    parameters_sha256: str
+
+
+@dataclass(frozen=True)
+class ResearchScriptSweep:
+    """Barrido inmutable: misma revisión y mismas entradas; solo cambian los parámetros de cada punto."""
+    sweep_id: str
+    script_id: str
+    revision_id: str
+    source_sha256: str
+    input_snapshot_id: str
+    input_manifest_sha256: str
+    base_parameters: dict[str, Any]
+    axes: list[ResearchScriptSweepAxis]
+    points: list[ResearchScriptSweepPoint]
+    definition_sha256: str
+    created_at: datetime
+    created_by: ResearchScriptAuthor = "user"
+    origin: str = "research_script_service.create_sweep"
+    transformation_note: str | None = None
+    contract_version: str = "research-script-sweep.v1"
+
+
+@dataclass(frozen=True)
+class ResearchScriptSweepCreateRequest:
+    revision_id: str
+    input_snapshot_id: str
+    axes: list[ResearchScriptSweepAxis]
+    base_parameters: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

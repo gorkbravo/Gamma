@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.research_script import (
     ResearchScript,
@@ -20,6 +20,9 @@ from src.models.research_script import (
     ResearchScriptRunComparison,
     ResearchScriptRunCreateRequest,
     ResearchScriptStorageDiagnostics,
+    ResearchScriptSweep,
+    ResearchScriptSweepAxis,
+    ResearchScriptSweepCreateRequest,
 )
 from src.services.research_script_runtime import ResearchScriptRuntimeCapabilities
 
@@ -90,6 +93,8 @@ class ResearchScriptRunCreateRequestModel(BaseModel):
     dataset_refs: list[dict[str, Any]] = Field(default_factory=list)
     source_refs: list[dict[str, Any]] = Field(default_factory=list)
     runtime_scenario: Literal["success", "failed", "timed_out", "unavailable", "incomplete"] = "success"
+    # E5: objeto JSON plano; el servicio lo canoniza, lo hashea y lo entrega como gamma_parameters.json.
+    parameters: dict[str, Any] | None = Field(default=None, max_length=64)
 
     def to_domain(self) -> ResearchScriptRunCreateRequest:
         return ResearchScriptRunCreateRequest(
@@ -99,6 +104,7 @@ class ResearchScriptRunCreateRequestModel(BaseModel):
             dataset_refs=[dict(item) for item in self.dataset_refs],
             source_refs=[dict(item) for item in self.source_refs],
             runtime_scenario=self.runtime_scenario,
+            parameters=dict(self.parameters) if self.parameters is not None else None,
         )
 
 
@@ -315,6 +321,10 @@ class ResearchScriptRunModel(BaseModel):
     origin: str
     transformation_note: str | None = None
     contract_version: str
+    parameters: dict[str, Any] | None = None
+    parameters_sha256: str | None = None
+    sweep_id: str | None = None
+    sweep_point_index: int | None = None
 
     @classmethod
     def from_domain(cls, value: ResearchScriptRun) -> "ResearchScriptRunModel":
@@ -368,10 +378,82 @@ class ResearchScriptRunComparisonModel(BaseModel):
     warning_count_delta: int
     metric_deltas: list[dict[str, Any]] = Field(default_factory=list)
     contract_version: str
+    same_parameters: bool = True
+    parameter_changes: list[dict[str, Any]] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, value: ResearchScriptRunComparison) -> "ResearchScriptRunComparisonModel":
         return cls(**value.__dict__)
+
+
+class ResearchScriptSweepAxisModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=64)
+    values: list[Any] = Field(min_length=1, max_length=32)
+
+
+class ResearchScriptSweepCreateRequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision_id: str = Field(min_length=1, max_length=128)
+    input_snapshot_id: str = Field(min_length=1, max_length=128)
+    base_parameters: dict[str, Any] = Field(default_factory=dict, max_length=64)
+    axes: list[ResearchScriptSweepAxisModel] = Field(min_length=1, max_length=8)
+
+    def to_domain(self) -> ResearchScriptSweepCreateRequest:
+        return ResearchScriptSweepCreateRequest(
+            revision_id=self.revision_id,
+            input_snapshot_id=self.input_snapshot_id,
+            axes=[ResearchScriptSweepAxis(name=item.name, values=list(item.values)) for item in self.axes],
+            base_parameters=dict(self.base_parameters),
+        )
+
+
+class ResearchScriptSweepPointModel(BaseModel):
+    index: int
+    parameters: dict[str, Any]
+    parameters_sha256: str
+
+
+class ResearchScriptSweepModel(BaseModel):
+    sweep_id: str
+    script_id: str
+    revision_id: str
+    source_sha256: str
+    input_snapshot_id: str
+    input_manifest_sha256: str
+    base_parameters: dict[str, Any] = Field(default_factory=dict)
+    axes: list[ResearchScriptSweepAxisModel] = Field(default_factory=list)
+    points: list[ResearchScriptSweepPointModel] = Field(default_factory=list)
+    definition_sha256: str
+    created_at: datetime
+    created_by: Literal["operator", "user"]
+    origin: str
+    transformation_note: str | None = None
+    contract_version: str
+
+    @classmethod
+    def from_domain(cls, value: ResearchScriptSweep) -> "ResearchScriptSweepModel":
+        payload = dict(value.__dict__)
+        payload["axes"] = [ResearchScriptSweepAxisModel(name=item.name, values=list(item.values)) for item in value.axes]
+        payload["points"] = [ResearchScriptSweepPointModel(**item.__dict__) for item in value.points]
+        return cls(**payload)
+
+
+class ResearchScriptEvaluationModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: Literal["returns_result", "weight_book"]
+    result_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    execution_lag: int = Field(default=1, ge=1, le=5)
+    cost_bps: float = Field(default=0.0, ge=0.0, le=1000.0, allow_inf_nan=False)
+
+
+class ResearchScriptWalkForwardRequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    evaluation: ResearchScriptEvaluationModel
+    train_observations: int = Field(ge=10, le=5000)
+    test_observations: int = Field(ge=5, le=5000)
+    window: Literal["anchored", "rolling"] = "anchored"
+    selection_metric: Literal["sharpe", "total_return"] = "sharpe"
 
 
 class ResearchScriptStorageDiagnosticsModel(BaseModel):

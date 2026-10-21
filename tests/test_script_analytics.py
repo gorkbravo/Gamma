@@ -78,8 +78,11 @@ def test_optional_and_all_four_kinds(tmp_path):
     artifact = inspect_analytics(service, run.run_id)["artifacts"][0]
     assert artifact["valid"] and artifact["eligible"]
     assert [r["can_open"] for r in artifact["results"]] == [True, False, False, False]
-    assert "gross-normalizes" in artifact["results"][3]["unsupported_reason"]
+    # El calendario de pesos no se abre por sí solo: solo a través del libro causal (cierre E4).
+    assert "causal weight book" in artifact["results"][3]["unsupported_reason"]
     assert artifact["results"][3]["result"]["observations"][1]["value"] == -2
+    book = artifact["weight_book"]
+    assert book["can_open"] and book["weight_result_ids"] == ["weights"] and book["return_result_ids"] == ["returns"]
 
 
 def test_open_fidelity_restart_edit_save_and_export(tmp_path):

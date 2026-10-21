@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { inspectScriptAnalytics, openScriptAnalytics, type ScriptAnalyticalReport, type ScriptAnalyticalItem } from "../lib/api/research-scripts";
+  import {
+    DEFAULT_BOOK_OPTIONS,
+    inspectScriptAnalytics,
+    openScriptAnalytics,
+    type ScriptAnalyticalItem,
+    type ScriptAnalyticalReport,
+    type ScriptBookOptions,
+    type ScriptWeightBook
+  } from "../lib/api/research-scripts";
   import type { StrategyLabResult } from "../lib/api/types";
   import { getJson } from "../lib/api/client";
 
@@ -10,6 +18,16 @@
   let busy = false;
   let error = "";
   let disposed = false;
+  // Las opciones del libro forman parte del hash de la vista previa: se abre con las inspeccionadas.
+  let bookOptions: ScriptBookOptions = { ...DEFAULT_BOOK_OPTIONS };
+  let inspectedOptions: ScriptBookOptions | null = null;
+  $: optionsDirty = Boolean(inspectedOptions) && (inspectedOptions?.execution_lag !== bookOptions.execution_lag || inspectedOptions?.cost_bps !== bookOptions.cost_bps);
+  const pct = (value: number | null | undefined, digits = 2) =>
+    typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : "—";
+  function setOption(key: keyof ScriptBookOptions, event: Event) {
+    const value = Number((event.currentTarget as HTMLInputElement).value);
+    if (Number.isFinite(value)) bookOptions = { ...bookOptions, [key]: value };
+  }
   let contract: { example_source: string; [key: string]: unknown } | null = null;
   async function inspectContract() {
     try { const value = await getJson<{ example_source: string; [key: string]: unknown }>("/research/strategy-lab/scripts/analytical-contract"); if (!disposed) contract = value; }
@@ -20,9 +38,20 @@
   async function inspect() {
     if (busy || !runId) return;
     busy = true; error = "";
+    const options = { ...bookOptions };
     try {
-      const next = await inspectScriptAnalytics(runId);
-      if (!disposed) report = next;
+      const next = await inspectScriptAnalytics(runId, options);
+      if (!disposed) { report = next; inspectedOptions = options; }
+    } catch (e) { if (!disposed) error = e instanceof Error ? e.message : String(e); }
+    finally { if (!disposed) busy = false; }
+  }
+
+  async function openBook(outputId: string, book: ScriptWeightBook) {
+    if (busy || !runId || !book.can_open || !onOpen || !inspectedOptions || optionsDirty) return;
+    busy = true; error = "";
+    try {
+      const result = await openScriptAnalytics(runId, outputId, book.book_id, book.preview_sha256, inspectedOptions);
+      if (!disposed) onOpen?.(result);
     } catch (e) { if (!disposed) error = e instanceof Error ? e.message : String(e); }
     finally { if (!disposed) busy = false; }
   }
@@ -72,6 +101,39 @@
           </details>
           <button type="button" disabled={busy || !item.can_open || !onOpen} on:click={() => void open(artifact.output_id, item)}>Open temporary Strategy Lab analysis</button>
         {/each}
+        {#if artifact.weight_book}
+          {@const book = artifact.weight_book}
+          <div class="book" aria-label="Causal weight book">
+            <h4>Causal weight book · {book.instruments.length} instrument{book.instruments.length === 1 ? "" : "s"}</h4>
+            <p>Gamma turns the signed NAV weight schedules ({book.weight_result_ids.join(", ")}) and each instrument's daily simple returns ({book.return_result_ids.join(", ") || "none"}) into one return stream: decisions apply only from a later period, holdings drift between decisions, residual cash earns 0% and weights are never normalized.</p>
+            <div class="book-options">
+              <label><span>Execution lag (periods)</span>
+                <input type="number" aria-label="Book execution lag in periods" min="1" max="5" step="1" value={bookOptions.execution_lag} on:change={(event) => setOption("execution_lag", event)} disabled={busy} /></label>
+              <label><span>Cost (bps per unit turnover)</span>
+                <input type="number" aria-label="Book cost in basis points per unit turnover" min="0" max="1000" step="0.5" value={bookOptions.cost_bps} on:change={(event) => setOption("cost_bps", event)} disabled={busy} /></label>
+              <button type="button" on:click={() => void inspect()} disabled={busy || !optionsDirty}>Apply</button>
+            </div>
+            {#if optionsDirty}<p role="status">Options changed: apply them to recompute the exact book before opening it.</p>{/if}
+            {#if book.unsupported_reason}<p class="reason">{book.unsupported_reason}</p>{/if}
+            {#if book.mapping}
+              {@const details = book.mapping.details}
+              <dl class="book-summary">
+                <div><dt>Book returns</dt><dd>{book.mapping.rows.length} · {book.mapping.rows[0]?.date ?? "—"} → {book.mapping.rows[book.mapping.rows.length - 1]?.date ?? "—"}</dd></div>
+                <div><dt>Common calendar</dt><dd>{details.calendar_start} → {details.calendar_end}</dd></div>
+                <div><dt>Rebalances</dt><dd>{details.rebalances.length}{details.superseded_decisions.length ? ` · ${details.superseded_decisions.length} superseded` : ""}{details.ignored_decisions.length ? ` · ${details.ignored_decisions.length} after data end` : ""}</dd></div>
+                <div><dt>Turnover / cost drag</dt><dd>{details.total_turnover.toFixed(2)}× · {pct(details.total_cost_fraction, 3)}</dd></div>
+                <div><dt>Max gross exposure</dt><dd>{pct(details.max_gross_exposure, 0)}</dd></div>
+              </dl>
+              {#each details.warnings as warning}<p class="reason">{warning}</p>{/each}
+              <details>
+                <summary>Inspect assumptions, rebalances and exact book rows</summary>
+                <ul>{#each book.mapping.assumptions as assumption}<li>{assumption}</li>{/each}</ul>
+                <pre>{JSON.stringify({ options: book.options, rebalances: details.rebalances.slice(0, 50), rows: book.mapping.rows }, null, 2)}</pre>
+              </details>
+            {/if}
+            <button type="button" disabled={busy || !book.can_open || !onOpen || optionsDirty} on:click={() => void openBook(artifact.output_id, book)}>Open causal book in Strategy Lab</button>
+          </div>
+        {/if}
       </section>
     {/each}
     <p>Opening performs no save. Use Save Strategy in the derived analysis to retain a research object separately.</p>
@@ -87,6 +149,16 @@
   section { display: grid; gap: var(--space-4); border-top: 1px solid var(--divider); padding-top: var(--space-4); }
   details { min-width: 0; } summary { cursor: pointer; font-size: var(--text-xs); }
   pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-xs); }
+  .book { display: grid; gap: var(--space-3); border: 1px solid var(--panel-strong); padding: var(--space-4); min-width: 0; }
+  .book-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: var(--space-3); align-items: end; }
+  .book-options label { display: grid; gap: var(--space-2); min-width: 0; }
+  .book-options span, dt { color: var(--text-2); font-size: var(--text-2xs); letter-spacing: 0.1em; text-transform: uppercase; }
+  .book-options input { width: 100%; min-height: 28px; border: 1px solid var(--panel-strong); background: var(--bg-1); color: var(--text-0); padding: var(--space-2); font-family: var(--app-font); font-size: var(--text-xs); }
+  .book-summary { display: grid; gap: 0; margin: 0; }
+  .book-summary div { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--divider); }
+  dd { margin: 0; color: var(--text-1); font-family: var(--app-font); font-size: var(--text-xs); text-align: right; overflow-wrap: anywhere; }
+  .reason { color: var(--warning); }
+  ul { margin: var(--space-2) 0; padding-left: var(--space-5); font-size: var(--text-xs); color: var(--text-1); line-height: var(--leading-normal); }
   button { min-height: 28px; white-space: normal; background: var(--bg-1); border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); color: var(--text-0); padding: var(--space-2) var(--space-4); font-size: var(--text-sm); cursor: pointer; }
   button:disabled { color: var(--text-2); cursor: default; }
   :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
