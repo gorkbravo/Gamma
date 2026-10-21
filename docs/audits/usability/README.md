@@ -4,9 +4,11 @@ Live product workflow audits and research-thread evaluations.
 
 ## Audits
 
+- [`gamma_usability_findings_2026-10-21.md`](./gamma_usability_findings_2026-10-21.md) (current): live IBKR Brent–WTI / Strait of Hormuz trade-idea audit; Prediction Markets and the Commodities → Strategy Lab → Risk loop carried the thesis, the Operator tool-name, Options symbol-change and Strategy Lab → Risk defects are confirmed fixed, and two new P0s were found (Add Leg duplicate-key app wedge, crack spreads computed from week-old history but stamped current).
+
 - [`options_snapshot_live_acceptance_2026-10-06.md`](./options_snapshot_live_acceptance_2026-10-06.md) (current): two real SPY/TWS surfaces captured with exact payload preservation, retained across runtime reconstruction, and compared with the production observed-strike helper; partial coverage produces honest N/A values.
 
-- [`gamma_usability_findings_2026-09-04.md`](./gamma_usability_findings_2026-09-04.md) (current): IBKR-integrated QQQ-minus-SPY thesis audit focused on Research Operator and Strategy Lab Script; the live provider gate passed and Script safe preview retained immutable provenance, while a P1 invalid-tool-name defect blocked the Operator-to-Script loop.
+- [`gamma_usability_findings_2026-09-04.md`](./gamma_usability_findings_2026-09-04.md): historical - IBKR-integrated QQQ-minus-SPY thesis audit focused on Research Operator and Strategy Lab Script; the live provider gate passed and Script safe preview retained immutable provenance, while a P1 invalid-tool-name defect blocked the Operator-to-Script loop.
 
 - [`gamma_usability_findings_2026-09-03-3.md`](./gamma_usability_findings_2026-09-03-3.md) (current): IBKR-integrated Gold-versus-duration audit; Strategy Lab Backtest/Regime Stress rejected the hedge thesis, while commodity-history loss and mixed Risk/account state exposed two P1 cross-tab trust defects.
 
