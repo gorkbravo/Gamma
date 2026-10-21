@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CopilotWorkingAnalysis, IvSurface, ResearchResult } from "../api/types";
 import {
+  appendStrategyPortfolioDraftLeg,
   buildCommodityStrategyHandoff,
   buildMacroStrategyLensHandoff,
   buildOptionsStrategyHandoff,
@@ -21,6 +22,7 @@ import {
   deriveCoverageFromResearchResult,
   deriveStructureFromWeights,
   doesResearchDraftMatchResult,
+  ensureUniqueStrategyPortfolioDraftLegIds,
   formatResearchOverviewMetricValue,
   formatResearchOverviewSortValue,
   hydrateStrategyLabResultFromSaved,
@@ -322,6 +324,54 @@ describe("research view model helpers", () => {
     expect(built.legs.map((leg) => leg.weight)).toEqual([0.7, -0.3]);
     expect(built.legs[0]?.asset_class).toBe("prediction_contract");
     expect(built.legs[1]?.identifier).toBe("SPY");
+  });
+
+  // Regresión GUA-20261021-1: ids `draft-leg-${length + 1}` repetidos rompían el `{#each}` y bloqueaban la app.
+  it("keeps composer leg ids unique after handoff accepts, removals and repeated adds", () => {
+    let legs = [1, 2, 3].map((index) => defaultStrategyPortfolioDraftLeg(index));
+    legs = appendStrategyPortfolioDraftLeg(legs, {
+      ...defaultStrategyPortfolioDraftLeg(legs.length + 1),
+      label: "Brent Crude Oil commodity return stream",
+      assetClass: "commodity",
+      identifier: "brent"
+    });
+    legs = appendStrategyPortfolioDraftLeg(legs, {
+      ...defaultStrategyPortfolioDraftLeg(legs.length + 1),
+      label: "WTI Crude Oil commodity return stream",
+      assetClass: "commodity",
+      identifier: "wti"
+    });
+    // Secuencia de la auditoría: quitar las tres patas por defecto y pulsar Add Leg dos veces.
+    legs = legs.filter((leg) => leg.identifier === "brent" || leg.identifier === "wti");
+    legs = appendStrategyPortfolioDraftLeg(legs);
+    legs = appendStrategyPortfolioDraftLeg(legs);
+
+    const ids = legs.map((leg) => leg.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(["draft-leg-4", "draft-leg-5", "draft-leg-3", "draft-leg-6"]);
+    expect(legs.map((leg) => leg.identifier)).toEqual(["brent", "wti", "", ""]);
+    // El peso por defecto sigue dependiendo de la posición, no del id.
+    expect(legs[2]?.weight).toBe(0.1);
+  });
+
+  it("skips ids that are still in use when a middle leg is removed", () => {
+    const remaining = [1, 2, 3].map((index) => defaultStrategyPortfolioDraftLeg(index)).filter((leg) => leg.id !== "draft-leg-2");
+    const legs = appendStrategyPortfolioDraftLeg(remaining);
+
+    expect(legs.map((leg) => leg.id)).toEqual(["draft-leg-1", "draft-leg-3", "draft-leg-4"]);
+    expect(legs[2]?.weight).toBe(0.1);
+  });
+
+  it("repairs a restored draft that already carries duplicate leg ids", () => {
+    const brent = { ...defaultStrategyPortfolioDraftLeg(4), identifier: "brent" };
+    const wti = { ...defaultStrategyPortfolioDraftLeg(5), identifier: "wti" };
+    const added = { ...defaultStrategyPortfolioDraftLeg(4), identifier: "" };
+    const repaired = ensureUniqueStrategyPortfolioDraftLegIds([brent, wti, added]);
+    const clean = [brent, wti];
+
+    expect(repaired.map((leg) => leg.id)).toEqual(["draft-leg-4", "draft-leg-5", "draft-leg-3"]);
+    expect(repaired.map((leg) => leg.identifier)).toEqual(["brent", "wti", ""]);
+    expect(ensureUniqueStrategyPortfolioDraftLegIds(clean)).toBe(clean);
   });
 
   it("builds prediction-market handoffs and converts resolved drafts into composer rows", () => {

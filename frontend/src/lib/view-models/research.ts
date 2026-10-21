@@ -183,6 +183,51 @@ export function defaultStrategyPortfolioDraftLeg(index: number): StrategyPortfol
   };
 }
 
+// La posición solo decide el peso por defecto; el id es la clave del `{#each}` del compositor
+// y debe ser único aunque se hayan quitado o aceptado patas (GUA-20261021-1).
+export function nextStrategyPortfolioDraftLegId(legs: readonly Pick<StrategyPortfolioDraftLeg, "id">[]): string {
+  const used = new Set(legs.map((leg) => leg.id));
+  let next = legs.length + 1;
+  while (used.has(`draft-leg-${next}`)) {
+    next += 1;
+  }
+  return `draft-leg-${next}`;
+}
+
+export function appendStrategyPortfolioDraftLeg(
+  legs: readonly StrategyPortfolioDraftLeg[],
+  leg: StrategyPortfolioDraftLeg = defaultStrategyPortfolioDraftLeg(legs.length + 1)
+): StrategyPortfolioDraftLeg[] {
+  return [...legs, { ...leg, id: nextStrategyPortfolioDraftLegId(legs) }];
+}
+
+// Repara borradores que ya traen ids repetidos (p. ej. restaurados del store): conserva el
+// primer id de cada grupo y renombra los siguientes. Devuelve la misma lista si no hay duplicados.
+export function ensureUniqueStrategyPortfolioDraftLegIds(legs: StrategyPortfolioDraftLeg[]): StrategyPortfolioDraftLeg[] {
+  const taken = new Set(legs.map((leg) => leg.id));
+  if (taken.size === legs.length) {
+    return legs;
+  }
+  const seen = new Set<string>();
+  const unique: StrategyPortfolioDraftLeg[] = [];
+  for (const leg of legs) {
+    if (!seen.has(leg.id)) {
+      seen.add(leg.id);
+      unique.push(leg);
+      continue;
+    }
+    let next = unique.length + 1;
+    while (taken.has(`draft-leg-${next}`)) {
+      next += 1;
+    }
+    const id = `draft-leg-${next}`;
+    taken.add(id);
+    seen.add(id);
+    unique.push({ ...leg, id });
+  }
+  return unique;
+}
+
 export function buildPredictionMarketStrategyHandoff(
   market: {
     market_id: string;

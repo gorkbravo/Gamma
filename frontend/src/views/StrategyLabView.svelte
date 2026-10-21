@@ -27,10 +27,12 @@
     StrategyLabPortfolioComposeOptions
   } from "../lib/stores/app";
   import {
+    appendStrategyPortfolioDraftLeg,
     buildStrategyComposerObjects,
     buildStrategyPortfolioLegInputs,
     classifySavedResearchSurface,
     defaultStrategyPortfolioDraftLeg,
+    ensureUniqueStrategyPortfolioDraftLegIds,
     parseResearchCsvText,
     parseStrategyPortfolioHistoryText,
     summarizeStrategyPortfolioDraft,
@@ -113,7 +115,10 @@
   let runNotice = "";
   let portfolioLookbackDays = restoredDraft.lookbackDays;
   let portfolioMinObservations = restoredDraft.minObservations ?? 5;
-  let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = restoredDraft.legs.map((leg) => ({ ...leg }));
+  // Deduplica al restaurar: un borrador con ids repetidos rompía el `{#each}` al montar la vista (GUA-20261021-1).
+  let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = ensureUniqueStrategyPortfolioDraftLegIds(
+    restoredDraft.legs.map((leg) => ({ ...leg }))
+  );
   let appliedWorkingAnalysisId = "";
   let showHandoffReview = true;
   let bookValidation: StrategyLabBookValidation | null = null;
@@ -207,7 +212,7 @@
   }
 
   function addPortfolioDraftLeg() {
-    portfolioDraftLegs = [...portfolioDraftLegs, defaultStrategyPortfolioDraftLeg(portfolioDraftLegs.length + 1)];
+    portfolioDraftLegs = appendStrategyPortfolioDraftLeg(portfolioDraftLegs);
   }
 
   function toggleDraftLegDetail(id: string) {
@@ -217,13 +222,14 @@
   function removePortfolioDraftLeg(id: string) {
     portfolioDraftLegs =
       portfolioDraftLegs.length <= 1
-        ? portfolioDraftLegs.map((leg, index) => (leg.id === id ? defaultStrategyPortfolioDraftLeg(index + 1) : leg))
+        ? portfolioDraftLegs.map((leg, index) => (leg.id === id ? { ...defaultStrategyPortfolioDraftLeg(index + 1), id } : leg))
         : portfolioDraftLegs.filter((leg) => leg.id !== id);
   }
 
+  // Reiniciar vacía la pata pero conserva su id para no chocar con otra clave del `{#each}`.
   function resetPortfolioDraftLeg(id: string) {
     portfolioDraftLegs = portfolioDraftLegs.map((leg, index) =>
-      leg.id === id ? defaultStrategyPortfolioDraftLeg(index + 1) : leg
+      leg.id === id ? { ...defaultStrategyPortfolioDraftLeg(index + 1), id } : leg
     );
   }
 
@@ -278,17 +284,14 @@
     if (!option) {
       return;
     }
-    portfolioDraftLegs = [
-      ...portfolioDraftLegs,
-      {
-        ...defaultStrategyPortfolioDraftLeg(portfolioDraftLegs.length + 1),
-        label: option.label,
-        assetClass: option.object.object_type.includes("crypto") ? "crypto" : "custom_stream",
-        identifier: option.object.symbols[0] ?? "",
-        weight: option.defaultWeight,
-        objectOptionId: option.id
-      }
-    ];
+    portfolioDraftLegs = appendStrategyPortfolioDraftLeg(portfolioDraftLegs, {
+      ...defaultStrategyPortfolioDraftLeg(portfolioDraftLegs.length + 1),
+      label: option.label,
+      assetClass: option.object.object_type.includes("crypto") ? "crypto" : "custom_stream",
+      identifier: option.object.symbols[0] ?? "",
+      weight: option.defaultWeight,
+      objectOptionId: option.id
+    });
   }
 
   function acceptStrategyHandoff(item: StrategyLabHandoffQueueItem) {
@@ -322,7 +325,7 @@
       strategyInputWarning = resolved.unsupported_reason ?? "Resolved handoff did not include a composer-ready leg.";
       return;
     }
-    portfolioDraftLegs = [...portfolioDraftLegs, draftLeg];
+    portfolioDraftLegs = appendStrategyPortfolioDraftLeg(portfolioDraftLegs, draftLeg);
     acceptedHandoffWarnings = [...resolved.warnings, ...acceptedHandoffWarnings].slice(0, 12);
     onAcceptStrategyLabHandoff?.(item.id);
     strategyInputWarning = "";
