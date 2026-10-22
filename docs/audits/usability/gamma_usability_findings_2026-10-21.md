@@ -274,6 +274,45 @@ The 2026-09-04 report used partly different categories; Δ is given where a cate
 
 Visual and density observations (raw markdown tables, JSON traces) belong to `gamma-ui`; chart internals were not assessed.
 
+## Fix Status (2026-10-22, uncommitted working tree)
+
+All friction findings above were fixed in one pass on top of `c69ebfc`: seven area agents worked in isolated worktrees and the integrator merged and wired their changes.
+
+**Suites on the integrated tree:**
+- Backend `pytest`: 1169 passed, 4 skipped.
+- Frontend `vitest`: 607 passed.
+- `tsc --noEmit`: clean.
+
+**Browser check:** live backend with TWS closed (IBKR-dependent paths not exercised), so "verified" below means seen in the running app.
+
+| ID | Status | Verified |
+| --- | --- | --- |
+| GUA-20261021-1 | Fixed: unique leg ids; restored drafts are de-duplicated; a per-view `<svelte:boundary>` in App/Shell keeps navigation alive. | Remove → Add Leg ×3 raised 0 errors. The boundary fallback is covered by SSR tests only. |
+| GUA-20261021-2 | Fixed: spreads carry `observed_at`, lag and a `freshness` flag (stale beyond 4 days); an "Obs" column; a same-snapshot "Live" value when every leg has an IBKR front. | Column visible; spread rows need TWS, so not live-checked. |
+| GUA-20261021-3 | Fixed in the frontend: `lib/time.ts` reads offset-less API instants as UTC, wired into SITREP ages, provenance badges, Commodities, Options, Strategy Lab, Sealanes, Prediction Markets, Diagnostics and Copilot. Commodities times show their zone; PRIOR shows as a date. A backend wire-format "Z" was tried and reverted: clients echo timestamps back (`expected_updated_at`) and 11 Copilot tests failed. | SITREP ages read "<1m old". |
+| GUA-20261021-4 | Fixed: references carry their date and unit; units are converted; old references are reported as `stale_reference` and dated futures-vs-spot gaps as `basis`. Copilot now receives these statuses. | Not live-checked (needs IBKR quotes). |
+| GUA-20261021-5 | Fixed: the EU EUR/USD series is inverted and titled "(monthly avg)". | Live: 1.174. |
+| GUA-20261021-6 | Fixed: output budget sized per request (ceiling 25k tokens); one automatic continuation on `max_output_tokens`; partial text shown; Retry/Continue keeps prompt and context; Commodities context covers viewed instruments and Strategy Lab legs. Decision recorded in `docs/copilot_v2_tab_plan.md`. | **Not verified live:** no OpenAI calls were made. |
+| GUA-20261021-7 | Fixed: a static chokepoint reference is served in live mode; AISstream now subscribes with real bounding boxes, which were empty before; the entity handoff pans, highlights and annotates. Integration bugs fixed: Commodities sent `commodity_links` as objects (group unresolvable), and `applyProjection()` cancelled the focus `fitBounds`. | Live: PM → Sealanes zooms to Hormuz (6.5) with "8 AIS positions in the last 6 s sample"; the Commodities row resolves all 5 chokepoints. |
+| GUA-20261021-8 | Fixed: active-month calendar for metals fronts; dead FRED LBMA fallbacks dropped with a warning (env override available); negative cache for failed contract lookups. | Not live-checked (needs TWS). |
+| GUA-20261021-9 | Fixed: legs state series type and end date; Validate warns beyond 3 trading days of lag; benchmark caveats are separated; commodity stress episodes added. | Live: an 8/8-episode replay including "2020 oil price war" and "2022 energy shock". The episode windows were set from memory and must be checked against an official source. |
+| GUA-20261021-10 | Fixed: headline skips 0D/1D (≥7D); "closed · last session" outside 09:30–16:00 ET (holidays not modelled); put/call IV divergence warning; templates default to ≥30 DTE; the empty state no longer names SPY. Theta aggregation was reviewed and found correct. | Empty state seen; session labels need TWS. |
+| GUA-20261021-11 | Fixed: the window is trimmed to N trading days and the field is relabelled. | Live: "Lookback 1700 trading days · analysed 1700". |
+| GUA-20261021-12 | Fixed: six concurrent `sections=` requests with isolated failures. | Live: news 5.1 s, FX/rates 7.6 s, indices 14.3 s (was ~77 s for anything). |
+| GUA-20261021-13 | Fixed: markdown tables render; JSON collapsed; warnings coalesced; the SEC warning only appears for company lookups; empty sections hidden; snapshots about halved. | Not verified live. |
+| GUA-20261021-14 | Fixed: opt-in `IB_AUTO_CONNECT` (one attempt, no retry); Review lists lost capabilities; EIA guidance and activation condition now count `ibkr`; the modal closes on Finish. | Live: auto-connect failed cleanly ("not retrying"); Review table shown. |
+| GUA-20261021-15 | Fixed: same-series/same-event siblings in RELATED; a "Group" toggle with distribution and Σ; Copilot gets separate caps (5+5 context, 8+8 flow tool) so siblings reach the model without ~36 rows. | Live: RELATED lists the Oct 31 and Nov 30 Hormuz siblings; grouping shows "Σ 103.0% · +3.0% vs 100%". |
+| GUA-20261021-16 | Fixed: per-leg names for Remove/inputs, a distinct Options Copilot button, template names, SITREP row names, `aria-current` on tabs. Part of this finding was a tooling artefact: the accessibility snapshot hid content-derived names. | Live: names present in the accessibility tree. |
+| GUA-20260903-10 | Fixed: a central urllib recorder attributes every call by host or adapter and counts failures. | Live: 12 named rows summing to the 520 total, 25 failures counted. |
+| Risk copy / transient drill header | Fixed. | Risk copy verified live; drill header covered by tests only. |
+
+**New observations during verification:**
+- **App.svelte (pre-existing, fixed):** used `getTabLabel` without importing it since `17fbded`, so every cross-domain handoff threw after navigating.
+- **`us_macro_events` (open):** 23 of 31 requests fail. This was invisible before the provider-usage fix.
+- **SITREP Commodities section (open):** takes ~94 s when TWS is down; other sections are no longer blocked.
+- **Prediction Markets "Event Book" (open):** treats a cumulative date ladder ("Putin out by …?") as a complete book (Σ 11.5 %, overround −88.5 %). This panel predates this pass.
+- **Gaps section:** not addressed (freight/Portwatch, inter-commodity spread curves, EU sovereigns, roll-adjusted futures). Route these through `roadmap.md`.
+
 ## Coverage Ledger Update
 
 - Prediction Markets: first deep use. One liquid contract with probability history, resolution terms, depth, venue and series siblings. Worked; RELATED and grouping gaps remain.
