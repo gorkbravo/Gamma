@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import type { DiagnosticsResponse } from "../lib/api/types";
 
   export interface DiagnosticsEntry {
@@ -40,7 +41,7 @@
   <div class="summary">
     <article>
       <span>Generated</span>
-      <strong>{diagnostics ? new Date(diagnostics.generated_at).toLocaleString("en-US") : "N/A"}</strong>
+      <strong>{apiInstantDate(diagnostics?.generated_at)?.toLocaleString("en-US") ?? "N/A"}</strong>
     </article>
     <article>
       <span>Connection</span>

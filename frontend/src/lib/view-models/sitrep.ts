@@ -1,3 +1,4 @@
+import { parseApiInstant } from "../time";
 import type { CommodityMode, MacroMode, SitrepWorkspaceResponse, TabId } from "../api/types";
 
 export type SitrepMarketHandoffProfile =
@@ -175,8 +176,8 @@ export interface SitrepSectionOutcome {
 }
 
 function latestTimestamp(left: string | null | undefined, right: string | null | undefined): string | null {
-  const leftMillis = left ? Date.parse(left) : Number.NaN;
-  const rightMillis = right ? Date.parse(right) : Number.NaN;
+  const leftMillis = parseApiInstant(left);
+  const rightMillis = parseApiInstant(right);
   if (!Number.isFinite(rightMillis)) return Number.isFinite(leftMillis) ? left ?? null : right ?? left ?? null;
   if (!Number.isFinite(leftMillis)) return right ?? null;
   return rightMillis >= leftMillis ? right ?? null : left ?? null;
@@ -393,7 +394,7 @@ export function oldestSitrepSection(sections: SitrepSectionClock[]): SitrepOldes
   let oldestMillis = Number.POSITIVE_INFINITY;
   for (const section of sections) {
     if (!section.retrievedAt) continue;
-    const millis = Date.parse(section.retrievedAt);
+    const millis = parseApiInstant(section.retrievedAt);
     if (!Number.isFinite(millis) || millis >= oldestMillis) continue;
     oldestMillis = millis;
     oldest = { id: section.id, label: section.label, retrievedAt: section.retrievedAt };
@@ -406,7 +407,7 @@ export function formatSitrepSectionAge(
   now: Date = new Date()
 ): string {
   if (!retrievedAt) return "N/A";
-  const millis = Date.parse(retrievedAt);
+  const millis = parseApiInstant(retrievedAt);
   if (!Number.isFinite(millis)) return "N/A";
   const minutes = Math.max(0, Math.floor((now.getTime() - millis) / 60_000));
   if (minutes < 1) return "<1m old";

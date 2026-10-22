@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import { onMount } from "svelte";
   import type Hls from "hls.js";
   import { flashOnMount } from "../lib/flash";
@@ -369,8 +370,8 @@
     if (!value) {
       return "N/A";
     }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
+    const date = apiInstantDate(value);
+    if (!date) {
       return value.slice(0, 16);
     }
     return date.toLocaleString("en-US", {
@@ -384,8 +385,8 @@
 
   function formatTime(value: string | null | undefined) {
     if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value.slice(11, 16);
+    const date = apiInstantDate(value);
+    if (!date) return value.slice(11, 16);
     return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   }
 

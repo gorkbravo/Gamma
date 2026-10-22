@@ -3,6 +3,7 @@
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
+  import { apiInstantDate } from "../lib/time";
   import { flashOnChange } from "../lib/flash";
   import {
     CALIBRATION_LEAD_TIME_CHOICES,
@@ -182,7 +183,7 @@
   const fmt = (value: number | null | undefined, digits = 0) =>
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString("en-US") : "N/A";
+    apiInstantDate(value)?.toLocaleString("en-US") ?? "N/A";
   const dayStamp = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }) : "N/A";
   const compactId = (value: string | null | undefined) => {

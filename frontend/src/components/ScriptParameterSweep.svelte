@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import { onMount } from "svelte";
 
   import type { ResearchScriptRun } from "../lib/api/types";
@@ -134,7 +135,7 @@
       <select aria-label="Selected sweep" value={state.selectedSweepId ?? ""} disabled={busy}
         on:change={(event) => selectScriptSweep((event.currentTarget as HTMLSelectElement).value)}>
         {#each state.sweeps as item}
-          <option value={item.sweep_id}>{new Date(item.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {item.points.length} pts · {axisValues(item)}</option>
+          <option value={item.sweep_id}>{apiInstantDate(item.created_at)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {item.points.length} pts · {axisValues(item)}</option>
         {/each}
       </select>
     </label>

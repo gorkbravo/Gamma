@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import { onMount } from "svelte";
   import CryptoTreemapBoard from "../components/CryptoTreemapBoard.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
@@ -112,7 +113,7 @@
   };
   const pct = (value: number | null | undefined, digits = 1) => (value == null ? "N/A" : `${value.toFixed(digits)}%`);
   const ratio = (value: number | null | undefined, digits = 2) => (value == null ? "N/A" : `${value.toFixed(digits)}x`);
-  const shortDate = (value: string | null | undefined) => (value ? new Date(value).toLocaleString("en-US") : "N/A");
+  const shortDate = (value: string | null | undefined) => (apiInstantDate(value)?.toLocaleString("en-US") ?? "N/A");
 
   function toneClass(value: number | null | undefined) {
     if (value == null) return "";

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import { onMount } from "svelte";
   import ResearchScopeWorkingAnalysis from "../components/ResearchScopeWorkingAnalysis.svelte";
   import type { CopilotWorkingAnalysis } from "../lib/api/types";
@@ -228,7 +229,7 @@
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+    apiInstantDate(value)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) ?? "N/A";
 
   const overviewMetricLabels: Record<ResearchOverviewMetricId, string> = {
     return: "Return",
@@ -1906,7 +1907,7 @@
             <div class="row"><span>Base Currency</span><strong>{result.snapshot.base_currency}</strong></div>
             <div class="row"><span>Positions</span><strong>{result.snapshot.positions.length}</strong></div>
             <div class="row"><span>Portfolio Value</span><strong class:absent={fmt(result.snapshot.net_liquidation) === "N/A"}>{fmt(result.snapshot.net_liquidation)}</strong></div>
-            <div class="row"><span>Snapshot Time</span><strong>{new Date(result.snapshot.timestamp).toLocaleString("en-US")}</strong></div>
+            <div class="row"><span>Snapshot Time</span><strong>{apiInstantDate(result.snapshot.timestamp)?.toLocaleString("en-US") ?? "N/A"}</strong></div>
           </div>
         {:else}
           <p class="muted">Run research to create the forwarded snapshot for Risk or Options.</p>

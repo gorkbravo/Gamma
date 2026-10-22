@@ -7,6 +7,8 @@
 // ProvenanceBadgeData and render it through components/ProvenanceBadge.svelte
 // instead of per-widget warning prose.
 
+import { apiInstantDate } from "./time";
+
 export type ProvenanceState =
   | "live"
   | "delayed"
@@ -171,9 +173,8 @@ export function toProvenanceBadge(
 
 /** Compact timestamp: HH:MM when today, otherwise YYYY-MM-DD. */
 export function shortProvenanceTimestamp(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return null;
+  const parsed = apiInstantDate(iso);
+  if (!parsed) return null;
   const now = new Date();
   const sameDay =
     parsed.getFullYear() === now.getFullYear() &&
@@ -212,8 +213,8 @@ export function provenanceDetails(data: ProvenanceBadgeData): ProvenanceDetail[]
 /** Human-readable absolute timestamp; falls back to the raw string when unparseable. */
 export function formatProvenanceInstant(iso: string | null | undefined): string {
   if (!iso) return "N/A";
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return iso;
+  const parsed = apiInstantDate(iso);
+  if (!parsed) return iso;
   return parsed.toLocaleString("en-US", {
     month: "short",
     day: "numeric",

@@ -20,6 +20,7 @@
   } from "../lib/api/types";
   import { commoditiesRequestedInstrumentId, type CommodityWorkspaceLoadOptions } from "../lib/stores/app";
   import { activateRowOnKey } from "../lib/row-activation";
+  import { apiInstantDate } from "../lib/time";
   import { buildCommodityStrategyHandoff } from "../lib/view-models/research";
   import {
     RECONCILIATION_PANEL_STATUSES,
@@ -814,12 +815,11 @@
     });
   }
 
+  // Instante de cotización/recuperación: el backend lo manda en UTC sin zona, así que se lee
+  // como UTC y se muestra con la zona local explícita (GUA-20261021-3).
   function formatDateTime(value: string | null | undefined) {
-    if (!value) {
-      return "N/A";
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
+    const date = apiInstantDate(value);
+    if (!date) {
       return "N/A";
     }
     return date.toLocaleString("en-US", {
@@ -827,8 +827,17 @@
       day: "numeric",
       year: "numeric",
       hour: "2-digit",
-      minute: "2-digit"
+      minute: "2-digit",
+      timeZoneName: "short"
     });
+  }
+
+  // El cierre previo es un día de calendario: una medianoche sin zona se muestra como fecha.
+  function formatReferenceTime(value: string | null | undefined) {
+    if (value && /T00:00(?::00(?:\.0+)?)?$/.test(value.trim())) {
+      return formatDate(value.trim().slice(0, 10));
+    }
+    return formatDateTime(value);
   }
 
   function humanize(value: string | null | undefined) {
@@ -1357,11 +1366,11 @@
   }
 
   function basisTimeLabel(basis: CommodityPriceBasis | null | undefined) {
-    return formatDateTime(basis?.source_timestamp ?? basis?.timestamp ?? basis?.retrieved_at ?? null);
+    return formatReferenceTime(basis?.source_timestamp ?? basis?.timestamp ?? basis?.retrieved_at ?? null);
   }
 
   function basisPriorTimeLabel(basis: CommodityPriceBasis | null | undefined) {
-    return formatDateTime(basis?.previous_source_timestamp ?? null);
+    return formatReferenceTime(basis?.previous_source_timestamp ?? null);
   }
 
 </script>
