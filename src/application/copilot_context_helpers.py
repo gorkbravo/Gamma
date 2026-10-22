@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime
+import re
 from typing import Any, Iterable
 
 
@@ -26,6 +27,46 @@ def dedupe_warnings(*groups: Iterable[str] | None) -> list[str]:
                 seen.add(text)
                 ordered.append(text)
     return ordered
+
+
+# Identificadores que varían entre avisos del mismo tipo: códigos `entre comillas`, series o
+# contratos con letras y dígitos (GCV6, GOLDAMGBD228NLBM) y códigos en mayúsculas largos (SLVPRUSD).
+_WARNING_IDENTIFIER = re.compile(
+    r"`[^`]+`"
+    r"|\b(?=[A-Z0-9_]*[A-Z])(?=[A-Z0-9_]*\d)[A-Z0-9_]{3,}\b"
+    r"|\b[A-Z][A-Z0-9_]{5,}\b"
+)
+_SERIES_FAILURE = re.compile(r"^(?P<provider>[A-Za-z][\w .-]*?) series (?P<series>\S+) failed: (?P<reason>.+?)\.?$")
+
+
+def coalesce_warnings(warnings: Iterable[str] | None) -> list[tuple[str, list[str]]]:
+    """Agrupa avisos del mismo tipo que solo difieren en un identificador (GUA-20261021-13).
+
+    Devuelve `(mensaje, miembros)` en el orden de la primera aparición. Un grupo de un solo
+    aviso conserva su texto; tres fallos de series FRED pasan a "3 FRED series failed: …".
+    Los avisos originales siguen disponibles en `miembros` para la procedencia.
+    """
+    groups: dict[str, list[str]] = {}
+    for warning in dedupe_warnings(warnings):
+        groups.setdefault(_WARNING_IDENTIFIER.sub("{}", warning), []).append(warning)
+    coalesced: list[tuple[str, list[str]]] = []
+    for signature, members in groups.items():
+        if len(members) == 1:
+            coalesced.append((members[0], members))
+            continue
+        matches = [_SERIES_FAILURE.match(member) for member in members]
+        if all(matches) and len({(match["provider"], match["reason"]) for match in matches if match}) == 1:
+            first = matches[0]
+            assert first is not None
+            series = ", ".join(match["series"] for match in matches if match)
+            message = f"{len(members)} {first['provider']} series failed: {first['reason'].rstrip('.')} ({series})."
+        else:
+            identifiers = "; ".join(
+                ", ".join(_WARNING_IDENTIFIER.findall(member)) for member in members
+            )
+            message = f"{len(members)} similar warnings: {signature.replace('{}', '…')} ({identifiers})"
+        coalesced.append((message, members))
+    return coalesced
 
 
 def summarize_portfolio_snapshot(
@@ -477,6 +518,7 @@ def summarize_commodities_workspace(
     summary_limit: int = 8,
     spread_limit: int = 8,
     inventory_limit: int = 8,
+    focus_instrument_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     if not workspace:
         return None
@@ -502,10 +544,39 @@ def summarize_commodities_workspace(
         (_commodity_curve_summary(row) for row in curves if str(row.get("instrument_id") or "") == selected_id),
         None,
     )
+    # Curvas de los demás instrumentos vistos o referenciados (GUA-20261021-6): antes solo
+    # viajaba la del seleccionado aunque el workspace ya tuviera, por ejemplo, Brent.
+    focus_ids = [
+        item
+        for item in dict.fromkeys(str(value or "").strip().lower() for value in focus_instrument_ids or [])
+        if item and item != selected_id
+    ]
+    curve_by_id = {str(row.get("instrument_id") or "").lower(): row for row in curves}
+    focus_curves = [
+        summary
+        for item in focus_ids
+        if (summary := _commodity_curve_summary(curve_by_id.get(item))) is not None
+    ]
+    focus_markets = [
+        _commodity_market_summary(row)
+        for row in market_summaries
+        if str(_as_dict(row.get("instrument")).get("instrument_id") or "").lower() in focus_ids
+    ]
+
+    focus_section = (
+        {
+            "focus_instrument_ids": [item for item in [selected_id, *focus_ids] if item],
+            "focus_markets": focus_markets,
+            "focus_curves": focus_curves,
+        }
+        if focus_ids
+        else {}
+    )
 
     return {
         "mode": workspace.get("mode"),
         "selected_instrument_id": selected_id or None,
+        **focus_section,
         "provider": {
             "provider_id": coverage.get("provider_id"),
             "provider_label": coverage.get("provider_label"),

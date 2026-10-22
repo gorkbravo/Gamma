@@ -552,7 +552,7 @@ class CopilotStore:
                 context_fingerprint=context_fingerprint,
                 current_tab=current_tab,
                 workspace_mode=workspace_mode,
-                summary=context_summary,
+                summary=self._snapshot_summary(context_summary, result),
                 request_context=dict(request_context or {}),
                 selected_scope_domains=list(selected_scope_domains or []),
                 source_ids=[source.source_id for source in result.sources],
@@ -644,7 +644,11 @@ class CopilotStore:
             )
             self._write_json(self.sessions_dir / f"{safe_session_id}.json", self._session_to_json(next_session))
             if prior_turn is None:
-                self._write_json(self.snapshots_dir / f"{snapshot.snapshot_id}.json", self._snapshot_to_json(snapshot))
+                self._write_json(
+                    self.snapshots_dir / f"{snapshot.snapshot_id}.json",
+                    self._snapshot_to_json(snapshot),
+                    compact=True,
+                )
             self._write_json(self.turns_dir / safe_session_id / f"{turn.turn_id}.json", self._turn_to_json(turn))
         return next_session, snapshot, turn
 
@@ -1819,6 +1823,7 @@ class CopilotStore:
         payload: dict[str, Any],
         *,
         preserve_existing: bool = True,
+        compact: bool = False,
     ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         next_payload = dict(payload)
@@ -1829,7 +1834,13 @@ class CopilotStore:
                 existing = None
             if isinstance(existing, dict):
                 next_payload = {**existing, **next_payload}
-        serialized = json.dumps(next_payload, indent=2, sort_keys=True, default=str)
+        # Las instantáneas de contexto se escriben sin sangría: misma información, ~45 % menos
+        # bytes en disco (GUA-20261021-13).
+        serialized = (
+            json.dumps(next_payload, separators=(",", ":"), sort_keys=True, default=str)
+            if compact
+            else json.dumps(next_payload, indent=2, sort_keys=True, default=str)
+        )
         temp_path = path.with_name(f"{path.name}.tmp")
         with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
             handle.write(serialized)
@@ -1984,6 +1995,27 @@ class CopilotStore:
             "warnings": list(session.warnings),
             "archived_at": session.archived_at.isoformat() if session.archived_at else None,
         }
+
+    @staticmethod
+    def _snapshot_summary(
+        context_summary: dict[str, Any],
+        result: CopilotResearchCardResult,
+    ) -> dict[str, Any]:
+        """Resumen de la instantánea sin la copia duplicada de los eventos del Operator.
+
+        Los eventos ya se guardan íntegros en `turn.result.operator_events`; repetirlos en la
+        instantánea añadía ~0,4 MB por turno (GUA-20261021-13). El contexto de la petición se
+        conserva entero porque Retry lo reproduce tal cual.
+        """
+        events = context_summary.get("operator_events")
+        if not isinstance(events, list) or len(events) != len(result.operator_events) or not events:
+            return context_summary
+        summary = {key: value for key, value in context_summary.items() if key != "operator_events"}
+        summary["operator_events_ref"] = {
+            "location": "turn.result.operator_events",
+            "event_count": len(events),
+        }
+        return summary
 
     @staticmethod
     def _snapshot_to_json(snapshot: CopilotContextSnapshot) -> dict[str, Any]:

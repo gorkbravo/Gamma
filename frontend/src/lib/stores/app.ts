@@ -1,7 +1,7 @@
 import { derived, get, writable } from "svelte/store";
 import { compositionValidation } from "../strategy-experiments";
 import { deleteJson, getJson, getNdjsonStream, getText, patchJson, postJson, postNdjsonStream, postText } from "../api/client";
-import { normalizeCopilotResearchCardResult } from "../copilot-result";
+import { isCopilotOutputBudgetCutoff, normalizeCopilotResearchCardResult } from "../copilot-result";
 import {
   createCopilotRunState,
   isTerminalCopilotRunEvent,
@@ -472,6 +472,21 @@ export const macroEvents = writable<MacroEventsResponse | null>(null);
 export const macroSeriesHistories = writable<Record<string, MacroSeriesHistory>>({});
 export const newsFeed = writable<NewsEventFeedResponse | null>(null);
 export const commoditiesWorkspace = writable<CommodityWorkspaceResponse | null>(null);
+// Instrumentos de Commodities vistos en esta sesión (GUA-20261021-6). Solo identidades: el
+// backend detalla sus curvas en el contexto de Copilot además de la del seleccionado.
+const MAX_VIEWED_COMMODITY_INSTRUMENTS = 6;
+let viewedCommodityInstrumentIds: string[] = [];
+commoditiesWorkspace.subscribe((workspace) => {
+  const instrumentId = workspace?.selected_instrument_id;
+  if (!instrumentId) return;
+  viewedCommodityInstrumentIds = [
+    instrumentId,
+    ...viewedCommodityInstrumentIds.filter((item) => item !== instrumentId)
+  ].slice(0, MAX_VIEWED_COMMODITY_INSTRUMENTS);
+});
+export function getViewedCommodityInstrumentIds(): string[] {
+  return [...viewedCommodityInstrumentIds];
+}
 export const maritimeWorkspace = writable<MaritimeWorkspaceResponse | null>(null);
 export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
 export const selectedPredictionMarketId = writable<string | null>(null);
@@ -3796,6 +3811,8 @@ type CopilotLoadOptions = {
   activeTabId?: TabId | "research";
   reasoningEffort?: CopilotReasoningEffort;
   selectedProfile?: CopilotProfile;
+  // "expanded" lo pide Continue tras un corte por max_output_tokens (GUA-20261021-6).
+  outputBudget?: "standard" | "expanded";
 };
 
 function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
@@ -3919,7 +3936,8 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         current_tab: "commodities",
         workspace_mode: workspaceMode,
         commodities_state: {
-          workspace: get(commoditiesWorkspace)
+          workspace: get(commoditiesWorkspace),
+          viewed_instrument_ids: getViewedCommodityInstrumentIds()
         }
       };
     case "maritime":
@@ -4402,6 +4420,7 @@ export async function streamCopilotResearchCard(
         ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
         : {}),
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+      ...(options.outputBudget ? { output_budget: options.outputBudget } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
     };
@@ -4628,6 +4647,7 @@ export async function executeCopilotOperatorPlan(
       ...(normalizeCopilotProfile(options.selectedProfile)
         ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
         : {}),
+      ...(options.outputBudget ? { output_budget: options.outputBudget } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
     };
@@ -4708,6 +4728,8 @@ export async function retryCopilotTurn(turnId: string) {
     synthesisDomains: turn.selected_scope_domains as CopilotBaseDomain[],
     selectedProfile: normalizeCopilotProfile(turn.selected_profile as CopilotProfile),
     reasoningEffort: normalizeReasoningEffort(turn.reasoning_effort as CopilotReasoningEffort),
+    // Continue tras un corte por presupuesto pide más tokens; el servidor fija el techo.
+    ...(isCopilotOutputBudgetCutoff(turn.result) ? { outputBudget: "expanded" as const } : {}),
   };
   return turn.role === "research_operator"
     ? executeCopilotOperatorPlan(turn.domain as CopilotDomain, turn.prompt, options)

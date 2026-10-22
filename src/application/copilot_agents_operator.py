@@ -10,7 +10,11 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.application.copilot_context_helpers import dedupe_warnings, without_planner_only_warning
+from src.application.copilot_context_helpers import (
+    coalesce_warnings,
+    dedupe_warnings,
+    without_planner_only_warning,
+)
 from src.application.copilot_model_policy import OPENAI_BASELINE_MODEL
 from src.application.copilot_operator_context import operator_attached_context
 from src.application.research_action_registry import (
@@ -221,9 +225,25 @@ class CopilotAgentsOperatorService:
                     # Event delivery must not change operator authority or tool execution.
                     pass
 
-        def record_warning(message: str, *, step: CopilotOperatorPlanStep | None = None) -> None:
-            warnings.append(message)
-            record_event("warning", step=step, title="Operator warning", message=message, event_warnings=[message])
+        recorded_context_warnings: set[str] = set()
+
+        def record_warning(
+            message: str,
+            *,
+            step: CopilotOperatorPlanStep | None = None,
+            members: list[str] | None = None,
+        ) -> None:
+            # Un aviso agrupado conserva cada original en los avisos del resultado (GUA-20261021-13).
+            originals = members or [message]
+            warnings.extend(originals)
+            record_event(
+                "warning",
+                step=step,
+                title="Operator warning",
+                message=message,
+                payload={"coalesced_warnings": originals} if len(originals) > 1 else None,
+                event_warnings=[message],
+            )
 
         step_by_tool = {
             step.tool_id: step
@@ -474,8 +494,12 @@ class CopilotAgentsOperatorService:
                 return self._json_dumps({"status": "skipped", "warning": message})
             for source in context.sources:
                 sources[source.source_id] = source
-            for warning in context.warnings:
-                record_warning(warning, step=step)
+            # Un paso por tipo de aviso y por ejecución (GUA-20261021-13).
+            for warning, members in coalesce_warnings(context.warnings):
+                if warning in recorded_context_warnings:
+                    continue
+                recorded_context_warnings.add(warning)
+                record_warning(warning, step=step, members=members)
 
             try:
                 validated_arguments = action_registry.validate_arguments(

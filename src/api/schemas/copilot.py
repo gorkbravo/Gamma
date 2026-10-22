@@ -194,6 +194,9 @@ class CopilotResearchCardRequestModel(BaseModel):
     last_seen_sequence: int | None = Field(default=None, ge=-1)
     context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
     synthesis: CopilotSynthesisRequestModel | None = None
+    # Continue tras un corte por max_output_tokens pide "expanded"; el techo lo fija el servidor
+    # (GUA-20261021-6).
+    output_budget: Literal["standard", "expanded"] | None = None
 
     def to_domain(self) -> CopilotResearchCardRequest:
         return CopilotResearchCardRequest(
@@ -211,6 +214,7 @@ class CopilotResearchCardRequestModel(BaseModel):
             requested_model=self.requested_model,
             context=self.context.to_domain(),
             synthesis=self.synthesis.to_domain() if self.synthesis is not None else None,
+            output_budget=self.output_budget,
         )
 
 

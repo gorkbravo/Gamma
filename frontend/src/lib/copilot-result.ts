@@ -253,3 +253,18 @@ export function normalizeCopilotResearchCardResult(
     safe_provider_error: normalizeSafeError(row.safe_provider_error)
   };
 }
+
+/**
+ * Turno cortado por el presupuesto de salida (GUA-20261021-6): Continue repite la misma
+ * petición y contexto pidiendo un presupuesto ampliado; el techo lo fija el servidor.
+ */
+export function isCopilotOutputBudgetCutoff(
+  result: Pick<CopilotResearchCardResult, "status" | "message"> | null | undefined
+): boolean {
+  return result?.status === "incomplete" && /max_output_tokens/.test(result.message ?? "");
+}
+
+/** Estados no exitosos que pueden repetirse con el mismo prompt y contexto. */
+export function isRetryableCopilotStatus(status: string | null | undefined): boolean {
+  return status != null && !["ready", "awaiting_confirmation", "interrupted"].includes(status);
+}

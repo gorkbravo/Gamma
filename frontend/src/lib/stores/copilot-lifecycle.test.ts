@@ -250,6 +250,48 @@ describe("Copilot checkpoint 3 lifecycle stores", () => {
       context_fingerprint: "original-options", selected_scope_domains: ["iv"], selected_profile: "quick", context });
   });
 
+  it("continues an output-budget cut-off with the original prompt, context and an expanded budget (GUA-20261021-6)", async () => {
+    const summary = session("retry-budget", { active_domain: "synthesis" });
+    localStorage.setItem("gamma.copilot.session", summary.session_id);
+    const retained = detail(summary);
+    const context = { current_tab: "synthesis", workspace_mode: "research" };
+    const synthesis = { active_tab: "copilot", included_scopes: [
+      { domain: "commodities", label: "Commodities", context_fingerprint: "c1",
+        context: { current_tab: "commodities", commodities_state: { workspace: null, viewed_instrument_ids: ["brent", "wti"] } } },
+      { domain: "risk", label: "Risk", context_fingerprint: "r1", context: { current_tab: "risk" } }
+    ] };
+    retained.turns = [{ turn_id: "cut-turn", session_id: summary.session_id, domain: "synthesis",
+      prompt: "Four-part Brent/WTI synthesis", role: "research_agent", selected_scope_domains: ["commodities", "risk"],
+      selected_profile: "auto", context_snapshot_id: "snapshot-cut", context_fingerprint: "original-synthesis",
+      result: { ...cardResult("cut-response", "incomplete"), message: "OpenAI ended the response early: max_output_tokens." }
+    }] as CopilotSessionDetail["turns"];
+    retained.context_snapshots = [{ snapshot_id: "snapshot-cut", context_fingerprint: "original-synthesis",
+      domain: "synthesis", current_tab: "synthesis", workspace_mode: "research", summary: {}, source_ids: [], warnings: [],
+      created_at: "2026-10-21T10:40:00Z", read_only_safety: {}, context_contract: {},
+      request_context: { context, synthesis }, selected_scope_domains: ["commodities", "risk"]
+    }];
+    activeCopilotSession.set(retained);
+    const requests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(input).pathname;
+      if (path.endsWith("/stream")) {
+        requests.push(JSON.parse(String(init?.body)));
+        return runStream({ ...cardResult("continued-response"), domain: "synthesis" }, init);
+      }
+      if (path.endsWith("/copilot/sessions")) return response([summary]);
+      return response(retained);
+    }));
+    await retryCopilotTurn("cut-turn");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      prompt: "Four-part Brent/WTI synthesis",
+      output_budget: "expanded",
+      context_fingerprint: "original-synthesis",
+      context,
+      synthesis
+    });
+  });
+
   it("refuses retry when the original context snapshot is missing", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

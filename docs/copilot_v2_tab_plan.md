@@ -2,7 +2,36 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
+
+### Official guidance reviewed 2026-10-21 — Output budget, incomplete responses and trace hygiene (GUA-20261021-6, GUA-20261021-13)
+
+Fetched the current official [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning), [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs), [conversation state guide](https://developers.openai.com/api/docs/guides/conversation-state) and [Responses create reference](https://developers.openai.com/api/reference/resources/responses/methods/create) directly (no Developer Docs connector was available in this session). Review date: **2026-10-21**. Relevant points:
+
+- `max_output_tokens` is an upper bound on generated tokens and covers reasoning, visible output and formatting tokens. Reasoning tokens are billed as output and reported in `output_tokens_details.reasoning_tokens`.
+- Hitting the bound returns `status: "incomplete"` with `incomplete_details.reason: "max_output_tokens"` (other reasons: `content_filter`, `max_messages`, `steered`). The response may carry partial `output_text`, or none when the budget went to reasoning. The reasoning guide still recommends reserving at least 25,000 tokens for reasoning and output.
+- Structured Outputs warns that an incomplete response may not match the JSON schema and should be handled separately from a parse failure.
+- No endpoint resumes an incomplete response in place. Continuation is a new request: chained with `previous_response_id` when the response was stored, or by replaying the full input statelessly. Gamma runs with provider storage disabled by default.
+
+**Defect.** A five-context, four-part Research Agent synthesis stopped at the fixed 1,400-token cap (1,422 output tokens, 114 reasoning) after 49 s. It returned an empty `incomplete` card with no Continue control. The Commodities evidence held only the selected WTI curve, although the workspace payload already carried a 12-node Brent curve and Brent was a Strategy Lab leg.
+
+**Decision.** Gamma keeps the custom Responses loop. The budget and continuation policy is server-owned:
+
+- **Sized budget.** The Agent card budget is 2,000 / 4,000 / 8,000 tokens for Quick / Standard / Deep (Auto resolves as before). It adds 1,500 per extra included context and 600 per extra requested part (numbered markers or questions, at most 8). It is capped at the documented 25,000-token ceiling. The audit request now gets 11,800 instead of 1,400. The bound is a ceiling, so only generated tokens are billed.
+- **One automatic continuation.** On `max_output_tokens`, Gamma re-issues the same input once with at least double the budget (capped), plus a short Gamma note asking for concise fields. The strict JSON card cannot be resumed mid-object, so this is a repeat, not a resume. The same rule applies to the non-streaming path and the Operator loop (1,600 → 5,600). No tool is re-executed: Operator observations are replayed as they are.
+- **Visible state.** The stream emits one `warning` with `reset_provisional_text`, so the cut-off provisional text is cleared.
+- **Partial answer.** If the second attempt is also cut off, Gamma closes the truncated JSON and keeps only the fields that arrived. The card is returned with status `incomplete` and labelled "Partial answer". Nothing is invented; with no text, the message says the budget was spent on reasoning.
+- **Retry / Continue.** The incomplete card offers Retry, or Continue for a budget cut-off, in both the Copilot tab and the drawer. Continue replays the persisted prompt, request context and scopes with `output_budget: "expanded"`. The server maps that to the escalated budget within the same ceiling, so the client never chooses a token count. A missing original snapshot still blocks Retry, so it never runs on an empty context (closes GUA-20260904-2).
+- **Commodities focus.** The context now details every focus instrument, not only the selected one. Focus instruments are the selected one, those viewed in the session (`viewed_instrument_ids`, identities only), Strategy Lab `commodity` legs and Commodities handoffs from any included scope, and instruments named in the prompt. They are capped at 6 and must be known to the workspace. The synthesis drilldown runs `inspect_commodity_curve_fundamentals` for each, with 12 nodes. A focus instrument with no loaded curve is disclosed as a warning, not fetched or inferred.
+
+**Trace hygiene (GUA-20261021-13).**
+
+- **Rendering.** Markdown tables and lists in card fields render through an escaped Svelte parser (no model HTML). Empty sections are omitted. Raw JSON in step and report details sits behind closed disclosures.
+- **Warnings.** Same-kind warnings that differ only in an identifier are coalesced into one Operator step, for example "3 FRED series failed: HTTPError (…)". A context reused by a later step does not repeat its warnings. The originals stay in the result warnings and the event payload.
+- **SEC identity.** Commodity and data codes (WTI, EIA, FRED, OPEC, …) and delivery months no longer count as company evidence; `$WTI` and "ticker WTI" stay explicit. The SEC-identity warning now appears only for name lookups. Explicit tickers get a scoped "used without SEC verification" note.
+- **Snapshots.** Context snapshots are written as compact JSON and drop the duplicate copy of `operator_events` (kept in the turn). Measured on the audit snapshots: 4.58 → 2.44 MB (Agent) and 5.00 → 2.36 MB (Operator). The request context (about 2.4 MB, mostly the Commodities workspace) is kept intact because Retry replays it verbatim. Trimming it would change what a retried run sees.
+
+No model, framework, tool exposure, permission or storage change. Covered by `tests/test_copilot_usability_20261021.py` (16 tests) and frontend tests in `copilot-text`, `CopilotTranscriptResult`, `copilot-run`, `copilot-result`, `copilot-lifecycle` and `copilot-commodities-context`. No live paid call was made; live acceptance of the larger budget remains for the integrator's browser pass.
 
 ### Official guidance reviewed 2026-10-20 — Script E4 weight book and E5 parameters
 

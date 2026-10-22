@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterator
 
 from src.application.copilot_context_helpers import (
     PLANNER_ONLY_WARNING,
+    coalesce_warnings,
     dedupe_warnings,
     resolve_iv_surface,
     summarize_commodities_workspace,
@@ -187,6 +188,8 @@ DEFAULT_COPILOT_RUN_TIMEOUT_SECONDS = 300.0
 COPILOT_RUN_REPLAY_LIMIT = 512
 COPILOT_RUN_RETENTION_SECONDS = 900.0
 COPILOT_RUN_REGISTRY_LIMIT = 64
+# Instrumentos de materias primas que el contexto detalla además del seleccionado (GUA-20261021-6).
+COPILOT_MAX_COMMODITY_FOCUS_INSTRUMENTS = 6
 
 
 @dataclass
@@ -4485,9 +4488,25 @@ class CopilotService:
                 except Exception:
                     logger.exception("Copilot Operator event delivery failed")
 
-        def record_warning(message: str, *, step: CopilotOperatorPlanStep | None = None) -> None:
-            warnings.append(message)
-            record_event("warning", step=step, title="Operator warning", message=message, event_warnings=[message])
+        recorded_context_warnings: set[str] = set()
+
+        def record_warning(
+            message: str,
+            *,
+            step: CopilotOperatorPlanStep | None = None,
+            members: list[str] | None = None,
+        ) -> None:
+            # Un aviso agrupado conserva cada original en los avisos del resultado (GUA-20261021-13).
+            originals = members or [message]
+            warnings.extend(originals)
+            record_event(
+                "warning",
+                step=step,
+                title="Operator warning",
+                message=message,
+                payload={"coalesced_warnings": originals} if len(originals) > 1 else None,
+                event_warnings=[message],
+            )
 
         record_event(
             "plan",
@@ -4794,8 +4813,13 @@ class CopilotService:
                 built_contexts.append(context)
             for source in context.sources:
                 sources[source.source_id] = source
-            for warning in context.warnings:
-                record_warning(warning, step=step)
+            # Un paso por tipo de aviso y por ejecución: el contexto reutilizado por otro paso no
+            # repite sus avisos (GUA-20261021-13).
+            for warning, members in coalesce_warnings(context.warnings):
+                if warning in recorded_context_warnings:
+                    continue
+                recorded_context_warnings.add(warning)
+                record_warning(warning, step=step, members=members)
 
             arguments = self._default_plan_execution_arguments(step.tool_id, context)
             if arguments is None:
@@ -5344,14 +5368,21 @@ class CopilotService:
             *,
             step: CopilotOperatorPlanStep | None = None,
             payload: dict[str, Any] | None = None,
+            members: list[str] | None = None,
         ) -> None:
-            warnings.append(message)
+            # Un aviso agrupado conserva cada original en los avisos del resultado (GUA-20261021-13).
+            originals = members or [message]
+            warnings.extend(originals)
             record_event(
                 "warning",
                 step=step,
                 title="Operator warning",
                 message=message,
-                payload=payload,
+                payload=(
+                    {**(payload or {}), "coalesced_warnings": originals}
+                    if len(originals) > 1
+                    else payload
+                ),
                 event_warnings=[message],
             )
 
@@ -5599,8 +5630,9 @@ class CopilotService:
                 built_contexts.append(context)
                 for source in context.sources:
                     sources[source.source_id] = source
-                for warning in context.warnings:
-                    record_warning(warning, step=step)
+                # Un paso por tipo de aviso, no uno por serie fallida (GUA-20261021-13).
+                for warning, members in coalesce_warnings(context.warnings):
+                    record_warning(warning, step=step, members=members)
 
             if normalized_tool_id.startswith("strategy_lab.") and any(
                 isinstance(item, dict) and isinstance(item.get("result"), dict)
@@ -7498,6 +7530,11 @@ class CopilotService:
     ) -> CopilotRequestContext:
         domain_context = self._synthesis_scope_context_for_domain(request, domain) or request.context
         domain_context = replace(domain_context, current_tab=domain)
+        if domain == "commodities":
+            domain_context = self._with_referenced_commodity_instruments(
+                domain_context,
+                self._referenced_commodity_instrument_ids(request),
+            )
 
         if domain == "fundamentals" and not self._context_has_fundamentals_ticker(domain_context):
             ticker = self._first_plan_entity_id(request, "ticker")
@@ -9341,6 +9378,7 @@ class CopilotService:
             )
         }
         warnings: list[str] = []
+        referenced_commodities = self._referenced_commodity_instrument_ids(request)
 
         for scope in synthesis.included_scopes:
             domain = str(scope.domain or "").strip()
@@ -9348,7 +9386,11 @@ class CopilotService:
                 continue
             if domain in included_bundles:
                 continue
-            bundle = self._build_context_for_domain(domain, scope.context)
+            scope_context = scope.context
+            if domain == "commodities":
+                # Las patas de Strategy Lab y los nombres del prompt entran en el foco (GUA-20261021-6).
+                scope_context = self._with_referenced_commodity_instruments(scope_context, referenced_commodities)
+            bundle = self._build_context_for_domain(domain, scope_context)
             included_bundles[domain] = bundle
             for source in bundle.sources:
                 sources[source.source_id] = source
@@ -10333,6 +10375,13 @@ class CopilotService:
         )
 
     def _build_commodities_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        request = replace(
+            request,
+            context=self._with_referenced_commodity_instruments(
+                request.context,
+                self._referenced_commodity_instrument_ids(request),
+            ),
+        )
         state = request.context.commodities_state or {}
         workspace = state.get("workspace")
         if not isinstance(workspace, dict):
@@ -10404,11 +10453,27 @@ class CopilotService:
                     ],
                     warnings=[warning],
                 )
-        summary = summarize_commodities_workspace(workspace)
+        focus_instrument_ids = self._commodity_focus_instrument_ids(state, workspace)
+        summary = summarize_commodities_workspace(workspace, focus_instrument_ids=focus_instrument_ids)
         if summary is None:
             raise ValueError("Commodities workspace did not contain a normalized summary.")
         coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
         warnings = dedupe_warnings(workspace.get("warnings", []), coverage.get("caveats", []))
+        # Instrumentos vistos o referenciados sin curva cargada: se dice, no se infiere.
+        missing_focus = [
+            instrument_id
+            for instrument_id in focus_instrument_ids
+            if not any(
+                isinstance(row, dict) and str(row.get("instrument_id") or "").lower() == instrument_id
+                for row in workspace.get("curves", []) or []
+            )
+        ]
+        if missing_focus:
+            warnings.append(
+                "No loaded futures curve for "
+                + ", ".join(item.upper() for item in missing_focus)
+                + "; open it in Commodities to load it."
+            )
         coverage_status = str(coverage.get("coverage_status") or "unknown")
         status = "ready" if coverage_status in {"live"} else (
             "unavailable" if coverage_status == "unavailable" else "degraded"
@@ -10453,9 +10518,10 @@ class CopilotService:
                 "workspace_mode": request.context.workspace_mode or "research",
                 "status": status,
                 "selected_instrument_id": workspace.get("selected_instrument_id"),
+                **({"focus_instrument_ids": focus_instrument_ids} if len(focus_instrument_ids) > 1 else {}),
                 "commodities": summary,
             },
-            tool_state={"workspace": workspace},
+            tool_state={"workspace": workspace, "focus_instrument_ids": focus_instrument_ids},
             sources=sources,
             warnings=warnings,
         )
@@ -10714,6 +10780,105 @@ class CopilotService:
             ],
             warnings=[warning],
         )
+
+    @staticmethod
+    def _commodity_ids_in_text(text: str) -> list[str]:
+        """Instrumentos nombrados explícitamente en el texto (GUA-20261021-6)."""
+        lowered = str(text or "").lower()
+        aliases = {
+            "brent": "brent",
+            "wti": "wti",
+            "natural gas": "henry_hub",
+            "henry hub": "henry_hub",
+            "heating oil": "heating_oil",
+            "gasoline": "gasoline",
+            "copper": "copper",
+            "gold": "gold",
+            "silver": "silver",
+            "platinum": "platinum",
+            "aluminum": "aluminum",
+        }
+        found = [
+            (match.start(), instrument_id)
+            for alias, instrument_id in aliases.items()
+            for match in [re.search(rf"\b{re.escape(alias)}\b", lowered)]
+            if match is not None
+        ]
+        return list(dict.fromkeys(instrument_id for _, instrument_id in sorted(found)))
+
+    @classmethod
+    def _referenced_commodity_instrument_ids(cls, request: CopilotResearchCardRequest) -> list[str]:
+        """Instrumentos de materias primas que la petición o una pestaña incluida referencian.
+
+        GUA-20261021-6: el contexto de Commodities solo llevaba el instrumento seleccionado
+        (WTI) aunque Brent era una pata del libro de Strategy Lab incluido. Se recogen las patas
+        `commodity` de la composición, los handoffs de Commodities y los nombres del prompt.
+        """
+        contexts = [request.context]
+        if request.synthesis is not None:
+            contexts.extend(scope.context for scope in request.synthesis.included_scopes)
+        referenced: list[str] = []
+        for context in contexts:
+            states = [
+                context.strategy_lab_state if isinstance(context.strategy_lab_state, dict) else {},
+                context.research_state if isinstance(context.research_state, dict) else {},
+            ]
+            for state in states:
+                for key in ("composition", "strategy_composition"):
+                    composition = state.get(key)
+                    inputs = composition.get("portfolio_inputs") if isinstance(composition, dict) else None
+                    for leg in (inputs.get("legs") if isinstance(inputs, dict) else None) or []:
+                        if (
+                            isinstance(leg, dict)
+                            and str(leg.get("asset_class") or "").lower() == "commodity"
+                            and str(leg.get("identifier") or "").strip()
+                        ):
+                            referenced.append(str(leg["identifier"]).strip().lower())
+                handoffs = state.get("handoff_context") or state.get("strategy_lab_handoffs")
+                for item in (handoffs.get("items") if isinstance(handoffs, dict) else None) or []:
+                    if not isinstance(item, dict) or item.get("stale"):
+                        continue
+                    if str(item.get("source_tab") or "") != "commodities":
+                        continue
+                    normalized = item.get("normalized_ids") if isinstance(item.get("normalized_ids"), dict) else {}
+                    instrument_id = str(normalized.get("instrument_id") or "").strip().lower()
+                    if instrument_id:
+                        referenced.append(instrument_id)
+        referenced.extend(cls._commodity_ids_in_text(str(request.prompt or "")))
+        return list(dict.fromkeys(referenced))[:COPILOT_MAX_COMMODITY_FOCUS_INSTRUMENTS]
+
+    @staticmethod
+    def _with_referenced_commodity_instruments(
+        context: CopilotRequestContext,
+        referenced: list[str],
+    ) -> CopilotRequestContext:
+        if not referenced:
+            return context
+        state = dict(context.commodities_state or {})
+        prior = [str(item) for item in state.get("referenced_instrument_ids") or [] if str(item or "").strip()]
+        state["referenced_instrument_ids"] = list(dict.fromkeys([*prior, *referenced]))
+        return replace(context, commodities_state=state)
+
+    @staticmethod
+    def _commodity_focus_instrument_ids(
+        state: dict[str, Any],
+        workspace: dict[str, Any],
+    ) -> list[str]:
+        """Seleccionado + vistos en la sesión + referenciados, limitado a instrumentos conocidos."""
+        known = {
+            str(row.get("instrument_id") or "").strip().lower()
+            for row in [*(workspace.get("instruments") or []), *(workspace.get("curves") or [])]
+            if isinstance(row, dict)
+        }
+        known.discard("")
+        ordered = [
+            str(workspace.get("selected_instrument_id") or "").strip().lower(),
+            *(str(item or "").strip().lower() for item in state.get("viewed_instrument_ids") or []),
+            *(str(item or "").strip().lower() for item in state.get("referenced_instrument_ids") or []),
+        ]
+        return [
+            item for item in dict.fromkeys(ordered) if item and item in known
+        ][:COPILOT_MAX_COMMODITY_FOCUS_INSTRUMENTS]
 
     @staticmethod
     def _commodity_instrument_for_request(request: CopilotResearchCardRequest) -> str:
@@ -14777,6 +14942,27 @@ class CopilotService:
             for source_id in execution.trace.source_ids:
                 if source_id not in source_ids:
                     source_ids.append(source_id)
+
+        if domain == "commodities":
+            # Una inspección por instrumento en foco, no solo el seleccionado (GUA-20261021-6).
+            selected = str(bundle.summary_data.get("selected_instrument_id") or "").lower()
+            additional: dict[str, Any] = {}
+            for instrument_id in list(bundle.tool_state.get("focus_instrument_ids") or []):
+                if not instrument_id or instrument_id == selected:
+                    continue
+                execution = self._execute_tool(
+                    "inspect_commodity_curve_fundamentals",
+                    {"instrument_id": instrument_id, "max_curve_nodes": 12, "max_inventory_points": 6},
+                    bundle,
+                )
+                additional[instrument_id] = execution.output
+                for source in execution.sources:
+                    sources[source.source_id] = source
+                for source_id in execution.trace.source_ids:
+                    if source_id not in source_ids:
+                        source_ids.append(source_id)
+            if additional:
+                drilldown["inspect_commodity_curve_fundamentals.focus"] = additional
 
         domain_source = CopilotSourceRef(
             source_id=f"synthesis.domain.{domain}.drilldown",

@@ -717,11 +717,14 @@
             <div class="msg assistant">
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
+                <!-- Retry/Continue en la propia tarjeta del último turno (GUA-20261021-6). -->
                 <CopilotTranscriptResult
                   result={turn.result}
                   {onOpenSource}
                   onConfirmMutation={roleMode === "operator" ? onConfirmMutation : null}
                   onRejectMutation={roleMode === "operator" ? onRejectMutation : null}
+                  onRetry={index === chatTurns.length - 1 && retryPrompt ? () => handleRetry() : null}
+                  retryDisabled={onRetryTurn ? !retryTurn : !surface.supported}
                 />
               </div>
             </div>

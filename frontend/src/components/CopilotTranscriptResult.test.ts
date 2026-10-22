@@ -461,3 +461,78 @@ describe("CopilotTranscriptResult", () => {
     expect(body).toContain("GOOGL · Alphabet Inc. · NASDAQ");
   });
 });
+
+// GUA-20261021-6 / GUA-20261021-13: tarjeta parcial, Retry/Continue y ruido de trazas.
+describe("CopilotTranscriptResult usability audit 2026-10-21", () => {
+  it("renders Markdown tables as tables and omits empty sections", () => {
+    const tabled = result();
+    tabled.card = {
+      ...tabled.card!,
+      rationale: "| Delivery | Brent | WTI |\n| --- | ---: | ---: |\n| Dec-26 | 111.05 | 99.93 |",
+      proposed_test: "",
+      hypothesis: "   "
+    };
+    const { body } = render(CopilotTranscriptResult, { props: { result: tabled } });
+    expect(body).toContain("rich-table");
+    expect(body).toMatch(/<th[^>]*>Delivery<\/th>/);
+    expect(body).toMatch(/<td[^>]*>111.05<\/td>/);
+    expect(body).not.toContain("| Delivery |");
+    expect(body).not.toContain("Proposed test");
+    expect(body).not.toContain("Hypothesis");
+  });
+
+  it("shows a partial card with a Continue action after an output-budget cut-off", () => {
+    const partial = result();
+    partial.status = "incomplete";
+    partial.message =
+      "OpenAI ended the response early: max_output_tokens. The output budget was 23,600 tokens, reasoning included.";
+    partial.card = { ...partial.card!, proposed_test: "", next_steps: [] };
+    const withRetry = render(CopilotTranscriptResult, {
+      props: { result: partial, onRetry: () => null }
+    }).body;
+    expect(withRetry).toContain("Partial answer");
+    expect(withRetry).toMatch(/>\s*Continue\s*<\/button>/);
+    expect(withRetry).toContain("The equity is exposed to a renewed rate shock.");
+
+    const withoutRetry = render(CopilotTranscriptResult, { props: { result: partial } }).body;
+    expect(withoutRetry).not.toMatch(/>\s*Continue\s*<\/button>/);
+
+    const failed = result();
+    failed.status = "error";
+    failed.card = null;
+    failed.message = "OpenAI request timed out.";
+    expect(render(CopilotTranscriptResult, { props: { result: failed, onRetry: () => null } }).body)
+      .toMatch(/>\s*Retry\s*<\/button>/);
+  });
+
+  it("keeps raw JSON step and report objects collapsed by default", () => {
+    const operatorResult = result();
+    operatorResult.card = null;
+    operatorResult.operator_events = [
+      {
+        run_id: "run_1",
+        event_id: "event_1",
+        sequence: 1,
+        event_type: "final-report",
+        timestamp: "2026-10-21T10:47:45Z",
+        step_id: null,
+        tool_id: null,
+        title: "Final operator report",
+        message: "Operator report completed.",
+        payload: {
+          status: "ready",
+          executed_steps: ["step-1"],
+          outputs: { "step-1": { working_analysis: { analysis_id: "work_1", inputs: { legs: [1, 2] } } } }
+        },
+        source_ids: [],
+        warnings: []
+      }
+    ];
+    const { body } = render(CopilotTranscriptResult, { props: { result: operatorResult } });
+    // Escalares visibles en la tabla del informe; el objeto `outputs` va en un <details> cerrado.
+    expect(body).toMatch(/<dt[^>]*>executed steps<\/dt><dd[^>]*>step-1<\/dd>/);
+    expect(body).toMatch(/<details class="raw-json[^"]*"><summary[^>]*>outputs \(JSON\)<\/summary>/);
+    expect(body).not.toMatch(/<details class="raw-json[^"]*" open/);
+    expect(body).not.toMatch(/<dd[^>]*>\{/);
+  });
+});

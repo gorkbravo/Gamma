@@ -160,6 +160,23 @@ describe("reduceCopilotRunEvent", () => {
 });
 
 
+it("clears the cut-off provisional text when the server continues with a larger budget (GUA-20261021-6)", () => {
+  let state = createCopilotRunState("run_test");
+  state = reduceCopilotRunEvent(state, event({ sequence: 1, event: "text.delta", data: { delta: "{\"title\": \"Br" } }));
+  const notice = "OpenAI stopped at the 11,800-token output budget; Gamma retried once with 23,600 tokens.";
+  state = reduceCopilotRunEvent(
+    state,
+    event({ sequence: 2, event: "warning", data: { message: notice, reset_provisional_text: true } })
+  );
+  expect(state.provisionalText).toBe("");
+  expect(state.statusDetail).toBe(notice);
+  state = reduceCopilotRunEvent(state, event({ sequence: 3, event: "text.delta", data: { delta: "{\"title\"" } }));
+  expect(state.provisionalText).toBe("{\"title\"");
+  // Un aviso normal no borra el texto provisional.
+  state = reduceCopilotRunEvent(state, event({ sequence: 4, event: "warning", data: { message: "x" } }));
+  expect(state.provisionalText).toBe("{\"title\"");
+});
+
 it("pauses without a terminal and resumes the same event sequence", () => {
   let state = createCopilotRunState("run_test");
   const paused = event({ sequence: 3, event: "run.paused", result: { status: "awaiting_confirmation" } });

@@ -7,7 +7,10 @@
     CopilotResearchReport,
     CopilotSourceRef
   } from "../lib/api/types";
+  import CopilotRichText from "./CopilotRichText.svelte";
   import { canNavigateCopilotSource } from "../lib/copilot-source-navigation";
+  import { isCopilotOutputBudgetCutoff, isRetryableCopilotStatus } from "../lib/copilot-result";
+  import { hasCopilotText } from "../lib/copilot-text";
   import {
     buildCopilotTranscriptBlocks,
     formatMutationValue,
@@ -15,6 +18,12 @@
   } from "../lib/copilot-transcript";
 
   export let result: CopilotResearchCardResult | null = null;
+  /**
+   * Repite el turno con el mismo prompt y contexto (GUA-20261021-6). Solo se pasa para el
+   * último turno; `expandBudget` es true cuando el corte fue por max_output_tokens.
+   */
+  export let onRetry: ((options: { expandBudget: boolean }) => Promise<unknown> | unknown) | null = null;
+  export let retryDisabled = false;
   export let researchPlan: CopilotResearchPlan | null = null;
   export let operatorPlan: CopilotOperatorPlan | null = null;
   export let report: CopilotResearchReport | null = null;
@@ -50,6 +59,48 @@
 
   function payloadEntries(payload: Record<string, unknown>) {
     return Object.entries(payload).filter(([, value]) => value != null);
+  }
+
+  // Valores escalares (o listas cortas de texto) se muestran en línea; los objetos JSON van
+  // detrás de una divulgación cerrada por defecto (GUA-20261021-13).
+  function isInlineValue(value: unknown) {
+    if (value == null || typeof value !== "object") return true;
+    return Array.isArray(value)
+      && value.length <= 8
+      && value.every((item) => item == null || ["string", "number", "boolean"].includes(typeof item));
+  }
+
+  function formatInlineValue(value: unknown) {
+    if (Array.isArray(value)) return value.length ? value.map((item) => formatValue(item)).join(", ") : "—";
+    return formatValue(value);
+  }
+
+  function formatJson(value: unknown) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  function inlineEntries(payload: Record<string, unknown>) {
+    return payloadEntries(payload).filter(([, value]) => isInlineValue(value));
+  }
+
+  function structuredEntries(payload: Record<string, unknown>) {
+    return payloadEntries(payload).filter(([, value]) => !isInlineValue(value));
+  }
+
+  let retrying = false;
+
+  async function handleRetry() {
+    if (!onRetry || retrying || retryDisabled) return;
+    retrying = true;
+    try {
+      await onRetry({ expandBudget: isCopilotOutputBudgetCutoff(result) });
+    } finally {
+      retrying = false;
+    }
   }
 
   function sourceIsNavigable(source: CopilotSourceRef) {
@@ -94,22 +145,30 @@
     {:else if block.kind === "research-card"}
       <section class="block research-card" aria-label="Copilot research card">
         <header class="block-head">
-          <h4>{block.card.title}</h4>
-          {#if cardLabel}<span>{cardLabel}</span>{/if}
+          <h4>{hasCopilotText(block.card.title) ? block.card.title : "Research card"}</h4>
+          {#if result?.status === "incomplete"}<span class="partial-label">Partial answer</span>
+          {:else if cardLabel}<span>{cardLabel}</span>{/if}
         </header>
 
-        <div class="field">
-          <span>Hypothesis</span>
-          <p class="emphasis">{block.card.hypothesis}</p>
-        </div>
-        <div class="field">
-          <span>Rationale</span>
-          <p>{block.card.rationale}</p>
-        </div>
-        <div class="field">
-          <span>Proposed test</span>
-          <p>{block.card.proposed_test}</p>
-        </div>
+        <!-- Las secciones vacías se omiten (GUA-20261021-13); el texto admite tablas Markdown. -->
+        {#if hasCopilotText(block.card.hypothesis)}
+          <div class="field">
+            <span>Hypothesis</span>
+            <CopilotRichText text={block.card.hypothesis} emphasis />
+          </div>
+        {/if}
+        {#if hasCopilotText(block.card.rationale)}
+          <div class="field">
+            <span>Rationale</span>
+            <CopilotRichText text={block.card.rationale} />
+          </div>
+        {/if}
+        {#if hasCopilotText(block.card.proposed_test)}
+          <div class="field">
+            <span>Proposed test</span>
+            <CopilotRichText text={block.card.proposed_test} />
+          </div>
+        {/if}
 
         {#if block.card.required_data.length}
           <div class="field">
@@ -141,7 +200,7 @@
             <span>Source-backed</span>
             {#each block.claims as claim}
               <div class="claim">
-                <p>{claim.claim}</p>
+                <CopilotRichText text={claim.claim} />
                 {#if claim.evidence.length}
                   <div class="source-links" aria-label="Claim sources">
                     {#each claim.evidence as source}
@@ -301,7 +360,8 @@
           <strong>{block.event.title ?? block.event.event_type.replaceAll("-", " ")}</strong>
           <p>{block.event.message ?? "Operator event recorded."}</p>
           {#if payloadEntries(block.event.payload).length}
-            <details><summary>Step details</summary><pre>{formatValue(block.event.payload)}</pre></details>
+            <!-- Detalle técnico cerrado por defecto (GUA-20261021-13). -->
+            <details class="raw-json"><summary>Step details (JSON)</summary><pre>{formatJson(block.event.payload)}</pre></details>
           {/if}
           {#if block.references.evidence.length}
             <div class="source-links">
@@ -413,13 +473,22 @@
           <strong>{block.event.title ?? (block.kind === "artifact" ? "Operator artifact" : "Operator report")}</strong>
           <p>{block.event.message ?? "Operator artifact recorded."}</p>
           {#if payloadEntries(block.event.payload).length}
-            <details open={block.kind === "operator-report"}>
+            <details open={block.kind === "operator-report" && inlineEntries(block.event.payload).length > 0}>
               <summary>{block.kind === "operator-report" ? "Report details" : "Artifact details"}</summary>
-              <dl>
-                {#each payloadEntries(block.event.payload) as [key, value]}
-                  <dt>{key.replaceAll("_", " ")}</dt><dd>{formatValue(value)}</dd>
-                {/each}
-              </dl>
+              {#if inlineEntries(block.event.payload).length}
+                <dl>
+                  {#each inlineEntries(block.event.payload) as [key, value]}
+                    <dt>{key.replaceAll("_", " ")}</dt><dd>{formatInlineValue(value)}</dd>
+                  {/each}
+                </dl>
+              {/if}
+              <!-- Objetos como outputs o working_analysis: JSON cerrado por defecto (GUA-20261021-13). -->
+              {#each structuredEntries(block.event.payload) as [key, value]}
+                <details class="raw-json">
+                  <summary>{key.replaceAll("_", " ")} (JSON)</summary>
+                  <pre>{formatJson(value)}</pre>
+                </details>
+              {/each}
             </details>
           {/if}
           {#if block.references.evidence.length}
@@ -492,6 +561,22 @@
       <section class="block result-state {block.status}" aria-label="Copilot result state">
         <header class="block-head"><h4>{block.label}</h4><span>{block.providerLabel}</span></header>
         <p>{block.message}</p>
+        {#if onRetry && isRetryableCopilotStatus(block.status)}
+          <!-- Repite el mismo prompt y contexto; tras un corte por presupuesto pide más tokens (GUA-20261021-6). -->
+          <div class="confirmation-actions">
+            <button
+              type="button"
+              class="retry-action"
+              disabled={retrying || retryDisabled}
+              on:click={handleRetry}
+              title={isCopilotOutputBudgetCutoff(result)
+                ? "Rerun the same request and context with a larger output budget"
+                : "Rerun the same request and context"}
+            >
+              {retrying ? "Retrying…" : isCopilotOutputBudgetCutoff(result) ? "Continue" : "Retry"}
+            </button>
+          </div>
+        {/if}
       </section>
 
     {:else if block.kind === "evidence"}
@@ -935,6 +1020,14 @@
   .mutation-error {
     color: var(--negative);
     font-size: var(--text-xs);
+  }
+
+  .partial-label {
+    color: var(--warning);
+  }
+
+  .raw-json {
+    margin-top: var(--space-2);
   }
 
   .result-state {

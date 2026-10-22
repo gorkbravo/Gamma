@@ -2255,7 +2255,12 @@
     navigationSearchResetToken += 1;
   }
 
-  async function handleGenerateCopilot(prompt = "", selectedProfile?: CopilotProfile) {
+  // `outputBudget` solo lo envía Continue tras un corte por max_output_tokens (GUA-20261021-6).
+  async function handleGenerateCopilot(
+    prompt = "",
+    selectedProfile?: CopilotProfile,
+    retryOptions: { outputBudget?: "standard" | "expanded" } = {}
+  ) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -2265,10 +2270,15 @@
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
       selectedProfile,
+      outputBudget: retryOptions.outputBudget,
     });
   }
 
-  async function handleRunOperatorCopilot(prompt = "", selectedProfile?: CopilotProfile) {
+  async function handleRunOperatorCopilot(
+    prompt = "",
+    selectedProfile?: CopilotProfile,
+    retryOptions: { outputBudget?: "standard" | "expanded" } = {}
+  ) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -2278,6 +2288,7 @@
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
       selectedProfile,
+      outputBudget: retryOptions.outputBudget,
     });
   }
 
