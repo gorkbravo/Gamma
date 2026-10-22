@@ -11,8 +11,13 @@ import {
   calibrationCurveFor,
   describeCalibrationMethod,
   describeHistoryCoverage,
+  flatScreenerEntries,
   formatResolution,
+  groupRelatedMarkets,
+  groupScreenerMarkets,
   markLegacyResearchMigrated,
+  parseBucketBounds,
+  type PredictionScreenerEntry,
   normalizeCompareSelection,
   normalizeWatchlist,
   readLegacyResearch,
@@ -26,7 +31,8 @@ import type {
   PredictionMarket,
   PredictionOutcomeSeries,
   PredictionPairAnalytics,
-  PredictionProbabilityHistoryResponse
+  PredictionProbabilityHistoryResponse,
+  RelatedPredictionMarket
 } from "./api/types";
 
 function makeMarket(marketId: string, probability = 0.42): PredictionMarket {
@@ -419,5 +425,166 @@ describe("legacy research migration", () => {
   it("marks an empty browser as migrated so it never re-checks", () => {
     expect(readLegacyResearch()).toBeNull();
     expect(localStorage.getItem(PREDICTION_MIGRATION_FLAG_KEY)).toBeTruthy();
+  });
+});
+
+// GUA-20261021-15: agrupación de buckets por evento y secciones de RELATED.
+const WEEK = "October 19-October 25";
+
+function bucketLeg(id: string, label: string, wording: string, probability: number, overrides: Partial<PredictionMarket> = {}) {
+  return {
+    ...makeMarket(`polymarket:${id}`, probability),
+    title: `Will ${wording} ships transit the Strait of Hormuz between ${WEEK}?`,
+    subtitle: label,
+    event_id: "polymarket:event:wk-1019",
+    event_title: "How many ships transit the Strait of Hormuz week of October 19?",
+    end_time: "2026-10-26T00:00:00Z",
+    volume_24h: 1000,
+    liquidity: 500,
+    freshness: { status: "fresh", is_stale: false, is_broken: false, reason: null, last_history_point_at: null, retrieval_age_seconds: 1, history_lag_seconds: null },
+    ...overrides
+  } satisfies PredictionMarket;
+}
+
+function weeklyBook(): PredictionMarket[] {
+  // Orden de ranking del screener, no de bucket.
+  return [
+    bucketLeg("25", "25-29", "25-29", 0.35),
+    bucketLeg("40", "40+", "40 or more", 0.03),
+    bucketLeg("lt20", "<20", "fewer than 20", 0.08),
+    bucketLeg("30", "30-34", "30-34", 0.22),
+    bucketLeg("20", "20-24", "20-24", 0.27, {
+      freshness: { status: "stale", is_stale: true, is_broken: false, reason: "old", last_history_point_at: null, retrieval_age_seconds: 1, history_lag_seconds: null }
+    }),
+    bucketLeg("35", "35-39", "35-39", 0.08)
+  ];
+}
+
+function groupOf(entries: PredictionScreenerEntry[]) {
+  const entry = entries.find((item) => item.type === "group");
+  if (!entry || entry.type !== "group") throw new Error("expected a group entry");
+  return entry.group;
+}
+
+describe("parseBucketBounds", () => {
+  it("reads ranges, open-ended buckets and units, and ignores date-only titles", () => {
+    expect(parseBucketBounds("20-24")).toEqual([20, 24]);
+    expect(parseBucketBounds("<20")).toEqual([-Infinity, 20]);
+    expect(parseBucketBounds("40+")).toEqual([40, Infinity]);
+    expect(parseBucketBounds("Will fewer than 20 ships transit the Strait of Hormuz between October 19-October 25?")).toEqual([
+      -Infinity,
+      20
+    ]);
+    expect(parseBucketBounds("between 0 and 5 average daily transits on October 31")).toEqual([0, 5]);
+    expect(parseBucketBounds("70° to 71°")).toEqual([70, 71]);
+    expect(parseBucketBounds("72° or above")).toEqual([72, Infinity]);
+    expect(parseBucketBounds("Strait of Hormuz traffic returns to normal by October 31?")).toBeNull();
+  });
+});
+
+describe("groupScreenerMarkets", () => {
+  it("collapses one event's buckets into a distribution with sum, mode and overround", () => {
+    const loose = makeMarket("kalshi:solo", 0.4);
+    const entries = groupScreenerMarkets([loose, ...weeklyBook()]);
+
+    expect(entries.map((entry) => entry.type)).toEqual(["market", "group"]);
+    const group = groupOf(entries);
+    expect(group.eventTitle).toBe("How many ships transit the Strait of Hormuz week of October 19?");
+    expect(group.kind).toBe("buckets");
+    expect(group.coverage).toBe("complete");
+    expect(group.legs.map((leg) => leg.label)).toEqual(["<20", "20-24", "25-29", "30-34", "35-39", "40+"]);
+    expect(group.probabilitySum).toBeCloseTo(1.03, 6);
+    expect(group.overround).toBeCloseTo(0.03, 6);
+    expect(group.mode?.label).toBe("25-29");
+    expect(group.legs.filter((leg) => leg.isMode)).toHaveLength(1);
+    expect(group.legs.find((leg) => leg.label === "25-29")?.share).toBe(1);
+    expect(group.volume24h).toBe(6000);
+    expect(group.liquidity).toBe(3000);
+    // La freshness del grupo es la peor de sus legs, no la del primero.
+    expect(group.worstFreshness).toBe("stale");
+  });
+
+  it("keeps the group at the position of its best-ranked leg", () => {
+    const [first, ...rest] = weeklyBook();
+    const entries = groupScreenerMarkets([makeMarket("kalshi:a"), first, makeMarket("kalshi:b"), ...rest]);
+    expect(entries.map((entry) => entry.key)).toEqual(["kalshi:a", "polymarket|polymarket:event:wk-1019", "kalshi:b"]);
+  });
+
+  it("does not call the sum an overround when a bucket is missing from the view", () => {
+    const partial = weeklyBook().filter((market) => market.subtitle !== "30-34");
+    const group = groupOf(groupScreenerMarkets(partial));
+    expect(group.kind).toBe("buckets");
+    expect(group.coverage).toBe("partial");
+    expect(group.overround).toBeNull();
+    expect(group.probabilitySum).toBeCloseTo(0.81, 6);
+  });
+
+  it("treats a dated ladder inside one event as descriptive, ordered by resolution", () => {
+    const ladder = [
+      { ...makeMarket("polymarket:dec", 0.11), title: "Hormuz normal by December 31?", subtitle: "December 31", event_id: "polymarket:event:e-1", end_time: "2026-12-31T00:00:00Z" },
+      { ...makeMarket("polymarket:oct", 0.007), title: "Hormuz normal by October 31?", subtitle: "October 31", event_id: "polymarket:event:e-1", end_time: "2026-10-31T00:00:00Z" },
+      { ...makeMarket("polymarket:nov", 0.05), title: "Hormuz normal by November 30?", subtitle: "November 30", event_id: "polymarket:event:e-1", end_time: "2026-11-30T00:00:00Z" }
+    ];
+    const group = groupOf(groupScreenerMarkets(ladder));
+    expect(group.kind).toBe("unverified");
+    expect(group.overround).toBeNull();
+    expect(group.legs.map((leg) => leg.market.market_id)).toEqual(["polymarket:oct", "polymarket:nov", "polymarket:dec"]);
+  });
+
+  it("does not treat a cumulative threshold ladder as exclusive buckets", () => {
+    const thresholds = [
+      { ...makeMarket("kalshi:a3", 0.6), subtitle: "Above 3%", event_id: "kalshi:event:cpi" },
+      { ...makeMarket("kalshi:a35", 0.3), subtitle: "Above 3.5%", event_id: "kalshi:event:cpi" }
+    ];
+    const group = groupOf(groupScreenerMarkets(thresholds));
+    expect(group.kind).toBe("unverified");
+    expect(group.overround).toBeNull();
+  });
+
+  it("leaves the flat list untouched", () => {
+    const markets = weeklyBook();
+    expect(flatScreenerEntries(markets).map((entry) => entry.key)).toEqual(markets.map((market) => market.market_id));
+  });
+});
+
+describe("groupRelatedMarkets", () => {
+  function relatedRow(marketId: string, overrides: Partial<RelatedPredictionMarket> = {}): RelatedPredictionMarket {
+    return {
+      market_id: marketId,
+      venue: "polymarket",
+      title: marketId,
+      probability: 0.1,
+      price_gap: 0.01,
+      relationship: "cross_venue_analog",
+      note: null,
+      source_provider: "polymarket",
+      retrieved_at: null,
+      origin: "test",
+      transformation_note: null,
+      ...overrides
+    };
+  }
+
+  it("splits analogs from event and series siblings and orders siblings by their rank", () => {
+    const sections = groupRelatedMarkets([
+      relatedRow("kalshi:analog", { venue: "kalshi" }),
+      relatedRow("polymarket:nov", { relationship: "same_series", sibling_scope: "same_series", sibling_order: 1, group_title: "Hormuz Traffic Returns to Normal" }),
+      relatedRow("polymarket:b40", { relationship: "adjacent_threshold", sibling_scope: "same_event", sibling_order: 2, group_title: "Week of Oct 19" }),
+      relatedRow("polymarket:oct", { relationship: "same_series", sibling_scope: "same_series", sibling_order: 0, group_title: "Hormuz Traffic Returns to Normal" }),
+      relatedRow("polymarket:b20", { relationship: "adjacent_threshold", sibling_scope: "same_event", sibling_order: 0, group_title: "Week of Oct 19" })
+    ]);
+
+    expect(sections.map((section) => section.id)).toEqual(["analog", "same_event", "same_series"]);
+    expect(sections[1].rows.map((row) => row.market_id)).toEqual(["polymarket:b20", "polymarket:b40"]);
+    expect(sections[2].rows.map((row) => row.market_id)).toEqual(["polymarket:oct", "polymarket:nov"]);
+    expect(sections[2].groupTitle).toBe("Hormuz Traffic Returns to Normal");
+  });
+
+  it("drops empty sections so a sibling-only contract still lists its links", () => {
+    const sections = groupRelatedMarkets([
+      relatedRow("polymarket:oct", { relationship: "same_series", sibling_scope: "same_series", sibling_order: 0 })
+    ]);
+    expect(sections.map((section) => section.id)).toEqual(["same_series"]);
+    expect(groupRelatedMarkets([])).toEqual([]);
   });
 });

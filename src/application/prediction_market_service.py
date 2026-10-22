@@ -171,6 +171,17 @@ RELATED_RELATIONSHIP_PRIORITY = {
 # semantically related; below it they are venue-metadata artifacts (a venue can
 # group unrelated markets under one event/series id).
 RELATED_SAME_EVENT_MIN_SIMILARITY = 0.25
+# GUA-20261021-15: los hermanos de evento/serie van detrás del bloque de análogos
+# con cupo propio, para no desplazar los análogos entre venues.
+MAX_RELATED_EVENT_SIBLINGS = 16
+MAX_RELATED_SERIES_SIBLINGS = 12
+# Contratos de serie pedidos al venue antes de reducir a uno por evento hermano.
+RELATED_SERIES_FETCH_LIMIT = 120
+SIBLING_TRANSFORMATION_NOTE = (
+    "Siblings come from the venue's own event or series grouping. Same-event rows follow bucket order when "
+    "every leg names a numeric bucket, otherwise resolution date; same-series rows keep one contract per "
+    "sibling event, ordered by resolution date."
+)
 HISTORY_RANGE_DAYS: dict[str, int] = {
     "1d": 1,
     "1w": 7,
@@ -651,7 +662,21 @@ class PredictionMarketService:
             return None
         return adapter.get_wallet_summary(self._canonicalize_market(market))
 
-    def get_related_markets(self, market_id: str, *, limit: int = 8) -> list[RelatedMarketRecord]:
+    def get_related_markets(
+        self,
+        market_id: str,
+        *,
+        limit: int = 8,
+        sibling_limit: int = MAX_RELATED_EVENT_SIBLINGS,
+        series_limit: int = MAX_RELATED_SERIES_SIBLINGS,
+    ) -> list[RelatedMarketRecord]:
+        """Related contracts: the ranked analog block, then venue siblings.
+
+        The first `limit` rows are the existing analog ranking, unchanged. Event
+        siblings beyond that block and same-series siblings (GUA-20261021-15)
+        follow with their own caps, tagged with `sibling_scope` and ordered by
+        bucket or resolution date, so they never displace an analog.
+        """
         detail = self.get_market_detail(market_id)
         if detail is None:
             return []
@@ -660,9 +685,11 @@ class PredictionMarketService:
             return []
 
         related_rows: list[tuple[tuple[int, float, float, str], RelatedMarketRecord]] = []
-        seen: set[str] = set()
+        seen: set[str] = {detail.market_id}
+        # Hermanos de evento con enlace semántico real (no `weak_venue_link`).
+        event_siblings: list[PredictionMarketRecord] = []
 
-        for sibling in adapter.list_event_markets(detail, limit=max(limit * 2, 8)):
+        for sibling in adapter.list_event_markets(detail, limit=max(limit * 2, sibling_limit, 8)):
             candidate = self._annotate_market_freshness(self._canonicalize_market(sibling))
             if candidate.market_id in seen:
                 continue
@@ -675,6 +702,8 @@ class PredictionMarketService:
                 continue
             relationship, note, similarity = self._describe_related_market(detail, candidate, same_event=True)
             seen.add(candidate.market_id)
+            if relationship != "weak_venue_link":
+                event_siblings.append(candidate)
             related_rows.append(
                 (
                     self._related_sort_key(relationship, similarity, candidate),
@@ -731,15 +760,136 @@ class PredictionMarketService:
                     )
                 )
 
+        series_rows = self._series_sibling_rows(detail, adapter, seen, limit=series_limit)
+
         related_rows.sort(key=lambda item: item[0])
         ordered = [row for _, row in related_rows]
         # Venue-metadata-only links are shown (clearly labeled) only when nothing
         # semantically related exists, so an AI-policy market no longer surfaces
         # unrelated venue-event artifacts ahead of or alongside real matches.
         strong = [row for row in ordered if row.relationship != "weak_venue_link"]
-        if strong:
-            return strong[:limit]
-        return ordered[: min(limit, 3)]
+        if strong or series_rows:
+            head = strong[:limit]
+        else:
+            head = ordered[: min(limit, 3)]
+
+        # GUA-20261021-15: los hermanos de evento se etiquetan y ordenan aunque ya
+        # estén en el bloque de análogos; el resto va detrás con cupo propio.
+        event_order = {
+            record.market_id: index for index, record in enumerate(_order_siblings(detail, event_siblings))
+        }
+        sibling_by_id = {record.market_id: record for record in event_siblings}
+
+        def tag_event_sibling(row: RelatedMarketRecord) -> RelatedMarketRecord:
+            candidate = sibling_by_id[row.market_id]
+            return replace(
+                row,
+                sibling_scope="same_event",
+                sibling_order=event_order[row.market_id],
+                sibling_label=_sibling_label(candidate),
+                group_id=detail.event_id,
+                group_title=detail.event_title,
+                end_time=candidate.end_time,
+            )
+
+        head = [tag_event_sibling(row) if row.market_id in event_order else row for row in head]
+        head_ids = {row.market_id for row in head}
+        in_head = sum(1 for row in head if row.sibling_scope == "same_event")
+        event_tail = sorted(
+            (tag_event_sibling(row) for row in strong if row.market_id in event_order and row.market_id not in head_ids),
+            key=lambda row: row.sibling_order if row.sibling_order is not None else 0,
+        )[: max(sibling_limit - in_head, 0)]
+        return [*head, *event_tail, *series_rows]
+
+    def _series_sibling_rows(
+        self,
+        detail: PredictionMarketRecord,
+        adapter: PredictionMarketAdapter,
+        seen: set[str],
+        *,
+        limit: int,
+    ) -> list[RelatedMarketRecord]:
+        """One contract per sibling event of the venue series (GUA-20261021-15).
+
+        A dated ladder ("by Oct 31 / Nov 30 / Dec 31") lives in separate events
+        joined only by the series, which the event endpoint cannot see.
+        """
+        fetch_series = getattr(adapter, "list_series_markets", None)
+        if not callable(fetch_series) or not detail.provider_series_id or limit <= 0:
+            return []
+        try:
+            raw_rows = fetch_series(detail, limit=RELATED_SERIES_FETCH_LIMIT)
+        except Exception:
+            # La serie es contexto adicional: su fallo no debe vaciar RELATED.
+            return []
+
+        by_event: dict[str, list[PredictionMarketRecord]] = {}
+        for raw in raw_rows:
+            candidate = self._annotate_market_freshness(self._canonicalize_market(raw))
+            if candidate.market_id in seen:
+                continue
+            # Los del propio evento ya los cubre el bloque de mismo evento.
+            if detail.event_id and candidate.event_id == detail.event_id:
+                continue
+            if self._is_excluded_topic_market(candidate):
+                continue
+            if candidate.freshness and candidate.freshness.is_broken:
+                continue
+            # Una serie puede ser un cajón de sastre del venue: sin solape léxico
+            # no es un hermano.
+            if self._similarity(detail, candidate) < RELATED_SAME_EVENT_MIN_SIMILARITY:
+                continue
+            by_event.setdefault(candidate.event_id or candidate.market_id, []).append(candidate)
+
+        anchor_label = str(detail.subtitle or "").strip().lower()
+        picks: list[tuple[PredictionMarketRecord, str]] = []
+        for legs in by_event.values():
+            series_title = detail.series_title or "this series"
+            if len(legs) == 1:
+                pick = legs[0]
+                note = f"Shares the venue series '{series_title}'; separate event resolving {_day_label(pick.end_time)}."
+            else:
+                same_bucket = next(
+                    (leg for leg in legs if anchor_label and str(leg.subtitle or "").strip().lower() == anchor_label),
+                    None,
+                )
+                if same_bucket is not None:
+                    pick = same_bucket
+                    note = f"Same bucket ({same_bucket.subtitle}) in a sibling event of the series '{series_title}'."
+                else:
+                    pick = max(legs, key=lambda leg: (leg.current_probability or -1.0, leg.title.lower()))
+                    note = (
+                        f"Most likely bucket of the sibling event '{pick.event_title or pick.title}' "
+                        f"in the series '{series_title}'."
+                    )
+            picks.append((pick, note))
+
+        picks.sort(key=lambda item: (_end_sort_value(item[0]), item[0].title.lower()))
+        rows: list[RelatedMarketRecord] = []
+        for index, (pick, note) in enumerate(picks[:limit]):
+            seen.add(pick.market_id)
+            rows.append(
+                RelatedMarketRecord(
+                    market_id=pick.market_id,
+                    venue=pick.venue,
+                    title=pick.title,
+                    probability=pick.current_probability,
+                    price_gap=_price_gap(detail.current_probability, pick.current_probability),
+                    relationship="same_series",
+                    note=note,
+                    source_provider=pick.source_provider,
+                    retrieved_at=pick.retrieved_at,
+                    origin="prediction_market_service.same_series",
+                    transformation_note=SIBLING_TRANSFORMATION_NOTE,
+                    sibling_scope="same_series",
+                    sibling_order=index,
+                    sibling_label=_sibling_label(pick),
+                    group_id=detail.series_id,
+                    group_title=detail.series_title,
+                    end_time=pick.end_time,
+                )
+            )
+        return rows
 
     def get_cross_domain_handoffs(self, market_id: str) -> list[CrossTabHandoffEnvelope] | None:
         """Outward handoffs this contract can open with a resolvable target."""
@@ -2523,6 +2673,103 @@ def _extract_threshold_tokens(*texts: str | None) -> list[str]:
                 continue
             thresholds.append(cleaned)
     return thresholds
+
+
+# GUA-20261021-15: lectura de buckets numéricos ("20-24", "fewer than 20",
+# "40 or more", "70° to 71°"). Gana la coincidencia más temprana del texto.
+_BUCKET_NUMBER = r"\$?\d[\d,]*(?:\.\d+)?"
+_BUCKET_UNIT = r"\s*[%°]?"
+_BUCKET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("range", re.compile(rf"({_BUCKET_NUMBER}){_BUCKET_UNIT}\s*(?:-|–|—|to|and)\s*({_BUCKET_NUMBER})", re.IGNORECASE)),
+    (
+        "below",
+        re.compile(
+            rf"(?:\b(?:fewer than|less than|under|below|at most|no more than|up to)|<=?|≤)\s*({_BUCKET_NUMBER})",
+            re.IGNORECASE,
+        ),
+    ),
+    ("below", re.compile(rf"({_BUCKET_NUMBER}){_BUCKET_UNIT}\s*or (?:fewer|less|below|lower)", re.IGNORECASE)),
+    (
+        "above",
+        re.compile(
+            rf"(?:\b(?:more than|greater than|over|above|at least)|>=?|≥)\s*({_BUCKET_NUMBER})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "above",
+        re.compile(rf"({_BUCKET_NUMBER}){_BUCKET_UNIT}\s*(?:\+|or (?:more|above|higher|greater))", re.IGNORECASE),
+    ),
+)
+
+
+def _bucket_number(text: str) -> float | None:
+    try:
+        return float(text.replace("$", "").replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _parse_bucket_bounds(text: str | None) -> tuple[float, float] | None:
+    """Return (lower, upper) for a bucket label, open ends as infinities."""
+    best: tuple[int, int, tuple[float, float]] | None = None
+    for kind, pattern in _BUCKET_PATTERNS:
+        match = pattern.search(str(text or ""))
+        if match is None:
+            continue
+        if kind == "range":
+            left, right = _bucket_number(match.group(1)), _bucket_number(match.group(2))
+            if left is None or right is None:
+                continue
+            bounds = (min(left, right), max(left, right))
+        else:
+            value = _bucket_number(match.group(1))
+            if value is None:
+                continue
+            bounds = (-math.inf, value) if kind == "below" else (value, math.inf)
+        candidate = (match.start(), -(match.end() - match.start()), bounds)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    return best[2] if best else None
+
+
+def _bucket_bounds(record: PredictionMarketRecord) -> tuple[float, float] | None:
+    # La etiqueta de grupo del venue (groupItemTitle / yes_sub_title) manda; el
+    # título solo se usa si no hay etiqueta legible.
+    return _parse_bucket_bounds(record.subtitle) or _parse_bucket_bounds(record.title)
+
+
+def _end_sort_value(record: PredictionMarketRecord) -> float:
+    end_time = ensure_utc(record.end_time)
+    return end_time.timestamp() if end_time is not None else math.inf
+
+
+def _order_siblings(
+    anchor: PredictionMarketRecord,
+    siblings: list[PredictionMarketRecord],
+) -> list[PredictionMarketRecord]:
+    """Bucket order when every leg (anchor included) names a distinct numeric
+    bucket; otherwise resolution date, then probability."""
+    bounds = {record.market_id: _bucket_bounds(record) for record in siblings}
+    every_bound = [_bucket_bounds(anchor), *bounds.values()]
+    bucket_mode = bool(siblings) and all(value is not None for value in every_bound)
+    bucket_mode = bucket_mode and len(set(every_bound)) == len(every_bound)
+    if bucket_mode:
+        return sorted(siblings, key=lambda record: (bounds[record.market_id], record.title.lower()))
+    return sorted(
+        siblings,
+        key=lambda record: (_end_sort_value(record), -(record.current_probability or -1.0), record.title.lower()),
+    )
+
+
+def _sibling_label(record: PredictionMarketRecord) -> str | None:
+    label = str(record.subtitle or "").strip()
+    return label or None
+
+
+def _day_label(value: datetime | None) -> str:
+    stamp = ensure_utc(value)
+    return stamp.strftime("%Y-%m-%d") if stamp is not None else "on an unstated date"
 
 
 def _price_gap(left: float | None, right: float | None) -> float | None:

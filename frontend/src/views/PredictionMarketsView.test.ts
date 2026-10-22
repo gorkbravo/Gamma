@@ -1,6 +1,11 @@
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
-import type { CopilotWorkingAnalysis, PredictionMarketComparison } from "../lib/api/types";
+import type {
+  CopilotWorkingAnalysis,
+  PredictionMarket,
+  PredictionMarketComparison,
+  RelatedPredictionMarket
+} from "../lib/api/types";
 import { predictionComparisonFromWorkingAnalysis } from "../lib/prediction-markets";
 import { resolveWorkingAnalysisTarget } from "../lib/copilot-workspace";
 import PredictionMarketsView from "./PredictionMarketsView.svelte";
@@ -84,5 +89,77 @@ describe("Prediction Markets temporary comparison", () => {
     } });
     expect(body).toContain("expired or is unavailable");
     expect(body).not.toContain("Retained contract 1");
+  });
+});
+
+// GUA-20261021-15: agrupación opcional del screener y secciones de RELATED.
+function bucket(id: string, label: string, probability: number): PredictionMarket {
+  return {
+    market_id: `polymarket:${id}`, venue: "polymarket",
+    title: `Will ${label} ships transit the Strait of Hormuz between October 19-October 25?`, subtitle: label,
+    description: null, status: "open", category: "Geopolitics",
+    event_id: "polymarket:event:wk-1019", event_title: "How many ships transit the Strait of Hormuz week of October 19?",
+    series_id: null, series_title: null, provider_market_id: id, provider_condition_id: null,
+    provider_event_id: "wk-1019", provider_series_id: null, slug: null,
+    end_time: "2099-10-26T00:00:00Z", open_time: null, close_time: null,
+    current_probability: probability, probability_label: "Yes", volume: null, volume_24h: null, liquidity: null,
+    open_interest: null, best_bid: null, best_ask: null, spread: null, recent_price_change: null,
+    resolved_probability: null, resolution_outcome: null, image_url: null, resolution_source: null,
+    outcomes: [], tags: [],
+    freshness: { status: "fresh", is_stale: false, is_broken: false, reason: null, last_history_point_at: null, retrieval_age_seconds: 1, history_lag_seconds: null },
+    research_score: null, research_rationale: null, source_provider: "polymarket", retrieved_at: null,
+    origin: "test", transformation_note: null
+  };
+}
+
+// Buckets contiguos (<20 / 20-29 / 30+): el libro visible está completo.
+const book = () => [bucket("b25", "20-29", 0.35), bucket("b20", "<20", 0.4), bucket("b30", "30+", 0.28)];
+
+describe("Prediction Markets event grouping", () => {
+  it("defaults to the flat screener", () => {
+    const { body } = render(PredictionMarketsView, { props: {
+      mode: "screener", screener: { markets: book(), venues: [], warnings: [] },
+      onLoadScreener: vi.fn(), onSelectMarket: vi.fn()
+    } });
+    expect(body).not.toContain("Event group");
+    expect(body).toContain("Group 1");
+    expect(body).toContain("Will 20-29 ships transit");
+  });
+
+  it("renders one event header with the distribution, the sum and the most likely bucket", () => {
+    const { body } = render(PredictionMarketsView, { props: {
+      mode: "screener", groupEvents: true, screener: { markets: book(), venues: [], warnings: [] },
+      onLoadScreener: vi.fn(), onSelectMarket: vi.fn()
+    } });
+    expect(body).toContain("Event group How many ships transit the Strait of Hormuz week of October 19?");
+    expect(body).toContain("3 legs in view");
+    expect(body).toContain("mode &lt;20");
+    expect(body).toContain("Σ 103.0%");
+    expect(body).toContain("+3.0% vs 100%");
+    expect(body).toMatch(/Distribution: (&lt;|<)20 40\.0%, 20-29 35\.0%, 30\+ 28\.0%/);
+    // Colapsado por defecto: las legs individuales no se pintan hasta expandir.
+    expect(body).not.toContain("Will 20-29 ships transit");
+  });
+
+  it("labels related siblings by event and series next to the analogs", () => {
+    const related: RelatedPredictionMarket[] = [
+      { market_id: "kalshi:analog", venue: "kalshi", title: "Kalshi Hormuz analog", probability: 0.14, price_gap: 0.03,
+        relationship: "cross_venue_analog", note: null, source_provider: "kalshi", retrieved_at: null, origin: "test",
+        transformation_note: null },
+      { market_id: "polymarket:oct", venue: "polymarket", title: "Hormuz normal by October 31?", probability: 0.007,
+        price_gap: 0.103, relationship: "same_series", note: "Shares the venue series", source_provider: "polymarket",
+        retrieved_at: null, origin: "test", transformation_note: null, sibling_scope: "same_series", sibling_order: 0,
+        group_title: "Hormuz Traffic Returns to Normal", end_time: "2026-10-31T12:00:00Z" }
+    ];
+    const { body } = render(PredictionMarketsView, { props: {
+      mode: "contract", detail: { ...bucket("dec", "December", 0.11), subtitle: null },
+      related: { market_id: "polymarket:dec", related },
+      onLoadScreener: vi.fn(), onSelectMarket: vi.fn()
+    } });
+    expect(body).toContain("Analogs");
+    expect(body).toContain("Same series");
+    expect(body).toContain("Hormuz Traffic Returns to Normal");
+    expect(body).toContain("cross_venue_analog | kalshi");
+    expect(body).toMatch(/resolves Oct 31, 26/);
   });
 });

@@ -471,6 +471,15 @@ class RelatedMarketRecord:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # GUA-20261021-15: hermanos por agrupación del venue. `sibling_scope` vale
+    # "same_event" o "same_series"; `sibling_order` es la posición dentro de ese
+    # grupo (orden de bucket o fecha de resolución). Ambos son None en análogos.
+    sibling_scope: str | None = None
+    sibling_order: int | None = None
+    sibling_label: str | None = None
+    group_id: str | None = None
+    group_title: str | None = None
+    end_time: datetime | None = None
 
 
 @dataclass(frozen=True)

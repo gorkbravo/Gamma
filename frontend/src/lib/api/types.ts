@@ -1648,6 +1648,13 @@ export interface RelatedPredictionMarket {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  // GUA-20261021-15: hermanos por agrupación del venue (null en análogos).
+  sibling_scope?: "same_event" | "same_series" | null;
+  sibling_order?: number | null;
+  sibling_label?: string | null;
+  group_id?: string | null;
+  group_title?: string | null;
+  end_time?: string | null;
 }
 
 export interface RelatedPredictionMarketListResponse {

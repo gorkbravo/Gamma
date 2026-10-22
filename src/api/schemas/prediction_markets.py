@@ -664,6 +664,13 @@ class RelatedMarketModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    # GUA-20261021-15: agrupación de hermanos (mismo evento / misma serie).
+    sibling_scope: str | None = None
+    sibling_order: int | None = None
+    sibling_label: str | None = None
+    group_id: str | None = None
+    group_title: str | None = None
+    end_time: datetime | None = None
 
     @classmethod
     def from_domain(cls, row: RelatedMarketRecord) -> "RelatedMarketModel":
