@@ -50,12 +50,19 @@ export function deriveIvSurfaceAlerts(input: IvSurfaceAlertInput): string[] {
     return alerts;
   }
 
-  const symbol = input.requestedSymbol.trim().toUpperCase() || input.session?.active_symbol || "the selected symbol";
+  // GUA-20261021-10: el símbolo activo de una sesión inactiva no es una petición
+  // del usuario (el backend informaba "SPY"); solo cuenta si la sesión corre.
+  const runningSymbol = input.session?.running ? input.session.active_symbol?.trim().toUpperCase() || "" : "";
+  const symbol = input.requestedSymbol.trim().toUpperCase() || runningSymbol;
   let availabilityMessage: string;
   if (input.status && !input.status.mock_mode && !input.status.connection.connected) {
-    availabilityMessage = `IBKR/TWS is disconnected. Connect it before loading an options surface for ${symbol}.`;
+    availabilityMessage = symbol
+      ? `IBKR/TWS is disconnected. Connect it before loading an options surface for ${symbol}.`
+      : "IBKR/TWS is disconnected. Connect it, then enter an underlying symbol to load an options surface.";
   } else if (input.session?.running) {
-    availabilityMessage = `The ${symbol} options session is running, but no surface snapshot has been collected yet.`;
+    availabilityMessage = `The ${symbol || "active"} options session is running, but no surface snapshot has been collected yet.`;
+  } else if (!symbol) {
+    availabilityMessage = "Enter an underlying symbol and load the surface to see its options chain.";
   } else {
     availabilityMessage = `No options surface snapshot is available for ${symbol}. The provider session is idle; load the surface and check options entitlements if collection remains unavailable.`;
   }
@@ -89,9 +96,106 @@ export function isFittedCell(code: string | null | undefined): boolean {
   return code != null && code !== "observed";
 }
 
+/**
+ * GUA-20261021-10: el titular (Front ATM IV, pendiente, movimiento implícito) usa
+ * el primer vencimiento con al menos N = 7 días naturales. Un 0D (o 1D fuera de
+ * sesión) cotizado antes de la apertura no es una lectura de volatilidad útil.
+ * Los vencimientos saltados siguen en la cadena y en los selectores.
+ */
+export const HEADLINE_MIN_DTE = 7;
+/** GUA-20261021-10: horizonte por defecto de las plantillas de estrategia (DTE). */
+export const STRATEGY_TEMPLATE_MIN_DTE = 30;
+
+export interface HeadlineExpirySelection {
+  expiry: string | null;
+  index: number;
+  dte: number | null;
+  /** Vencimientos más cortos que el titular, todavía visibles en la cadena. */
+  skippedExpiries: string[];
+  /** min_dte: ≥ N días · shortest_tradable: ninguno llega a N · front_only: solo hay 0D/1D. */
+  rule: "min_dte" | "shortest_tradable" | "front_only" | "none";
+}
+
+export function selectHeadlineExpiry(
+  surface: IvSurface | null | undefined,
+  now = new Date(),
+  minDte = HEADLINE_MIN_DTE
+): HeadlineExpirySelection {
+  const expiries = surface?.expiries ?? [];
+  if (!expiries.length) {
+    return { expiry: null, index: -1, dte: null, skippedExpiries: [], rule: "none" };
+  }
+  const dtes = expiries.map((expiry) => daysToExpiry(expiry, now));
+  // El mismo día se salta siempre; el 1D también cuando la foto se tomó fuera de sesión.
+  const minTradableDte = surface?.market_session === "closed" ? 2 : 1;
+  let rule: HeadlineExpirySelection["rule"] = "min_dte";
+  let index = dtes.findIndex((dte) => dte >= minDte);
+  if (index < 0) {
+    rule = "shortest_tradable";
+    index = dtes.findIndex((dte) => dte >= minTradableDte);
+  }
+  if (index < 0) {
+    rule = "front_only";
+    index = 0;
+  }
+  return { expiry: expiries[index], index, dte: dtes[index], skippedExpiries: expiries.slice(0, index), rule };
+}
+
+/** Texto de ayuda del titular: qué vencimiento usa y cuáles salta (GUA-20261021-10). */
+export function describeHeadlineExpiry(
+  stats: Pick<SurfaceStats, "frontExpiry" | "skippedExpiries" | "headlineRule">
+): string {
+  const label = (expiry: string) => expiry.replace(/^(\d{4})-?(\d{2})-?(\d{2})$/, "$1/$2/$3");
+  if (!stats.frontExpiry) {
+    return "No expiry is loaded for the headline.";
+  }
+  const front = label(stats.frontExpiry);
+  const skipped = stats.skippedExpiries.length
+    ? ` Skipped ${stats.skippedExpiries.map(label).join(", ")}; still listed in the chain.`
+    : "";
+  if (stats.headlineRule === "shortest_tradable") {
+    return `No loaded expiry reaches ${HEADLINE_MIN_DTE} days; the headline uses the shortest non-same-day expiry (${front}).${skipped}`;
+  }
+  if (stats.headlineRule === "front_only") {
+    return `Only same-day or next-day expiries are loaded; the headline reads ${front} and is not a reliable IV level.`;
+  }
+  return `Headline uses the first expiry with at least ${HEADLINE_MIN_DTE} calendar days (${front}).${skipped}`;
+}
+
+/**
+ * GUA-20261021-10: las plantillas toman un horizonte. Por defecto, el primer
+ * vencimiento con ≥ 30 DTE; si ninguno llega, el más cercano a 30 disponible.
+ */
+export function defaultStrategyExpiry(
+  surface: IvSurface | null | undefined,
+  now = new Date(),
+  minDte = STRATEGY_TEMPLATE_MIN_DTE
+): string | null {
+  const expiries = surface?.expiries ?? [];
+  if (!expiries.length) {
+    return null;
+  }
+  const dtes = expiries.map((expiry) => daysToExpiry(expiry, now));
+  const index = dtes.findIndex((dte) => dte >= minDte);
+  if (index >= 0) {
+    return expiries[index];
+  }
+  let best = 0;
+  dtes.forEach((dte, candidate) => {
+    if (Math.abs(dte - minDte) < Math.abs(dtes[best] - minDte)) {
+      best = candidate;
+    }
+  });
+  return expiries[best];
+}
+
 export interface SurfaceStats {
   atmStrike: number | null;
+  /** Vencimiento del titular (ver HEADLINE_MIN_DTE), no necesariamente expiries[0]. */
   frontExpiry: string | null;
+  frontExpiryDte: number | null;
+  skippedExpiries: string[];
+  headlineRule: HeadlineExpirySelection["rule"];
   frontAtmIv: number | null;
   frontAtmIvSource: string | null;
   backAtmIv: number | null;
@@ -418,6 +522,10 @@ export interface StrategyPayoffMatrix {
   riskBasis: number;
 }
 
+/**
+ * Griegas netas por acción (theta por día natural), como Net Premium. Largo suma,
+ * corto resta, multiplicado por la cantidad de la pata; no incluye contratos x 100.
+ */
 export interface StrategyGreekSummary {
   delta: number;
   gamma: number;
@@ -425,6 +533,8 @@ export interface StrategyGreekSummary {
   theta: number;
   rho: number;
   legCount: number;
+  /** GUA-20261021-10: patas con ≤ 1 DTE, valoradas con el suelo de 1 día. */
+  shortDatedLegCount: number;
 }
 
 export function nearestStrikeIndex(surface: IvSurface | null): number {
@@ -454,10 +564,13 @@ export function deriveTermStructure(surface: IvSurface | null): Array<{ expiry: 
   }));
 }
 
-export function deriveSurfaceStats(surface: IvSurface | null): SurfaceStats {
+export function deriveSurfaceStats(surface: IvSurface | null, now = new Date()): SurfaceStats {
   const empty: SurfaceStats = {
     atmStrike: null,
     frontExpiry: null,
+    frontExpiryDte: null,
+    skippedExpiries: [],
+    headlineRule: "none",
     frontAtmIv: null,
     frontAtmIvSource: null,
     backAtmIv: null,
@@ -474,13 +587,19 @@ export function deriveSurfaceStats(surface: IvSurface | null): SurfaceStats {
 
   const atmIndex = nearestStrikeIndex(surface);
   const values = surface.iv_grid.flat().filter((value) => Number.isFinite(value) && value > 0);
-  const frontAtmIv = surface.iv_grid[0]?.[atmIndex] ?? null;
+  // GUA-20261021-10: fila del titular, no la fila 0 (que puede ser un 0D pre-mercado).
+  const headline = selectHeadlineExpiry(surface, now);
+  const frontRow = Math.max(0, headline.index);
+  const frontAtmIv = surface.iv_grid[frontRow]?.[atmIndex] ?? null;
   const backAtmIv = surface.iv_grid[surface.iv_grid.length - 1]?.[atmIndex] ?? null;
   return {
     atmStrike: surface.strikes[atmIndex] ?? null,
-    frontExpiry: surface.expiries[0] ?? null,
+    frontExpiry: headline.expiry,
+    frontExpiryDte: headline.dte,
+    skippedExpiries: headline.skippedExpiries,
+    headlineRule: headline.rule,
     frontAtmIv,
-    frontAtmIvSource: cellSource(surface, 0, atmIndex),
+    frontAtmIvSource: cellSource(surface, frontRow, atmIndex),
     backAtmIv,
     backAtmIvSource: cellSource(surface, surface.iv_grid.length - 1, atmIndex),
     termSlope: frontAtmIv != null && backAtmIv != null ? backAtmIv - frontAtmIv : null,
@@ -491,11 +610,22 @@ export function deriveSurfaceStats(surface: IvSurface | null): SurfaceStats {
   };
 }
 
-export function selectedExpiryForSurface(surface: IvSurface | null, requestedExpiry: string | null | undefined): string | null {
+/**
+ * Una elección explícita del usuario siempre gana. Sin ella se usa `defaultExpiry`
+ * (titular o horizonte de estrategia, GUA-20261021-10) y, en último caso, el frente.
+ */
+export function selectedExpiryForSurface(
+  surface: IvSurface | null,
+  requestedExpiry: string | null | undefined,
+  defaultExpiry: string | null | undefined = null
+): string | null {
   if (!surface?.expiries.length) {
     return null;
   }
-  return requestedExpiry && surface.expiries.includes(requestedExpiry) ? requestedExpiry : surface.expiries[0];
+  if (requestedExpiry && surface.expiries.includes(requestedExpiry)) {
+    return requestedExpiry;
+  }
+  return defaultExpiry && surface.expiries.includes(defaultExpiry) ? defaultExpiry : surface.expiries[0];
 }
 
 export function deriveChainRows(surface: IvSurface | null, expiry: string | null | undefined): ChainRow[] {
@@ -535,10 +665,12 @@ export function deriveChainRows(surface: IvSurface | null, expiry: string | null
 
 export function deriveOverviewSnapshot(
   surface: IvSurface | null,
-  requestedExpiry: string | null | undefined
+  requestedExpiry: string | null | undefined,
+  now = new Date()
 ): OverviewSnapshot {
-  const stats = deriveSurfaceStats(surface);
-  const selectedExpiry = selectedExpiryForSurface(surface, requestedExpiry);
+  const stats = deriveSurfaceStats(surface, now);
+  // GUA-20261021-10: sin elección, la cadena y el movimiento implícito siguen al titular.
+  const selectedExpiry = selectedExpiryForSurface(surface, requestedExpiry, stats.frontExpiry);
   const frontChain = deriveChainRows(surface, selectedExpiry);
   const atmPair = surface?.spot && frontChain.length
     ? minBy(frontChain, (row) => Math.abs(row.strike - surface.spot!))
@@ -550,7 +682,7 @@ export function deriveOverviewSnapshot(
   return {
     stats,
     selectedExpiry,
-    selectedExpiryDte: selectedExpiry ? daysToExpiry(selectedExpiry) : null,
+    selectedExpiryDte: selectedExpiry ? daysToExpiry(selectedExpiry, now) : null,
     atmPair,
     frontChain,
     skewRows: deriveSkewRows(surface),
@@ -1391,11 +1523,15 @@ export function deriveChainGreekRows(surface: IvSurface | null, expiry: string |
   });
 }
 
-export function deriveStrategyGreeks(legs: StrategyLeg[], surface: IvSurface | null): StrategyGreekSummary | null {
+export function deriveStrategyGreeks(
+  legs: StrategyLeg[],
+  surface: IvSurface | null,
+  now = new Date()
+): StrategyGreekSummary | null {
   if (!surface?.spot || !legs.length) {
     return null;
   }
-  let summary: StrategyGreekSummary = { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, legCount: 0 };
+  let summary: StrategyGreekSummary = { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, legCount: 0, shortDatedLegCount: 0 };
   for (const leg of legs) {
     const expiryIndex = surface.expiries.indexOf(leg.expiry);
     const strikeIndex = surface.strikes.findIndex((strike) => Math.abs(strike - leg.strike) < 1e-8);
@@ -1406,7 +1542,8 @@ export function deriveStrategyGreeks(legs: StrategyLeg[], surface: IvSurface | n
     if (!(sigma != null && Number.isFinite(sigma) && sigma > 0)) {
       continue;
     }
-    const years = Math.max(daysToExpiry(leg.expiry) / 365, 1 / 365);
+    const dte = daysToExpiry(leg.expiry, now);
+    const years = Math.max(dte / 365, 1 / 365);
     const greeks = blackScholesGreeks(leg.optionType, surface.spot, leg.strike, years, sigma);
     const side = leg.side === "long" ? 1 : -1;
     const weight = side * leg.quantity;
@@ -1417,6 +1554,7 @@ export function deriveStrategyGreeks(legs: StrategyLeg[], surface: IvSurface | n
       theta: summary.theta + greeks.theta * weight,
       rho: summary.rho + greeks.rho * weight,
       legCount: summary.legCount + 1,
+      shortDatedLegCount: summary.shortDatedLegCount + (dte <= 1 ? 1 : 0),
     };
   }
   return summary.legCount ? summary : null;

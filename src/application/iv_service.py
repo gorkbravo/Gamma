@@ -51,7 +51,9 @@ class IVService:
         self.usage_ledger = usage_ledger
         self.market_data_mode = normalize_market_data_mode(market_data_mode)
         self._engine: IVSurfaceEngine | None = None
-        self._active_symbol = "SPY"
+        # GUA-20261021-10: sin sesión iniciada no hay símbolo activo; antes se
+        # informaba "SPY" y el estado vacío nombraba un símbolo no pedido.
+        self._active_symbol: str | None = None
         self._active_depth_preset = "standard"
         self._active_surface_model = "linear"
         self._engine_config = {

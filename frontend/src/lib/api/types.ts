@@ -4589,6 +4589,8 @@ export interface IvSurface {
   collection: IvSurfaceCollection | null;
   quality: IvSurfaceQuality | null;
   pairs: IvOptionPair[];
+  /** GUA-20261021-10: sesión USA al tomar la foto ("regular" / "closed"); null si se desconoce. */
+  market_session?: string | null;
 }
 
 export interface ActionResponse {

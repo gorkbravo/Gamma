@@ -22,9 +22,12 @@
   import { buildOptionsStrategyHandoff } from "../lib/view-models/research";
   import {
     STRATEGY_TEMPLATES,
+    STRATEGY_TEMPLATE_MIN_DTE,
     buildStrategyLegFromChainRow,
     buildStrategyTemplateLegs,
     daysToExpiry,
+    defaultStrategyExpiry,
+    describeHeadlineExpiry,
     deriveChainGreekRows,
     deriveChainRows,
     deriveImpliedProbabilitySelection,
@@ -220,11 +223,16 @@
   $: syncStrategyToActiveSymbol(result?.symbol ?? null);
   $: applyOptionsStrategyWorkingAnalysis(workingAnalysis);
 
-  $: activeExpiry = selectedExpiryForSurface(result, selectedExpiry);
+  $: surfaceStats = deriveSurfaceStats(result);
+  // GUA-20261021-10: sin elección explícita, Strategies parte del horizonte
+  // (primer vencimiento ≥ 30 DTE) y el resto de modos del vencimiento del titular
+  // (≥ 7 DTE). Los vencimientos saltados siguen en los selectores.
+  $: defaultExpiry = mode === "strategies" ? defaultStrategyExpiry(result) : surfaceStats.frontExpiry;
+  $: activeExpiry = selectedExpiryForSurface(result, selectedExpiry, defaultExpiry);
+  $: expiryIsExplicit = Boolean(selectedExpiry && result?.expiries.includes(selectedExpiry));
   $: chainRows = deriveChainRows(result, activeExpiry);
   $: chainGreekRows = deriveChainGreekRows(result, activeExpiry);
   $: overview = deriveOverviewSnapshot(result, activeExpiry);
-  $: surfaceStats = deriveSurfaceStats(result);
   $: termStructure = deriveTermStructure(result);
   $: hasFittedModel = hasParametricIvFit(result);
   $: observedSurfacePoints = deriveObservedSurfacePoints(result);
@@ -239,7 +247,10 @@
   $: optionsHistoryMatches = Boolean(
     historySymbol && underlyingHistory?.symbol?.trim().toUpperCase() === historySymbol
   );
-  $: surfaceBadge = result ? toProvenanceBadge(result) : null;
+  // GUA-20261021-10: fuera de sesión el backend marca la foto "stale"; la etiqueta lo explica.
+  $: surfaceBadge = result
+    ? toProvenanceBadge(result, { qualityLabel: result.market_session === "closed" ? "closed · last session" : null })
+    : null;
   $: historyBadge = optionsHistoryMatches && underlyingHistory ? toProvenanceBadge(underlyingHistory) : null;
   $: researchHistoryMatches = Boolean(
     historySymbol && researchPrimarySymbol?.trim().toUpperCase() === historySymbol && underlyingPricePoints.length
@@ -279,7 +290,9 @@
   $: if (result?.symbol) {
     optionsWorkspaceDraft.set({
       symbol: result.symbol,
-      selectedExpiry: activeExpiry,
+      // Solo la elección explícita: un valor por defecto guardado se volvería
+      // explícito al volver y anularía el horizonte de Strategies (GUA-20261021-10).
+      selectedExpiry: expiryIsExplicit ? selectedExpiry : null,
       strategySymbol,
       legs: strategyLegs.map((leg) => ({ ...leg })),
       contracts: strategyContracts,
@@ -559,9 +572,14 @@
     const built = buildStrategyTemplateLegs(templateId, chainRows, result?.spot);
     strategyLegs = built.legs;
     const summary = template ? `${template.label} (${template.stance})` : templateId;
+    // GUA-20261021-10: el aviso dice qué horizonte se usó y que el selector manda.
+    const expiryLabel = activeExpiry ? `${formatExpiry(activeExpiry)} (${daysToExpiry(activeExpiry)}D)` : "N/A";
+    const horizonNote = expiryIsExplicit
+      ? ""
+      : ` Default horizon: first expiry ≥ ${STRATEGY_TEMPLATE_MIN_DTE}D; pick another expiry and reapply to change it.`;
     strategyTemplateNotice = built.warnings.length
-      ? `${summary}: ${built.warnings.join(" ")}`
-      : `${summary} built from the nearest priced strikes on ${formatExpiry(activeExpiry)}.`;
+      ? `${summary} on ${expiryLabel}: ${built.warnings.join(" ")}${horizonNote}`
+      : `${summary} built from the nearest priced strikes on ${expiryLabel}.${horizonNote}`;
   }
 
   function payoffHeatStyle(pct: number, maxGain: number) {
@@ -726,7 +744,7 @@
       <div class="primary-column">
         <article class="panel kpi-panel">
           <div class="kpi-grid">
-            <div class="metric"><span>Front ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"} class:fitted={isFittedCell(surfaceStats.frontAtmIvSource)}>{pct(surfaceStats.frontAtmIv)}</strong><small>{formatExpiry(surfaceStats.frontExpiry)}{isFittedCell(surfaceStats.frontAtmIvSource) ? " · fitted" : ""}</small></div>
+            <div class="metric"><span>Front ATM IV</span><strong class:absent={pct(surfaceStats.frontAtmIv) === "N/A"} class:fitted={isFittedCell(surfaceStats.frontAtmIvSource)}>{pct(surfaceStats.frontAtmIv)}</strong><small title={describeHeadlineExpiry(surfaceStats)}>{formatExpiry(surfaceStats.frontExpiry)}{surfaceStats.frontExpiryDte != null ? ` · ${surfaceStats.frontExpiryDte}D` : ""}{surfaceStats.skippedExpiries.length ? ` · skips ${surfaceStats.skippedExpiries.length} shorter` : ""}{isFittedCell(surfaceStats.frontAtmIvSource) ? " · fitted" : ""}</small></div>
             <div class="metric"><span>Back ATM IV</span><strong class:absent={pct(surfaceStats.backAtmIv) === "N/A"} class:fitted={isFittedCell(surfaceStats.backAtmIvSource)}>{pct(surfaceStats.backAtmIv)}</strong><small>{signedPct(surfaceStats.termSlope)} slope{isFittedCell(surfaceStats.backAtmIvSource) ? " · fitted" : ""}</small></div>
             <div class="metric"><span>ATM Strike</span><strong class:absent={fmt(surfaceStats.atmStrike, 2) === "N/A"}>{fmt(surfaceStats.atmStrike, 2)}</strong><small>Spot {money(result?.spot)}</small></div>
             <div class="metric"><span>Put / Call OI</span><strong class:absent={fmt(overview.putCallOpenInterestRatio, 2) === "N/A"}>{fmt(overview.putCallOpenInterestRatio, 2)}</strong><small>Volume {fmt(overview.putCallVolumeRatio, 2)}</small></div>
@@ -737,7 +755,7 @@
 
         <article class="panel split-panel">
           <div class="panel-head">
-            <h3>Front Expiry Chain</h3>
+            <h3>Expiry Chain</h3>
             <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value}>
               {#each result?.expiries ?? [] as expiry}
                 <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
@@ -1274,9 +1292,14 @@
               <option value="call">Call</option>
               <option value="put">Put</option>
             </select>
-            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value}>
+            <select
+              value={activeExpiry ?? ""}
+              on:change={(event) => selectedExpiry = event.currentTarget.value}
+              aria-label="Strategy expiry"
+              title={expiryIsExplicit ? "Strategy expiry" : `Default horizon: first expiry ≥ ${STRATEGY_TEMPLATE_MIN_DTE}D`}
+            >
               {#each result?.expiries ?? [] as expiry}
-                <option value={expiry}>{formatExpiry(expiry)}</option>
+                <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
               {/each}
             </select>
             <label class="contracts-field">
@@ -1401,9 +1424,15 @@
             <div><span>Net Delta</span><strong class:absent={signedGreek(strategyGreeks?.delta, 3) === "N/A"}>{signedGreek(strategyGreeks?.delta, 3)}</strong></div>
             <div><span>Net Gamma</span><strong class:absent={signedGreek(strategyGreeks?.gamma, 4) === "N/A"}>{signedGreek(strategyGreeks?.gamma, 4)}</strong></div>
             <div><span>Net Vega</span><strong class:absent={signedGreek(strategyGreeks?.vega, 3) === "N/A"}>{signedGreek(strategyGreeks?.vega, 3)}</strong></div>
-            <div><span>Net Theta</span><strong class:absent={signedGreek(strategyGreeks?.theta, 3) === "N/A"}>{signedGreek(strategyGreeks?.theta, 3)}</strong></div>
+            <div><span>Net Theta / day</span><strong class:absent={signedGreek(strategyGreeks?.theta, 3) === "N/A"}>{signedGreek(strategyGreeks?.theta, 3)}</strong></div>
             <div><span>Net Rho</span><strong class:absent={signedGreek(strategyGreeks?.rho, 3) === "N/A"}>{signedGreek(strategyGreeks?.rho, 3)}</strong></div>
           </div>
+          {#if strategyGreeks?.shortDatedLegCount}
+            <!-- GUA-20261021-10: con patas 0D/1D la theta diaria no es una lectura fiable. -->
+            <p class="sizing-note">
+              {strategyGreeks.shortDatedLegCount === 1 ? "One leg expires" : `${strategyGreeks.shortDatedLegCount} legs expire`} within a day: Greeks use a 1-day floor on the surface IV, so theta is not a reliable daily decay.
+            </p>
+          {/if}
         </article>
 
         <article class="panel">

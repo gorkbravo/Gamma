@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from typing import List, Sequence
 
 import numpy as np
@@ -50,6 +50,88 @@ CELL_SOURCE_LABELS = {
 # A fitted cell more than this far outside its own expiry's observed IV range is
 # reported as a surface discontinuity rather than drawn silently.
 SURFACE_DISCONTINUITY_TOLERANCE = 0.02
+
+# GUA-20261021-10: sesión regular de opciones USA (09:30–16:00 America/New_York,
+# lunes a viernes). Los festivos de mercado no se modelan: un festivo entre semana
+# cuenta como sesión regular.
+US_OPTIONS_SESSION_OPEN = dt_time(9, 30)
+US_OPTIONS_SESSION_CLOSE = dt_time(16, 0)
+MARKET_SESSION_REGULAR = "regular"
+MARKET_SESSION_CLOSED = "closed"
+MARKET_SESSION_CLOSED_WARNING = (
+    "US options are outside regular hours (09:30-16:00 ET, Mon-Fri; exchange holidays are not modelled). "
+    "Quotes, IV and Greeks are last-session or indicative values, not live."
+)
+
+# GUA-20261021-10: umbrales de divergencia put/call en el mismo strike y vencimiento.
+# Solo se revisan strikes cercanos al dinero, donde la paridad debe cumplirse.
+PUT_CALL_IV_MAX_RATIO = 3.0
+PUT_CALL_IV_MAX_GAP = 0.40
+PUT_CALL_IV_CHECK_BAND = 0.05
+
+
+def _nth_sunday(year: int, month: int, n: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def _to_us_eastern(moment: datetime) -> datetime:
+    """Convierte a hora de Nueva York; las fechas naive se interpretan como UTC."""
+    aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return aware.astimezone(ZoneInfo("America/New_York"))
+    except Exception:  # pragma: no cover - respaldo sin tzdata
+        # Regla DST de EE. UU.: 2.º domingo de marzo 07:00 UTC a 1.er domingo de noviembre 06:00 UTC.
+        utc = aware.astimezone(timezone.utc)
+        dst_start = datetime.combine(_nth_sunday(utc.year, 3, 2), dt_time(7, 0), tzinfo=timezone.utc)
+        dst_end = datetime.combine(_nth_sunday(utc.year, 11, 1), dt_time(6, 0), tzinfo=timezone.utc)
+        offset = -4 if dst_start <= utc < dst_end else -5
+        return utc.astimezone(timezone(timedelta(hours=offset)))
+
+
+def us_options_market_session(moment: datetime | None = None) -> str:
+    """"regular" dentro de 09:30–16:00 ET de lunes a viernes; si no, "closed" (GUA-20261021-10)."""
+    local = _to_us_eastern(moment or datetime.now(timezone.utc))
+    if local.weekday() >= 5:
+        return MARKET_SESSION_CLOSED
+    if US_OPTIONS_SESSION_OPEN <= local.time() < US_OPTIONS_SESSION_CLOSE:
+        return MARKET_SESSION_REGULAR
+    return MARKET_SESSION_CLOSED
+
+
+def put_call_iv_divergence_warning(pairs: Sequence[IVOptionPairRecord], spot: float | None) -> str | None:
+    """Avisa cuando la IV de call y put del mismo strike divergen de forma inverosímil.
+
+    GUA-20261021-10: con la cadena 0D pre-mercado de USO el strike 163 daba call 14.0 %
+    y put 98.6 %; la paridad put-call estaba rota y nada lo señalaba.
+    """
+    if spot is None or not np.isfinite(spot) or spot <= 0:
+        return None
+    flagged: list[tuple[float, IVOptionPairRecord]] = []
+    for pair in pairs:
+        call_iv, put_iv = pair.call_implied_volatility, pair.put_implied_volatility
+        if call_iv is None or put_iv is None or not (call_iv > 0 and put_iv > 0):
+            continue
+        if abs(float(pair.strike) / float(spot) - 1.0) > PUT_CALL_IV_CHECK_BAND:
+            continue
+        low, high = sorted((float(call_iv), float(put_iv)))
+        gap = high - low
+        if high / low > PUT_CALL_IV_MAX_RATIO or gap > PUT_CALL_IV_MAX_GAP:
+            flagged.append((gap, pair))
+    if not flagged:
+        return None
+    _, worst = max(flagged, key=lambda item: item[0])
+    expiry = str(worst.expiry or "")
+    expiry_label = f"{expiry[0:4]}/{expiry[4:6]}/{expiry[6:8]}" if len(expiry) == 8 and expiry.isdigit() else expiry
+    count = len(flagged)
+    return (
+        f"Put/call IV diverge at {count} near-the-money strike{'' if count == 1 else 's'} "
+        f"(worst {expiry_label} {float(worst.strike):g}: call {float(worst.call_implied_volatility):.1%} vs "
+        f"put {float(worst.put_implied_volatility):.1%}). Put-call parity is broken; treat these quotes as "
+        "stale or indicative."
+    )
 
 
 @dataclass(frozen=True)
@@ -97,6 +179,10 @@ class IVSurfaceSnapshot:
     expiry_analytics: list[IVExpiryAnalyticsRecord] = field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsRecord | None = None
     underlying_historical_volatility: float | None = None
+    # GUA-20261021-10: sesión USA al tomar la foto ("regular"/"closed"; None en mock)
+    # y avisos de calidad de cotización que la respuesta debe mostrar.
+    market_session: str | None = None
+    quote_warnings: list[str] = field(default_factory=list)
 
 
 class IVSurfaceEngine:
@@ -895,6 +981,14 @@ class IVSurfaceEngine:
             subscribed_contract_count=len(self._option_tickers),
             selection_note=selection_note,
         )
+        captured_at = datetime.utcnow()
+        market_session, freshness_label, quote_warnings = self._snapshot_session_state(
+            contracts=contracts,
+            pairs=pairs,
+            spot=self._spot,
+            delayed=bool(delayed),
+            now=captured_at,
+        )
         return IVSurfaceSnapshot(
             symbol=symbol,
             spot=float(self._spot if self._coerce_positive(self._spot) is not None else 0.0),
@@ -902,8 +996,10 @@ class IVSurfaceEngine:
             strikes=list(strikes),
             iv_grid=display_grid,
             cell_sources=cell_sources,
-            timestamp=datetime.utcnow(),
+            timestamp=captured_at,
             delayed=bool(delayed),
+            market_session=market_session,
+            quote_warnings=quote_warnings,
             points=observed_cells,
             source_provider="ibkr",
             origin="gamma.iv.surface.ibkr",
@@ -915,7 +1011,7 @@ class IVSurfaceEngine:
                 "reqSecDefOptParams, subscribes to paired near-spot call and put contracts, preserves contract-level "
                 "quotes/greeks from those same lines, and interpolates a blended IV grid for the display surface."
             ),
-            freshness_label="delayed" if delayed else "live",
+            freshness_label=freshness_label,
             contracts=contracts,
             pairs=pairs,
             collection=collection,
@@ -1763,6 +1859,35 @@ class IVSurfaceEngine:
     @staticmethod
     def _contract_id(symbol: str, expiry: str, strike: float, right: str) -> str:
         return f"{symbol}:{expiry}:{strike:.2f}:{right}"
+
+    @staticmethod
+    def _snapshot_session_state(
+        *,
+        contracts: Sequence[IVOptionContractRecord],
+        pairs: Sequence[IVOptionPairRecord],
+        spot: float | None,
+        delayed: bool,
+        now: datetime,
+    ) -> tuple[str, str, list[str]]:
+        """Sesión, etiqueta de frescura y avisos de calidad de una foto IBKR (GUA-20261021-10).
+
+        Fuera de la sesión regular (o con líneas congeladas, marketDataType 2/4) la
+        foto nunca se etiqueta "live": IBKR devuelve el último cierre o cotizaciones
+        indicativas, así que se marca "stale".
+        """
+        market_session = us_options_market_session(now)
+        frozen = any(getattr(item, "market_data_type", None) in (2, 4) for item in contracts)
+        warnings: list[str] = []
+        if market_session == MARKET_SESSION_CLOSED:
+            warnings.append(MARKET_SESSION_CLOSED_WARNING)
+        divergence = put_call_iv_divergence_warning(pairs, spot)
+        if divergence:
+            warnings.append(divergence)
+        if market_session == MARKET_SESSION_CLOSED or frozen:
+            freshness_label = "stale"
+        else:
+            freshness_label = "delayed" if delayed else "live"
+        return market_session, freshness_label, warnings
 
     @staticmethod
     def _days_to_expiry(expiry: str, now: datetime | None = None) -> int | None:
