@@ -10,6 +10,7 @@ import {
   spreadCurrentValueView,
   spreadObservationView
 } from "./commodities";
+import { maritimeFocusFromHandoff, resolveMaritimeFocus } from "./maritime";
 
 function spread(overrides: Partial<CommoditySpreadSnapshot> = {}): CommoditySpreadSnapshot {
   return {
@@ -216,7 +217,8 @@ describe("commodity cross-domain handoffs (GUA-20261021-7)", () => {
         label: "Sealanes Energy Chokepoints",
         metadata: {
           source_commodity_id: "brent",
-          commodity_links: [
+          commodity_links: ["crude oil", "LNG", "refined products"],
+          cross_domain_links: [
             {
               link_id: "maritime-energy-chokepoints",
               relationship: "shipping_context",
@@ -227,6 +229,26 @@ describe("commodity cross-domain handoffs (GUA-20261021-7)", () => {
         }
       }
     });
+  });
+
+  // Integración Commodities → Sealanes: el grupo debe resolverse a chokepoints, no a "no tracked".
+  it("resolves the Sealanes chokepoint group on the receiving side", () => {
+    const handoff = buildCommodityCrossDomainHandoff(link(), { instrument: { instrument_id: "brent", name: "Brent Crude Oil" } });
+    const request = maritimeFocusFromHandoff(handoff!);
+    const chokepoint = (id: string, commodities: string[]) => ({
+      chokepoint_id: id,
+      name: id,
+      strategic_commodities: commodities,
+      bounding_box: { min_latitude: 25, max_latitude: 27.5, min_longitude: 55, max_longitude: 57.5 }
+    });
+    const focus = resolveMaritimeFocus(request, {
+      chokepoints: [chokepoint("hormuz", ["crude oil", "LNG"]), chokepoint("panama", ["containers"])] as never,
+      chokepoint_summaries: [],
+      coverage: null as never
+    });
+
+    expect(focus?.status).toBe("resolved");
+    expect(focus && "chokepointIds" in focus ? focus.chokepointIds : []).toEqual(["hormuz"]);
   });
 
   it("passes the Macro lens through normalized ids and resolves legacy links by domain", () => {

@@ -842,7 +842,9 @@ def _register_provider_activation_conditions(
             provider_id="eia",
             display_name="EIA commodities",
             expected_when="Commodities workspace is loaded with EIA/FRED official-provider configuration.",
-            configured=commodities_provider in {"eia", "official", "eia_fred", "fred", "ibkr_eia"}
+            # El proveedor IBKR también usa EIA como referencia cuando hay clave (GUA-20261021-14c).
+            configured=commodities_provider
+            in {"eia", "official", "eia_fred", "fred", "ibkr", "tws", "ibkr_eia", "ibkr_futures"}
             and bool((os.getenv("EIA_API_KEY", "") or "").strip()),
             active=False,
             idle_status="not_requested",

@@ -191,6 +191,15 @@ export function crossDomainLinkTargetTab(link: CommodityCrossDomainLink): string
   return DOMAIN_TABS[(link.target_domain ?? "").trim().toLowerCase()] ?? null;
 }
 
+// Mercancía marítima que mueve cada instrumento, con los nombres de `strategic_commodities`.
+const SHIPPING_COMMODITY_BY_INSTRUMENT: Record<string, string> = {
+  wti: "crude oil",
+  brent: "crude oil",
+  gasoline: "refined products",
+  heating_oil: "refined products",
+  henry_hub: "LNG"
+};
+
 /**
  * Sobre de traspaso entre pestañas para una fila "cross-domain" (GUA-20261021-7). Reutiliza el
  * contrato CrossTabHandoffEnvelope que ya consumen los traspasos de Prediction Markets; Sealanes
@@ -207,7 +216,7 @@ export function buildCommodityCrossDomainHandoff(
   const targetTab = crossDomainLinkTargetTab(link);
   if (!targetTab) return null;
   const instrument = options.instrument ?? null;
-  const commodityLinks = [
+  const crossDomainLinks = [
     {
       link_id: link.link_id,
       relationship: link.relationship,
@@ -216,6 +225,15 @@ export function buildCommodityCrossDomainHandoff(
     }
   ];
   const isMaritime = targetTab === "maritime";
+  // Sealanes filtra chokepoints por `strategic_commodities` ("crude oil", "LNG"…), así que
+  // `commodity_links` lleva esos nombres y el detalle del enlace va en `cross_domain_links`.
+  const shippingCommodities = [
+    ...new Set(
+      link.linked_instrument_ids
+        .map((instrumentId) => SHIPPING_COMMODITY_BY_INSTRUMENT[instrumentId])
+        .filter((item): item is string => Boolean(item))
+    )
+  ];
   return {
     source_tab: "commodities",
     source_mode: options.sourceMode ?? null,
@@ -226,7 +244,8 @@ export function buildCommodityCrossDomainHandoff(
       provider_id: "gamma",
       native_id: link.link_id,
       metadata: {
-        commodity_links: commodityLinks,
+        commodity_links: shippingCommodities,
+        cross_domain_links: crossDomainLinks,
         relationship: link.relationship,
         source_commodity_id: instrument?.instrument_id ?? null,
         source_commodity_label: instrument?.name ?? null

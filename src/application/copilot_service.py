@@ -192,6 +192,17 @@ COPILOT_RUN_REGISTRY_LIMIT = 64
 COPILOT_MAX_COMMODITY_FOCUS_INSTRUMENTS = 6
 
 
+def _related_markets_for_model(related: list[Any], *, analog_limit: int, sibling_limit: int) -> list[Any]:
+    """Análogos y hermanos de serie/evento con cupos propios (GUA-20261021-15).
+
+    Los hermanos van detrás de los análogos: sin cupo propio no llegaban al modelo, y sin tope
+    la herramienta de flujo enviaba hasta ~36 filas.
+    """
+    analogs = [row for row in related if not getattr(row, "sibling_scope", None)][:analog_limit]
+    siblings = [row for row in related if getattr(row, "sibling_scope", None)][:sibling_limit]
+    return [*analogs, *siblings]
+
+
 @dataclass
 class _CopilotRunHandle:
     run_id: str
@@ -11181,9 +11192,10 @@ class CopilotService:
                     "probability": row.probability,
                     "price_gap": row.price_gap,
                     "relationship": row.relationship,
+                    "sibling_scope": getattr(row, "sibling_scope", None),
                     "note": row.note,
                 }
-                for row in related[:5]
+                for row in _related_markets_for_model(related, analog_limit=5, sibling_limit=5)
             ],
             "calibration_summary": self._prediction_calibration_summary(calibration),
         }
@@ -13481,11 +13493,12 @@ class CopilotService:
                     "market_id": row.market_id,
                     "title": row.title,
                     "relationship": row.relationship,
+                    "sibling_scope": getattr(row, "sibling_scope", None),
                     "probability": row.probability,
                     "price_gap": row.price_gap,
                     "note": row.note,
                 }
-                for row in related
+                for row in _related_markets_for_model(related, analog_limit=8, sibling_limit=8)
             ],
         }
         return CopilotToolExecution(

@@ -568,3 +568,20 @@ def test_expanded_budget_request_field_reaches_the_domain_request():
     model = CopilotResearchCardRequestModel(domain="synthesis", prompt="x", output_budget="expanded")
     assert model.to_domain().output_budget == "expanded"
     assert replace(model.to_domain(), output_budget=None).output_budget is None
+
+
+def test_related_markets_for_model_keeps_series_siblings_and_caps_rows():
+    """GUA-20261021-15: los hermanos de serie van detrás de los análogos; deben llegar al modelo con tope."""
+    from types import SimpleNamespace
+
+    from src.application.copilot_service import _related_markets_for_model
+
+    analogs = [SimpleNamespace(market_id=f"analog-{index}", sibling_scope=None) for index in range(12)]
+    siblings = [SimpleNamespace(market_id=f"sibling-{index}", sibling_scope="same_series") for index in range(30)]
+
+    selected = _related_markets_for_model([*analogs, *siblings], analog_limit=5, sibling_limit=5)
+
+    assert [row.market_id for row in selected] == [
+        *[f"analog-{index}" for index in range(5)],
+        *[f"sibling-{index}" for index in range(5)],
+    ]

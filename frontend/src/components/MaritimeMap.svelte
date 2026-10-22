@@ -3,6 +3,7 @@
   import maplibregl from "maplibre-gl";
   import "maplibre-gl/dist/maplibre-gl.css";
   import { WS_BASE } from "../lib/api/client";
+  import { apiInstantDate } from "../lib/time";
   import type {
     MaritimeAisPosition,
     MaritimeChokepointDefinition,
@@ -318,8 +319,10 @@
     } else {
       map.dragRotate.disable();
       map.touchZoomRotate.disableRotation();
-      map.setPitch(0);
-      map.setBearing(0);
+      // setPitch/setBearing detienen cualquier animación de cámara aunque el valor no cambie:
+      // al llegar por un handoff cortaban el fitBounds del foco recién lanzado (GUA-20261021-7).
+      if (map.getPitch() !== 0) map.setPitch(0);
+      if (map.getBearing() !== 0) map.setBearing(0);
     }
   }
 
@@ -628,9 +631,7 @@
   $: coverageChipTooltip = `Subscribed but no vessels detected — ${coverage?.provider_label ?? "AISstream"} may have limited coverage here — open coverage map`;
 
   function shortDate(value: string | null | undefined) {
-    return value
-      ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-      : "N/A";
+    return apiInstantDate(value)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) ?? "N/A";
   }
 
   function number(value: number | null | undefined, digits = 1) {

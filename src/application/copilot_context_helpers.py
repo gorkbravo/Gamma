@@ -605,10 +605,12 @@ def summarize_commodities_workspace(
             None,
         ),
         "market_summaries": [_commodity_market_summary(row) for row in market_summaries[:summary_limit]],
+        # Además de los conflictos de datos, el modelo necesita las referencias desfasadas y los
+        # basis económicos fechados (p. ej. Dated Brent vs futuro) que distingue GUA-20261021-4.
         "price_reconciliations": [
             _commodity_reconciliation_summary(row)
             for row in reconciliations
-            if str(row.get("status") or "") == "conflict"
+            if str(row.get("status") or "") in {"conflict", "stale_reference", "basis", "units_differ"}
         ][:6],
         "spreads": [_commodity_spread_summary(row) for row in spreads[:spread_limit]],
         "inventories": [_commodity_inventory_summary(row) for row in inventories[:inventory_limit]],
@@ -822,6 +824,12 @@ def _commodity_spread_summary(row: dict[str, Any] | None) -> dict[str, Any] | No
         "z_score": _as_float(row.get("z_score")),
         "percentile": _as_float(row.get("percentile")),
         "interpretation": row.get("interpretation"),
+        # GUA-20261021-2: el modelo debe ver la fecha de la observación, no solo el valor.
+        "observed_at": _isoformat(row.get("observed_at")),
+        "observation_lag_days": row.get("observation_lag_days"),
+        "freshness": row.get("freshness"),
+        "current_value": _as_float(row.get("current_value")),
+        "current_value_as_of": _isoformat(row.get("current_value_as_of")),
         "warnings": list(row.get("warnings", []) or []),
     }
 

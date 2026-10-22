@@ -15,6 +15,7 @@
     getOrderedWorkspaceTabs,
     getTabModes,
     getTabByShortcutIndex,
+    getTabLabel,
     getWorkspaceHomeTab,
     isWorkspaceTab,
     type NavigationRouteMatch,
