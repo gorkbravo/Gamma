@@ -5,6 +5,7 @@
   import StrategyScriptWorkspace from "../components/StrategyScriptWorkspace.svelte";
   import StrategyRunComparison from "../components/StrategyRunComparison.svelte";
   import { STRATEGY_EXPERIMENT_CONTRACT, savedStrategyExperiment, frozenExperimentDraft, frozenExperimentBenchmark } from "../lib/strategy-experiments";
+  import { apiInstantDate } from "../lib/time";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -144,7 +145,10 @@
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+    apiInstantDate(value)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) ?? "N/A";
+  // Nombre accesible de cada pata: sin él los cinco "Remove leg" eran indistinguibles (GUA-20261021-16).
+  const draftLegName = (leg: StrategyPortfolioDraftLeg, index: number) =>
+    leg.label.trim() || leg.identifier.trim() || `leg ${index + 1}`;
   // Observation dates always carry the year: a multi-year sample rendered as
   // "Jun 24" does not say which June (GUA-20260903-11).
   const observationDate = (value: string | null | undefined) =>
@@ -861,11 +865,11 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {#each portfolioDraftLegs as leg (leg.id)}
+                  {#each portfolioDraftLegs as leg, index (leg.id)}
                     <tr>
-                      <td><input class="compact-input wide" bind:value={leg.label} placeholder="Leg label" /></td>
+                      <td><input class="compact-input wide" bind:value={leg.label} placeholder="Leg label" aria-label={`Label of ${draftLegName(leg, index)}`} /></td>
                       <td>
-                        <select class="compact-input class-select" bind:value={leg.assetClass} on:change={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}>
+                        <select class="compact-input class-select" bind:value={leg.assetClass} aria-label={`Asset class of ${draftLegName(leg, index)}`} on:change={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}>
                           {#each portfolioAssetClasses as assetClass}
                             <option value={assetClass.id}>{assetClass.label}</option>
                           {/each}
@@ -882,11 +886,12 @@
                           class="compact-input wide"
                           bind:value={leg.identifier}
                           placeholder="Ticker / contract id"
+                          aria-label={`Ticker or contract id of ${draftLegName(leg, index)}`}
                           on:input={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}
                         />
                       </td>
                       <td class="num-cell">
-                        <input class="compact-input" type="number" step="0.05" bind:value={leg.weight} />
+                        <input class="compact-input" type="number" step="0.05" bind:value={leg.weight} aria-label={`Weight of ${draftLegName(leg, index)}`} />
                       </td>
                       <td class="num-cell">
                         <div class="row-actions">
@@ -895,13 +900,14 @@
                             class="ghost-button icon-button"
                             aria-expanded={Boolean(expandedDraftLegs[leg.id])}
                             title="Object / inline history source"
+                            aria-label={`Source details of ${draftLegName(leg, index)}`}
                             on:click={() => toggleDraftLegDetail(leg.id)}
                           >{expandedDraftLegs[leg.id] ? "▾" : "▸"}</button>
                           <button
                             type="button"
                             class="ghost-button icon-button"
                             title="Remove leg"
-                            aria-label="Remove leg"
+                            aria-label={`Remove ${draftLegName(leg, index)}`}
                             on:click={() => removePortfolioDraftLeg(leg.id)}
                           >✕</button>
                         </div>

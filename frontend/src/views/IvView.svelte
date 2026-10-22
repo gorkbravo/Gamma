@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import IvSnapshotComparison from "../components/IvSnapshotComparison.svelte";
   import CopilotOptionsWorkingAnalysis from "../components/CopilotOptionsWorkingAnalysis.svelte";
@@ -155,7 +156,7 @@
   const signedGreek = (value: number | null | undefined, digits = 3) =>
     value == null || !Number.isFinite(value) ? "N/A" : `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
   const shortTime = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+    apiInstantDate(value)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) ?? "N/A";
   const formatExpiry = (expiry: string | null | undefined) => {
     if (!expiry) return "N/A";
     const match = /^(\d{4})-?(\d{2})-?(\d{2})$/.exec(expiry);
@@ -694,7 +695,8 @@
             {sessionLoading ? "STOPPING..." : "Stop Stream"}
           </button>
         {/if}
-        <button type="button" on:click={sendSurfaceToCopilot} disabled={loading || !result}>Copilot</button>
+        <!-- Nombre propio para no colisionar con el botón Copilot de la cabecera (GUA-20261021-16). -->
+        <button type="button" aria-label="Send this options surface to Copilot" on:click={sendSurfaceToCopilot} disabled={loading || !result}>Copilot</button>
       </div>
     </div>
 
@@ -1324,6 +1326,7 @@
               type="button"
               class="template-button"
               title={template.stance}
+              aria-label={`${template.label} template, ${template.stance}`}
               on:click={() => applyStrategyTemplate(template.id)}
               disabled={!chainRows.length}
             >
