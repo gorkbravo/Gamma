@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -111,10 +114,38 @@ from src.utils.logging_config import setup_logging
 if TYPE_CHECKING:
     from src.services.app_context import AppDataContext
 
+logger = logging.getLogger(__name__)
+
+# Variable opt-in para conectar con TWS al arrancar (GUA-20261021-14a). Desactivada por defecto.
+IB_AUTO_CONNECT_ENV = "IB_AUTO_CONNECT"
+
 
 @dataclass
 class DesktopRuntimeState:
     app_context: AppDataContext
+
+
+@dataclass
+class IbAutoConnectState:
+    """Intento único, opcional y en segundo plano de conectar con TWS al arrancar (GUA-20261021-14a).
+
+    No reintenta: si TWS no responde, el usuario conecta desde Settings o Setup > Broker.
+    """
+
+    host: str
+    port: int
+    thread: threading.Thread | None = None
+    outcome: str = "pending"  # pending | connected | failed
+    detail: str = ""
+
+    def in_progress(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+    def wait(self, timeout_seconds: float) -> None:
+        """Espera a que termine el intento para que un Connect manual no compita con él."""
+        thread = self.thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(max(0.0, float(timeout_seconds)))
 
 
 @dataclass
@@ -162,6 +193,8 @@ class ApplicationRuntime:
     startup_settings: StartupSettings | None = None
     # Referencia directa (sin trazar) para aplicar en caliente la identidad SEC guardada.
     sec_fundamentals_adapter: SecFundamentalsAdapter | None = None
+    # Estado del auto-connect opcional a TWS (None si IB_AUTO_CONNECT no está activo).
+    ib_auto_connect: IbAutoConnectState | None = None
 
     @property
     def app_context(self) -> AppDataContext | None:
@@ -573,6 +606,59 @@ def reset_runtime() -> None:
         runtime = get_runtime()
         runtime.shutdown()
     get_runtime.cache_clear()
+
+
+def ib_auto_connect_enabled() -> bool:
+    return _parse_bool_env(IB_AUTO_CONNECT_ENV, False)
+
+
+def start_ib_auto_connect(runtime: ApplicationRuntime) -> IbAutoConnectState | None:
+    """Lanza, si se pidió, un único intento de conexión con TWS sin bloquear el arranque.
+
+    GUA-20261021-14a: el backend no conectaba con TWS hasta pulsar Test connection. Con
+    ``IB_AUTO_CONNECT=true`` y modo live se intenta una vez en un hilo daemon; ``ib.connect``
+    usa un timeout de 5 s, el resultado se registra en el log y nunca se reintenta. Nunca
+    corre en modo demo ni bajo pytest (la suite además elimina las variables ``IB_*``).
+    """
+    if not ib_auto_connect_enabled():
+        return None
+    if runtime.mock_mode:
+        logger.info("IBKR auto-connect skipped: Gamma is running in demo mode.")
+        return None
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
+    existing = runtime.ib_auto_connect
+    if existing is not None:
+        return existing
+    client = runtime.client
+    state = IbAutoConnectState(host=str(client.host), port=int(client.port))
+
+    def _attempt() -> None:
+        started = time.perf_counter()
+        try:
+            connected = bool(client.connect())
+        except Exception as exc:  # noqa: BLE001 - el arranque no debe fallar por TWS
+            connected = False
+            state.detail = str(exc) or exc.__class__.__name__
+        elapsed = time.perf_counter() - started
+        if connected:
+            state.outcome = "connected"
+            logger.info("IBKR auto-connect ok: %s:%s in %.1fs", state.host, state.port, elapsed)
+            return
+        state.outcome = "failed"
+        if not state.detail:
+            state.detail = f"TWS did not accept a connection at {state.host}:{state.port}."
+        logger.warning(
+            "IBKR auto-connect failed after %.1fs (%s); not retrying. Connect from Settings or Setup > Broker.",
+            elapsed,
+            state.detail,
+        )
+
+    state.thread = threading.Thread(target=_attempt, name="ibkr-auto-connect", daemon=True)
+    runtime.ib_auto_connect = state
+    logger.info("IBKR auto-connect: trying %s:%s once in the background.", state.host, state.port)
+    state.thread.start()
+    return state
 
 
 def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRuntimeState:

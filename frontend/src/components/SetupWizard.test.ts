@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
 import { setupReportFixture } from "../lib/setup-wizard.fixture";
@@ -53,6 +55,26 @@ describe("SetupWizard", () => {
     expect(body).toContain('autocomplete="email"');
     expect(body).toContain("Required for Fundamentals");
     expect(body).not.toContain("development identity");
+  });
+
+  it("warns on Review what an empty SEC identity disables even with no changes (GUA-20261021-14b)", () => {
+    const { body } = render(SetupWizard, {
+      props: { ...handlers, report: setupReportFixture(), status: null, firstRun: true, initialStep: "review" }
+    });
+
+    expect(body).toContain("No changes.");
+    expect(body).toContain("Unavailable after you finish");
+    expect(body).toContain("Fundamentals, Copilot company lookup");
+    expect(body).toContain("Add your name and email in the SEC identity step.");
+  });
+
+  it("closes on Finish and never leaves a blocking backdrop behind (GUA-20261021-14d)", () => {
+    const source = readFileSync(fileURLToPath(new URL("./SetupWizard.svelte", import.meta.url)), "utf8");
+
+    expect(source).toContain("if (closesOnFinish(outcome))");
+    expect(source).toContain("class:passthrough={result != null}");
+    expect(source).toMatch(/\.backdrop\.passthrough\s*\{\s*pointer-events: none;/);
+    expect(source).toContain("on:pointerdown|capture={handleWindowPointerDown}");
   });
 
   it("states loading and failure without a draft", () => {

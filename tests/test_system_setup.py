@@ -472,3 +472,133 @@ def test_env_file_path_follows_app_data_in_packaged_builds(tmp_path, monkeypatch
     # Una ruta explícita manda en cualquier modo.
     monkeypatch.setenv("GAMMA_ENV_FILE", str(tmp_path / "custom.env"))
     assert resolve_env_file_path() == tmp_path / "custom.env"
+
+
+# ── GUA-20261021-14: auto-connect opcional y guía coherente ─────────────
+
+
+def test_eia_guidance_matches_how_ibkr_commodities_uses_the_key(monkeypatch):
+    """GUA-20261021-14c: con COMMODITIES_PROVIDER=ibkr la clave EIA ya alimenta la referencia."""
+    from src.application.setup_service import _commodities_coverage, _provider_unlocks
+
+    monkeypatch.setenv("COMMODITIES_PROVIDER", "ibkr")
+    monkeypatch.setenv("EIA_API_KEY", FAKE_SECRET)
+    unlocks = _provider_unlocks("eia")
+    assert "COMMODITIES_PROVIDER=eia" not in unlocks
+    assert "COMMODITIES_PROVIDER=ibkr reads this key" in unlocks
+    source, detail = _commodities_coverage(mock_mode=False)
+    assert source == "mixed"
+    assert "EIA inventories as reference data" in detail
+
+    monkeypatch.delenv("EIA_API_KEY")
+    _, detail_without_key = _commodities_coverage(mock_mode=False)
+    assert "EIA_API_KEY" in detail_without_key
+
+    monkeypatch.setenv("COMMODITIES_PROVIDER", "sample")
+    neutral = _provider_unlocks("eia")
+    assert "COMMODITIES_PROVIDER=ibkr" in neutral and "COMMODITIES_PROVIDER=eia" in neutral
+    assert "Also set" not in neutral
+
+    monkeypatch.setenv("MARITIME_PROVIDER", "aisstream")
+    assert "Also set" not in _provider_unlocks("aisstream")
+
+
+class _FakeIbClient:
+    """Cliente sin red: nunca abre un socket hacia TWS."""
+
+    def __init__(self, *, connects: bool, release=None) -> None:
+        self.host = "127.0.0.1"
+        self.port = 7497
+        self.connects = connects
+        self.release = release
+        self.calls = 0
+
+    def connect(self) -> bool:
+        self.calls += 1
+        if self.release is not None:
+            self.release.wait(5)
+        return self.connects
+
+
+def _fake_runtime(client, *, mock_mode=False):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(mock_mode=mock_mode, client=client, ib_auto_connect=None)
+
+
+def test_auto_connect_is_opt_in_and_never_runs_in_demo_or_under_pytest(monkeypatch):
+    from src.application.runtime import start_ib_auto_connect
+
+    client = _FakeIbClient(connects=True)
+    monkeypatch.delenv("IB_AUTO_CONNECT", raising=False)
+    assert start_ib_auto_connect(_fake_runtime(client)) is None
+
+    monkeypatch.setenv("IB_AUTO_CONNECT", "true")
+    assert start_ib_auto_connect(_fake_runtime(client, mock_mode=True)) is None
+    # La suite corre con PYTEST_CURRENT_TEST: el auto-connect queda desactivado.
+    assert start_ib_auto_connect(_fake_runtime(client)) is None
+    assert client.calls == 0
+
+
+def test_auto_connect_tries_once_in_the_background_and_logs_the_outcome(monkeypatch, caplog):
+    import logging
+    import threading
+
+    from src.application.runtime import start_ib_auto_connect
+
+    monkeypatch.setenv("IB_AUTO_CONNECT", "1")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    caplog.set_level(logging.INFO, logger="src.application.runtime")
+
+    release = threading.Event()
+    client = _FakeIbClient(connects=False, release=release)
+    runtime = _fake_runtime(client)
+    state = start_ib_auto_connect(runtime)
+    # No bloquea: devuelve mientras connect() sigue esperando.
+    assert state is not None and state.in_progress()
+    assert runtime.ib_auto_connect is state
+    assert start_ib_auto_connect(runtime) is state  # sin segundo intento
+    release.set()
+    state.wait(5)
+
+    assert client.calls == 1
+    assert state.outcome == "failed"
+    assert "not retrying" in caplog.text
+
+    ok_client = _FakeIbClient(connects=True)
+    ok_state = start_ib_auto_connect(_fake_runtime(ok_client))
+    ok_state.wait(5)
+    assert ok_state.outcome == "connected"
+    assert "IBKR auto-connect ok" in caplog.text
+
+
+def test_status_and_setup_report_reflect_the_auto_connect_attempt(tmp_path, monkeypatch):
+    import threading
+
+    from src.application.runtime import IbAutoConnectState
+
+    client, runtime = _client(tmp_path, mock_mode=False)
+    release = threading.Event()
+    worker = threading.Thread(target=lambda: release.wait(5), daemon=True)
+    try:
+        body = client.get("/system/setup").json()
+        assert body["ibkr"]["status"] == "disconnected"
+        assert any("IB_AUTO_CONNECT=true" in step for step in body["ibkr"]["steps"])
+
+        runtime.ib_auto_connect = IbAutoConnectState(host="127.0.0.1", port=7497, thread=worker)
+        worker.start()
+        status = client.get("/system/status").json()
+        assert status["connection"]["connected"] is False
+        assert "auto-connect" in status["connection"]["status_text"]
+        assert status["connection"]["action_enabled"] is False
+        assert "auto-connect" in client.get("/system/setup").json()["ibkr"]["detail"]
+
+        release.set()
+        worker.join(5)
+        runtime.ib_auto_connect.outcome = "failed"
+        detail = client.get("/system/setup").json()["ibkr"]["detail"]
+        assert "did not reach TWS" in detail and "not retried" in detail
+        assert client.get("/system/status").json()["connection"]["action_enabled"] is True
+    finally:
+        release.set()
+        runtime.shutdown()

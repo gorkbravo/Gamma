@@ -59,12 +59,17 @@ import {
   SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY,
   SITREP_FOLLOW_UP_STORAGE_KEY,
   buildSitrepFollowUpCreatePayload,
+  composeSitrepWorkspace,
   findSitrepFollowUpByRow,
+  mergeSitrepSectionMeta,
+  normalizeSitrepWorkspaceSections,
   parseSitrepFollowUps,
   type SitrepFollowUp,
   type SitrepFollowUpStatus,
+  type SitrepSectionOutcome,
   type SitrepTapeHandoffRow,
-  type SitrepWorkspaceMeta
+  type SitrepWorkspaceMeta,
+  type SitrepWorkspaceSection
 } from "../view-models/sitrep";
 import type {
   ActionResponse,
@@ -1793,52 +1798,96 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
   }
 }
 
-export async function loadSitrepWorkspace(options: { forceRefresh?: boolean } = {}) {
-  const params = new URLSearchParams();
-  if (options.forceRefresh) params.set("force_refresh", "true");
-  const query = params.toString();
-  const path = query ? `/sitrep/workspace?${query}` : "/sitrep/workspace";
-  beginLoading("researchOverview");
-  beginLoading("macro");
-  beginLoading("commodities");
-  setLoading("prediction", true);
-  setLoading("news", true);
-  try {
-    const workspace = await queryCache.query<SitrepWorkspaceResponse>({
-      scope: "sitrep-workspace",
-      key: stableQueryKey("/sitrep/workspace", {}),
-      staleTimeMs: 5 * 60_000,
-      forceRefresh: options.forceRefresh,
-      fetcher: (signal) => getJson<SitrepWorkspaceResponse>(path, { signal }),
-      onData: (data) => {
-        if (data.equities_overview) researchOverview.set(data.equities_overview);
-        if (data.indices_overview) sitrepIndicesOverview.set(data.indices_overview);
-        if (data.macro_snapshot) macroSnapshot.set(data.macro_snapshot);
-        if (data.commodities) commoditiesWorkspace.set(data.commodities);
-        if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
-        if (data.news) newsFeed.set(data.news);
-        sitrepWorkspaceMeta.set({
-          retrieved_at: data.retrieved_at,
-          sections: data.sections,
-          section_warnings: data.section_warnings
+// Clave de carga de cada sección de SITREP (mismas claves que la carga agregada anterior).
+const SITREP_SECTION_LOADING: Record<SitrepWorkspaceSection, { key: string; counted: boolean }> = {
+  equities: { key: "researchOverview", counted: true },
+  indices: { key: "researchOverview", counted: true },
+  macro: { key: "macro", counted: true },
+  commodities: { key: "commodities", counted: true },
+  prediction_markets: { key: "prediction", counted: false },
+  news: { key: "news", counted: false }
+};
+
+function applySitrepSectionData(data: SitrepWorkspaceResponse) {
+  if (data.equities_overview) researchOverview.set(data.equities_overview);
+  if (data.indices_overview) sitrepIndicesOverview.set(data.indices_overview);
+  if (data.macro_snapshot) macroSnapshot.set(data.macro_snapshot);
+  if (data.commodities) commoditiesWorkspace.set(data.commodities);
+  if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
+  if (data.news) newsFeed.set(data.news);
+}
+
+/**
+ * GUA-20261021-12: una petición por sección (`sections=<id>`), en paralelo, en lugar de una
+ * agregada que esperaba al proveedor más lento. Cada tablero se pinta al llegar, cada sección
+ * tiene su propia caché y su error queda aislado en los metadatos.
+ */
+export async function loadSitrepWorkspace(
+  options: { forceRefresh?: boolean; sections?: readonly string[] } = {}
+) {
+  const sections = normalizeSitrepWorkspaceSections(options.sections);
+  const pending = new Set<string>(sections);
+  const responses: Partial<Record<SitrepWorkspaceSection, SitrepWorkspaceResponse>> = {};
+  const failures: unknown[] = [];
+
+  const updateMeta = (outcome: SitrepSectionOutcome) => {
+    const previous = get(sitrepWorkspaceMeta);
+    const next = mergeSitrepSectionMeta(previous, outcome, [...pending]);
+    // Sin ninguna sección respondida no se publica meta: Copilot sigue exigiendo datos.
+    if (previous || next.sections.length) sitrepWorkspaceMeta.set(next);
+  };
+
+  const current = get(sitrepWorkspaceMeta);
+  if (current) sitrepWorkspaceMeta.set({ ...current, pending_sections: [...sections] });
+
+  await Promise.all(
+    sections.map(async (section) => {
+      const loadingState = SITREP_SECTION_LOADING[section];
+      if (loadingState.counted) beginLoading(loadingState.key);
+      else setLoading(loadingState.key, true);
+      const params = new URLSearchParams({ sections: section });
+      if (options.forceRefresh) params.set("force_refresh", "true");
+      const path = `/sitrep/workspace?${params.toString()}`;
+      try {
+        await queryCache.query<SitrepWorkspaceResponse>({
+          scope: `sitrep-workspace:${section}`,
+          key: stableQueryKey("/sitrep/workspace", { sections: section }),
+          staleTimeMs: 5 * 60_000,
+          forceRefresh: options.forceRefresh,
+          fetcher: (signal) => getJson<SitrepWorkspaceResponse>(path, { signal }),
+          onData: (data) => {
+            responses[section] = data;
+            pending.delete(section);
+            applySitrepSectionData(data);
+            updateMeta({ section, response: data });
+            if (data.section_warnings.length) {
+              console.warn(`SITREP section '${section}' degraded:`, data.section_warnings);
+            }
+          }
         });
-        if (data.section_warnings.length) {
-          console.warn("SITREP workspace sections degraded:", data.section_warnings);
+      } catch (error) {
+        pending.delete(section);
+        if (isAbortError(error)) {
+          updateMeta({ section, response: responses[section] ?? null });
+          return;
         }
+        failures.push(error);
+        updateMeta({ section, error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (loadingState.counted) endLoading(loadingState.key);
+        else setLoading(loadingState.key, false);
       }
-    });
+    })
+  );
+
+  const workspace = composeSitrepWorkspace(responses, get(sitrepWorkspaceMeta));
+  if (workspace) {
     lastError.set("");
-    return workspace;
-  } catch (error) {
-    if (!isAbortError(error)) setError(error);
-    return null;
-  } finally {
-    endLoading("researchOverview");
-    endLoading("macro");
-    endLoading("commodities");
-    setLoading("prediction", false);
-    setLoading("news", false);
+  } else if (failures.length) {
+    // Solo un fallo total llega al error global; uno parcial queda en su sección.
+    setError(failures[0]);
   }
+  return workspace;
 }
 
 interface SitrepFollowUpListResponse {

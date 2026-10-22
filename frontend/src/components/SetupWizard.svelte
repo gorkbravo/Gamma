@@ -3,6 +3,7 @@
   import type { SetupDataMode, SetupReport, SystemStatus } from "../lib/api/types";
   import {
     buildSetupChoices,
+    closesOnFinish,
     coverageSourceLabel,
     coverageSourceTone,
     dataModeLabel,
@@ -11,6 +12,7 @@
     initialDraft,
     initialStepIndex,
     lockedNote,
+    lostCapabilities,
     restartNeeded,
     SEC_EMAIL_MAX,
     SEC_NAME_MAX,
@@ -54,6 +56,7 @@
   let result: SetupFinishResult | null = null;
   let headingEl: HTMLHeadingElement | null = null;
   let dialogEl: HTMLDivElement | null = null;
+  let doneEl: HTMLButtonElement | null = null;
   let previouslyFocused: HTMLElement | null = null;
 
   // El borrador se crea una sola vez con el primer informe; refrescos posteriores no lo pisan.
@@ -66,6 +69,7 @@
   $: step = steps[stepIndex];
   $: identityError = draft ? validateSecIdentity(draft.secName, draft.secEmail) : null;
   $: changes = report && draft ? draftChanges(report, status, draft) : [];
+  $: lost = report && draft ? lostCapabilities(report, draft) : [];
   $: coverage = report && draft ? report.coverage_by_mode[draft.dataMode] ?? [] : [];
   $: modeLocked = report ? dataModeLocked(report) : false;
   $: needsRestart = report && draft ? restartNeeded(report, draft) : false;
@@ -115,8 +119,23 @@
       errorText = outcome.error ?? "Setup could not be saved.";
       return;
     }
+    // GUA-20261021-14d: sin nada que leer, Finish cierra el asistente directamente.
+    if (closesOnFinish(outcome)) {
+      onClose();
+      return;
+    }
     result = outcome;
-    await focusHeading();
+    await tick();
+    (doneEl ?? headingEl)?.focus();
+  }
+
+  // Con el resumen abierto, un clic fuera cierra el asistente y llega a su destino
+  // (el fondo deja pasar el puntero), en lugar de perderse (GUA-20261021-14d).
+  function handleWindowPointerDown(event: PointerEvent) {
+    if (!result || !dialogEl) return;
+    const target = event.target;
+    if (target instanceof Node && dialogEl.contains(target)) return;
+    onClose();
   }
 
   async function skip() {
@@ -181,11 +200,13 @@
   }
 </script>
 
-<div class="backdrop">
+<svelte:window on:pointerdown|capture={handleWindowPointerDown} />
+
+<div class="backdrop" class:passthrough={result != null}>
   <div
     class="dialog"
     role="dialog"
-    aria-modal="true"
+    aria-modal={result ? undefined : "true"}
     aria-labelledby="setup-title"
     tabindex="-1"
     bind:this={dialogEl}
@@ -196,7 +217,9 @@
         <span class="eyebrow">{firstRun ? "First-run setup" : "Setup"}</span>
         <h2 id="setup-title" tabindex="-1" bind:this={headingEl}>{title}</h2>
       </div>
-      <button type="button" class="ghost close" aria-label="Close setup" on:click={onClose}>Close</button>
+      {#if !result}
+        <button type="button" class="ghost close" aria-label="Close setup" on:click={onClose}>Close</button>
+      {/if}
     </header>
 
     {#if report && draft && !result}
@@ -478,6 +501,28 @@
         {:else}
           <p class="muted">No changes. Finishing marks setup as complete; run it again any time from Settings.</p>
         {/if}
+        {#if lost.length}
+          <!-- GUA-20261021-14b: lo que no funcionará por pasos omitidos o vacíos. -->
+          <table class="grid lost">
+            <caption>Unavailable after you finish</caption>
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col">Why</th>
+                <th scope="col">To enable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each lost as item (item.id)}
+                <tr>
+                  <th scope="row">{item.capability}</th>
+                  <td>{item.reason}</td>
+                  <td>{item.fix}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
       {/if}
 
       {#if errorText}
@@ -488,7 +533,7 @@
     <footer class="foot">
       {#if result}
         <span></span>
-        <button type="button" class="primary" on:click={onClose}>Done</button>
+        <button type="button" class="primary" bind:this={doneEl} on:click={onClose}>Done</button>
       {:else if !report || !draft}
         <span></span>
         {#if loadError}
@@ -852,6 +897,26 @@
 
   .grid td:nth-child(2) {
     white-space: nowrap;
+  }
+
+  /* La capacidad perdida es texto largo: se parte y se marca como aviso. */
+  .grid.lost th[scope="row"] {
+    color: var(--warning);
+    white-space: normal;
+  }
+
+  .grid.lost td:nth-child(2) {
+    white-space: normal;
+  }
+
+  /* Con el resumen final, el fondo deja pasar los clics a la página (GUA-20261021-14d). */
+  .backdrop.passthrough {
+    pointer-events: none;
+    background: transparent;
+  }
+
+  .backdrop.passthrough .dialog {
+    pointer-events: auto;
   }
 
   .lines {

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import email.message
+import io
+import socket
+import urllib.error
+import urllib.request
+import urllib.response
 from datetime import datetime, timezone
 
 import pytest
@@ -7,8 +13,15 @@ from fastapi.testclient import TestClient
 
 from src.api.main import create_app
 from src.application.runtime import _build_copilot_provider, build_runtime
+from src.services import provider_usage as provider_usage_module
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
-from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
+from src.services.provider_usage import (
+    ProviderActivationCondition,
+    ProviderUsageLedger,
+    install_http_usage_recorder,
+    trace_provider,
+    uninstall_http_usage_recorder,
+)
 
 
 class FakeProvider:
@@ -438,3 +451,225 @@ def test_clean_provider_history_still_reads_healthy():
 
     assert health.health_status == "healthy"
     assert health.incomplete_count == 0
+
+
+# ── GUA-20260903-10: atribución completa y filas que suman el total ─────────
+
+
+class _FakeHTTPHandler(urllib.request.BaseHandler):
+    """Responde a http/https sin red: código por host, o un timeout simulado."""
+
+    handler_order = 100
+
+    def __init__(self, responses: dict[str, object]) -> None:
+        self.responses = responses
+        self.seen: list[str] = []
+
+    def http_open(self, req):
+        return self._respond(req)
+
+    def https_open(self, req):
+        return self._respond(req)
+
+    def _respond(self, req):
+        self.seen.append(req.full_url)
+        outcome = self.responses.get(req.host, 200)
+        if outcome == "timeout":
+            raise urllib.error.URLError(socket.timeout("timed out"))
+        response = urllib.response.addinfourl(io.BytesIO(b"{}"), email.message.Message(), req.full_url, code=outcome)
+        response.msg = "Bad Request" if outcome == 400 else "OK"
+        return response
+
+
+@pytest.fixture
+def http_recorder():
+    """Instala el registrador HTTP sobre un opener falso y restaura el estado global."""
+
+    saved_opener = getattr(urllib.request, "_opener", None)
+    saved_ledger = provider_usage_module._HTTP_RECORDER_STATE["ledger"]
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 10, 21, 10, 30, tzinfo=timezone.utc))
+
+    def install(responses: dict[str, object]) -> _FakeHTTPHandler:
+        handler = _FakeHTTPHandler(responses)
+        urllib.request.install_opener(urllib.request.build_opener(handler))
+        install_http_usage_recorder(ledger)
+        return handler
+
+    try:
+        yield ledger, install
+    finally:
+        urllib.request.install_opener(saved_opener)
+        provider_usage_module._HTTP_RECORDER_STATE["ledger"] = saved_ledger
+
+
+def test_http_errors_are_attributed_by_host_and_counted_without_leaking_the_query(http_recorder):
+    ledger, install = http_recorder
+    install({"api.stlouisfed.org": 400})
+
+    with pytest.raises(urllib.error.HTTPError):
+        urllib.request.urlopen(
+            "https://api.stlouisfed.org/fred/series/observations?series_id=GOLDAMGBD228NLBM&api_key=SECRET-KEY"
+        )
+
+    snapshot = ledger.snapshot()
+    fred = {row.provider_id: row for row in snapshot.providers}["fred"]
+    assert fred.call_count == 1
+    assert fred.error_count == 1
+    assert fred.http_request_count == 1
+    call = snapshot.recent_calls[0]
+    assert call.kind == "http"
+    assert call.endpoint == "http:api.stlouisfed.org"
+    assert "HTTP 400" in (call.message or "")
+    assert "SECRET-KEY" not in (call.message or "") and "api_key" not in (call.message or "")
+    health = {row.provider_id: row for row in snapshot.health}["fred"]
+    assert health.health_status == "degraded"
+
+
+def test_reference_calls_inside_a_composed_provider_keep_their_own_provider(http_recorder):
+    """Las referencias EIA/FRED de la curva IBKR ya no se atribuyen a IBKR."""
+
+    ledger, install = http_recorder
+    install({"api.stlouisfed.org": 400, "api.eia.gov": 200})
+
+    class IbkrCurveProvider:
+        provider_id = "ibkr"
+
+        def get_snapshot(self):
+            urllib.request.urlopen("https://api.eia.gov/v2/seriesid/PET.WCESTUS1.W?api_key=SECRET")
+            try:
+                urllib.request.urlopen("https://api.stlouisfed.org/fred/series/observations?series_id=SLVPRUSD")
+            except urllib.error.HTTPError:
+                pass  # el adaptador real lo convierte en un aviso
+            return ComposedSnapshot(["FRED series SLVPRUSD failed: HTTP Error 400."])
+
+    trace_provider(IbkrCurveProvider(), ledger, endpoint_prefix="commodities").get_snapshot()
+
+    snapshot = ledger.snapshot()
+    rows = {row.provider_id: row for row in snapshot.providers}
+    assert set(rows) == {"ibkr", "eia", "fred"}
+    assert rows["eia"].success_count == 1
+    assert rows["fred"].error_count == 1
+    assert rows["ibkr"].call_count == 1 and rows["ibkr"].http_request_count == 0
+    assert "http:api.eia.gov via commodities.get_snapshot" in rows["eia"].endpoints
+    assert sum(row.call_count for row in snapshot.providers) == snapshot.total_calls == 3
+
+
+def test_unknown_hosts_inherit_the_calling_provider_or_show_as_unattributed(http_recorder):
+    ledger, install = http_recorder
+    install({"feeds.example.org": 200, "cdn.example.net": "timeout"})
+
+    class Feeds:
+        provider_id = "rss"
+
+        def latest(self):
+            return urllib.request.urlopen("https://feeds.example.org/markets.xml")
+
+    trace_provider(Feeds(), ledger, endpoint_prefix="news").latest()
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen("https://cdn.example.net/blob")
+
+    snapshot = ledger.snapshot()
+    rows = {row.provider_id: row for row in snapshot.providers}
+    assert rows["rss"].call_count == 2 and rows["rss"].http_request_count == 1
+    assert "http:feeds.example.org via news.latest" in rows["rss"].endpoints
+    assert rows["unattributed"].call_count == 1
+    assert rows["unattributed"].error_count == 1
+    assert snapshot.recent_calls[0].status == "timeout"
+    assert sum(row.call_count for row in snapshot.providers) == snapshot.total_calls
+    unattributed_health = {row.provider_id: row for row in snapshot.health}["unattributed"]
+    assert unattributed_health.display_name == "Unattributed calls"
+
+
+def test_the_recorder_passes_through_when_no_ledger_is_active(http_recorder):
+    ledger, install = http_recorder
+    handler = install({})
+    uninstall_http_usage_recorder()
+
+    urllib.request.urlopen("https://api.eia.gov/v2/seriesid/X")
+
+    assert handler.seen == ["https://api.eia.gov/v2/seriesid/X"]
+    assert ledger.snapshot().total_calls == 0
+
+
+def test_status_words_never_become_provider_rows_and_cached_suffix_is_a_cache_hit():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 10, 21, tzinfo=timezone.utc))
+
+    class UnavailableNews:
+        provider_id = "unavailable_news"
+
+        def latest(self):
+            return type("Feed", (), {"source_provider": "unavailable", "warnings": ["No live news provider."]})()
+
+    class CachedIbkr:
+        provider_id = "ibkr_fx"
+
+        def quote(self):
+            return type("Quote", (), {"source_provider": "ibkr_cached"})()
+
+    trace_provider(UnavailableNews(), ledger, endpoint_prefix="news").latest()
+    trace_provider(CachedIbkr(), ledger, endpoint_prefix="macro").quote()
+    ledger.record(provider_id="", endpoint="orphan", status="success")
+    ledger.record(provider_id="unknown", endpoint="orphan", status="success")
+
+    snapshot = ledger.snapshot()
+    rows = {row.provider_id: row for row in snapshot.providers}
+    assert set(rows) == {"unavailable_news", "ibkr", "unattributed"}
+    assert rows["unavailable_news"].unavailable_count == 1
+    assert rows["ibkr"].cache_hit_count == 1
+    assert rows["unattributed"].call_count == 2
+
+
+def test_rows_sum_to_the_retained_total_and_lifetime_counts_everything():
+    ledger = ProviderUsageLedger(max_calls=3, clock=lambda: datetime(2026, 10, 21, tzinfo=timezone.utc))
+    for provider_id in ("fred", "fred", "eia", "kalshi", "polymarket"):
+        ledger.record(provider_id=provider_id, endpoint="x", status="success")
+
+    snapshot = ledger.snapshot()
+
+    assert snapshot.total_calls == 3
+    assert snapshot.lifetime_calls == 5
+    assert snapshot.retained_limit == 3
+    assert sum(row.call_count for row in snapshot.providers) == snapshot.total_calls
+
+
+def test_app_lifespan_installs_the_http_recorder_for_its_runtime(tmp_path):
+    saved_opener = getattr(urllib.request, "_opener", None)
+    saved_ledger = provider_usage_module._HTTP_RECORDER_STATE["ledger"]
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        with TestClient(create_app(runtime)):
+            assert isinstance(urllib.request._opener, provider_usage_module._UsageRecordingOpener)
+            assert provider_usage_module._HTTP_RECORDER_STATE["ledger"] is runtime.provider_usage
+            # Un runtime inyectado nunca lanza el auto-connect a TWS.
+            assert runtime.ib_auto_connect is None
+    finally:
+        urllib.request.install_opener(saved_opener)
+        provider_usage_module._HTTP_RECORDER_STATE["ledger"] = saved_ledger
+        runtime.shutdown()
+
+
+def test_provider_usage_api_exposes_window_and_http_counts(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        runtime.provider_usage.record(provider_id="fred", endpoint="http:api.stlouisfed.org", status="error", kind="http")
+
+        payload = client.get("/system/provider-usage").json()
+
+        assert payload["total_calls"] == 1
+        assert payload["lifetime_calls"] == 1
+        assert payload["retained_limit"] == runtime.provider_usage.max_calls
+        assert payload["providers"][0]["http_request_count"] == 1
+        assert payload["recent_calls"][0]["kind"] == "http"
+    finally:
+        runtime.shutdown()

@@ -95,6 +95,7 @@ def read_only_boundary() -> ReadOnlyBoundaryModel:
 def toggle_connection(request: Request) -> SystemStatusResponseModel:
     runtime = request.app.state.runtime
     if not runtime.mock_mode:
+        _await_auto_connect(runtime)
         if runtime.client.is_connected():
             runtime.client.disconnect()
         else:
@@ -110,6 +111,7 @@ def set_connection(
     """Apply a desired TWS connection state without toggle races."""
     runtime = request.app.state.runtime
     if not runtime.mock_mode:
+        _await_auto_connect(runtime)
         connected = runtime.client.is_connected()
         if payload.connected and not connected:
             runtime.client.connect()
@@ -224,6 +226,17 @@ def force_account_subscribe(request: Request) -> ActionResponseModel:
     return ActionResponseModel(lines=list(lines or ["Force account subscribe returned no output."]))
 
 
+# Margen para que un Connect manual espere al auto-connect de arranque en vez de competir
+# con él en el hilo de IB (ib.connect usa 5 s, más la suscripción de cuenta).
+_AUTO_CONNECT_WAIT_SECONDS = 15.0
+
+
+def _await_auto_connect(runtime) -> None:
+    state = getattr(runtime, "ib_auto_connect", None)
+    if state is not None and state.in_progress():
+        state.wait(_AUTO_CONNECT_WAIT_SECONDS)
+
+
 def _connection_state(runtime) -> ConnectionStateModel:
     if runtime.mock_mode:
         return ConnectionStateModel(
@@ -234,6 +247,16 @@ def _connection_state(runtime) -> ConnectionStateModel:
             active_account=runtime.client.account,
         )
     connected = runtime.client.is_connected()
+    auto_connect = getattr(runtime, "ib_auto_connect", None)
+    if not connected and auto_connect is not None and auto_connect.in_progress():
+        # GUA-20261021-14a: el intento de arranque sigue en curso; el botón espera a que termine.
+        return ConnectionStateModel(
+            connected=False,
+            status_text="Status: Connecting to TWS (auto-connect)",
+            action_text="Connecting...",
+            action_enabled=False,
+            active_account=None,
+        )
     status_text = "Status: Connected" if connected else "Status: Disconnected"
     return ConnectionStateModel(
         connected=connected,

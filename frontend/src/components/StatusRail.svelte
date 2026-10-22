@@ -1,8 +1,13 @@
 <script lang="ts">
-  import type { CopilotDiagnostics, ProviderUsageHealth, ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
+  import type { CopilotDiagnostics, ProviderUsageResponse, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
   import type { RequestMetricSnapshot } from "../lib/request-metrics";
+  import {
+    buildProviderHealthView,
+    buildProviderUsageView,
+    providerUsageRowDetail
+  } from "../lib/view-models/provider-usage";
 
   export let status: SystemStatus | null = null;
   export let providerUsage: ProviderUsageResponse | null = null;
@@ -29,8 +34,6 @@
   let selectedBaseCurrency = status?.base_currency ?? "USD";
   let selectedMarketDataMode = status?.market_data_mode ?? "delayed";
   let workspaceLabel = getWorkspaceLabel("portfolio");
-  let topProviderRows: ProviderUsageSummary[] = [];
-  let providerHealthRows: ProviderUsageHealth[] = [];
   let copiedDiagnosticId = "";
 
   $: if (status?.base_currency) {
@@ -46,27 +49,9 @@
   let selectedChartTheme: string = "blue";
   let selectedFontFamily: string = "Cascadia Mono";
 
-  $: topProviderRows = providerUsage?.providers.slice(0, 4) ?? [];
-  $: providerHealthRows = providerUsage?.health.slice(0, 4) ?? [];
-
-  function providerCallLabel(row: ProviderUsageSummary) {
-    return row.call_count === 1 ? "1 call" : `${row.call_count} calls`;
-  }
-
-  function providerStatusLabel(row: ProviderUsageSummary) {
-    const parts = [`${row.success_count} ok`];
-    if (row.unavailable_count) {
-      parts.push(`${row.unavailable_count} unavailable`);
-    }
-    if (row.error_count) {
-      parts.push(`${row.error_count} error`);
-    }
-    return parts.join(" / ");
-  }
-
-  function providerLatencyLabel(row: ProviderUsageSummary) {
-    return `${row.average_duration_ms.toFixed(row.average_duration_ms >= 10 ? 0 : 1)} ms avg`;
-  }
+  // GUA-20260903-10: todas las filas (antes solo 4) y sin atribuir explícito; suman el total.
+  $: usageView = buildProviderUsageView(providerUsage);
+  $: healthView = buildProviderHealthView(providerUsage);
 
   function providerHealthTone(status: string) {
     if (status === "healthy") return "positive";
@@ -223,30 +208,42 @@
         <div class="settings-section">
           <div class="settings-head">
             <span class="label">Provider Usage</span>
-            <strong>{providerUsage?.total_calls ?? 0} calls</strong>
+            <strong>{usageView.headline}</strong>
           </div>
-          {#if topProviderRows.length}
-            <div class="usage-list">
-              {#each topProviderRows as row}
-                <div class="usage-row" title={row.endpoints.join(", ")}>
-                  <strong>{row.provider_id}</strong>
-                  <span>{providerCallLabel(row)}</span>
-                  <small>{providerStatusLabel(row)} | {providerLatencyLabel(row)}</small>
+          {#if usageView.rows.length}
+            <div class="usage-list" aria-label="Provider calls by provider">
+              {#each usageView.rows as row (row.providerId)}
+                <div class="usage-row" class:unattributed={row.unattributed} title={row.endpoints.join(", ")}>
+                  <strong>{row.label}</strong>
+                  <span class:warning={row.failed > 0}>{row.calls}</span>
+                  <small>{providerUsageRowDetail(row)}</small>
                 </div>
               {/each}
+              <div class="usage-row total">
+                <strong>Total</strong>
+                <span>{usageView.rowSum}</span>
+                <small>
+                  {usageView.failed ? `${usageView.failed} failed` : "No failed calls"}{usageView.windowNote
+                    ? ` · ${usageView.windowNote}`
+                    : ""}
+                </small>
+              </div>
             </div>
           {:else}
             <small>No provider calls recorded since backend startup.</small>
           {/if}
-          {#if providerHealthRows.length}
+          {#if healthView.attention.length || healthView.summary}
             <div class="health-list">
-              {#each providerHealthRows as row}
+              {#each healthView.attention as row (row.provider_id)}
                 <div class="health-row" title={row.expected_when}>
                   <strong>{row.display_name}</strong>
                   <span class={providerHealthTone(row.health_status)}>{row.health_label}</span>
                   <small>{row.action_label ?? row.reason}</small>
                 </div>
               {/each}
+              {#if healthView.summary}
+                <small>{healthView.attention.length ? "Others: " : "All providers: "}{healthView.summary}</small>
+              {/if}
             </div>
           {/if}
         </div>
@@ -469,6 +466,9 @@
   .usage-list {
     display: grid;
     gap: var(--space-3);
+    /* Con todos los proveedores visibles la lista se desplaza en lugar de alargar el menú. */
+    max-height: 18rem;
+    overflow-y: auto;
   }
 
   .usage-row {
@@ -499,6 +499,20 @@
   .usage-row small {
     grid-column: 1 / -1;
     margin-top: 0;
+  }
+
+  .usage-row span.warning,
+  .usage-row.unattributed strong {
+    color: var(--warning);
+  }
+
+  .usage-row.total {
+    border-top-style: dashed;
+  }
+
+  .usage-row.total strong,
+  .usage-row.total span {
+    color: var(--text-1);
   }
 
   .health-list {

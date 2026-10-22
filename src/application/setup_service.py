@@ -81,9 +81,15 @@ _PROVIDER_UNLOCKS = {
     "fred": "FRED series in Macro and the risk-free rate used by Risk. FRED's API expects a free key.",
     "census": "Live US bilateral trade in Macro / Trade Partners; without it Gamma shows curated rows.",
     "coingecko": "Higher CoinGecko rate limits in Crypto. Crypto works without it on the public tier.",
-    "eia": "Official EIA inventories and energy fundamentals in Commodities. Also set COMMODITIES_PROVIDER=eia.",
-    "aisstream": "Live vessel positions in Sealanes. Also set MARITIME_PROVIDER=aisstream.",
 }
+
+# Mismos alias que _build_commodities_provider / _build_maritime_provider en runtime.py.
+_COMMODITIES_IBKR_IDS = {"ibkr", "tws", "ibkr_eia", "ibkr_futures"}
+_COMMODITIES_EIA_IDS = {"eia", "official", "eia_fred", "fred"}
+_MARITIME_AISSTREAM_IDS = {"aisstream", "aisstream_live", "live"}
+
+# Variable opt-in del auto-connect a TWS (GUA-20261021-14a); ver runtime.start_ib_auto_connect.
+_IB_AUTO_CONNECT_ENV = "IB_AUTO_CONNECT"
 
 
 @dataclass(frozen=True)
@@ -290,15 +296,34 @@ def _ibkr_state(runtime: "ApplicationRuntime", connected: bool) -> SetupIbkrStat
             detail=detail,
             steps=[],
         )
+    detail = f"Not connected to TWS at {host}:{port}. Portfolio, Risk and Options need this connection."
+    auto_connect = getattr(runtime, "ib_auto_connect", None)
+    if auto_connect is not None and auto_connect.in_progress():
+        detail = f"Connecting to TWS at {host}:{port} (auto-connect at startup)."
+    elif auto_connect is not None and auto_connect.outcome == "failed":
+        detail = (
+            f"Auto-connect at startup did not reach TWS at {host}:{port} and is not retried. "
+            "Start TWS, then use Test connection."
+        )
+    elif not _env_flag(_IB_AUTO_CONNECT_ENV):
+        # GUA-20261021-14a: el backend no conecta solo salvo que se pida.
+        steps.append(
+            f"Optional: set {_IB_AUTO_CONNECT_ENV}=true in the environment or .env file so Gamma connects "
+            "once when it starts."
+        )
     return SetupIbkrState(
         status="disconnected",
         host=host,
         port=port,
         client_id=client_id,
         account_configured=account_configured,
-        detail=f"Not connected to TWS at {host}:{port}. Portfolio, Risk and Options need this connection.",
+        detail=detail,
         steps=steps,
     )
+
+
+def _env_flag(name: str) -> bool:
+    return _env_choice(name, "") in {"1", "true", "yes", "on"}
 
 
 def _sec_identity_state(runtime: "ApplicationRuntime", preferences: SetupPreferences) -> SetupSecIdentityState:
@@ -377,7 +402,7 @@ def _provider_rows(runtime: "ApplicationRuntime") -> list[SetupProviderRow]:
         key_vars = [name for name in capability.credential_env_vars if name.endswith("_API_KEY")]
         if not key_vars or capability.provider_id == "openai_copilot":
             continue
-        unlocks = _PROVIDER_UNLOCKS.get(capability.provider_id)
+        unlocks = _provider_unlocks(capability.provider_id)
         if unlocks is None:
             unlocks = capability.configuration_notes[0] if capability.configuration_notes else capability.display_name
         rows.append(
@@ -390,6 +415,31 @@ def _provider_rows(runtime: "ApplicationRuntime") -> list[SetupProviderRow]:
             )
         )
     return rows
+
+
+def _provider_unlocks(provider_id: str) -> str | None:
+    """Qué añade cada clave, coherente con cómo runtime.py la usa realmente.
+
+    GUA-20261021-14c: la fila EIA pedía "COMMODITIES_PROVIDER=eia" aunque con
+    COMMODITIES_PROVIDER=ibkr la misma clave ya alimenta la referencia EIA bajo los futuros.
+    """
+    if provider_id == "eia":
+        provider = _env_choice("COMMODITIES_PROVIDER", "sample")
+        base = "Official EIA inventories and energy fundamentals in Commodities"
+        if provider in _COMMODITIES_IBKR_IDS:
+            return f"{base}, as reference data under the IBKR futures (COMMODITIES_PROVIDER={provider} reads this key)."
+        if provider in _COMMODITIES_EIA_IDS:
+            return f"{base} (COMMODITIES_PROVIDER={provider})."
+        return (
+            f"{base}. Read when COMMODITIES_PROVIDER=ibkr (reference data under IBKR futures) "
+            "or COMMODITIES_PROVIDER=eia (EIA and FRED without IBKR futures)."
+        )
+    if provider_id == "aisstream":
+        provider = _env_choice("MARITIME_PROVIDER", "sample")
+        if provider in _MARITIME_AISSTREAM_IDS:
+            return f"Live vessel positions in Sealanes (MARITIME_PROVIDER={provider})."
+        return "Live vessel positions in Sealanes. Also set MARITIME_PROVIDER=aisstream."
+    return _PROVIDER_UNLOCKS.get(provider_id)
 
 
 def _env_choice(name: str, default: str) -> str:
@@ -507,11 +557,20 @@ def _commodities_coverage(mock_mode: bool) -> tuple[str, str]:
     if provider in {"sample", "mock", "offline", "demo"}:
         if mock_mode:
             return "sample", "Sample curves, inventories and events."
-        return "unavailable", "No live commodities provider: set COMMODITIES_PROVIDER=eia with EIA_API_KEY, or ibkr."
-    if provider in {"ibkr", "tws", "ibkr_eia", "ibkr_futures"}:
-        reference = "EIA" if has_eia else ("sample" if mock_mode else "no")
-        return "mixed", f"IBKR futures (needs TWS) with {reference} reference data."
-    if provider in {"eia", "official", "eia_fred", "fred"}:
+        return (
+            "unavailable",
+            "No live commodities provider: set COMMODITIES_PROVIDER=ibkr (IBKR futures, plus EIA reference data "
+            "with EIA_API_KEY) or COMMODITIES_PROVIDER=eia with EIA_API_KEY.",
+        )
+    if provider in _COMMODITIES_IBKR_IDS:
+        # Igual que _build_commodities_provider: con EIA_API_KEY la referencia es EIA, sin ella no hay
+        # inventarios oficiales (GUA-20261021-14c).
+        if has_eia:
+            return "mixed", "IBKR futures (needs TWS) with EIA inventories as reference data."
+        if mock_mode:
+            return "mixed", "IBKR futures (needs TWS) with sample reference data; EIA_API_KEY adds EIA inventories."
+        return "mixed", "IBKR futures (needs TWS); EIA inventories need EIA_API_KEY."
+    if provider in _COMMODITIES_EIA_IDS:
         if has_eia:
             return "public", "Official EIA data" + (" with sample reference curves." if mock_mode else ".")
         if mock_mode:

@@ -120,6 +120,42 @@ describe("SitrepView", () => {
     expect(body).not.toContain("source / freshness / as of / age");
   });
 
+  it("marks in-flight and failed sections separately while sections load progressively (GUA-20261021-12)", () => {
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: makeGlobalIndicesOverview(),
+        news: null,
+        macro: null,
+        commodities: null,
+        prediction: null,
+        loading: true,
+        workspaceMeta: {
+          retrieved_at: "2026-06-27T12:00:00Z",
+          sections: ["indices", "macro"],
+          section_warnings: ["SITREP section 'macro' failed to load: FRED timed out"],
+          pending_sections: ["equities", "commodities", "prediction_markets", "news"]
+        },
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+      },
+    });
+
+    // Indices ya está pintado; el resto espera o falló por separado.
+    expect(body).toContain("EWJ / Jun 26");
+    expect(body).toMatch(/>Predictions<\/th>[\s\S]*?state-text[^>]*>LOADING</);
+    expect(body).toMatch(/>News<\/th>[\s\S]*?state-text[^>]*>LOADING</);
+    expect(body).toMatch(/>FX \/ Rates<\/th>[\s\S]*?state-text[^>]*>FAILED</);
+    expect(body).not.toContain("NOT LOADED");
+    // La edad por sección y la sección más antigua siguen funcionando.
+    expect(body).toContain("OLDEST INDICES");
+  });
+
   it("renders backend follow-ups with notes, resolved state, and triage actions", () => {
     const { body } = render(SitrepView, {
       props: {

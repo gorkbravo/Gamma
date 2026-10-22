@@ -85,6 +85,64 @@ describe("StatusRail", () => {
     expect(body).toContain("zoom past level 4");
   });
 
+  it("shows every provider row, an explicit unattributed row and a total that matches (GUA-20260903-10)", () => {
+    const row = (provider_id: string, call_count: number, error_count = 0) => ({
+      provider_id,
+      call_count,
+      success_count: call_count - error_count,
+      unavailable_count: 0,
+      error_count,
+      cache_hit_count: 0,
+      cache_miss_count: 0,
+      average_duration_ms: 20,
+      last_status: error_count ? "error" : "success",
+      last_message: null,
+      last_error: null,
+      last_called_at: "2026-10-21T10:32:00Z",
+      endpoints: [],
+      http_request_count: call_count
+    });
+    const providers = [
+      row("yfinance", 28),
+      row("ibkr", 98),
+      row("rss", 3),
+      row("fred", 40, 3),
+      row("treasury", 6),
+      row("polymarket", 9),
+      row("unattributed", 2)
+    ];
+    const { body } = render(StatusRail, {
+      props: {
+        providerUsage: {
+          generated_at: "2026-10-21T10:32:00Z",
+          providers,
+          health: [],
+          recent_calls: [],
+          total_calls: 186,
+          lifetime_calls: 186,
+          retained_limit: 2000,
+          source_provider: "gamma",
+          origin: "provider_usage_ledger.snapshot",
+          transformation_note: null
+        },
+        settingsOpen: true,
+        workspaceMode: "research",
+        onToggleConnection: vi.fn(),
+        onBaseCurrencyChange: vi.fn(),
+        onMarketDataModeChange: vi.fn(),
+        onRefresh: vi.fn(),
+        onChangeView: vi.fn()
+      }
+    });
+
+    expect(body).toContain("186 calls");
+    for (const name of ["yfinance", "ibkr", "rss", "fred", "treasury", "polymarket", "Unattributed"]) {
+      expect(body).toContain(`>${name}</strong>`);
+    }
+    expect(body).toContain("3 failed");
+    expect(body).toMatch(/>Total<\/strong>\s*<span[^>]*>186<\/span>/);
+  });
+
   it("renders safe Copilot storage guidance and a keyboard-native diagnostic copy control", () => {
     const resolution = {
       policy_version: "copilot.model-policy.v1",

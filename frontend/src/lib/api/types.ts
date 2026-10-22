@@ -431,6 +431,8 @@ export interface ProviderUsageCall {
   duration_ms: number;
   recorded_at: string;
   message: string | null;
+  /** "http" para peticiones salientes registradas en urllib (GUA-20260903-10). */
+  kind?: "provider" | "http" | string;
 }
 
 export interface ProviderUsageSummary {
@@ -447,6 +449,9 @@ export interface ProviderUsageSummary {
   last_error: string | null;
   last_called_at: string | null;
   endpoints: string[];
+  incomplete_count?: number;
+  /** Peticiones HTTP incluidas en call_count (GUA-20260903-10). */
+  http_request_count?: number;
 }
 
 export interface ProviderUsageHealth {
@@ -470,6 +475,9 @@ export interface ProviderUsageResponse {
   health: ProviderUsageHealth[];
   recent_calls: ProviderUsageCall[];
   total_calls: number;
+  /** Todo lo registrado desde el arranque; total_calls es la ventana retenida (GUA-20260903-10). */
+  lifetime_calls?: number;
+  retained_limit?: number;
   source_provider: string;
   origin: string;
   transformation_note: string | null;

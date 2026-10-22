@@ -35,6 +35,19 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.runtime = runtime_instance
+        # GUA-20260903-10: cada petición urllib saliente queda atribuida y contada en el ledger,
+        # también los HTTPError que los adaptadores convierten en avisos.
+        from src.services.provider_usage import install_http_usage_recorder
+
+        usage_ledger = getattr(runtime_instance, "provider_usage", None)
+        if usage_ledger is not None:
+            install_http_usage_recorder(usage_ledger)
+        if owns_runtime:
+            # GUA-20261021-14a: conexión opcional con TWS (IB_AUTO_CONNECT=true), en segundo
+            # plano y sin reintentos; un runtime inyectado (tests, scripts) nunca conecta solo.
+            from src.application.runtime import start_ib_auto_connect
+
+            start_ib_auto_connect(runtime_instance)
         yield
         if owns_runtime:
             runtime_instance.shutdown()

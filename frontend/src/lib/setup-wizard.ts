@@ -190,6 +190,65 @@ export function buildSetupChoices(report: SetupReport, status: SystemStatus | nu
   };
 }
 
+export interface SetupLostCapability {
+  id: string;
+  capability: string;
+  reason: string;
+  fix: string;
+}
+
+const SEC_IDENTITY_CAPABILITIES = "Fundamentals, Copilot company lookup, Script Fundamentals exports and SEC press releases";
+
+/** True si al terminar no quedará identidad SEC (vacía, borrada o sin cambios desde "missing"). */
+function secIdentityMissingAfterFinish(report: SetupReport, draft: SetupDraft): boolean {
+  if (secIdentityLocked(report)) return false;
+  if (draft.clearSecIdentity && report.sec_identity.source === "setup") return true;
+  if (report.sec_identity.status !== "missing") return false;
+  return !secIdentityChanged(report, draft);
+}
+
+/**
+ * GUA-20261021-14b: qué no funcionará tras terminar por pasos omitidos o vacíos. Antes
+ * Review decía "No changes" aunque la identidad SEC vacía desactiva Fundamentals.
+ */
+export function lostCapabilities(report: SetupReport, draft: SetupDraft): SetupLostCapability[] {
+  const lost: SetupLostCapability[] = [];
+  if (secIdentityMissingAfterFinish(report, draft)) {
+    lost.push({
+      id: "sec_identity",
+      capability: SEC_IDENTITY_CAPABILITIES,
+      reason: "No SEC identity is saved, so Gamma does not contact sec.gov.",
+      fix: "Add your name and email in the SEC identity step."
+    });
+  }
+  if (draft.dataMode === "live" && report.data_mode.current === "live" && report.ibkr.status !== "connected") {
+    lost.push({
+      id: "broker",
+      capability: "Portfolio, Risk and Options",
+      reason: `TWS is not connected at ${report.ibkr.host}:${report.ibkr.port}.`,
+      fix: "Use Test connection in the Broker step or Connect in Settings, or set IB_AUTO_CONNECT=true."
+    });
+  }
+  for (const row of report.coverage_by_mode[draft.dataMode] ?? []) {
+    if (row.source !== "unavailable") continue;
+    lost.push({
+      id: `coverage:${row.tab_id}`,
+      capability: row.label,
+      reason: row.detail,
+      fix: "See the Data sources step."
+    });
+  }
+  return lost;
+}
+
+/**
+ * GUA-20261021-14d: el aviso "Setup saved" se quedaba abierto y se tragaba el siguiente clic.
+ * Si no hay nada que leer (sin reinicio ni notas), el asistente se cierra al terminar.
+ */
+export function closesOnFinish(result: { restartRequired: boolean; lines: string[] }): boolean {
+  return !result.restartRequired && result.lines.length === 0;
+}
+
 export function coverageSourceLabel(source: SetupCoverageSource): string {
   switch (source) {
     case "sample":
