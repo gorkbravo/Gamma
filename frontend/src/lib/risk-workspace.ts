@@ -56,6 +56,8 @@ export interface RiskWorkspaceModel {
   // Replay histórico de episodios (backend) y estado de carga del modo Scenarios.
   stressState: "idle" | "loading" | "ready";
   stressEpisodes: StressEpisodeRow[];
+  // Una línea en lugar de una fila "No history" por episodio cuando nada queda cubierto (GUA-20261021-9).
+  stressCoverageSummary: string | null;
   selectedEpisode: StressEpisodeRow | null;
   stressLegs: StressLegRow[];
   regimeRows: RiskTableRow[];
@@ -118,6 +120,9 @@ export interface DrawdownEpisode {
 export interface StressEpisodeRow {
   episodeId: string;
   label: string;
+  // "Equity" (S&P 500 pico a valle) o "Commodity" (Brent frontal).
+  kind: string;
+  kindLabel: string;
   window: string;
   description: string;
   status: string;
@@ -280,7 +285,7 @@ export function buildRiskWorkspaceModel(
     largestMovers: buildLargestMovers(holdings),
     concentrationFlags: buildConcentrationFlags(holdings, exposureBreakdown),
     coverageWarnings,
-    whatChanged: buildWhatChanged(result, holdings),
+    whatChanged: buildWhatChanged(result, holdings, riskContributors),
     drawdownEpisodes: drawdowns,
     worstReturns: buildWorstReturns(returns, benchmarkReturns),
     positionDrawdownContributions: buildPositionDrawdownContributions(holdings),
@@ -293,6 +298,7 @@ export function buildRiskWorkspaceModel(
     benchmarkSensitivity: buildBenchmarkSensitivity(holdings, result),
     stressState: !result ? "idle" : options.stressReplayLoading && !options.stressReplay ? "loading" : options.stressReplay ? "ready" : "idle",
     stressEpisodes,
+    stressCoverageSummary: result ? options.stressReplay?.coverage_summary ?? null : null,
     selectedEpisode,
     stressLegs,
     regimeRows: buildRegimeRows(regimes?.regimes ?? [], portfolioValue, snapshot?.base_currency),
@@ -493,15 +499,33 @@ export function describeAnalysisWindow(result: RiskResult | null): string {
   return `Return history: requested ${requested} observations, analysed ${aligned}${dates}${reconciliation}${basis}.`;
 }
 
-function buildWhatChanged(result: RiskResult | null, holdings: HoldingRiskRow[]) {
+/**
+ * El mayor contribuyente sale de la misma lista que "Top Risk Contributors" (contribuciones por
+ * posición o por tramo del libro); antes leía las posiciones, vacías en un libro de Strategy Lab,
+ * y decía N/A junto a "Brent 70.7%".
+ */
+export function largestRiskContributor(contributors: RiskContributionRow[]): RiskContributionRow | null {
+  return contributors
+    .filter((row) => row.contribution != null && Number.isFinite(row.contribution))
+    .reduce<RiskContributionRow | null>(
+      (best, row) => (best == null || Math.abs(row.contribution ?? 0) > Math.abs(best.contribution ?? 0) ? row : best),
+      null
+    );
+}
+
+function buildWhatChanged(result: RiskResult | null, holdings: HoldingRiskRow[], contributors: RiskContributionRow[]) {
   if (!result) return ["Run a core risk pass to compare current risk state against the latest snapshot."];
+  const largest = largestRiskContributor(contributors);
+  const fallback = holdings.find((row) => row.riskContribution != null)?.symbol ?? null;
   const rows = [
     `Coverage is ${formatPercent(result.metrics.risk_coverage_ratio)} with ${result.metrics.aligned_obs_count ?? 0} aligned observations${
       result.metrics.effective_start_date && result.metrics.effective_end_date
         ? ` (${result.metrics.effective_start_date} to ${result.metrics.effective_end_date})`
         : ""
     }.`,
-    `Largest modeled risk contributor is ${holdings.find((row) => row.riskContribution != null)?.symbol ?? UNKNOWN}.`,
+    largest
+      ? `Largest modeled risk contributor is ${largest.symbol} (${formatPercent(largest.contribution)} of modeled risk).`
+      : `Largest modeled risk contributor is ${fallback ?? UNKNOWN}.`,
     `Benchmark beta is ${formatNumber(result.metrics.beta, 2)} versus ${result.metrics.benchmark_overlap_count ?? 0} overlapping observations.`,
   ];
   if (result.warnings.length) rows.push(`${result.warnings.length} coverage or model caveats are active.`);
@@ -675,6 +699,8 @@ function buildStressEpisodes(replay: RiskStressReplay | null): StressEpisodeRow[
   return (replay?.episodes ?? []).map((episode) => ({
     episodeId: episode.episode_id,
     label: episode.label,
+    kind: episode.kind ?? "equity",
+    kindLabel: episode.kind === "commodity" ? "Commodity" : episode.kind && episode.kind !== "equity" ? episode.kind : "Equity",
     window: `${episode.start} to ${episode.end}`,
     description: episode.description,
     status: episode.status,
@@ -747,7 +773,7 @@ function buildScenarioAssumptions(result: RiskResult | null, coverage: number | 
   const beta = result?.metrics.beta;
   return [
     replay?.method ?? "Historical replay runs when the Scenarios mode opens; it loads long price history for each position.",
-    "Episodes are S&P 500 close-to-close peak-to-trough windows; a position without history for a window is shown as missing.",
+    "Equity episodes are S&P 500 close-to-close peak-to-trough windows and commodity episodes are Brent front-month settlement windows; a position without history for a window is shown as missing, never proxied.",
     result?.regime_analysis?.method ?? "Volatility regimes appear after a risk computation with benchmark history.",
     `Benchmark shocks are linear estimates (beta ${beta == null ? "N/A" : formatNumber(beta, 2)} times the move), not simulations.`,
     `Return-history coverage of the risk window: ${coverage == null ? "unknown" : formatPercent(coverage)}.`,

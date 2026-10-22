@@ -43,6 +43,9 @@ export {
 import {
   buildResearchBookObjectFromStrategyComposition,
   defaultStrategyPortfolioDraftLeg,
+  parseStoredStrategyComposerDraft,
+  serializeStrategyComposerDraft,
+  STRATEGY_COMPOSER_DRAFT_STORAGE_KEY,
   type StrategyPortfolioDraftLeg
 } from "../view-models/research";
 import {
@@ -755,7 +758,34 @@ export function defaultStrategyComposerDraft(): StrategyComposerDraft {
   };
 }
 
-export const strategyComposerDraft = writable<StrategyComposerDraft>(defaultStrategyComposerDraft());
+// El borrador también se guarda en este navegador: una recarga lo restaura en vez de volver en
+// silencio al libro por defecto (GUA-20260708-8). Best-effort; el store sigue mandando.
+function loadPersistedStrategyComposerDraft(): StrategyComposerDraft | null {
+  try {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    return parseStoredStrategyComposerDraft(localStorage.getItem(STRATEGY_COMPOSER_DRAFT_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function persistStrategyComposerDraft(draft: StrategyComposerDraft) {
+  try {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
+    localStorage.setItem(STRATEGY_COMPOSER_DRAFT_STORAGE_KEY, serializeStrategyComposerDraft(draft));
+  } catch {
+    // Cuota llena o almacenamiento bloqueado: el borrador sigue vivo en memoria.
+  }
+}
+
+export const strategyComposerDraft = writable<StrategyComposerDraft>(
+  loadPersistedStrategyComposerDraft() ?? defaultStrategyComposerDraft()
+);
+strategyComposerDraft.subscribe(persistStrategyComposerDraft);
 
 export function resetStrategyComposerDraft() {
   strategyComposerDraft.set(defaultStrategyComposerDraft());

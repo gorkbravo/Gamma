@@ -4,6 +4,7 @@
   import LandingPage from "./components/LandingPage.svelte";
   import SetupWizard from "./components/SetupWizard.svelte";
   import Shell from "./components/Shell.svelte";
+  import ViewErrorBoundary from "./components/ViewErrorBoundary.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
   import { installExternalLinkHandler, openExternalUrl } from "./lib/external-links";
@@ -3026,6 +3027,8 @@
       />
 
       <section class="workspace-main">
+        <!-- La vista activa falla sola: TabBar, atajos y topbar siguen vivos; Retry o cambiar de pestaña la remonta (GUA-20261021-1). -->
+        <ViewErrorBoundary resetKey={$activeTab}>
         {#if activeViewLoadError}
           <div class="view-load-state" role="alert">
             <strong>Unable to load view</strong>
@@ -3359,6 +3362,7 @@
             onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {/if}
+        </ViewErrorBoundary>
       </section>
     </section>
 

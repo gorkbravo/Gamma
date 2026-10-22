@@ -947,9 +947,12 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
-          {@render StressEpisodeTable(workspace.stressEpisodes, workspace.selectedEpisode, workspace.stressState)}
-          {@render RankPanel(`Episode P&L by Position${workspace.selectedEpisode ? ` · ${workspace.selectedEpisode.label}` : ""}`, scenarioBars, "currency")}
-          {@render StressLegTable(workspace.stressLegs, workspace.selectedEpisode)}
+          {@render StressEpisodeTable(workspace.stressEpisodes, workspace.selectedEpisode, workspace.stressState, workspace.stressCoverageSummary)}
+          <!-- Sin ningún episodio cubierto no hay impacto por posición que enseñar (GUA-20261021-9). -->
+          {#if !workspace.stressCoverageSummary}
+            {@render RankPanel(`Episode P&L by Position${workspace.selectedEpisode ? ` · ${workspace.selectedEpisode.label}` : ""}`, scenarioBars, "currency")}
+            {@render StressLegTable(workspace.stressLegs, workspace.selectedEpisode)}
+          {/if}
         </div>
         <aside class="support-column">
           {@render SimpleTable("Volatility Regimes", ["Regime", "Days", "Ann. vol", "1d VaR", "1d ES", "Corr"], workspace.regimeRows)}
@@ -1083,7 +1086,7 @@
   </article>
 {/snippet}
 
-{#snippet StressEpisodeTable(rows: StressEpisodeRow[], selected: StressEpisodeRow | null, state: "idle" | "loading" | "ready")}
+{#snippet StressEpisodeTable(rows: StressEpisodeRow[], selected: StressEpisodeRow | null, state: "idle" | "loading" | "ready", summary: string | null)}
   <article class="panel table-panel">
     <header class="table-panel-header">
       Historical Stress Replay
@@ -1093,6 +1096,7 @@
       <thead>
         <tr>
           <th>Episode</th>
+          <th title="Equity: S&P 500 peak to trough. Commodity: Brent front-month settlement window.">Type</th>
           <th>Window</th>
           <th>Book</th>
           <th>Benchmark</th>
@@ -1103,7 +1107,10 @@
         </tr>
       </thead>
       <tbody>
-        {#if rows.length}
+        {#if summary && state === "ready"}
+          <!-- Una línea con la ventana del libro en vez de una fila "No history" por episodio. -->
+          <tr><td colspan="9" class="empty" data-testid="stress-coverage-summary">{summary}</td></tr>
+        {:else if rows.length}
           {#each rows as row}
             <tr class:selected-row={selected?.episodeId === row.episodeId} title={row.note ?? row.description}>
               <td>
@@ -1114,6 +1121,7 @@
                   on:click={() => (selectedEpisodeId = row.episodeId)}
                 >{row.label}</button>
               </td>
+              <td>{row.kindLabel}</td>
               <td>{row.window}</td>
               <td class={row.bookReturn == null ? "absent" : row.bookReturn >= 0 ? "positive" : "negative"}>{row.bookReturn == null ? (row.status === "unavailable" ? "No history" : "N/A") : pct(row.bookReturn)}</td>
               <td class:absent={pct(row.benchmarkReturn) === "N/A"}>{pct(row.benchmarkReturn)}</td>
@@ -1124,7 +1132,7 @@
             </tr>
           {/each}
         {:else}
-          <tr><td colspan="8" class="empty">{state === "loading" ? "LOADING..." : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
+          <tr><td colspan="9" class="empty">{state === "loading" ? "LOADING..." : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
         {/if}
       </tbody>
     </table>

@@ -1352,6 +1352,9 @@ export interface RiskStressEpisode {
   start: string;
   end: string;
   description: string;
+  // Tipo de episodio y serie que fija la ventana (GUA-20261021-9).
+  kind?: "equity" | "commodity" | string;
+  anchor?: string | null;
   status: "full" | "partial" | "unavailable" | string;
   book_return: number | null;
   book_pnl: number | null;
@@ -1375,6 +1378,10 @@ export interface RiskStressReplay {
   lookback_days: number;
   method: string;
   warnings: string[];
+  // Ventana de precios disponible y resumen de una línea si ningún episodio queda cubierto.
+  history_start?: string | null;
+  history_end?: string | null;
+  coverage_summary?: string | null;
 }
 
 export interface PredictionMarketOutcome {

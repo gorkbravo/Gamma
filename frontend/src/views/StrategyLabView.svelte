@@ -34,7 +34,8 @@
     defaultStrategyPortfolioDraftLeg,
     ensureUniqueStrategyPortfolioDraftLegIds,
     parseResearchCsvText,
-    parseStrategyPortfolioHistoryText,
+    strategyInlineHistoryDetail,
+    summarizeStrategyBookWindow,
     summarizeStrategyPortfolioDraft,
     hydrateStrategyLabResultFromSaved,
     savedResearchCanReloadStrategy,
@@ -238,7 +239,8 @@
       if (leg.id !== id) {
         return leg;
       }
-      leg = { ...leg, retainedObject: undefined };
+      // Editar la fuente invalida el tipo de serie que trajo el handoff (GUA-20261021-9).
+      leg = { ...leg, retainedObject: undefined, sourceNote: undefined };
       if (source === "object" && leg.objectOptionId) {
         return { ...leg, identifier: "", historyText: "" };
       }
@@ -265,8 +267,8 @@
       return composerOptions.find((option) => option.id === leg.objectOptionId)?.label ?? "Gamma object";
     }
     if (leg.historyText.trim()) {
-      const parsed = parseStrategyPortfolioHistoryText(leg.historyText);
-      return `${parsed.points.length} dated points`;
+      // Puntos, fecha final y tipo de serie: "248 dated points to 2026-10-14 · FRED spot proxy …".
+      return strategyInlineHistoryDetail(leg);
     }
     if (leg.identifier.trim()) {
       return `${leg.assetClass} / ${leg.identifier.trim().toUpperCase()}`;
@@ -577,6 +579,14 @@
   $: bookValidationLegs = Array.isArray(bookValidationDiagnostics.legs)
     ? (bookValidationDiagnostics.legs as Array<Record<string, unknown>>)
     : [];
+  // Ventana analizada frente al LOOKBACK y tramos desfasados (GUA-20261021-9 / -11).
+  $: bookValidationWindow = summarizeStrategyBookWindow(bookValidationDiagnostics);
+  $: compositionWindow = summarizeStrategyBookWindow(compositionDiagnostics);
+  $: bookValidationBenchmark = (bookValidationDiagnostics.benchmark ?? null) as Record<string, unknown> | null;
+  // Los avisos de desfase y de ventana ya tienen su propia línea; no se repiten en la lista general.
+  $: bookValidationOtherWarnings = (bookValidation?.warnings ?? []).filter(
+    (warning) => !warning.startsWith("Stale window:") && warning !== bookValidationWindow.lookbackNote
+  );
   $: strategyBadge = activeStrategyResult ? toProvenanceBadge(activeStrategyResult) : null;
   $: strategyChartSeries = activeStrategyResult
     ? [
@@ -726,6 +736,7 @@
                         <strong>{item.handoff.selected_entity.label}</strong>
                         <small>
                           {item.handoff.source_tab} / {item.handoff.asset_class} / {item.status}
+                          {typeof item.resolved?.provenance?.series_label === "string" ? ` / ${item.resolved.provenance.series_label}` : ""}
                           {item.resolved?.date_coverage ? ` / ${item.resolved.date_coverage.start?.slice(0, 10)} - ${item.resolved.date_coverage.end?.slice(0, 10)}` : ""}
                         </small>
                       </div>
@@ -805,7 +816,7 @@
             <div class="field-grid compact-fields">
               <label><span>Name</span><input bind:value={portfolioName} /></label>
               <label><span>Benchmark</span><input bind:value={portfolioBenchmarkSymbol} /></label>
-              <label><span>Lookback</span><input type="number" min="20" step="20" bind:value={portfolioLookbackDays} /></label>
+              <label title="Trailing daily return observations (sessions) each book analyses, not calendar days."><span>Lookback (trading days)</span><input type="number" min="20" step="20" bind:value={portfolioLookbackDays} /></label>
               <label><span>Min Overlap</span><input type="number" min="2" step="1" bind:value={portfolioMinObservations} /></label>
             </div>
 
@@ -969,11 +980,25 @@
                   <span>Aligned Obs</span>
                   <strong>{bookValidation.aligned_observation_count} / min {bookValidation.min_observations}</strong>
                 </div>
+                {#if bookValidationWindow.windowLine}
+                  <div class="row">
+                    <span>Window</span>
+                    <strong class:warning={Boolean(bookValidationWindow.lookbackNote)}>{bookValidationWindow.windowLine}</strong>
+                  </div>
+                {/if}
+                {#if bookValidationWindow.lookbackNote || bookValidationWindow.staleLines.length}
+                  <div class="warning-list compact-warning-list" data-testid="book-window-warnings">
+                    {#each bookValidationWindow.staleLines as line}
+                      <span>Stale window: {line}.</span>
+                    {/each}
+                    {#if bookValidationWindow.lookbackNote}<span>{bookValidationWindow.lookbackNote}</span>{/if}
+                  </div>
+                {/if}
                 {#if bookValidationLegs.length}
                   <div class="table-wrap compact-table">
                     <table>
                       <thead>
-                        <tr><th>Leg</th><th>Source</th><th>Window</th><th class="num-cell">Obs</th><th class="num-cell">Norm Wt</th></tr>
+                        <tr><th>Leg</th><th>Source</th><th>Window</th><th class="num-cell" title="Trading days between the leg's last observation and today">Lag</th><th class="num-cell">Obs</th><th class="num-cell">Norm Wt</th></tr>
                       </thead>
                       <tbody>
                         {#each bookValidationLegs as diagnostic}
@@ -981,10 +1006,22 @@
                             <td class:absent={diagnosticValue(diagnostic, "label") === "N/A"}>{diagnosticValue(diagnostic, "label")}</td>
                             <td class:absent={diagnosticValue(diagnostic, "source_provider") === "N/A"}>{diagnosticValue(diagnostic, "source_provider")}</td>
                             <td>{diagnosticValue(diagnostic, "available_start").slice(0, 10)} - {diagnosticValue(diagnostic, "available_end").slice(0, 10)}</td>
+                            <td class="num-cell" class:warning={diagnostic.stale_window === true} class:absent={diagnosticValue(diagnostic, "trading_days_behind") === "N/A"}>{diagnosticValue(diagnostic, "trading_days_behind") === "N/A" ? "N/A" : `${diagnosticValue(diagnostic, "trading_days_behind")}d`}</td>
                             <td class="num-cell" class:absent={diagnosticValue(diagnostic, "observation_count") === "N/A"}>{diagnosticValue(diagnostic, "observation_count")}</td>
                             <td class="num-cell" class:absent={fmt(Number(diagnostic.normalized_weight ?? 0), 3) === "N/A"}>{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
                           </tr>
                         {/each}
+                        {#if bookValidationBenchmark}
+                          <!-- El benchmark muestra su propio proveedor y sus avisos, separados de los tramos (GUA-20261021-9). -->
+                          <tr class="benchmark-row" title={Array.isArray(bookValidationBenchmark.warnings) ? bookValidationBenchmark.warnings.join(" ") : ""}>
+                            <td>{diagnosticValue(bookValidationBenchmark, "label")} <small>(benchmark)</small></td>
+                            <td>{diagnosticValue(bookValidationBenchmark, "source_provider")}</td>
+                            <td>{diagnosticValue(bookValidationBenchmark, "available_start").slice(0, 10)} - {diagnosticValue(bookValidationBenchmark, "available_end").slice(0, 10)}</td>
+                            <td class="num-cell absent">-</td>
+                            <td class="num-cell">{diagnosticValue(bookValidationBenchmark, "observation_count")}</td>
+                            <td class="num-cell absent">-</td>
+                          </tr>
+                        {/if}
                       </tbody>
                     </table>
                   </div>
@@ -996,9 +1033,9 @@
                     {/each}
                   </div>
                 {/if}
-                {#if bookValidation.warnings.length}
+                {#if bookValidationOtherWarnings.length}
                   <div class="warning-list compact-warning-list muted-warnings">
-                    {#each bookValidation.warnings.slice(0, 4) as warning}
+                    {#each bookValidationOtherWarnings.slice(0, 4) as warning}
                       <span>{warning}</span>
                     {/each}
                   </div>
@@ -1072,6 +1109,20 @@
                     <span>Aligned Obs</span>
                     <strong>{diagnosticValue(compositionDiagnostics, "aligned_observation_count")} / min {diagnosticValue(compositionDiagnostics, "min_observations")}</strong>
                   </div>
+                  {#if compositionWindow.windowLine}
+                    <div class="row">
+                      <span>Window</span>
+                      <strong class:warning={Boolean(compositionWindow.lookbackNote)}>{compositionWindow.windowLine}</strong>
+                    </div>
+                  {/if}
+                  {#if compositionWindow.lookbackNote || compositionWindow.staleLines.length}
+                    <div class="warning-list compact-warning-list">
+                      {#each compositionWindow.staleLines as line}
+                        <span>Stale window: {line}.</span>
+                      {/each}
+                      {#if compositionWindow.lookbackNote}<span>{compositionWindow.lookbackNote}</span>{/if}
+                    </div>
+                  {/if}
                   <div class="table-wrap compact-table">
                     <table>
                       <thead>
@@ -2182,6 +2233,11 @@
   .warning {
     color: var(--warning);
     font-size: var(--text-sm);
+  }
+
+  /* Fila del benchmark en Validate Book: contexto, no un tramo del libro. */
+  .benchmark-row td {
+    color: var(--text-2);
   }
 
   /* ── Responsive ── */

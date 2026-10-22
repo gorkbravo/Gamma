@@ -29,12 +29,16 @@ import {
   normalizeSyntheticText,
   parseResearchCsvText,
   parseStrategyPortfolioHistoryText,
+  parseStoredStrategyComposerDraft,
   parseSyntheticText,
   savedResearchCanReloadScope,
   savedResearchCanReloadStrategy,
   savedResearchScopeDraft,
+  serializeStrategyComposerDraft,
+  strategyInlineHistoryDetail,
   strategyResolvedHandoffToDraftLeg,
   strategyLabDraftFromWorkingAnalysis,
+  summarizeStrategyBookWindow,
   summarizeStrategyPortfolioDraft
 } from "./research";
 
@@ -372,6 +376,106 @@ describe("research view model helpers", () => {
     expect(repaired.map((leg) => leg.id)).toEqual(["draft-leg-4", "draft-leg-5", "draft-leg-3"]);
     expect(repaired.map((leg) => leg.identifier)).toEqual(["brent", "wti", ""]);
     expect(ensureUniqueStrategyPortfolioDraftLegIds(clean)).toBe(clean);
+  });
+
+  // GUA-20260708-8: una recarga reiniciaba en silencio el borrador al libro QQQ/SPY/PM.
+  it("round-trips the composer draft through browser storage and repairs duplicate ids", () => {
+    const brent = {
+      ...defaultStrategyPortfolioDraftLeg(4),
+      label: "Brent Crude Oil spot proxy return stream",
+      assetClass: "commodity" as const,
+      identifier: "brent",
+      weight: 1,
+      historyText: "date,value\n2026-10-13,0.01\n2026-10-14,-0.02",
+      sourceNote: "FRED spot proxy DCOILBRENTEU"
+    };
+    const wti = { ...brent, label: "WTI", identifier: "wti", weight: -1, sourceNote: undefined };
+    const raw = serializeStrategyComposerDraft({
+      name: "AUDIT Brent minus WTI",
+      benchmarkSymbol: "SPY",
+      benchmarkObject: null,
+      lookbackDays: 252,
+      minObservations: 5,
+      legs: [brent, wti],
+      selection: { latest_scope: true },
+      weights: { latest_scope: 0.5 }
+    });
+
+    const restored = parseStoredStrategyComposerDraft(raw);
+
+    expect(restored?.name).toBe("AUDIT Brent minus WTI");
+    expect(restored?.lookbackDays).toBe(252);
+    expect(restored?.legs.map((leg) => [leg.id, leg.identifier, leg.weight])).toEqual([
+      ["draft-leg-4", "brent", 1],
+      ["draft-leg-2", "wti", -1]
+    ]);
+    expect(restored?.legs[0]?.sourceNote).toBe("FRED spot proxy DCOILBRENTEU");
+    expect(restored?.selection).toEqual({ latest_scope: true });
+    expect(restored?.weights).toEqual({ latest_scope: 0.5 });
+    // Otra versión, JSON roto, tramos inválidos o vacío: se ignora y se usa el borrador por defecto.
+    expect(parseStoredStrategyComposerDraft(raw.replace('"version":1', '"version":2'))).toBeNull();
+    expect(parseStoredStrategyComposerDraft("{not json")).toBeNull();
+    expect(parseStoredStrategyComposerDraft(raw.replace('"assetClass":"commodity"', '"assetClass":"swap"'))).toBeNull();
+    expect(parseStoredStrategyComposerDraft(null)).toBeNull();
+  });
+
+  it("states points, end date and series type for handed-off inline legs", () => {
+    const leg = {
+      historyText: "date,value\n2025-10-22T00:00:00,0.01\n2026-10-14T00:00:00,-0.02",
+      sourceNote: "FRED spot proxy DCOILBRENTEU"
+    };
+    expect(strategyInlineHistoryDetail(leg)).toBe("2 dated points to 2026-10-14 · FRED spot proxy DCOILBRENTEU");
+    expect(strategyInlineHistoryDetail({ historyText: "date,value\n2026-01-02,0.5" })).toBe("1 dated points to 2026-01-02");
+
+    const draft = strategyResolvedHandoffToDraftLeg(
+      {
+        handoff_id: "commodities:brent",
+        envelope: {} as never,
+        status: "resolved",
+        resolved_capability: "return_leg",
+        composer_draft_leg: {
+          label: "Brent Crude Oil spot proxy return stream",
+          asset_class: "commodity",
+          identifier: "brent",
+          weight: 0.1,
+          value_kind: "return",
+          return_points: [{ timestamp: "2026-10-14T00:00:00", value: 0.01 }],
+          object: null
+        },
+        benchmark_draft: null,
+        lens: null,
+        overlay: null,
+        date_coverage: null,
+        provider_summary: "fred",
+        provenance: { series_kind: "spot_proxy", series_label: "FRED spot proxy DCOILBRENTEU", series_end: "2026-10-14" },
+        warnings: [],
+        unsupported_reason: null
+      },
+      4
+    );
+    expect(draft?.sourceNote).toBe("FRED spot proxy DCOILBRENTEU");
+  });
+
+  it("summarises the analysed window against the lookback and flags stale legs", () => {
+    const summary = summarizeStrategyBookWindow({
+      requested_lookback_days: 252,
+      aligned_observation_count: 241,
+      aligned_start: "2025-10-22T00:00:00",
+      aligned_end: "2026-10-14T00:00:00",
+      lookback_note: "Analysed 241 of the requested 252 trading days: Brent carries 247 return observations ending 2026-10-14.",
+      as_of_date: "2026-10-21",
+      stale_after_trading_days: 3,
+      stale_legs: [{ label: "Brent", available_end: "2026-10-14", trading_days_behind: 5 }]
+    });
+
+    expect(summary.windowLine).toBe("Lookback 252 trading days · analysed 241 (2025-10-22 to 2026-10-14)");
+    expect(summary.lookbackNote).toContain("Analysed 241 of the requested 252");
+    expect(summary.staleLines).toEqual(["Brent ends 2026-10-14, 5 trading days before 2026-10-21 (stale above 3)"]);
+    expect(summary.staleLabels.has("Brent")).toBe(true);
+
+    const legacy = summarizeStrategyBookWindow({ aligned_observation_count: 10 });
+    expect(legacy.windowLine).toBeNull();
+    expect(legacy.staleLines).toEqual([]);
   });
 
   it("builds prediction-market handoffs and converts resolved drafts into composer rows", () => {

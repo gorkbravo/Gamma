@@ -33,7 +33,9 @@ from src.analytics.stress import (
     EpisodeReplayResult,
     StressEpisode,
     VolatilityRegimeAnalysis,
+    price_history_window,
     replay_episode,
+    stress_coverage_summary,
     volatility_regimes,
 )
 from src.models.instruments import InstrumentDefaults, InstrumentReference
@@ -106,10 +108,16 @@ class RiskStressReplayResult:
     lookback_days: int
     warnings: list[str] = field(default_factory=list)
     method: str = (
-        "Current weights are held through each documented episode (S&P 500 close-to-close peak to trough) "
-        "with each position's own price history converted to the base currency; no rebalancing. "
+        "Current weights are held through each documented episode (equity episodes: S&P 500 close-to-close "
+        "peak to trough; commodity episodes: Brent front-month settlement windows) with each position's own "
+        "price history converted to the base currency; no rebalancing. "
         "A position without history for a window is treated as flat and reported; no proxy is substituted."
     )
+    # Ventana de precios disponible (unión de posiciones) y resumen de una línea si ningún
+    # episodio queda cubierto (GUA-20261021-9).
+    history_start: date | None = None
+    history_end: date | None = None
+    coverage_summary: str | None = None
 
 
 # Clases de activo de Strategy Lab cuyas posiciones son instrumentos cotizados con historia larga.
@@ -668,6 +676,12 @@ class RiskService:
             if missing:
                 warnings.append(f"Missing long price history for: {', '.join(missing)}")
 
+        own_windows: dict[str, tuple[date, date]] = {}
+        if request.source_scope == "research_book":
+            # Un tramo sin historia larga del proveedor (materias primas, contratos de predicción,
+            # series propias) usa su propia historia del libro; nunca un proxy (GUA-20261021-9).
+            prices, own_windows = self._stress_book_own_histories(request, prices)
+
         benchmark_prices = self._stress_benchmark_prices(request, lookback_days, data_provider, warnings)
         episodes = [
             replay_episode(
@@ -680,6 +694,13 @@ class RiskService:
             )
             for episode in request.episodes
         ]
+        # La ventana de un tramo con historia propia son sus fechas de rendimiento, no el nivel base.
+        history_start, history_end = price_history_window(
+            {key: series for key, series in prices.items() if key not in own_windows}
+        )
+        for own_start, own_end in own_windows.values():
+            history_start = own_start if history_start is None else min(history_start, own_start)
+            history_end = own_end if history_end is None else max(history_end, own_end)
         return RiskStressReplayResult(
             episodes=episodes,
             leg_metadata=metadata,
@@ -688,7 +709,44 @@ class RiskService:
             benchmark_symbol=request.benchmark_symbol,
             lookback_days=lookback_days,
             warnings=list(dict.fromkeys(warnings)),
+            history_start=history_start,
+            history_end=history_end,
+            coverage_summary=stress_coverage_summary(episodes, history_start, history_end),
         )
+
+    @staticmethod
+    def _stress_book_own_histories(
+        request: RiskStressReplayRequest,
+        prices: dict[str, pd.Series],
+    ) -> tuple[dict[str, pd.Series], dict[str, tuple[date, date]]]:
+        """Nivel acumulado (base 1) a partir de los rendimientos que el libro trae por tramo;
+        devuelve también la ventana de fechas de rendimiento de cada tramo así completado."""
+        filled = dict(prices)
+        windows: dict[str, tuple[date, date]] = {}
+        for leg in request.research_book_legs or []:
+            leg_id = str(leg.leg_id or "").strip()
+            current = filled.get(leg_id)
+            if not leg_id or (current is not None and not current.empty) or not leg.return_points:
+                continue
+            rows: dict[pd.Timestamp, float] = {}
+            for point in leg.return_points:
+                timestamp = pd.to_datetime(point.timestamp, errors="coerce")
+                value = pd.to_numeric(point.value, errors="coerce")
+                if pd.isna(timestamp) or pd.isna(value) or not np.isfinite(float(value)):
+                    continue
+                timestamp = pd.Timestamp(timestamp)
+                if timestamp.tzinfo is not None:
+                    timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+                rows[timestamp.normalize()] = float(value)
+            if len(rows) < 2:
+                continue
+            returns = pd.Series(rows).sort_index()
+            levels = (1.0 + returns).cumprod()
+            # Base 1,0 el día hábil anterior al primer rendimiento, para que el primer día cuente.
+            base_date = returns.index[0] - pd.offsets.BDay(1)
+            filled[leg_id] = pd.concat([pd.Series([1.0], index=[base_date]), levels]).sort_index()
+            windows[leg_id] = (returns.index[0].date(), returns.index[-1].date())
+        return filled, windows
 
     def _stress_portfolio_inputs(
         self,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRiskWorkspaceModel, describeAnalysisWindow, type RiskMode } from "./risk-workspace";
+import { buildRiskWorkspaceModel, describeAnalysisWindow, largestRiskContributor, type RiskMode } from "./risk-workspace";
 import type { PortfolioSnapshot, RiskResult } from "./api/types";
 
 const snapshot: PortfolioSnapshot = {
@@ -295,6 +295,60 @@ describe("risk workspace view-model", () => {
     expect(model.holdings).toEqual([]);
     expect(model.largestMovers).toEqual([]);
     expect(model.concentrationFlags).toEqual([]);
+  });
+
+  // Auditoría 2026-10-21: "Largest modeled risk contributor is N/A" junto a "Brent 70.7%".
+  it("names the largest research-book contributor from the same per-leg data as Top Risk Contributors", () => {
+    const model = buildRiskWorkspaceModel(snapshot, {
+      ...riskResult,
+      source_scope: "research_book",
+      source_label: "Strategy Lab book: AUDIT 2026-10-21 Brent minus WTI",
+      contributions: [
+        { symbol: "WTI", instrument_id: "2:leg:wti", display_symbol: "WTI Crude Oil commodity return stream", weight: -0.5,
+          daily_vol: 0.037, variance_contribution_pct: 0.293, marginal_contribution_to_risk: -0.01, component_var: 293 },
+        { symbol: "BRENT", instrument_id: "1:leg:brent", display_symbol: "Brent Crude Oil commodity return stream", weight: 0.5,
+          daily_vol: 0.041, variance_contribution_pct: 0.707, marginal_contribution_to_risk: 0.02, component_var: 707 },
+      ],
+    }, {
+      sourceScope: "research_book",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.holdings).toEqual([]);
+    expect(model.whatChanged).toContain(
+      "Largest modeled risk contributor is Brent Crude Oil commodity return stream (70.7% of modeled risk)."
+    );
+    expect(largestRiskContributor(model.riskContributors)?.symbol).toBe("Brent Crude Oil commodity return stream");
+    expect(model.whatChanged.join(" ")).not.toContain("contributor is N/A");
+  });
+
+  it("collapses the stress replay to one line with the book window when no episode is covered", () => {
+    const unavailable = (episode_id: string, label: string, start: string, end: string, kind: string) => ({
+      episode_id, label, start, end, kind, description: "", status: "unavailable",
+      book_return: null, book_pnl: null, benchmark_return: null, active_return: null, max_drawdown: null,
+      worst_day_return: null, worst_day_date: null, covered_gross_weight: 0, gross_weight: 1, observation_count: 0,
+      note: "No position has price history covering this window.", legs: [],
+    });
+    const summary = "No stress episode is covered: the book's price history runs 2025-10-22 to 2026-10-14, and the 8 episodes run from 2007-10-09 to 2025-04-08. No proxy history is substituted.";
+    const model = buildRiskWorkspaceModel(snapshot, riskResult, {
+      sourceScope: "research_book",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+      stressReplay: {
+        episodes: [
+          unavailable("covid_2020", "COVID crash", "2020-02-19", "2020-03-23", "equity"),
+          unavailable("oil_crash_2020", "2020 oil price war and demand collapse", "2020-03-05", "2020-04-21", "commodity"),
+        ],
+        portfolio_value: 105000, base_currency: "USD", benchmark_symbol: "SPY", lookback_days: 5040,
+        method: "Current weights are held through each documented episode.", warnings: [],
+        history_start: "2025-10-22", history_end: "2026-10-14", coverage_summary: summary,
+      },
+    });
+
+    expect(model.stressCoverageSummary).toBe(summary);
+    expect(model.stressEpisodes.map((row) => row.kindLabel)).toEqual(["Equity", "Commodity"]);
+    expect(model.scenarioAssumptions[1]).toContain("commodity episodes are Brent front-month settlement windows");
   });
 
   it("keeps optimization output as diagnostics-only candidate allocations", () => {
