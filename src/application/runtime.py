@@ -74,6 +74,7 @@ from src.services.macro_adapters import (
 from src.services.maritime_adapters import (
     AisstreamMaritimeDataProvider,
     SampleMaritimeDataProvider,
+    StaticMaritimeReferenceProvider,
     parse_aisstream_bounding_boxes,
 )
 from src.services.mock_copilot_provider import MockCopilotProvider
@@ -961,11 +962,13 @@ def _build_maritime_provider(*, live_mode: bool = False):
     sample_provider = SampleMaritimeDataProvider()
     if provider not in {"aisstream", "aisstream_live", "live"}:
         if live_mode:
+            # La geografía estática no es dato de muestra: se conserva en live (GUA-20261021-7).
             return UnavailableMaritimeDataProvider(
                 warning=(
                     f"MARITIME_PROVIDER={provider} is disabled while Gamma is running in live mode; "
                     "sample maritime data was not loaded."
-                )
+                ),
+                reference_provider=StaticMaritimeReferenceProvider(),
             )
         return sample_provider
 
@@ -981,11 +984,8 @@ def _build_maritime_provider(*, live_mode: bool = False):
     ] or None
     return AisstreamMaritimeDataProvider(
         api_key=os.getenv("AISSTREAM_API_KEY", ""),
-        reference_provider=UnavailableMaritimeDataProvider(
-            warning="AISstream reference definitions are unavailable until live provider configuration supplies them."
-        )
-        if live_mode
-        else sample_provider,
+        # En live, las cajas estáticas también definen la suscripción AIS; antes llegaba vacía (GUA-20261021-7).
+        reference_provider=StaticMaritimeReferenceProvider() if live_mode else sample_provider,
         bounding_boxes=bounding_boxes,
         message_types=message_types,
         sample_seconds=float(os.getenv("AISSTREAM_SAMPLE_SECONDS", "6") or 6.0),
@@ -1144,12 +1144,15 @@ class UnavailableMaritimeDataProvider:
     provider_id = "unavailable_maritime"
     provider_label = "Unavailable Maritime Provider"
 
-    def __init__(self, *, warning: str) -> None:
+    def __init__(self, *, warning: str, reference_provider: StaticMaritimeReferenceProvider | None = None) -> None:
         self.warning = warning
+        self.reference_provider = reference_provider
 
     def get_snapshot(self, *, force_refresh: bool = False) -> MaritimeProviderSnapshot:
         del force_refresh
         retrieved_at = now_utc()
+        # Solo geografía estática (cajas y puertos); nunca buques ni posiciones de muestra.
+        reference = self.reference_provider.get_snapshot() if self.reference_provider is not None else None
         coverage = MaritimeCoverageMetadata(
             coverage_status="unavailable",
             provider_id=self.provider_id,
@@ -1167,11 +1170,17 @@ class UnavailableMaritimeDataProvider:
         )
         return MaritimeProviderSnapshot(
             coverage=coverage,
+            ports=list(reference.ports) if reference is not None else [],
+            chokepoints=list(reference.chokepoints) if reference is not None else [],
             warnings=[self.warning],
             source_provider="unavailable",
             retrieved_at=retrieved_at,
             origin="gamma.maritime.unavailable",
-            transformation_note="No mock or sample maritime data was loaded.",
+            transformation_note=(
+                "No mock or sample maritime data was loaded; only static chokepoint and port reference geography."
+                if reference is not None
+                else "No mock or sample maritime data was loaded."
+            ),
         )
 
     def get_track(self, vessel_id: str, *, force_refresh: bool = False) -> MaritimeTrackSnippet | None:

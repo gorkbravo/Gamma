@@ -9,11 +9,12 @@ from src.api.main import create_app
 from src.application.maritime_service import MaritimeService
 from src.application.provider_capability_registry import build_default_provider_capability_registry
 from src.application.runtime import build_runtime
-from src.models.maritime import MaritimeCoverageMetadata
+from src.models.maritime import MaritimeCoverageMetadata, MaritimeProviderSnapshot
 from src.services.maritime_adapters import (
     AISSTREAM_DEFAULT_MESSAGE_TYPES,
     AisstreamMaritimeDataProvider,
     SampleMaritimeDataProvider,
+    StaticMaritimeReferenceProvider,
     normalize_aisstream_live_message,
 )
 
@@ -322,6 +323,135 @@ def test_runtime_can_select_aisstream_provider_without_key(tmp_path, monkeypatch
         assert workspace.coverage.coverage_status == "unavailable"
         assert workspace.positions == []
         assert workspace.chokepoints
+    finally:
+        runtime.shutdown()
+
+
+def test_empty_live_aisstream_sample_keeps_static_chokepoints_and_ports(monkeypatch):
+    # GUA-20261021-7: una muestra AIS vacía no debe borrar la geografía estática.
+    provider = AisstreamMaritimeDataProvider(
+        api_key="test-key",
+        reference_provider=StaticMaritimeReferenceProvider(),
+        sample_seconds=6,
+    )
+    subscribed_boxes: list = []
+
+    def fake_collect(reference):
+        subscribed_boxes.extend(reference.chokepoints)
+        return []
+
+    monkeypatch.setattr(provider, "_collect_messages_sync", fake_collect)
+    service = MaritimeService(provider=provider)
+
+    result = service.get_workspace(mode="live_map", force_refresh=True)
+
+    assert result.coverage.coverage_status == "unavailable"
+    assert result.coverage.freshness_label == "live_stream_empty_sample"
+    assert result.coverage.sample_window_seconds == 6
+    assert any("No AIS positions were received" in warning for warning in result.warnings)
+    assert result.positions == []
+    assert result.vessels == []
+    assert result.event_windows == []
+    assert result.watchlists == []
+    chokepoint_ids = {item.chokepoint_id for item in result.chokepoints}
+    assert {"hormuz", "suez", "bab-el-mandeb", "panama", "malacca"} <= chokepoint_ids
+    assert subscribed_boxes, "the live sample must subscribe to the static chokepoint boxes"
+    assert result.ports
+    assert all(item.source_provider == "gamma_static_reference" for item in result.chokepoints)
+    assert all(item.source_provider == "gamma_static_reference" for item in result.ports)
+    assert len(result.chokepoint_summaries) == len(result.chokepoints)
+    hormuz = next(row for row in result.chokepoint_summaries if row.chokepoint_id == "hormuz")
+    assert hormuz.coverage_status == "unavailable"
+    assert hormuz.total_vessel_count == 0
+    assert hormuz.congestion_score is None
+    assert hormuz.position_sample_note == "No live AIS positions in last 6 s sample"
+
+
+def test_aisstream_sample_note_counts_positions_inside_box(monkeypatch):
+    provider = AisstreamMaritimeDataProvider(
+        api_key="test-key",
+        reference_provider=StaticMaritimeReferenceProvider(),
+        sample_seconds=6,
+    )
+    message = {
+        "MessageType": "PositionReport",
+        "MetaData": {"MMSI": 538009991, "latitude": 26.33, "longitude": 56.35},
+        "Message": {"PositionReport": {"UserID": 538009991, "Latitude": 26.33, "Longitude": 56.35, "Sog": 12.1}},
+    }
+    monkeypatch.setattr(provider, "_collect_messages_sync", lambda reference: [message])
+
+    result = MaritimeService(provider=provider).get_workspace(force_refresh=True)
+
+    notes = {row.chokepoint_id: row.position_sample_note for row in result.chokepoint_summaries}
+    assert result.coverage.coverage_status == "partial"
+    assert notes["hormuz"] == "1 AIS position in last 6 s sample"
+    assert notes["suez"] == "No live AIS positions in last 6 s sample"
+
+
+def test_aisstream_without_any_bounding_box_reports_unavailable_instead_of_empty_sample():
+    class _NoGeography:
+        provider_id = "none"
+        provider_label = "None"
+
+        def get_snapshot(self, *, force_refresh: bool = False) -> MaritimeProviderSnapshot:
+            return MaritimeProviderSnapshot(
+                coverage=MaritimeCoverageMetadata(
+                    coverage_status="unavailable",
+                    provider_id="none",
+                    provider_label="None",
+                    freshness_label="unavailable",
+                )
+            )
+
+        def get_track(self, vessel_id, *, force_refresh=False):
+            return None
+
+    provider = AisstreamMaritimeDataProvider(api_key="test-key", reference_provider=_NoGeography())
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert snapshot.coverage.coverage_status == "unavailable"
+    assert snapshot.coverage.freshness_label == "unavailable"
+    assert any("bounding boxes" in warning for warning in snapshot.warnings)
+
+
+def test_sample_summaries_label_positions_as_sample():
+    result = MaritimeService(provider=SampleMaritimeDataProvider()).get_workspace()
+
+    assert all(
+        (row.position_sample_note or "").endswith("inside box; not live AIS") for row in result.chokepoint_summaries
+    )
+    assert all(item.source_provider == "sample_data" for item in result.chokepoints)
+
+
+@pytest.mark.parametrize(("maritime_provider", "provider_id"), [("aisstream", "aisstream"), ("sample", "unavailable_maritime")])
+def test_live_runtime_serves_static_chokepoints_without_sample_vessels(tmp_path, monkeypatch, maritime_provider, provider_id):
+    monkeypatch.setenv("MARITIME_PROVIDER", maritime_provider)
+    monkeypatch.setenv("AISSTREAM_API_KEY", "")
+    runtime = build_runtime(
+        mock_mode=False,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.get("/maritime/workspace", params={"mode": "chokepoints"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coverage"]["coverage_status"] == "unavailable"
+        assert payload["coverage"]["provider_id"] == provider_id
+        assert payload["vessels"] == []
+        assert payload["positions"] == []
+        assert payload["event_windows"] == []
+        assert "hormuz" in {item["chokepoint_id"] for item in payload["chokepoints"]}
+        assert payload["ports"]
+        assert all(item["source_provider"] == "gamma_static_reference" for item in payload["chokepoints"])
+        assert len(payload["chokepoint_summaries"]) == len(payload["chokepoints"])
+        assert all(
+            row["position_sample_note"].startswith("No live AIS positions") for row in payload["chokepoint_summaries"]
+        )
     finally:
         runtime.shutdown()
 

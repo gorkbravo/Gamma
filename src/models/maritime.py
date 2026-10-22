@@ -39,6 +39,9 @@ class MaritimeCoverageMetadata:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # Ventana real del muestreo AIS en segundos; None si no se tomó muestra (GUA-20261021-7).
+    sample_window_seconds: float | None = None
+
     def __post_init__(self) -> None:
         if self.coverage_status not in MARITIME_COVERAGE_STATUSES:
             raise ValueError(f"Unsupported maritime coverage status: {self.coverage_status}")
@@ -174,6 +177,8 @@ class MaritimeChokepointSummary:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # Estado de la muestra AIS dentro de la caja, p. ej. "No live AIS positions in last 6 s sample" (GUA-20261021-7).
+    position_sample_note: str | None = None
 
 
 @dataclass(frozen=True)

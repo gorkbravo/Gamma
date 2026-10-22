@@ -37,6 +37,7 @@ class MaritimeCoverageMetadataModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    sample_window_seconds: float | None = None
 
     @classmethod
     def from_domain(cls, row: MaritimeCoverageMetadata) -> "MaritimeCoverageMetadataModel":
@@ -202,6 +203,7 @@ class MaritimeChokepointSummaryModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    position_sample_note: str | None = None
 
     @classmethod
     def from_domain(cls, row: MaritimeChokepointSummary) -> "MaritimeChokepointSummaryModel":

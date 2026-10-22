@@ -123,6 +123,12 @@ class AisstreamMaritimeDataProvider:
             raise RuntimeError("Python package 'websockets' is required for AISstream live collection.") from exc
 
         boxes = self.bounding_boxes or _aisstream_boxes_from_chokepoints(reference.chokepoints)
+        if not boxes:
+            # Sin cajas la suscripción llega vacía y la muestra sale vacía en silencio (GUA-20261021-7).
+            raise RuntimeError(
+                "No AISstream bounding boxes are configured and no chokepoint reference geography is loaded; "
+                "set AISSTREAM_BOUNDING_BOXES."
+            )
         subscription = {
             "APIKey": self.api_key,
             "BoundingBoxes": boxes,
@@ -203,6 +209,7 @@ class AisstreamMaritimeDataProvider:
             transformation_note=(
                 "Gamma subscribed to AISstream chokepoint bounding boxes and normalized received AIS messages into read-only position records."
             ),
+            sample_window_seconds=self.sample_seconds,
         )
         return MaritimeProviderSnapshot(
             coverage=coverage,
@@ -308,6 +315,78 @@ class SampleMaritimeDataProvider:
     def get_track(self, vessel_id: str, *, force_refresh: bool = False) -> MaritimeTrackSnippet | None:
         snapshot = self.get_snapshot(force_refresh=force_refresh)
         return next((track for track in snapshot.tracks if track.vessel_id == vessel_id), None)
+
+
+STATIC_REFERENCE_SOURCE = "gamma_static_reference"
+
+
+class StaticMaritimeReferenceProvider:
+    """Geografía estática de chokepoints y puertos, sin buques, posiciones ni eventos de muestra.
+
+    Es la referencia que modo live puede cargar sin violar la regla de "sin datos de muestra":
+    las cajas y puertos son geografía, no mediciones (GUA-20261021-7 / GUA-20260708-9).
+    """
+
+    provider_id = STATIC_REFERENCE_SOURCE
+    provider_label = "Gamma Static Maritime Reference"
+
+    def get_snapshot(self, *, force_refresh: bool = False) -> MaritimeProviderSnapshot:
+        del force_refresh
+        retrieved_at = now_utc()
+        chokepoints = static_reference_chokepoints(retrieved_at)
+        warning = (
+            "Static chokepoint and port reference geography only; no AIS positions, tracks, or events are included."
+        )
+        coverage = MaritimeCoverageMetadata(
+            coverage_status="unavailable",
+            provider_id=self.provider_id,
+            provider_label=self.provider_label,
+            freshness_label="static_reference",
+            regions=[item.name for item in chokepoints],
+            as_of=retrieved_at,
+            caveats=[warning],
+            supports_live=False,
+            supports_historical=False,
+            source_provider=STATIC_REFERENCE_SOURCE,
+            retrieved_at=retrieved_at,
+            origin="gamma.maritime.static_reference.coverage",
+            transformation_note="Reference geography carries no vessel observations, so AIS coverage stays unavailable.",
+        )
+        return MaritimeProviderSnapshot(
+            coverage=coverage,
+            ports=static_reference_ports(retrieved_at),
+            chokepoints=chokepoints,
+            warnings=[warning],
+            source_provider=STATIC_REFERENCE_SOURCE,
+            retrieved_at=retrieved_at,
+            origin="gamma.maritime.static_reference.snapshot",
+            transformation_note="Hand-curated chokepoint boxes and port coordinates; no sample vessel data is loaded.",
+        )
+
+    def get_track(self, vessel_id: str, *, force_refresh: bool = False) -> MaritimeTrackSnippet | None:
+        del vessel_id
+        del force_refresh
+        return None
+
+
+def static_reference_chokepoints(retrieved_at) -> list[MaritimeChokepointDefinition]:
+    """Chokepoints como geografía de referencia, etiquetados fuera del origen de muestra."""
+    return _chokepoints(
+        retrieved_at,
+        source_provider=STATIC_REFERENCE_SOURCE,
+        origin="gamma.maritime.static_reference.chokepoints",
+        transformation_note="Approximate hand-curated bounding box; reference geography, not an AIS measurement.",
+    )
+
+
+def static_reference_ports(retrieved_at) -> list[MaritimePortRecord]:
+    """Puertos como geografía de referencia (coordenadas y UN/LOCODE), sin actividad asociada."""
+    return _ports(
+        retrieved_at,
+        source_provider=STATIC_REFERENCE_SOURCE,
+        origin="gamma.maritime.static_reference.ports",
+        transformation_note="Reference port coordinates; no port-call or congestion data is attached.",
+    )
 
 
 def _coverage(retrieved_at) -> MaritimeCoverageMetadata:
@@ -459,8 +538,14 @@ def _vessels(retrieved_at) -> list[MaritimeVesselStaticRecord]:
     ]
 
 
-def _ports(retrieved_at) -> list[MaritimePortRecord]:
-    return [
+def _ports(
+    retrieved_at,
+    *,
+    source_provider: str = "sample_data",
+    origin: str = "sample_maritime.ports",
+    transformation_note: str | None = None,
+) -> list[MaritimePortRecord]:
+    rows = [
         MaritimePortRecord(
             port_id="port-ras-tanura",
             name="Ras Tanura",
@@ -532,10 +617,21 @@ def _ports(retrieved_at) -> list[MaritimePortRecord]:
             origin="sample_maritime.ports",
         ),
     ]
-
-
-def _chokepoints(retrieved_at) -> list[MaritimeChokepointDefinition]:
+    # La misma geografía sirve a la muestra y a la referencia estática; solo cambia la procedencia.
     return [
+        replace(row, source_provider=source_provider, origin=origin, transformation_note=transformation_note)
+        for row in rows
+    ]
+
+
+def _chokepoints(
+    retrieved_at,
+    *,
+    source_provider: str = "sample_data",
+    origin: str = "sample_maritime.chokepoints",
+    transformation_note: str | None = None,
+) -> list[MaritimeChokepointDefinition]:
+    rows = [
         MaritimeChokepointDefinition(
             chokepoint_id="hormuz",
             name="Strait of Hormuz",
@@ -601,6 +697,10 @@ def _chokepoints(retrieved_at) -> list[MaritimeChokepointDefinition]:
             retrieved_at=retrieved_at,
             origin="sample_maritime.chokepoints",
         ),
+    ]
+    return [
+        replace(row, source_provider=source_provider, origin=origin, transformation_note=transformation_note)
+        for row in rows
     ]
 
 

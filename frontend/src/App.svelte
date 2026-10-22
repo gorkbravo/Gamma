@@ -298,6 +298,7 @@
   import type { SitrepHandoffRequest, SitrepWorkspaceMeta } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
+  import { maritimeFocusFromHandoff, type MaritimeFocusRequest } from "./lib/view-models/maritime";
   import type { RiskMode } from "./lib/risk-workspace";
 
   type LazyViewComponent = any;
@@ -348,8 +349,8 @@
   let researchWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
-  // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
-  let maritimeFocusChokepointId: string | null = null;
+  // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway (GUA-20261021-7).
+  let maritimeFocusRequest: MaritimeFocusRequest | null = null;
   let predictionMarketsMode: PredictionMarketsMode = persistedMode(
     restoredWorkspaceState,
     "prediction_markets",
@@ -2520,9 +2521,11 @@
       });
       return;
     } else if (targetTab === "maritime") {
-      const mode = (handoff.intended_target_mode ?? "live_map") as MaritimeMode;
-      maritimeMode = mode;
-      await loadMaritimeWorkspace({ mode });
+      // La pestaña ya está seleccionada; solo se fija el enfoque (GUA-20261021-7).
+      maritimeFocusRequest = maritimeFocusFromHandoff({ ...handoff, intended_target_tab: "maritime" });
+      maritimeMode =
+        maritimeFocusRequest?.lens ?? ((handoff.intended_target_mode ?? "live_map") as MaritimeMode);
+      await loadMaritimeWorkspace({ mode: maritimeMode });
       return;
     } else if (targetTab === "prediction_markets") {
       const marketId =
@@ -2776,6 +2779,22 @@
   }
 
   /**
+   * Abre Sealanes enfocado en la entidad de un handoff (GUA-20261021-7).
+   *
+   * Contrato de recepción para cualquier pestaña: un CrossTabHandoffEnvelope con
+   * intended_target_tab "maritime". La vista resuelve el destino contra la
+   * geografía estática; si no lo encuentra, lo dice en lugar de callar.
+   */
+  async function openMaritimeFocusHandoff(handoff: CrossTabHandoffEnvelope) {
+    const request = maritimeFocusFromHandoff({ ...handoff, intended_target_tab: "maritime" });
+    if (!request) return;
+    workspaceMode = "research";
+    maritimeFocusRequest = request;
+    maritimeMode = request.lens;
+    await selectTab("maritime");
+  }
+
+  /**
    * Open a Prediction Markets outward handoff in its target tab.
    *
    * The envelope carries the entity, the target mode, and the contract's own
@@ -2788,17 +2807,17 @@
     const entityLabel = handoff.selected_entity?.label ?? targetTab;
 
     if (targetTab === "maritime") {
-      maritimeFocusChokepointId = ids.chokepoint_id ?? null;
+      await openMaritimeFocusHandoff(handoff);
+    } else {
+      await openSitrepHandoff({
+        targetTab,
+        targetMode: handoff.intended_target_mode ?? undefined,
+        commodityId: ids.commodity_id ?? null,
+        region: ids.region ?? null,
+        theme: ids.theme ?? null,
+        timeframe: ids.timeframe ?? null
+      });
     }
-
-    await openSitrepHandoff({
-      targetTab,
-      targetMode: handoff.intended_target_mode ?? undefined,
-      commodityId: ids.commodity_id ?? null,
-      region: ids.region ?? null,
-      theme: ids.theme ?? null,
-      timeframe: ids.timeframe ?? null
-    });
 
     consoleEntries = [
       {
@@ -3251,7 +3270,7 @@
             bind:mode={maritimeMode}
             workspace={$maritimeWorkspace}
             loading={$loading.maritime}
-            focusChokepointId={maritimeFocusChokepointId}
+            focusRequest={maritimeFocusRequest}
             onLoadWorkspace={loadMaritimeWorkspace}
           />
         {:else if $activeTab === "copilot"}

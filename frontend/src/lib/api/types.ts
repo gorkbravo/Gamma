@@ -3472,6 +3472,8 @@ export interface MaritimeCoverageMetadata {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** Ventana del muestreo AIS en segundos; null si no se tomó muestra (GUA-20261021-7). */
+  sample_window_seconds?: number | null;
 }
 
 export interface MaritimeVesselIdentity {
@@ -3590,6 +3592,8 @@ export interface MaritimeChokepointSummary {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** Estado de la muestra AIS en la caja, p. ej. "No live AIS positions in last 6 s sample" (GUA-20261021-7). */
+  position_sample_note?: string | null;
 }
 
 export interface MaritimeFlowSummary {

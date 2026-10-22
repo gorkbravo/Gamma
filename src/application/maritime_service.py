@@ -114,6 +114,7 @@ class MaritimeService:
                     transformation_note=(
                         "Gamma derives sample chokepoint summaries by intersecting latest positions with normalized chokepoint bounding boxes."
                     ),
+                    position_sample_note=_position_sample_note(snapshot, total),
                 )
             )
         summaries.sort(key=lambda row: (-row.total_vessel_count, row.name))
@@ -170,6 +171,22 @@ class MaritimeService:
             )
         flows.sort(key=lambda row: (-row.vessel_count, row.label))
         return flows
+
+
+def _position_sample_note(snapshot: MaritimeProviderSnapshot, total: int) -> str:
+    """Describe la muestra AIS de una caja sin ocultar la caja cuando está vacía (GUA-20261021-7)."""
+    coverage = snapshot.coverage
+    plural = "" if total == 1 else "s"
+    if coverage.coverage_status in {"sample", "mock", "historical"}:
+        return f"{total} {coverage.coverage_status} position{plural} inside box; not live AIS"
+    window = coverage.sample_window_seconds
+    window_text = f"last {window:g} s sample" if window else "last sample"
+    if window is None and not snapshot.positions:
+        # No hubo muestreo (sin clave, error o proveedor no disponible): no se habla de "muestra vacía".
+        return f"No live AIS positions: {coverage.provider_label} sample unavailable"
+    if total <= 0:
+        return f"No live AIS positions in {window_text}"
+    return f"{total} AIS position{plural} in {window_text}"
 
 
 def _normalize_mode(value: str) -> str:
