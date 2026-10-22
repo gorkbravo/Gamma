@@ -371,6 +371,11 @@ def build_runtime(
         },
         research_store=prediction_research_store,
     )
+    # La identidad SEC (nombre y email) también identifica las peticiones a bls.gov, que
+    # bloquea los robots sin datos de contacto; por eso se crea antes que MacroService.
+    sec_fundamentals_adapter = SecFundamentalsAdapter(
+        cache, identity=sec_identity_tuple(startup_settings.preferences)
+    )
     macro_service = MacroService(
         fred_adapter=trace_provider(
             FredMacroAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="fred"
@@ -379,7 +384,10 @@ def build_runtime(
             TreasuryCurveAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="treasury"
         ),
         events_adapter=trace_provider(
-            USMacroEventsAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="us_macro_events"
+            USMacroEventsAdapter(cache, contact_user_agent=sec_fundamentals_adapter.user_agent),
+            provider_usage,
+            endpoint_prefix="macro",
+            provider_id="us_macro_events",
         ),
         fx_adapter=trace_provider(
             IBKRMacroFXAdapter(market_data), provider_usage, endpoint_prefix="macro", provider_id="ibkr"
@@ -418,9 +426,6 @@ def build_runtime(
         dex_adapter=trace_provider(
             GeckoTerminalAdapter(cache), provider_usage, endpoint_prefix="crypto", provider_id="geckoterminal"
         ),
-    )
-    sec_fundamentals_adapter = SecFundamentalsAdapter(
-        cache, identity=sec_identity_tuple(startup_settings.preferences)
     )
     fundamentals_service = FundamentalsService(
         sec_adapter=trace_provider(

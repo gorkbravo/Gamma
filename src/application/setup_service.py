@@ -321,11 +321,11 @@ def _sec_identity_state(runtime: "ApplicationRuntime", preferences: SetupPrefere
             locked_by=None,
             name=saved.name,
             email=saved.email,
-            detail="SEC EDGAR requests identify themselves with this name and email.",
+            detail="SEC EDGAR and BLS release-calendar requests identify themselves with this name and email.",
         )
     detail = (
-        "Fundamentals, Copilot company lookup, Script Fundamentals exports and SEC press releases "
-        "stay unavailable until you save your name and email."
+        "Fundamentals, Copilot company lookup, Script Fundamentals exports, SEC press releases and the "
+        "BLS release dates in the Macro calendar stay unavailable until you save your name and email."
     )
     if getattr(adapter, "partial_environment", False):
         detail = (

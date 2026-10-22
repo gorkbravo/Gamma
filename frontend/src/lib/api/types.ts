@@ -3029,6 +3029,7 @@ export interface MacroDivergenceListResponse {
 export interface MacroEventsResponse {
   region: string;
   events: MacroEvent[];
+  warnings?: string[];
 }
 
 export interface CommodityCoverageMetadata {
