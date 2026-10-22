@@ -948,6 +948,22 @@ def test_macro_service_supports_inverse_snapshot_fx_chart_series(monkeypatch):
     assert history.points[-1].value == 0.93
 
 
+def test_eu_eurusd_series_is_inverted_to_match_its_eur_usd_title(monkeypatch):
+    """GUA-20261021-5: CCUSMA02EZM618N cotiza EUR por USD; sin invertir mostraba 0.852 como "EUR/USD"."""
+
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    history = service.get_series_history("eu-eurusd", region="EU", timeframe="1Y")
+
+    assert history is not None
+    assert history.title.startswith("EUR/USD")
+    assert abs(history.points[-1].value - 1 / 0.85) < 1e-12
+    assert history.points[0].value > 1.0
+    assert "inverts" in (history.transformation_note or "")
+    assert all(point.transformation_note == history.transformation_note for point in history.points)
+
+
 def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 

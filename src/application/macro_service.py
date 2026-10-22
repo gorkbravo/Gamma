@@ -229,11 +229,13 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "ttl_hours": 72,
         "comparison_key": "labor_slack",
     },
+    # CCUSMA02EZM618N cotiza euros por dólar (USD/EUR, media mensual). Se invierte para que
+    # el valor coincida con el título EUR/USD y con los pesos de señal (GUA-20261021-5).
     "eu-eurusd": {
         "kind": "raw",
         "region": "EU",
         "provider_series_id": "CCUSMA02EZM618N",
-        "title": "EUR/USD Exchange Rate",
+        "title": "EUR/USD Exchange Rate (monthly avg)",
         "unit": "fx",
         "frequency": "monthly",
         "theme": "policy",
@@ -241,6 +243,8 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "history_days": 1200,
         "ttl_hours": 36,
         "comparison_key": "fx_proxy",
+        "invert": True,
+        "transformation_note": "FRED CCUSMA02EZM618N quotes euros per US dollar as a monthly average of daily rates; Gamma inverts it to US dollars per euro (EUR/USD). It lags the daily IBKR EUR/USD pair.",
     },
     "fx-eurusd": {
         "kind": "fx",
@@ -1560,6 +1564,8 @@ class MacroService:
     def _load_raw_history(self, series_id: str, meta: dict[str, Any], *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory:
         start, end = self._history_window(meta["history_days"], timeframe)
         points, retrieved_at = self.fred_adapter.get_series(meta["provider_series_id"], start=start, end=end, ttl=timedelta(hours=meta["ttl_hours"]), force_refresh=force_refresh)
+        if meta.get("invert"):
+            points = _invert_points(points, note=meta.get("transformation_note"))
         return MacroSeriesHistory(
             series_id=series_id,
             title=meta["title"],
@@ -3137,6 +3143,15 @@ class MacroService:
         if comparison_key is None:
             return None
         return SERIES_BY_COMPARISON_KEY.get(str(comparison_key), {}).get(comparison_region)
+
+
+def _invert_points(points: list[MacroSeriesPoint], *, note: str | None) -> list[MacroSeriesPoint]:
+    # Cambia la cotización (p. ej. EUR por USD -> USD por EUR); descarta valores no positivos.
+    return [
+        replace(point, value=1.0 / point.value, transformation_note=note or point.transformation_note)
+        for point in points
+        if point.value > 0
+    ]
 
 
 def _compute_yoy_points(raw_points: list[MacroSeriesPoint], *, retrieved_at: datetime, note: str, periods_per_year: int) -> list[MacroSeriesPoint]:
