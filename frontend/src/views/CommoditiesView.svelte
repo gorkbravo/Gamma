@@ -4,6 +4,7 @@
   import CommodityCurveHistory from "../components/CommodityCurveHistory.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
+    CommodityCrossDomainLink,
     CommodityCurveSnapshot,
     CommodityInventorySeries,
     CommodityMarketSummary,
@@ -12,12 +13,24 @@
     CommodityPriceBasis,
     CommodityPriceHistory,
     CommoditySpreadSnapshot,
+    CrossTabHandoffEnvelope,
     MacroSeriesHistory,
     StrategyLabHandoffEnvelope,
     CommodityWorkspaceResponse
   } from "../lib/api/types";
-  import type { CommodityWorkspaceLoadOptions } from "../lib/stores/app";
+  import { commoditiesRequestedInstrumentId, type CommodityWorkspaceLoadOptions } from "../lib/stores/app";
+  import { activateRowOnKey } from "../lib/row-activation";
   import { buildCommodityStrategyHandoff } from "../lib/view-models/research";
+  import {
+    RECONCILIATION_PANEL_STATUSES,
+    buildCommodityCrossDomainHandoff,
+    crossDomainLinkTargetTab,
+    pendingCommodityInstrument,
+    reconciliationReferenceRows,
+    reconciliationStatusLabel,
+    spreadCurrentValueView,
+    spreadObservationView
+  } from "../lib/view-models/commodities";
 
   export let workspace: CommodityWorkspaceResponse | null = null;
   export let loading = false;
@@ -27,6 +40,10 @@
   export let onLoadMacroSeries: (seriesId: string, options?: { region?: string; timeframe?: string; forceRefresh?: boolean }) => Promise<unknown> | void = () => undefined;
   export let onSendToStrategyLab:
     | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
+    | undefined = undefined;
+  // GUA-20261021-7: abre la pestaña destino de una fila cross-domain con el traspaso existente.
+  export let onCrossDomainHandoff:
+    | ((handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void)
     | undefined = undefined;
 
   const modes: Array<{ id: CommodityMode; label: string }> = [
@@ -101,7 +118,20 @@
   $: historyPointCount = selectedHistory?.points.length ?? 0;
   $: latestHistoryDate = selectedHistory?.points.at(-1)?.timestamp ?? selectedSummary?.retrieved_at ?? workspace?.retrieved_at ?? null;
   $: providerMixLabel = formatProviderMix(workspace);
-  $: basisConflictRows = (workspace?.price_reconciliations ?? []).filter((row) => row.status === "conflict");
+  // GUA-20261021-4: el resumen general lista conflictos de datos y referencias caducadas.
+  $: basisConflictRows = (workspace?.price_reconciliations ?? []).filter(
+    (row) => row.status === "conflict" || row.status === "stale_reference"
+  );
+  $: selectedReferenceRows = reconciliationReferenceRows(selectedReconciliation);
+  // P2 2026-10-21: mientras carga otro instrumento no se muestran la cabecera ni la base del anterior.
+  $: pendingInstrumentId = pendingCommodityInstrument(
+    loading,
+    $commoditiesRequestedInstrumentId,
+    workspace?.selected_instrument_id ?? null
+  );
+  $: pendingInstrumentLabel = pendingInstrumentId
+    ? findSelectedInstrument(workspace, pendingInstrumentId)?.name ?? pendingInstrumentId.toUpperCase()
+    : "";
   $: termSpreadHeatmapRows = buildTermSpreadHeatmap(selectedCurve);
   $: crackMatrixRows = buildCrackMatrix(workspace?.spreads ?? []);
   $: inventoryCloudRows = buildInventoryCloudRows(visibleInventories);
@@ -198,6 +228,20 @@
       { sourceMode: mode }
     );
     onSendToStrategyLab(handoff, { open });
+  }
+
+  function openCrossDomainLink(link: CommodityCrossDomainLink) {
+    if (!onCrossDomainHandoff) {
+      return;
+    }
+    const handoff = buildCommodityCrossDomainHandoff(link, { instrument: selectedInstrument, sourceMode: mode });
+    if (handoff) {
+      void onCrossDomainHandoff(handoff);
+    }
+  }
+
+  function crossDomainLinkActionable(link: CommodityCrossDomainLink) {
+    return Boolean(onCrossDomainHandoff && crossDomainLinkTargetTab(link));
   }
 
   function contextMenuPosition(event: MouseEvent | KeyboardEvent) {
@@ -391,6 +435,9 @@
         change: spread.change,
         percentile: spread.percentile,
         interpretation: spread.interpretation ?? "N/A",
+        // GUA-20261021-2: fecha de observación y valor actual de la misma instantánea, por fila.
+        observation: spreadObservationView(spread),
+        current: spreadCurrentValueView(spread),
         tone: spread.change == null ? "" : spread.change > 0 ? "positive" : spread.change < 0 ? "negative" : ""
       }));
   }
@@ -597,6 +644,7 @@
         return {
           id: spread.definition.spread_id,
           label: spread.definition.label,
+          observation: spreadObservationView(spread),
           current,
           mean,
           distance,
@@ -626,6 +674,8 @@
         change: spread.change,
         zScore: spread.z_score,
         percentile: spread.percentile,
+        observation: spreadObservationView(spread),
+        current: spreadCurrentValueView(spread),
         interpretation: spread.interpretation ?? "N/A"
       }));
   }
@@ -1348,7 +1398,13 @@
       </button>
     </div>
 
-    {#if workspace && selectedBasis}
+    {#if workspace && pendingInstrumentId}
+      <!-- P2 2026-10-21: identidad del instrumento pedido mientras carga, no la del anterior. -->
+      <div class="basis-strip pending" aria-label="Selected commodity source and basis" aria-busy="true">
+        <span><em>Loading</em> {pendingInstrumentLabel}</span>
+        <span class="pending-note">Headline, contract and basis checks appear when the {pendingInstrumentLabel} workspace arrives.</span>
+      </div>
+    {:else if workspace && selectedBasis}
       <div class="basis-strip" aria-label="Selected commodity source and basis">
         <span><em>Headline</em> {compactBasisLabel(selectedBasis)}</span>
         <span><em>Provider</em> {providerLabel(selectedBasis.provider)}</span>
@@ -1358,6 +1414,7 @@
         <span><em>Time</em> {basisTimeLabel(selectedBasis)}</span>
         <span><em>Prior</em> {basisPriorTimeLabel(selectedBasis)}</span>
         {#if selectedReconciliation?.status === "conflict"}<strong>Basis conflict</strong>{/if}
+        {#if selectedReconciliation?.status === "stale_reference"}<strong>Stale reference</strong>{/if}
       </div>
     {/if}
 
@@ -1702,11 +1759,25 @@
               <tbody>
                 {#if workspace.cross_domain_links.length}
                   {#each workspace.cross_domain_links.slice(0, 8) as link}
-                    <tr>
-                      <td><strong>{link.target_label}</strong></td>
-                      <td>{humanize(link.target_domain)}</td>
-                      <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
-                    </tr>
+                    {#if crossDomainLinkActionable(link)}
+                      <tr
+                        class="clickable-row"
+                        tabindex="0"
+                        aria-label={`Open ${link.target_label} in ${humanize(link.target_domain)}`}
+                        on:click={() => openCrossDomainLink(link)}
+                        on:keydown={(event) => activateRowOnKey(event, () => openCrossDomainLink(link))}
+                      >
+                        <td><strong>{link.target_label}</strong></td>
+                        <td>{humanize(link.target_domain)} <span class="row-go" aria-hidden="true">→</span></td>
+                        <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
+                      </tr>
+                    {:else}
+                      <tr>
+                        <td><strong>{link.target_label}</strong></td>
+                        <td>{humanize(link.target_domain)}</td>
+                        <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
+                      </tr>
+                    {/if}
                   {/each}
                 {:else}
                   <tr class="empty-row"><td colspan="3">No cross-domain links.</td></tr>
@@ -1768,22 +1839,64 @@
       </article>
     {/if}
 
-    {#if selectedReconciliation?.status === "conflict"}
+    {#if pendingInstrumentId}
+      <!-- La reconciliación del instrumento anterior no se muestra mientras carga el pedido. -->
+    {:else if selectedReconciliation && RECONCILIATION_PANEL_STATUSES.has(selectedReconciliation.status)}
+      <!-- GUA-20261021-4: cada referencia con su fecha y unidad; base económica separada del conflicto. -->
       <article class="panel reconciliation-panel">
         <header class="panel-title">
           <span>Basis Reconciliation</span>
-          <span class="header-meta">{selectedReconciliation.observations.length} quote references</span>
+          <span class="header-meta">
+            <span class="tag {selectedReconciliation.status === 'conflict' ? 'negative' : selectedReconciliation.status === 'stale_reference' ? 'warning' : 'neutral'}">{reconciliationStatusLabel(selectedReconciliation.status)}</span>
+            {selectedReferenceRows.length} quote references{selectedReconciliation.stale_after_days != null ? ` · stale after ${selectedReconciliation.stale_after_days}d` : ""}
+          </span>
         </header>
         <div class="reconciliation-line">
-          <strong>{selectedReconciliation.summary}</strong>
-          <span>{selectedReconciliation.warnings[0]}</span>
+          <strong class:neutral-strong={selectedReconciliation.status === "basis"}>{selectedReconciliation.summary}</strong>
+          {#if !(selectedReconciliation.comparisons ?? []).length && selectedReconciliation.warnings[0]}
+            <span>{selectedReconciliation.warnings[0]}</span>
+          {/if}
         </div>
+        {#if selectedReferenceRows.length}
+          <div class="table-wrap">
+            <table class="compact-table reference-table">
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th class="num">Value</th>
+                  <th>Obs</th>
+                  <th class="num">Age</th>
+                  <th class="num">Diff vs headline</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each selectedReferenceRows as row}
+                  <tr>
+                    <td><strong>{row.label}</strong>{#if row.note}<span class="meta">{row.note}</span>{/if}</td>
+                    <td class="num">
+                      {formatNumber(row.value, 2)} {row.unit}
+                      {#if row.convertedValue != null}<span class="meta">= {formatNumber(row.convertedValue, 3)} {row.convertedUnit}</span>{/if}
+                    </td>
+                    <td class="mono">{row.date}</td>
+                    <td class="num" class:absent={row.ageDays == null}>{row.ageDays == null ? "—" : `${row.ageDays}d`}</td>
+                    <td class="num {valueClass(row.difference)}" class:absent={row.difference == null}>
+                      {row.difference == null ? "—" : `${row.difference > 0 ? "+" : ""}${formatNumber(row.difference, 2)}`}
+                      {#if row.differencePct != null}<span class="meta">{formatPct(row.differencePct)}</span>{/if}
+                    </td>
+                    <td><span class="tag {row.tone}">{row.kindLabel}</span></td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
       </article>
     {:else if basisConflictRows.length && mode === "overview"}
       <article class="panel reconciliation-panel">
         <header class="panel-title">
           <span>Basis Reconciliation</span>
-          <span class="header-meta">{basisConflictRows.length} conflicts</span>
+          <span class="header-meta">{basisConflictRows.length} flagged</span>
         </header>
         <div class="reconciliation-list">
           {#each basisConflictRows.slice(0, 3) as row}
@@ -1936,6 +2049,7 @@
                 <tr>
                   <th>Spread</th>
                   <th class="num">Value</th>
+                  <th>Obs</th>
                   <th class="num">Chg</th>
                   <th class="num">Pctl</th>
                 </tr>
@@ -1943,15 +2057,22 @@
               <tbody>
                 {#if crackMatrixRows.length}
                   {#each crackMatrixRows as row}
-                    <tr>
+                    <tr class:stale-row={row.observation.stale}>
                       <td><strong>{row.label}</strong><span class="meta">{row.formula}</span></td>
-                      <td class="num" class:absent={formatNumber(row.value, 2) === "N/A"}>{formatNumber(row.value, 2)}</td>
+                      <td class="num" class:absent={formatNumber(row.value, 2) === "N/A"}>
+                        {formatNumber(row.value, 2)}
+                        {#if row.current}<span class="meta live-value" title={row.current.source}>Live {formatNumber(row.current.value, 2)} · {formatDateTime(row.current.asOf)}</span>{/if}
+                      </td>
+                      <td class="mono" title={row.observation.title}>
+                        {row.observation.date}
+                        {#if row.observation.stale}<span class="tag warning stale-tag">Stale {row.observation.lagLabel}</span>{/if}
+                      </td>
                       <td class="num {row.tone}" class:absent={formatNumber(row.change, 2) === "N/A"}>{formatNumber(row.change, 2)}</td>
                       <td class="num" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="4">No crack-spread rows.</td></tr>
+                  <tr class="empty-row"><td colspan="5">No crack-spread rows.</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1999,12 +2120,27 @@
             <tbody>
               {#if selectedCrossDomainLinks.length}
                 {#each selectedCrossDomainLinks as link}
-                  <tr>
-                    <td><strong>{link.target_label}</strong></td>
-                    <td>{humanize(link.target_domain)}</td>
-                    <td>{humanize(link.relationship)}</td>
-                    <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
-                  </tr>
+                  {#if crossDomainLinkActionable(link)}
+                    <tr
+                      class="clickable-row"
+                      tabindex="0"
+                      aria-label={`Open ${link.target_label} in ${humanize(link.target_domain)}`}
+                      on:click={() => openCrossDomainLink(link)}
+                      on:keydown={(event) => activateRowOnKey(event, () => openCrossDomainLink(link))}
+                    >
+                      <td><strong>{link.target_label}</strong></td>
+                      <td>{humanize(link.target_domain)} <span class="row-go" aria-hidden="true">→</span></td>
+                      <td>{humanize(link.relationship)}</td>
+                      <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
+                    </tr>
+                  {:else}
+                    <tr>
+                      <td><strong>{link.target_label}</strong></td>
+                      <td>{humanize(link.target_domain)}</td>
+                      <td>{humanize(link.relationship)}</td>
+                      <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
+                    </tr>
+                  {/if}
                 {/each}
               {:else}
                 <tr class="empty-row"><td colspan="4">No vessel-flow proxy linked.</td></tr>
@@ -2029,6 +2165,7 @@
                 <tr>
                   <th>Spread</th>
                   <th class="num">Value</th>
+                  <th>Obs</th>
                   <th class="num">Chg</th>
                   <th class="num">Z</th>
                   <th class="num">Pctl</th>
@@ -2037,16 +2174,23 @@
               <tbody>
                 {#if substitutionSpreadRows.length}
                   {#each substitutionSpreadRows as row}
-                    <tr>
+                    <tr class:stale-row={row.observation.stale}>
                       <td><strong>{row.label}</strong></td>
-                      <td class="num" class:absent={formatNumber(row.value, 1) === "N/A"}>{formatNumber(row.value, 1)}</td>
+                      <td class="num" class:absent={formatNumber(row.value, 1) === "N/A"}>
+                        {formatNumber(row.value, 1)}
+                        {#if row.current}<span class="meta live-value" title={row.current.source}>Live {formatNumber(row.current.value, 1)} · {formatDateTime(row.current.asOf)}</span>{/if}
+                      </td>
+                      <td class="mono" title={row.observation.title}>
+                        {row.observation.date}
+                        {#if row.observation.stale}<span class="tag warning stale-tag">Stale {row.observation.lagLabel}</span>{/if}
+                      </td>
                       <td class="num {valueClass(row.change)}" class:absent={formatNumber(row.change, 1) === "N/A"}>{formatNumber(row.change, 1)}</td>
                       <td class="num {valueClass(row.zScore)}" class:absent={formatNumber(row.zScore, 2) === "N/A"}>{formatNumber(row.zScore, 2)}</td>
                       <td class="num" class:absent={formatPercentile(row.percentile) === "N/A"}>{formatPercentile(row.percentile)}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="5">No substitution spreads.</td></tr>
+                  <tr class="empty-row"><td colspan="6">No substitution spreads.</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -2115,6 +2259,7 @@
               <tr>
                 <th>Spread</th>
                 <th class="num">Value</th>
+                <th>Obs</th>
                 <th class="num">Chg</th>
                 <th class="num">Z</th>
                 <th class="num">Pctl</th>
@@ -2123,16 +2268,25 @@
             <tbody>
               {#if selectedSpreads.length}
                 {#each selectedSpreads as spread}
-                  <tr>
+                  {@const observation = spreadObservationView(spread)}
+                  {@const current = spreadCurrentValueView(spread)}
+                  <tr class:stale-row={observation.stale}>
                     <td><strong>{spread.definition.label}</strong><span class="meta">{spread.definition.formula}</span></td>
-                    <td class="num">{formatNumber(spread.value, 3)} {spreadUnit(spread)}</td>
+                    <td class="num">
+                      {formatNumber(spread.value, 3)} {spreadUnit(spread)}
+                      {#if current}<span class="meta live-value" title={current.source}>Live {formatNumber(current.value, 3)} · {formatDateTime(current.asOf)}</span>{/if}
+                    </td>
+                    <td class="mono" title={observation.title}>
+                      {observation.date}
+                      {#if observation.stale}<span class="tag warning stale-tag">Stale {observation.lagLabel}</span>{/if}
+                    </td>
                     <td class="num {valueClass(spread.change)}" class:absent={formatNumber(spread.change, 3) === "N/A"}>{formatNumber(spread.change, 3)}</td>
                     <td class="num {valueClass(spread.z_score)}" class:absent={formatNumber(spread.z_score, 2) === "N/A"}>{formatNumber(spread.z_score, 2)}</td>
                     <td class="num" class:absent={formatPercentile(spread.percentile) === "N/A"}>{formatPercentile(spread.percentile)}</td>
                   </tr>
                 {/each}
               {:else}
-                <tr class="empty-row"><td colspan="5">No spread rows linked.</td></tr>
+                <tr class="empty-row"><td colspan="6">No spread rows linked.</td></tr>
               {/if}
             </tbody>
           </table>
@@ -2182,8 +2336,8 @@
           <div class="seasonality-list">
             {#if metalRatioGaugeRows.length}
               {#each metalRatioGaugeRows as row}
-                <div class="seasonality-row">
-                  <span class="row-label" title={row.label}>{row.label}</span>
+                <div class="seasonality-row" class:stale-row={row.observation.stale}>
+                  <span class="row-label" title={`${row.label} · ${row.observation.title}`}>{row.label}<span class="obs-inline" class:warning={row.observation.stale}>{row.observation.date}</span></span>
                   <span class="num meta range-min" class:absent={formatNumber(row.min, 2) === "N/A"}>{formatNumber(row.min, 2)}</span>
                   <div class="seasonality-band">
                     <span class="band-whisker"></span>
@@ -2443,12 +2597,27 @@
               <tbody>
                 {#if selectedCrossDomainLinks.length}
                   {#each selectedCrossDomainLinks as link}
-                    <tr>
-                      <td><strong>{link.target_label}</strong></td>
-                      <td>{humanize(link.target_domain)}</td>
-                      <td>{humanize(link.relationship)}</td>
-                      <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
-                    </tr>
+                    {#if crossDomainLinkActionable(link)}
+                      <tr
+                        class="clickable-row"
+                        tabindex="0"
+                        aria-label={`Open ${link.target_label} in ${humanize(link.target_domain)}`}
+                        on:click={() => openCrossDomainLink(link)}
+                        on:keydown={(event) => activateRowOnKey(event, () => openCrossDomainLink(link))}
+                      >
+                        <td><strong>{link.target_label}</strong></td>
+                        <td>{humanize(link.target_domain)} <span class="row-go" aria-hidden="true">→</span></td>
+                        <td>{humanize(link.relationship)}</td>
+                        <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
+                      </tr>
+                    {:else}
+                      <tr>
+                        <td><strong>{link.target_label}</strong></td>
+                        <td>{humanize(link.target_domain)}</td>
+                        <td>{humanize(link.relationship)}</td>
+                        <td class="num" class:absent={formatNumber(link.confidence, 2) === "N/A"}>{formatNumber(link.confidence, 2)}</td>
+                      </tr>
+                    {/if}
                   {/each}
                 {:else}
                   <tr class="empty-row"><td colspan="4">No cross-domain links.</td></tr>
@@ -2982,6 +3151,33 @@
   .reconciliation-list span {
     color: var(--text-2);
   }
+
+  /* GUA-20261021-4: una base económica no se pinta como aviso. */
+  .reconciliation-line strong.neutral-strong { color: var(--text-0); }
+  .reference-table { min-width: 40rem; }
+  .reference-table td .meta { white-space: normal; }
+
+  /* GUA-20261021-2: fecha de observación y estado caducado por fila. */
+  .stale-row td:not(:last-child) strong,
+  .stale-row td.num { color: var(--text-1); }
+  .stale-tag { margin-left: var(--space-2); }
+  .live-value { color: var(--accent); }
+  .obs-inline {
+    margin-left: var(--space-2);
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .obs-inline.warning { color: var(--warning); }
+
+  /* GUA-20261021-7: filas cross-domain navegables. */
+  tr.clickable-row { cursor: pointer; }
+  tr.clickable-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .row-go { color: var(--accent); margin-left: var(--space-2); }
+
+  /* P2 2026-10-21: estado de carga del instrumento pedido en la cabecera. */
+  .basis-strip.pending em { color: var(--accent); }
+  .basis-strip .pending-note { color: var(--text-2); }
 
   .scatter-shell {
     position: relative;

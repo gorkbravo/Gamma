@@ -38,7 +38,22 @@ COMMODITY_RECONCILIATION_STATUSES = {
     "aligned",
     "conflict",
     "insufficient",
+    # GUA-20261021-4: base económica futuro-spot fechada y referencias caducadas no son conflictos.
+    "basis",
+    "stale_reference",
 }
+
+# GUA-20261021-4: resultado de comparar una referencia con el titular.
+COMMODITY_BASIS_COMPARISON_KINDS = {
+    "same_series",
+    "aligned",
+    "basis",
+    "conflict",
+    "stale_reference",
+    "units_differ",
+}
+
+COMMODITY_SPREAD_FRESHNESS = {"current", "stale", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -193,6 +208,34 @@ class CommodityPriceBasis:
 
 
 @dataclass(frozen=True)
+class CommodityBasisComparison:
+    """Comparación fechada y con unidades de una referencia frente al titular (GUA-20261021-4)."""
+
+    basis_id: str
+    display_label: str
+    kind: str
+    provider: str = ""
+    value: float | None = None
+    unit: str | None = None
+    observed_at: datetime | None = None
+    headline_value: float | None = None
+    headline_unit: str | None = None
+    headline_observed_at: datetime | None = None
+    # Valor de la referencia expresado en la unidad del titular (None si no hay conversión conocida).
+    converted_value: float | None = None
+    # Días entre la fecha del titular y la de la referencia (positivo: referencia más antigua).
+    age_days: int | None = None
+    # Titular menos referencia convertida, en unidad del titular.
+    difference: float | None = None
+    difference_pct: float | None = None
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if self.kind not in COMMODITY_BASIS_COMPARISON_KINDS:
+            raise ValueError(f"Unsupported commodity basis comparison kind: {self.kind}")
+
+
+@dataclass(frozen=True)
 class CommodityPriceReconciliation:
     instrument_id: str
     status: str
@@ -204,6 +247,8 @@ class CommodityPriceReconciliation:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    comparisons: list[CommodityBasisComparison] = field(default_factory=list)
+    stale_after_days: int | None = None
 
     def __post_init__(self) -> None:
         if self.status not in COMMODITY_RECONCILIATION_STATUSES:
@@ -252,6 +297,20 @@ class CommoditySpreadSnapshot:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # GUA-20261021-2: fecha de la última observación alineada; retrieved_at es solo la hora de descarga.
+    observed_at: datetime | None = None
+    leg_observed_at: dict[str, datetime | None] = field(default_factory=dict)
+    observation_lag_days: int | None = None
+    freshness: str = "unknown"
+    stale_after_days: int | None = None
+    # Valor actual con cotizaciones front de la misma instantánea; el percentil sigue siendo histórico.
+    current_value: float | None = None
+    current_value_as_of: datetime | None = None
+    current_value_source: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.freshness not in COMMODITY_SPREAD_FRESHNESS:
+            raise ValueError(f"Unsupported commodity spread freshness: {self.freshness}")
 
 
 @dataclass(frozen=True)
@@ -477,6 +536,10 @@ class CommodityCrossDomainLink:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # GUA-20261021-7: destino navegable (pestaña, modo y lente) para el traspaso entre pestañas.
+    target_tab: str | None = None
+    target_mode: str | None = None
+    target_ids: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

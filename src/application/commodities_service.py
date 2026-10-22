@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable
 
 from src.models.commodities import (
     COMMODITY_MODES,
+    CommodityBasisComparison,
     CommodityCrossDomainLink,
     CommodityCurveSnapshot,
     CommodityInventoryPoint,
@@ -31,6 +33,22 @@ from src.models.commodities import (
 )
 from src.services.commodities_adapters import CommoditiesDataProvider
 from src.services.commodity_curve_store import CommodityCurveStore
+from src.utils.time import now_utc
+
+
+# GUA-20261021-2: un diferencial cuya última observación alineada tiene más de 4 días naturales
+# (fin de semana más un festivo) ya no describe el mercado actual y se marca como caducado.
+SPREAD_STALE_AFTER_DAYS = 4
+# GUA-20261021-4: referencias de precio separadas del titular por más de 4 días naturales se
+# informan como referencias caducadas, no como conflicto de datos.
+REFERENCE_STALE_AFTER_DAYS = 4
+# Diferencia relativa a partir de la cual dos referencias comparables dejan de estar alineadas.
+RECONCILIATION_MATERIALITY_PCT = 0.015
+# Por encima de esta razón entre valores ya convertidos, la diferencia no es una base económica.
+RECONCILIATION_IMPLAUSIBLE_RATIO = 3.0
+# Separación máxima entre las cotizaciones front de las patas para tratarlas como una misma instantánea.
+CURRENT_VALUE_VINTAGE_TOLERANCE = timedelta(minutes=15)
+LIVE_FRONT_QUOTE_PROVIDERS = {"ibkr", "ibkr_cached"}
 
 
 @dataclass(frozen=True)
@@ -41,9 +59,17 @@ class CommodityWorkspaceRequest:
 
 
 class CommoditiesService:
-    def __init__(self, *, provider: CommoditiesDataProvider, curve_store: CommodityCurveStore | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        provider: CommoditiesDataProvider,
+        curve_store: CommodityCurveStore | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.provider = provider
         self.curve_store = curve_store
+        # Reloj inyectable para fechar la frescura de diferenciales en tests.
+        self.clock = clock or now_utc
 
     def get_workspace(self, request: CommodityWorkspaceRequest | None = None) -> CommodityWorkspaceResult:
         normalized_request = request or CommodityWorkspaceRequest()
@@ -284,16 +310,20 @@ class CommoditiesService:
                     _curve_front_basis(instrument, curve, snapshot.coverage, history),
                 ]
             )
-            warnings = _reconciliation_warnings(instrument, headline, observations)
-            status = "conflict" if warnings else ("aligned" if len([row for row in observations if row.value is not None]) >= 2 else "insufficient")
+            # GUA-20261021-4: cada referencia se compara con fecha y unidad antes de hablar de conflicto.
+            comparisons = _basis_comparisons(instrument, headline, observations)
+            warnings = _reconciliation_warnings(instrument, comparisons)
+            status = _reconciliation_status(comparisons, observations)
             rows.append(
                 CommodityPriceReconciliation(
                     instrument_id=instrument_id,
                     status=status,
                     headline=headline,
                     observations=observations,
-                    summary=_reconciliation_summary(instrument, status, headline, observations),
+                    summary=_reconciliation_summary(instrument, status, headline, observations, comparisons),
                     warnings=warnings,
+                    comparisons=comparisons,
+                    stale_after_days=REFERENCE_STALE_AFTER_DAYS,
                     source_provider="gamma",
                     retrieved_at=_max_datetime(
                         snapshot.retrieved_at,
@@ -301,7 +331,8 @@ class CommoditiesService:
                     ),
                     origin="gamma.commodities.price_reconciliation",
                     transformation_note=(
-                        "Gamma compares the selected headline commodity quote against loaded price history and the front futures curve node, preserving basis and provider differences."
+                        "Gamma compares the selected headline commodity quote against loaded price history and the front futures curve node after converting units, "
+                        f"reports references more than {REFERENCE_STALE_AFTER_DAYS} days from the headline as stale, and separates a dated futures-spot basis from a data conflict."
                     ),
                 )
             )
@@ -314,6 +345,9 @@ class CommoditiesService:
     ) -> list[CommoditySpreadSnapshot]:
         curves_by_id = {curve.instrument_id: curve for curve in curves}
         histories_by_id = {history.instrument_id: history for history in snapshot.price_histories}
+        unit_by_id = {instrument.instrument_id: instrument.quote_unit for instrument in snapshot.instruments}
+        # GUA-20261021-2: la frescura se mide contra hoy (las cotizaciones titulares nunca son posteriores).
+        reference_date = _utc_date(self.clock())
         spreads: list[CommoditySpreadSnapshot] = []
 
         for instrument_id, label in [
@@ -345,7 +379,14 @@ class CommoditiesService:
                 transformation_note="Gamma-defined commodity spread for normalized curve analytics.",
             )
             history = _calendar_spread_history(spread_id, histories_by_id.get(instrument_id), value, curve)
-            spreads.append(_spread_snapshot(definition, value, history, curve.retrieved_at))
+            spreads.append(
+                _with_spread_freshness(
+                    _spread_snapshot(definition, value, history, curve.retrieved_at),
+                    observed_at=curve.as_of,
+                    leg_observed_at={instrument_id: curve.as_of},
+                    reference_date=reference_date,
+                )
+            )
 
         ratio_specs = [
             ("gold-silver-ratio", "Gold / Silver", "gold", "silver", "ratio"),
@@ -376,7 +417,22 @@ class CommoditiesService:
                 origin="gamma.commodities.spread_definition",
                 transformation_note="Gamma-defined inter-commodity spread using aligned normalized price histories.",
             )
-            spreads.append(_spread_snapshot(definition, value, history, history[-1].retrieved_at))
+            spread = _with_spread_freshness(
+                _spread_snapshot(definition, value, history, history[-1].retrieved_at),
+                observed_at=history[-1].timestamp,
+                leg_observed_at=_leg_latest_observations({left_id: left, right_id: right}),
+                reference_date=reference_date,
+            )
+            # Valor actual solo si todas las patas tienen cotización front de la misma instantánea.
+            leg_prices = _same_vintage_front_prices(
+                [left_id, right_id], curves_by_id, unit_by_id, histories_by_id, reference_date
+            )
+            current = None
+            if leg_prices is not None and left is not None and right is not None:
+                prices, as_of, symbols = leg_prices
+                current_value = _relative_spread_value(kind, prices[left_id], left.unit, prices[right_id], right.unit)
+                current = (current_value, as_of, symbols) if current_value is not None else None
+            spreads.append(_with_current_value(spread, current))
 
         for spread_id, label, product_weights, crude_barrels in [
             ("two-one-one-crack", "2-1-1 Crack Proxy", {"gasoline": 1.0, "heating_oil": 1.0}, 2.0),
@@ -399,7 +455,25 @@ class CommoditiesService:
                 origin="gamma.commodities.spread_definition",
                 transformation_note="Gamma-defined composite crack spread using aligned normalized product and crude price histories.",
             )
-            spreads.append(_spread_snapshot(definition, history[-1].value, history, history[-1].retrieved_at))
+            leg_ids = [*product_weights.keys(), "wti"]
+            spread = _with_spread_freshness(
+                _spread_snapshot(definition, history[-1].value, history, history[-1].retrieved_at),
+                observed_at=history[-1].timestamp,
+                leg_observed_at=_leg_latest_observations({leg: histories_by_id.get(leg) for leg in leg_ids}),
+                reference_date=reference_date,
+            )
+            leg_prices = _same_vintage_front_prices(leg_ids, curves_by_id, unit_by_id, histories_by_id, reference_date)
+            current = None
+            if leg_prices is not None:
+                prices, as_of, symbols = leg_prices
+                current = (
+                    _composite_crack_value(
+                        {leg: prices[leg] for leg in product_weights}, product_weights, prices["wti"], crude_barrels
+                    ),
+                    as_of,
+                    symbols,
+                )
+            spreads.append(_with_current_value(spread, current))
         return sorted(spreads, key=lambda spread: spread.definition.label)
 
     def _build_cross_domain_links(
@@ -407,6 +481,7 @@ class CommoditiesService:
         snapshot: CommodityProviderSnapshot,
     ) -> list[CommodityCrossDomainLink]:
         retrieved_at = snapshot.retrieved_at
+        # GUA-20261021-7: cada enlace declara la pestaña, el modo y la lente que admite el traspaso existente.
         return [
             CommodityCrossDomainLink(
                 link_id="macro-inflation-energy",
@@ -420,6 +495,9 @@ class CommoditiesService:
                 retrieved_at=retrieved_at,
                 origin="gamma.commodities.cross_domain",
                 transformation_note="Heuristic cross-domain link; it is not a causal model.",
+                target_tab="macro",
+                target_mode="snapshot",
+                target_ids={"theme": "inflation"},
             ),
             CommodityCrossDomainLink(
                 link_id="macro-growth-copper-gold",
@@ -433,6 +511,9 @@ class CommoditiesService:
                 retrieved_at=retrieved_at,
                 origin="gamma.commodities.cross_domain",
                 transformation_note="Heuristic macro framing based on common market convention and normalized sample/proxy data.",
+                target_tab="macro",
+                target_mode="snapshot",
+                target_ids={"theme": "growth"},
             ),
             CommodityCrossDomainLink(
                 link_id="maritime-energy-chokepoints",
@@ -446,6 +527,8 @@ class CommoditiesService:
                 retrieved_at=retrieved_at,
                 origin="gamma.commodities.cross_domain",
                 transformation_note="Heuristic handoff link; Gamma does not infer cargo or route disruption from commodity prices alone.",
+                target_tab="maritime",
+                target_mode="chokepoints",
             ),
             CommodityCrossDomainLink(
                 link_id="prediction-geopolitical-energy",
@@ -459,6 +542,8 @@ class CommoditiesService:
                 retrieved_at=retrieved_at,
                 origin="gamma.commodities.cross_domain",
                 transformation_note="Heuristic related-context link; prediction-market retrieval is handled by the Prediction Markets workspace.",
+                target_tab="prediction_markets",
+                target_mode="screener",
             ),
         ]
 
@@ -1142,31 +1227,182 @@ def _dedupe_basis_records(records: list[CommodityPriceBasis | None]) -> list[Com
     return result
 
 
-def _reconciliation_warnings(
+# Tipos de base que representan un precio de futuros frente a referencias spot/proxy.
+_FUTURES_BASIS_TYPES = {"front_future", "selected_future", "curve_node", "continuous_proxy"}
+
+
+def _basis_observed_at(basis: CommodityPriceBasis) -> datetime | None:
+    return basis.source_timestamp or basis.timestamp
+
+
+def _basis_comparisons(
     instrument,
     headline: CommodityPriceBasis | None,
     observations: list[CommodityPriceBasis],
-) -> list[str]:
+) -> list[CommodityBasisComparison]:
+    """GUA-20261021-4: compara cada referencia con el titular por fecha y unidad antes que por valor."""
     if headline is None or headline.value is None:
         return []
-    warnings: list[str] = []
+    rows: list[CommodityBasisComparison] = []
+    headline_at = _basis_observed_at(headline)
     for observation in observations:
         if observation.basis_id == headline.basis_id or observation.value is None:
             continue
-        if observation.basis_type == headline.basis_type and observation.provider == headline.provider:
-            continue
-        denominator = abs(headline.value) if headline.value else abs(observation.value)
-        diff_pct = abs(observation.value - headline.value) / denominator if denominator else 0.0
-        if diff_pct < 0.015:
-            continue
-        warnings.append(
-            (
-                f"Commodity basis conflict for {instrument.name}: headline {headline.display_label} "
-                f"{_format_number(headline.value, 2)} differs from {observation.display_label} "
-                f"{_format_number(observation.value, 2)} by {diff_pct * 100:.1f}%."
-            )
+        observed_at = _basis_observed_at(observation)
+        age_days = (
+            (_utc_date(headline_at) - _utc_date(observed_at)).days
+            if headline_at is not None and observed_at is not None
+            else None
         )
+        base = {
+            "basis_id": observation.basis_id,
+            "display_label": observation.display_label,
+            "provider": observation.provider,
+            "value": observation.value,
+            "unit": observation.unit,
+            "observed_at": observed_at,
+            "headline_value": headline.value,
+            "headline_unit": headline.unit,
+            "headline_observed_at": headline_at,
+            "age_days": age_days,
+        }
+        if observation.basis_type == headline.basis_type and observation.provider == headline.provider:
+            rows.append(
+                CommodityBasisComparison(
+                    **base,
+                    kind="same_series",
+                    note="Same provider series and basis as the headline; it is not compared again.",
+                )
+            )
+            continue
+        converted = _convert_unit_price(observation.value, observation.unit, headline.unit)
+        if converted is None:
+            rows.append(
+                CommodityBasisComparison(
+                    **base,
+                    kind="units_differ",
+                    note=(
+                        f"Units differ ({observation.unit or 'unknown'} vs headline {headline.unit or 'unknown'}) "
+                        "and Gamma knows no conversion, so no percentage is computed."
+                    ),
+                )
+            )
+            continue
+        conversion_note = (
+            f" Converted from {_format_number(observation.value, 2)} {observation.unit} to {headline.unit}."
+            if not _same_unit(observation.unit, headline.unit)
+            else ""
+        )
+        if age_days is None or abs(age_days) > REFERENCE_STALE_AFTER_DAYS:
+            if age_days is None:
+                timing = "has no observation date"
+            elif age_days > 0:
+                timing = f"is dated {_date_text(observed_at)}, {age_days} days before the headline ({_date_text(headline_at)})"
+            else:
+                timing = f"is dated {_date_text(observed_at)}, {-age_days} days after the headline ({_date_text(headline_at)})"
+            rows.append(
+                CommodityBasisComparison(
+                    **base,
+                    kind="stale_reference",
+                    converted_value=round(converted, 6),
+                    note=(
+                        f"Stale reference: it {timing}; quotes more than {REFERENCE_STALE_AFTER_DAYS} days apart "
+                        "are not compared." + conversion_note
+                    ),
+                )
+            )
+            continue
+        difference = float(headline.value) - converted
+        difference_pct = difference / converted if converted else None
+        ratio = (
+            max(abs(converted), abs(float(headline.value))) / min(abs(converted), abs(float(headline.value)))
+            if converted and headline.value
+            else None
+        )
+        values = {
+            "converted_value": round(converted, 6),
+            "difference": round(difference, 6),
+            "difference_pct": round(difference_pct, 6) if difference_pct is not None else None,
+        }
+        if ratio is not None and ratio > RECONCILIATION_IMPLAUSIBLE_RATIO:
+            kind = "conflict"
+            note = (
+                f"Values differ by more than {RECONCILIATION_IMPLAUSIBLE_RATIO:g}x after unit conversion; "
+                "check the series or its unit label." + conversion_note
+            )
+        elif difference_pct is None or abs(difference_pct) < RECONCILIATION_MATERIALITY_PCT:
+            kind = "aligned"
+            note = "Within the 1.5% materiality threshold." + conversion_note
+        elif _is_futures_spot_pair(headline.basis_type, observation.basis_type):
+            # Una base futuro-spot fechada es económica, no un error de datos.
+            kind = "basis"
+            note = (
+                f"Futures-spot basis {difference:+.2f} {headline.unit or ''} ({difference_pct * 100:+.1f}%) between "
+                f"{_date_text(headline_at)} and {_date_text(observed_at)}; this is an economic basis, not a data conflict."
+                + (" Large basis: verify the reference series." if abs(difference_pct) > 0.10 else "")
+                + conversion_note
+            )
+        else:
+            kind = "conflict"
+            note = (
+                f"Same {_humanize_basis(headline.basis_type)} basis from different sources differs by "
+                f"{abs(difference_pct) * 100:.1f}%." + conversion_note
+            )
+        rows.append(CommodityBasisComparison(**base, **values, kind=kind, note=note.strip()))
+    return rows
+
+
+def _humanize_basis(basis_type: str | None) -> str:
+    return str(basis_type or "unknown").replace("_", " ")
+
+
+def _is_futures_spot_pair(left: str | None, right: str | None) -> bool:
+    left_future = str(left or "") in _FUTURES_BASIS_TYPES
+    right_future = str(right or "") in _FUTURES_BASIS_TYPES
+    sample = "sample_generated" in {left, right}
+    return left_future != right_future and not sample
+
+
+def _reconciliation_status(
+    comparisons: list[CommodityBasisComparison],
+    observations: list[CommodityPriceBasis],
+) -> str:
+    del observations
+    kinds = {row.kind for row in comparisons}
+    # Prioridad: conflicto de datos > referencia caducada > base económica > alineado.
+    if "conflict" in kinds:
+        return "conflict"
+    if "stale_reference" in kinds:
+        return "stale_reference"
+    if "basis" in kinds:
+        return "basis"
+    if kinds & {"aligned", "same_series"}:
+        return "aligned"
+    return "insufficient"
+
+
+def _reconciliation_warnings(instrument, comparisons: list[CommodityBasisComparison]) -> list[str]:
+    warnings: list[str] = []
+    for row in comparisons:
+        if row.kind not in {"conflict", "stale_reference", "units_differ"}:
+            continue
+        headline = _compact_spaces(
+            f"{_format_number(row.headline_value, 2)} {row.headline_unit or ''} ({_date_text(row.headline_observed_at)})"
+        )
+        reference = _compact_spaces(
+            f"{row.display_label} {_format_number(row.value, 2)} {row.unit or ''} ({_date_text(row.observed_at)})"
+        )
+        prefix = {
+            "conflict": f"Commodity basis conflict (data conflict) for {instrument.name}",
+            "stale_reference": f"Stale commodity reference for {instrument.name}",
+            "units_differ": f"Commodity reference units differ for {instrument.name}",
+        }[row.kind]
+        warnings.append(f"{prefix}: headline {headline} vs {reference}. {row.note}")
     return _dedupe(warnings)
+
+
+def _compact_spaces(text: str) -> str:
+    return " ".join(str(text or "").split())
 
 
 def _reconciliation_summary(
@@ -1174,15 +1410,36 @@ def _reconciliation_summary(
     status: str,
     headline: CommodityPriceBasis | None,
     observations: list[CommodityPriceBasis],
+    comparisons: list[CommodityBasisComparison] | None = None,
 ) -> str:
     if headline is None:
         return f"{instrument.name} has no usable headline quote basis."
     compared = len([row for row in observations if row.value is not None])
+    rows = comparisons or []
     if status == "conflict":
-        return f"{instrument.name} has a material basis mismatch across {compared} loaded quote references."
+        return f"{instrument.name} has a data conflict: a comparable, same-dated reference disagrees with the headline beyond the materiality threshold."
+    if status == "stale_reference":
+        stale = [row for row in rows if row.kind == "stale_reference"]
+        labels = ", ".join(f"{row.display_label} {_date_text(row.observed_at)}" for row in stale)
+        return (
+            f"{instrument.name} reference quotes are stale ({labels}); they are shown with their dates and units "
+            f"but not compared with the {_date_text(_basis_observed_at(headline))} headline."
+        )
+    if status == "basis":
+        basis_row = next(row for row in rows if row.kind == "basis")
+        return (
+            f"{instrument.name} futures-spot basis: headline {headline.display_label} "
+            f"{_format_number(headline.value, 2)} {headline.unit or ''} ({_date_text(_basis_observed_at(headline))}) vs "
+            f"{basis_row.display_label} {_format_number(basis_row.converted_value, 2)} {headline.unit or ''} "
+            f"({_date_text(basis_row.observed_at)}) = {basis_row.difference:+.2f} ({(basis_row.difference_pct or 0) * 100:+.1f}%)."
+        ).replace("  ", " ")
     if status == "aligned":
         return f"{instrument.name} quote bases are aligned within the materiality threshold."
-    return f"{instrument.name} has only one usable quote basis loaded."
+    if any(row.kind == "units_differ" for row in rows):
+        return f"{instrument.name} references use units Gamma cannot convert; no comparison is computed."
+    if compared < 2:
+        return f"{instrument.name} has only one usable quote basis loaded."
+    return f"{instrument.name} has no comparable quote reference loaded."
 
 
 def _family_rank(family: str | None) -> int:
@@ -1455,12 +1712,9 @@ def _relative_spread_history(
         right_point = right_by_date.get(left_point.timestamp.date())
         if right_point is None or right_point.value == 0:
             continue
-        if kind == "crack":
-            value = (left_point.value * 42.0) - right_point.value
-        elif kind == "substitution":
-            value = _price_as_metric_ton(left_point.value, left.unit) - _price_as_metric_ton(right_point.value, right.unit)
-        else:
-            value = left_point.value / right_point.value
+        value = _relative_spread_value(kind, left_point.value, left.unit, right_point.value, right.unit)
+        if value is None:
+            continue
         rows.append(
             CommoditySpreadPoint(
                 spread_id=spread_id,
@@ -1494,19 +1748,19 @@ def _composite_crack_history(
     }
     rows: list[CommoditySpreadPoint] = []
     for date_key, crude_point in crude_by_date.items():
-        product_value = 0.0
+        product_values: dict[str, float] = {}
         retrieved_values = [crude_point.retrieved_at]
         missing = False
-        for instrument_id, weight in product_weights.items():
+        for instrument_id in product_weights:
             point = product_by_date.get(instrument_id, {}).get(date_key)
             if point is None:
                 missing = True
                 break
-            product_value += weight * point.value * 42.0
+            product_values[instrument_id] = point.value
             retrieved_values.append(point.retrieved_at)
         if missing:
             continue
-        value = (product_value - (crude_barrels * crude_point.value)) / crude_barrels
+        value = _composite_crack_value(product_values, product_weights, crude_point.value, crude_barrels)
         rows.append(
             CommoditySpreadPoint(
                 spread_id=spread_id,
@@ -1542,6 +1796,208 @@ def _price_as_metric_ton(value: float, unit: str | None) -> float:
     if "lb" in normalized:
         return value * 2204.62262185
     return value
+
+
+def _relative_spread_value(
+    kind: str,
+    left_value: float,
+    left_unit: str | None,
+    right_value: float,
+    right_unit: str | None,
+) -> float | None:
+    if kind == "crack":
+        return (left_value * 42.0) - right_value
+    if kind == "substitution":
+        return _price_as_metric_ton(left_value, left_unit) - _price_as_metric_ton(right_value, right_unit)
+    if not right_value:
+        return None
+    return left_value / right_value
+
+
+def _composite_crack_value(
+    product_values: dict[str, float],
+    product_weights: dict[str, float],
+    crude_value: float,
+    crude_barrels: float,
+) -> float:
+    product_value = sum(weight * product_values[instrument_id] * 42.0 for instrument_id, weight in product_weights.items())
+    return (product_value - (crude_barrels * crude_value)) / crude_barrels
+
+
+# GUA-20261021-4: tamaño de cada unidad de precio en su magnitud base (kg, galón, MMBtu).
+_UNIT_SIZES: dict[str, tuple[str, float]] = {
+    "lb": ("mass", 0.45359237),
+    "lbs": ("mass", 0.45359237),
+    "pound": ("mass", 0.45359237),
+    "metric ton": ("mass", 1000.0),
+    "metric tonne": ("mass", 1000.0),
+    "tonne": ("mass", 1000.0),
+    "mt": ("mass", 1000.0),
+    "t": ("mass", 1000.0),
+    "short ton": ("mass", 907.18474),
+    "oz": ("mass", 0.0311034768),
+    "troy oz": ("mass", 0.0311034768),
+    "gal": ("volume", 1.0),
+    "gallon": ("volume", 1.0),
+    "bbl": ("volume", 42.0),
+    "barrel": ("volume", 42.0),
+    "mmbtu": ("energy", 1.0),
+}
+
+
+def _parse_price_unit(unit: str | None) -> tuple[str, str, float] | None:
+    text = " ".join(str(unit or "").strip().lower().split())
+    if "/" not in text:
+        return None
+    currency, _, denominator = text.partition("/")
+    size = _UNIT_SIZES.get(denominator.strip())
+    if not currency.strip() or size is None:
+        return None
+    return currency.strip(), size[0], size[1]
+
+
+def _same_unit(left: str | None, right: str | None) -> bool:
+    return " ".join(str(left or "").lower().split()) == " ".join(str(right or "").lower().split())
+
+
+def _convert_unit_price(value: float | None, from_unit: str | None, to_unit: str | None) -> float | None:
+    """Convierte un precio entre unidades de la misma magnitud (lb<->t, gal<->bbl); None si no se sabe."""
+    if value is None or not _finite(value):
+        return None
+    if _same_unit(from_unit, to_unit):
+        return float(value)
+    source = _parse_price_unit(from_unit)
+    target = _parse_price_unit(to_unit)
+    if source is None or target is None or source[0] != target[0] or source[1] != target[1]:
+        return None
+    # Precio por unidad origen -> precio por unidad destino.
+    return float(value) * (target[2] / source[2])
+
+
+def _utc_date(value: datetime | None) -> date:
+    """Fecha UTC de un instante con o sin zona (tolera el cambio a marcas con zona de GUA-20261021-3)."""
+    if value is None:
+        return now_utc().date()
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).date()
+    return value.date()
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _date_text(value: datetime | None) -> str:
+    return _utc_date(value).isoformat() if value is not None else "undated"
+
+
+def _leg_latest_observations(histories: dict[str, CommodityPriceHistory | None]) -> dict[str, datetime | None]:
+    return {
+        leg: (max(point.timestamp for point in history.points) if history is not None and history.points else None)
+        for leg, history in histories.items()
+    }
+
+
+def _with_spread_freshness(
+    spread: CommoditySpreadSnapshot,
+    *,
+    observed_at: datetime | None,
+    leg_observed_at: dict[str, datetime | None],
+    reference_date: date,
+) -> CommoditySpreadSnapshot:
+    """GUA-20261021-2: fecha la última observación alineada y marca el diferencial caducado."""
+    lag = max(0, (reference_date - _utc_date(observed_at)).days) if observed_at is not None else None
+    if lag is None:
+        freshness = "unknown"
+    else:
+        freshness = "stale" if lag > SPREAD_STALE_AFTER_DAYS else "current"
+    warnings = list(spread.warnings)
+    label = spread.definition.label
+    if freshness == "stale":
+        legs = ", ".join(f"{leg} {_date_text(stamp)}" for leg, stamp in leg_observed_at.items())
+        warnings.append(
+            f"{label} is stale: its latest aligned observation is {_date_text(observed_at)}, {lag} days before "
+            f"{reference_date.isoformat()}; value, change and percentile describe that date, not today. "
+            f"Leg observations: {legs}."
+        )
+    elif freshness == "unknown":
+        warnings.append(f"{label} has no dated observation, so its freshness cannot be judged.")
+    return replace(
+        spread,
+        observed_at=observed_at,
+        leg_observed_at=dict(leg_observed_at),
+        observation_lag_days=lag,
+        freshness=freshness,
+        stale_after_days=SPREAD_STALE_AFTER_DAYS,
+        warnings=_dedupe(warnings),
+    )
+
+
+def _live_front_quote(curve: CommodityCurveSnapshot | None):
+    # La curva enriquecida lleva source_provider="gamma"; el proveedor real está en cada nodo.
+    if curve is None:
+        return None
+    priced = [node for node in curve.nodes if node.price is not None and _finite(node.price)]
+    node = next((row for row in priced if row.contract.is_front_month), priced[0] if priced else None)
+    provider = str((node.source_provider or node.contract.source_provider) if node is not None else "").lower()
+    if node is None or provider not in LIVE_FRONT_QUOTE_PROVIDERS:
+        return None
+    return node
+
+
+def _same_vintage_front_prices(
+    leg_ids: list[str],
+    curves_by_id: dict[str, CommodityCurveSnapshot],
+    unit_by_id: dict[str, str],
+    histories_by_id: dict[str, CommodityPriceHistory],
+    reference_date: date,
+) -> tuple[dict[str, float], datetime, list[str]] | None:
+    """Precios front IBKR de todas las patas, en la unidad de su histórico, si son de la misma instantánea."""
+    prices: dict[str, float] = {}
+    stamps: list[datetime] = []
+    symbols: list[str] = []
+    for leg in leg_ids:
+        curve = curves_by_id.get(leg)
+        node = _live_front_quote(curve)
+        if curve is None or node is None:
+            return None
+        history = histories_by_id.get(leg)
+        target_unit = history.unit if history is not None and history.unit else unit_by_id.get(leg)
+        price = _convert_unit_price(float(node.price), unit_by_id.get(leg), target_unit)
+        if price is None:
+            return None
+        prices[leg] = price
+        stamps.append(curve.as_of)
+        symbols.append(node.contract.symbol)
+    if not stamps:
+        return None
+    normalized = [_naive_utc(stamp) for stamp in stamps]
+    if max(normalized) - min(normalized) > CURRENT_VALUE_VINTAGE_TOLERANCE:
+        return None
+    latest = stamps[normalized.index(max(normalized))]
+    if (reference_date - _utc_date(latest)).days > SPREAD_STALE_AFTER_DAYS:
+        return None
+    return prices, latest, symbols
+
+
+def _with_current_value(
+    spread: CommoditySpreadSnapshot,
+    current: tuple[float | None, datetime, list[str]] | None,
+) -> CommoditySpreadSnapshot:
+    if current is None or current[0] is None or not _finite(current[0]):
+        return spread
+    value, as_of, symbols = current
+    return replace(
+        spread,
+        current_value=round(float(value), 6),
+        current_value_as_of=as_of,
+        current_value_source=(
+            f"IBKR front futures {' / '.join(symbols)} from one snapshot; contract months can differ by leg, "
+            "and the history-based change and percentile are not recomputed for this value."
+        ),
+    )
 
 
 def _spread_snapshot(

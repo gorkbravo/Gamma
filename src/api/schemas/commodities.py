@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from src.application.commodities_service import CommodityWorkspaceRequest
 from src.models.commodities import (
+    CommodityBasisComparison,
     CommodityCoverageMetadata,
     CommodityCrossDomainLink,
     CommodityCurveNode,
@@ -232,6 +233,28 @@ class CommodityPriceBasisModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class CommodityBasisComparisonModel(BaseModel):
+    basis_id: str
+    display_label: str
+    kind: str
+    provider: str = ""
+    value: float | None = None
+    unit: str | None = None
+    observed_at: datetime | None = None
+    headline_value: float | None = None
+    headline_unit: str | None = None
+    headline_observed_at: datetime | None = None
+    converted_value: float | None = None
+    age_days: int | None = None
+    difference: float | None = None
+    difference_pct: float | None = None
+    note: str = ""
+
+    @classmethod
+    def from_domain(cls, row: CommodityBasisComparison) -> "CommodityBasisComparisonModel":
+        return cls(**row.__dict__)
+
+
 class CommodityPriceReconciliationModel(BaseModel):
     instrument_id: str
     status: str
@@ -243,6 +266,9 @@ class CommodityPriceReconciliationModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    # GUA-20261021-4: comparación fechada y con unidades de cada referencia.
+    comparisons: list[CommodityBasisComparisonModel] = Field(default_factory=list)
+    stale_after_days: int | None = None
 
     @classmethod
     def from_domain(cls, row: CommodityPriceReconciliation) -> "CommodityPriceReconciliationModel":
@@ -251,6 +277,7 @@ class CommodityPriceReconciliationModel(BaseModel):
                 **row.__dict__,
                 "headline": CommodityPriceBasisModel.from_domain(row.headline) if row.headline is not None else None,
                 "observations": [CommodityPriceBasisModel.from_domain(item) for item in row.observations],
+                "comparisons": [CommodityBasisComparisonModel.from_domain(item) for item in row.comparisons],
             }
         )
 
@@ -302,6 +329,15 @@ class CommoditySpreadSnapshotModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    # GUA-20261021-2: fecha de observación y frescura; retrieved_at no es la hora de observación.
+    observed_at: datetime | None = None
+    leg_observed_at: dict[str, datetime | None] = Field(default_factory=dict)
+    observation_lag_days: int | None = None
+    freshness: str = "unknown"
+    stale_after_days: int | None = None
+    current_value: float | None = None
+    current_value_as_of: datetime | None = None
+    current_value_source: str | None = None
 
     @classmethod
     def from_domain(cls, row: CommoditySpreadSnapshot) -> "CommoditySpreadSnapshotModel":
@@ -646,6 +682,10 @@ class CommodityCrossDomainLinkModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    # GUA-20261021-7: destino navegable del enlace.
+    target_tab: str | None = None
+    target_mode: str | None = None
+    target_ids: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def from_domain(cls, row: CommodityCrossDomainLink) -> "CommodityCrossDomainLinkModel":

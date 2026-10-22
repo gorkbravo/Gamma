@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pandas as pd
@@ -18,9 +18,14 @@ from src.application.commodities_service import (
 from src.application.runtime import build_runtime
 from src.models.commodities import (
     CommodityCoverageMetadata,
+    CommodityCurveNode,
+    CommodityCurveSnapshot,
+    CommodityFuturesContract,
     CommodityInstrument,
     CommodityMarketSummary,
     CommodityPriceBasis,
+    CommodityPriceHistory,
+    CommodityPricePoint,
 )
 from src.services.cache import CacheService
 from src.services.commodities_adapters import (
@@ -31,7 +36,9 @@ from src.services.commodities_adapters import (
     IbkrFutureRootConfig,
     IbkrCommoditiesDataProvider,
     SampleCommoditiesDataProvider,
+    _select_active_contracts,
 )
+from src.services.fred import FredObservation
 from src.services.market_data import QuoteSnapshot
 from src.utils.time import now_utc
 
@@ -138,7 +145,9 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert copper_aluminum.definition.unit == "USD/mt"
 
 
-def test_commodity_reconciliation_flags_material_basis_conflict():
+def test_commodity_reconciliation_reports_same_dated_futures_spot_gap_as_basis():
+    # GUA-20261021-4: un futuro IBKR frente a un spot FRED del mismo día es una base económica fechada,
+    # no un conflicto de datos.
     class ConflictingProvider:
         provider_id = "fixture"
         provider_label = "Fixture Conflicting Commodities"
@@ -210,11 +219,22 @@ def test_commodity_reconciliation_flags_material_basis_conflict():
     assert wti_summary.quote_basis.provider == "ibkr"
     assert any("prior close" in warning.lower() for warning in wti_summary.warnings)
     reconciliation = next(row for row in workspace.price_reconciliations if row.instrument_id == "wti")
-    assert reconciliation.status == "conflict"
+    assert reconciliation.status == "basis"
     assert reconciliation.headline is not None
     assert reconciliation.headline.contract_month
-    assert any("basis conflict" in warning.lower() for warning in reconciliation.warnings)
-    assert any("basis conflict" in warning.lower() for warning in workspace.warnings)
+    assert reconciliation.stale_after_days == 4
+    comparison = next(row for row in reconciliation.comparisons if row.kind == "basis")
+    assert comparison.value == 95.0
+    assert comparison.unit == "USD/bbl"
+    assert comparison.observed_at is not None
+    assert comparison.headline_observed_at is not None
+    assert comparison.age_days in {0, 1}
+    assert comparison.difference == pytest.approx(-11.0)
+    assert comparison.difference_pct == pytest.approx(-11.0 / 95.0, abs=1e-6)
+    assert "economic basis, not a data conflict" in comparison.note
+    assert "futures-spot basis" in (reconciliation.summary or "").lower()
+    assert not any("basis conflict" in warning.lower() for warning in reconciliation.warnings)
+    assert not any("basis conflict" in warning.lower() for warning in workspace.warnings)
 
 
 def test_commodity_provider_sign_split_guard_flags_uniform_ibkr_vs_fred_moves():
@@ -436,6 +456,26 @@ def _forward_contract_months(count: int, *, reference: datetime | None = None) -
     today = reference or now_utc()
     base = today.year * 12 + today.month
     return [f"{(base + index) // 12:04d}{(base + index) % 12 + 1:02d}" for index in range(count)]
+
+
+def _forward_active_months(codes: str, count: int, *, reference: datetime | None = None) -> list[str]:
+    """`YYYYMM` keys in a root's active-month calendar, starting two months ahead.
+
+    Starting two months ahead keeps every key outside the five-day delivery roll
+    window that metals roots apply, whatever day the suite runs on.
+    """
+
+    today = reference or now_utc()
+    base = today.year * 12 + today.month
+    months: list[str] = []
+    index = 1
+    while len(months) < count:
+        absolute = base + index
+        month = absolute % 12 + 1
+        if _FUTURES_MONTH_CODES[month - 1] in codes:
+            months.append(f"{absolute // 12:04d}{month:02d}")
+        index += 1
+    return months
 
 
 def _contract_local_symbol(root: str, month: str) -> str:
@@ -708,6 +748,8 @@ def test_ibkr_cached_curve_rejects_mismatched_quote_context_timestamps(tmp_path)
 
 def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_path):
     months = _forward_contract_months(4)
+    # El oro usa solo sus meses activos fuera de la ventana de entrega (GUA-20261021-8).
+    gold_months = _forward_active_months("GJMQZ", 4)
     details = {
         "CL": [
             _future_detail(2001, months[0]),
@@ -716,10 +758,10 @@ def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_pat
             _future_detail(2004, months[3]),
         ],
         "GC": [
-            _future_detail(3001, months[0], symbol="GC", exchange="COMEX"),
-            _future_detail(3002, months[1], symbol="GC", exchange="COMEX"),
-            _future_detail(3003, months[2], symbol="GC", exchange="COMEX"),
-            _future_detail(3004, months[3], symbol="GC", exchange="COMEX"),
+            _future_detail(3001, gold_months[0], symbol="GC", exchange="COMEX"),
+            _future_detail(3002, gold_months[1], symbol="GC", exchange="COMEX"),
+            _future_detail(3003, gold_months[2], symbol="GC", exchange="COMEX"),
+            _future_detail(3004, gold_months[3], symbol="GC", exchange="COMEX"),
         ],
     }
     fake_client = _FakeIbkrClient(details)
@@ -947,3 +989,530 @@ def test_commodities_copilot_context_uses_loaded_workspace(tmp_path, monkeypatch
         assert any(source["source_id"] == "commodities.workspace.drilldown" for source in payload["sources"])
     finally:
         runtime.shutdown()
+
+
+# --- GUA-20261021-2 / -4 / -8: fechas de observación, base con unidades y contratos activos ---
+
+_AUDIT_NOW = datetime(2026, 10, 21, 10, 31)
+
+
+def _daily_history(
+    instrument_id: str,
+    values: list[float],
+    *,
+    end: datetime,
+    unit: str,
+    provider: str = "fred",
+    step_days: int = 1,
+) -> CommodityPriceHistory:
+    points = [
+        CommodityPricePoint(
+            instrument_id=instrument_id,
+            timestamp=end - timedelta(days=step_days * (len(values) - 1 - index)),
+            value=value,
+            unit=unit,
+            source_provider=provider,
+            retrieved_at=_AUDIT_NOW,
+            origin=f"{provider}.fixture:{instrument_id}",
+            transformation_note="Fixture spot/proxy series.",
+        )
+        for index, value in enumerate(values)
+    ]
+    return CommodityPriceHistory(
+        instrument_id=instrument_id,
+        label=f"{instrument_id} fixture",
+        unit=unit,
+        points=points,
+        source_provider=provider,
+        retrieved_at=_AUDIT_NOW,
+        origin=f"{provider}.fixture:{instrument_id}",
+        transformation_note="Fixture spot/proxy series.",
+    )
+
+
+def _front_curve(
+    instrument_id: str,
+    symbols_and_prices: list[tuple[str, float]],
+    *,
+    as_of: datetime = _AUDIT_NOW,
+    provider: str = "ibkr",
+) -> CommodityCurveSnapshot:
+    nodes = [
+        CommodityCurveNode(
+            contract=CommodityFuturesContract(
+                contract_id=f"ibkr:{instrument_id}:{index}",
+                instrument_id=instrument_id,
+                symbol=symbol,
+                contract_month=f"M{index + 1}",
+                is_front_month=index == 0,
+                source_provider=provider,
+            ),
+            price=price,
+            source_provider=provider,
+            retrieved_at=as_of,
+        )
+        for index, (symbol, price) in enumerate(symbols_and_prices)
+    ]
+    return CommodityCurveSnapshot(
+        instrument_id=instrument_id,
+        as_of=as_of,
+        nodes=nodes,
+        source_provider=provider,
+        retrieved_at=as_of,
+        origin=f"ibkr.commodities.curve:{instrument_id}",
+    )
+
+
+class _FixtureCommoditiesProvider:
+    provider_id = "fixture"
+    provider_label = "Fixture Commodities"
+
+    def __init__(self, histories: list[CommodityPriceHistory], curves: list[CommodityCurveSnapshot]):
+        self.histories = histories
+        self.curves = curves
+
+    def get_snapshot(self, *, force_refresh=False, selected_instrument_id=None):
+        del force_refresh, selected_instrument_id
+        sample = SampleCommoditiesDataProvider().get_snapshot()
+        return replace(
+            sample,
+            price_histories=self.histories,
+            curve_snapshots=self.curves,
+            inventory_series=[],
+            source_provider="ibkr",
+        )
+
+
+def _audit_energy_provider(*, wti_as_of: datetime = _AUDIT_NOW) -> _FixtureCommoditiesProvider:
+    # Réplica de la auditoría: spot FRED/EIA hasta el 2026-10-14 junto a futuros IBKR del 2026-10-21.
+    end = datetime(2026, 10, 14)
+    return _FixtureCommoditiesProvider(
+        histories=[
+            _daily_history("wti", [95.0 + index * 0.25 for index in range(27)] + [101.91], end=end, unit="USD/bbl"),
+            _daily_history("gasoline", [2.9 + index * 0.003 for index in range(27)] + [2.99], end=end, unit="USD/gal", provider="eia"),
+            _daily_history("heating_oil", [4.4 + index * 0.004 for index in range(27)] + [4.83], end=end, unit="USD/gal", provider="eia"),
+            _daily_history("brent", [120.0 + index * 0.2 for index in range(27)] + [126.55], end=end, unit="USD/bbl"),
+        ],
+        curves=[
+            _front_curve("wti", [("CLZ6", 100.05), ("CLF7", 98.17)], as_of=wti_as_of),
+            _front_curve("gasoline", [("RBX6", 3.18), ("RBZ6", 3.05)]),
+            _front_curve("heating_oil", [("HOX6", 4.95), ("HOZ6", 4.81)]),
+            _front_curve("brent", [("BZZ6", 111.05), ("BZF7", 107.35)], provider="ibkr_cached"),
+        ],
+    )
+
+
+def test_spreads_expose_latest_aligned_observation_and_flag_week_old_history_as_stale():
+    service = CommoditiesService(provider=_audit_energy_provider(), clock=lambda: _AUDIT_NOW)
+
+    spreads = {spread.definition.spread_id: spread for spread in service.get_spreads()}
+
+    crack = spreads["gasoline-crack"]
+    assert crack.observed_at == datetime(2026, 10, 14)
+    assert crack.observation_lag_days == 7
+    assert crack.freshness == "stale"
+    assert crack.stale_after_days == 4
+    assert crack.leg_observed_at == {"gasoline": datetime(2026, 10, 14), "wti": datetime(2026, 10, 14)}
+    assert crack.value == pytest.approx(2.99 * 42 - 101.91, abs=1e-6)
+    assert any("is stale" in warning and "2026-10-14" in warning for warning in crack.warnings)
+    # retrieved_at sigue siendo la hora de descarga y nunca sustituye a la observación.
+    assert crack.retrieved_at == _AUDIT_NOW
+    assert crack.observed_at != crack.retrieved_at
+
+    # Valor actual con las cotizaciones front IBKR de la misma instantánea, etiquetado aparte.
+    assert crack.current_value == pytest.approx(3.18 * 42 - 100.05, abs=1e-6)
+    assert crack.current_value_as_of == _AUDIT_NOW
+    assert "RBX6 / CLZ6" in (crack.current_value_source or "")
+    three_two_one = spreads["three-two-one-crack"]
+    assert three_two_one.freshness == "stale"
+    assert three_two_one.current_value == pytest.approx(((2 * 3.18 + 4.95) * 42 - 3 * 100.05) / 3, abs=1e-6)
+
+    wti_calendar = spreads["wti-m1-m2"]
+    assert wti_calendar.observed_at == _AUDIT_NOW
+    assert wti_calendar.freshness == "current"
+    assert wti_calendar.current_value is None
+
+
+def test_spread_current_value_is_withheld_when_leg_quotes_are_different_vintages():
+    provider = _audit_energy_provider(wti_as_of=_AUDIT_NOW - timedelta(hours=1))
+    service = CommoditiesService(provider=provider, clock=lambda: _AUDIT_NOW)
+
+    spreads = {spread.definition.spread_id: spread for spread in service.get_spreads()}
+
+    assert spreads["gasoline-crack"].current_value is None
+    assert spreads["gasoline-crack"].current_value_source is None
+    assert spreads["two-one-one-crack"].current_value is None
+    # El valor histórico, con su fecha, se mantiene.
+    assert spreads["gasoline-crack"].observed_at == datetime(2026, 10, 14)
+
+
+def test_spreads_with_recent_history_are_current_and_monthly_metals_are_stale():
+    provider = _FixtureCommoditiesProvider(
+        histories=[
+            _daily_history("gasoline", [3.0 + index * 0.01 for index in range(25)], end=datetime(2026, 10, 20), unit="USD/gal", provider="eia"),
+            _daily_history("wti", [99.0 + index * 0.05 for index in range(25)], end=datetime(2026, 10, 20), unit="USD/bbl"),
+            _daily_history("copper", [13000.0 + index * 20 for index in range(25)], end=datetime(2026, 7, 1), unit="USD/metric ton"),
+            _daily_history("aluminum", [2600.0 + index * 5 for index in range(25)], end=datetime(2026, 7, 1), unit="USD/metric ton"),
+        ],
+        curves=[],
+    )
+    service = CommoditiesService(provider=provider, clock=lambda: _AUDIT_NOW)
+
+    spreads = {spread.definition.spread_id: spread for spread in service.get_spreads()}
+
+    assert spreads["gasoline-crack"].freshness == "current"
+    assert spreads["gasoline-crack"].observation_lag_days == 1
+    assert not any("is stale" in warning for warning in spreads["gasoline-crack"].warnings)
+    assert spreads["copper-aluminum-spread"].freshness == "stale"
+    assert spreads["copper-aluminum-spread"].observed_at == datetime(2026, 7, 1)
+    assert spreads["copper-aluminum-spread"].observation_lag_days == 112
+
+
+def test_spread_freshness_survives_the_api_schema():
+    from src.api.schemas.commodities import CommoditySpreadSnapshotModel
+
+    service = CommoditiesService(provider=_audit_energy_provider(), clock=lambda: _AUDIT_NOW)
+    crack = next(spread for spread in service.get_spreads() if spread.definition.spread_id == "gasoline-crack")
+
+    payload = CommoditySpreadSnapshotModel.from_domain(crack).model_dump(mode="json")
+
+    assert payload["observed_at"].startswith("2026-10-14")
+    assert payload["freshness"] == "stale"
+    assert payload["observation_lag_days"] == 7
+    assert payload["leg_observed_at"]["wti"].startswith("2026-10-14")
+    assert payload["current_value"] == pytest.approx(3.18 * 42 - 100.05, abs=1e-6)
+
+
+def test_basis_reconciliation_reports_week_old_references_as_stale_not_conflict():
+    service = CommoditiesService(provider=_audit_energy_provider(), clock=lambda: _AUDIT_NOW)
+
+    workspace = service.get_workspace(CommodityWorkspaceRequest(mode="energy", selected_instrument_id="brent"))
+
+    rows = {row.instrument_id: row for row in workspace.price_reconciliations}
+    for instrument_id, reference_value in [("wti", 101.91), ("brent", 126.55)]:
+        row = rows[instrument_id]
+        assert row.status == "stale_reference"
+        stale = next(item for item in row.comparisons if item.kind == "stale_reference")
+        assert stale.value == pytest.approx(reference_value)
+        assert stale.unit == "USD/bbl"
+        assert stale.observed_at == datetime(2026, 10, 14)
+        assert stale.age_days == 7
+        assert stale.difference_pct is None
+        assert any("Stale commodity reference" in warning and "2026-10-14" in warning for warning in row.warnings)
+        assert not any("basis conflict" in warning.lower() for warning in row.warnings)
+    assert not any("basis conflict" in warning.lower() for warning in workspace.warnings)
+    assert "stale" in (rows["brent"].summary or "").lower()
+
+
+def _copper_provider(reference_value: float, reference_unit: str, *, reference_end: datetime) -> _FixtureCommoditiesProvider:
+    return _FixtureCommoditiesProvider(
+        histories=[_daily_history("copper", [reference_value] * 3, end=reference_end, unit=reference_unit)],
+        curves=[_front_curve("copper", [("HGZ6", 6.49), ("HGH7", 6.55)])],
+    )
+
+
+def test_basis_reconciliation_converts_copper_tonnes_to_pounds_before_comparing():
+    service = CommoditiesService(
+        provider=_copper_provider(13542.82, "USD/metric ton", reference_end=datetime(2026, 10, 20)),
+        clock=lambda: _AUDIT_NOW,
+    )
+
+    row = next(item for item in service.get_workspace().price_reconciliations if item.instrument_id == "copper")
+
+    comparison = next(item for item in row.comparisons if item.basis_id == "copper:history_latest")
+    assert comparison.kind == "basis"
+    assert comparison.converted_value == pytest.approx(13542.82 / 2204.62262185, rel=1e-6)
+    assert comparison.difference == pytest.approx(6.49 - 13542.82 / 2204.62262185, rel=1e-5)
+    assert abs(comparison.difference_pct) < 0.1
+    assert "Converted from 13542.82 USD/metric ton to USD/lb" in comparison.note
+    assert row.status == "basis"
+    assert not any("208636" in warning for warning in row.warnings)
+
+
+def test_basis_reconciliation_stale_copper_reference_keeps_converted_value():
+    service = CommoditiesService(
+        provider=_copper_provider(13542.82, "USD/metric ton", reference_end=datetime(2026, 7, 1)),
+        clock=lambda: _AUDIT_NOW,
+    )
+
+    row = next(item for item in service.get_workspace().price_reconciliations if item.instrument_id == "copper")
+
+    comparison = next(item for item in row.comparisons if item.basis_id == "copper:history_latest")
+    assert row.status == "stale_reference"
+    assert comparison.kind == "stale_reference"
+    assert comparison.converted_value == pytest.approx(6.1429, abs=1e-3)
+    assert comparison.age_days == 112
+
+
+def test_basis_reconciliation_reports_unknown_units_without_a_percentage():
+    service = CommoditiesService(
+        provider=_copper_provider(5.0, "USD/bu", reference_end=datetime(2026, 10, 20)),
+        clock=lambda: _AUDIT_NOW,
+    )
+
+    row = next(item for item in service.get_workspace().price_reconciliations if item.instrument_id == "copper")
+
+    comparison = next(item for item in row.comparisons if item.basis_id == "copper:history_latest")
+    assert comparison.kind == "units_differ"
+    assert comparison.difference_pct is None
+    assert comparison.converted_value is None
+    assert row.status == "insufficient"
+    assert any("units differ" in warning.lower() for warning in row.warnings)
+
+
+def test_basis_reconciliation_flags_implausible_gap_after_conversion_and_same_basis_conflicts():
+    mislabeled = CommoditiesService(
+        provider=_copper_provider(13542.82, "USD/lb", reference_end=datetime(2026, 10, 20)),
+        clock=lambda: _AUDIT_NOW,
+    )
+    row = next(item for item in mislabeled.get_workspace().price_reconciliations if item.instrument_id == "copper")
+    assert row.status == "conflict"
+    assert any("more than 3x" in warning for warning in row.warnings)
+
+    # Mismo tipo de base (futuro front) de dos fuentes distintas y fechas cercanas: conflicto de datos.
+    same_basis = CommoditiesService(
+        provider=_FixtureCommoditiesProvider(
+            histories=[_daily_history("wti", [79.0, 80.0], end=datetime(2026, 10, 20), unit="USD/bbl", provider="ibkr")],
+            curves=[_front_curve("wti", [("CLZ6", 92.10), ("CLF7", 91.40)], provider="ibkr_cached")],
+        ),
+        clock=lambda: _AUDIT_NOW,
+    )
+    row = next(item for item in same_basis.get_workspace().price_reconciliations if item.instrument_id == "wti")
+    assert row.status == "conflict"
+    assert any("basis conflict (data conflict)" in warning for warning in row.warnings)
+
+
+def _metal_contracts(symbol: str, exchange: str, months: list[str]):
+    return [
+        (detail.contract, detail)
+        for detail in (
+            _future_detail(9000 + index, month, symbol=symbol, exchange=exchange) for index, month in enumerate(months)
+        )
+    ]
+
+
+def _root(instrument_id: str) -> IbkrFutureRootConfig:
+    return next(config for config in IBKR_FUTURES_ROOTS if config.instrument_id == instrument_id)
+
+
+@pytest.mark.parametrize(
+    ("instrument_id", "symbol", "exchange", "months", "expected"),
+    [
+        ("gold", "GC", "COMEX", ["202610", "202611", "202612", "202702", "202704"], ["GCZ6", "GCG7", "GCJ7"]),
+        ("silver", "SI", "COMEX", ["202610", "202611", "202612", "202701", "202703"], ["SIZ6", "SIH7"]),
+        ("platinum", "PL", "NYMEX", ["202610", "202701", "202704"], ["PLF7", "PLJ7"]),
+        ("copper", "HG", "COMEX", ["202610", "202611", "202612", "202703"], ["HGZ6", "HGH7"]),
+        ("aluminum", "ALI", "COMEX", ["202610", "202611", "202612"], ["ALIX6", "ALIZ6"]),
+        ("wti", "CL", "NYMEX", ["202612", "202701", "202702"], ["CLZ6", "CLF7", "CLG7"]),
+    ],
+)
+def test_metals_front_selection_skips_delivery_and_thin_months(instrument_id, symbol, exchange, months, expected):
+    selected, notes = _select_active_contracts(
+        _root(instrument_id), _metal_contracts(symbol, exchange, months), datetime(2026, 10, 21, 10, 31)
+    )
+
+    assert [contract.localSymbol for contract, _detail in selected] == expected
+    if instrument_id == "wti":
+        assert notes == []
+    else:
+        assert any(f"{symbol}V6" in note for note in notes)
+
+
+def test_metals_front_selection_rolls_before_the_delivery_month_starts():
+    selected, notes = _select_active_contracts(
+        _root("gold"), _metal_contracts("GC", "COMEX", ["202612", "202702", "202704"]), datetime(2026, 11, 27)
+    )
+
+    assert [contract.localSymbol for contract, _detail in selected] == ["GCG7", "GCJ7"]
+    assert any("GCZ6" in note for note in notes)
+
+
+def test_ibkr_gold_curve_front_is_the_active_month_from_a_fake_contract_list(tmp_path):
+    today = now_utc()
+    base = today.year * 12 + today.month - 1
+    months = [f"{(base + index) // 12:04d}{(base + index) % 12 + 1:02d}" for index in range(10)]
+    details = [_future_detail(7000 + index, month, symbol="GC", exchange="COMEX") for index, month in enumerate(months)]
+    prices = {7000 + index: 2400.0 + index for index in range(len(months))}
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient({"GC": details}),
+        market_data=_FakeMarketData(prices, history=pd.Series(dtype=float)),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["gold"],
+        contract_depth=3,
+        history_days=0,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True, selected_instrument_id="gold")
+
+    gold_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert gold_curve.source_provider == "ibkr"
+    assert all(node.contract.symbol[2] in "GJMQZ" for node in gold_curve.nodes)
+    cutoff = (today + timedelta(days=5)).date()
+    front_month = next(
+        month
+        for month in months
+        if _FUTURES_MONTH_CODES[int(month[4:6]) - 1] in "GJMQZ"
+        and datetime(int(month[:4]), int(month[4:6]), 1).date() > cutoff
+    )
+    assert gold_curve.nodes[0].contract.symbol == _contract_local_symbol("GC", front_month)
+    assert any("active delivery months" in warning for warning in gold_curve.warnings)
+
+
+class _RaisingIb(_FakeIb):
+    def reqContractDetails(self, contract):
+        self.requests.append(str(getattr(contract, "symbol", "") or ""))
+        raise TimeoutError("contract details timed out")
+
+
+def test_failed_zinc_discovery_is_negatively_cached_for_the_session(tmp_path):
+    client = _FakeIbkrClient({"ZS": []})
+    provider = IbkrCommoditiesDataProvider(
+        client=client,
+        market_data=_FakeMarketData({}),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["zinc"],
+        history_days=0,
+    )
+
+    first = provider.get_snapshot(force_refresh=True, selected_instrument_id="zinc")
+    second = provider.get_snapshot(force_refresh=True, selected_instrument_id="zinc")
+    third = provider.get_snapshot(selected_instrument_id="zinc")
+
+    assert client.requests == ["ZS"]
+    assert any("returned no futures contract definitions for Zinc" in warning for warning in first.warnings)
+    for snapshot in (second, third):
+        assert any("failed earlier this session" in warning and "Zinc" in warning for warning in snapshot.warnings)
+
+
+def test_discovery_exceptions_are_cached_and_zero_ttl_disables_the_negative_cache(tmp_path):
+    raising_client = _FakeIbkrClient({})
+    raising_client.ib = _RaisingIb({})
+    raising_client.requests = raising_client.ib.requests
+    provider = IbkrCommoditiesDataProvider(
+        client=raising_client,
+        market_data=_FakeMarketData({}),
+        cache=CacheService(tmp_path / "raising"),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["zinc"],
+        history_days=0,
+    )
+    provider.get_snapshot(force_refresh=True, selected_instrument_id="zinc")
+    provider.get_snapshot(force_refresh=True, selected_instrument_id="zinc")
+    assert raising_client.requests == ["ZS"]
+
+    retrying_client = _FakeIbkrClient({"ZS": []})
+    retrying = IbkrCommoditiesDataProvider(
+        client=retrying_client,
+        market_data=_FakeMarketData({}),
+        cache=CacheService(tmp_path / "retrying"),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["zinc"],
+        history_days=0,
+        discovery_failure_ttl_seconds=0,
+    )
+    retrying.get_snapshot(force_refresh=True, selected_instrument_id="zinc")
+    retrying.get_snapshot(force_refresh=True, selected_instrument_id="zinc")
+    assert retrying_client.requests == ["ZS", "ZS"]
+
+
+class _BoilerplateReferenceProvider:
+    provider_id = "fixture_reference"
+    provider_label = "Fixture Reference"
+
+    def get_snapshot(self, *, force_refresh=False, selected_instrument_id=None):
+        del force_refresh, selected_instrument_id
+        snapshot = SampleCommoditiesDataProvider().get_snapshot()
+        return replace(
+            snapshot,
+            warnings=[
+                "Futures curves are unavailable in this provider slice; add IBKR/Databento-style futures-chain coverage for live curves.",
+                *snapshot.warnings,
+            ],
+            coverage=replace(
+                snapshot.coverage,
+                caveats=[
+                    "FRED price histories are spot or proxy series where configured; futures curves remain unavailable unless a futures provider is added.",
+                    *snapshot.coverage.caveats,
+                ],
+            ),
+        )
+
+
+def test_curve_unavailable_boilerplate_is_dropped_once_ibkr_curves_load(tmp_path):
+    months = _forward_contract_months(2)
+    loaded = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient([_future_detail(8101, months[0]), _future_detail(8102, months[1])]),
+        market_data=_FakeMarketData({8101: 80.0, 8102: 79.5}),
+        cache=CacheService(tmp_path),
+        reference_provider=_BoilerplateReferenceProvider(),
+        enabled_instrument_ids=["wti"],
+        contract_depth=2,
+        history_days=0,
+    ).get_snapshot(force_refresh=True)
+
+    assert not any("Futures curves are unavailable" in warning for warning in loaded.warnings)
+    assert not any("futures curves remain unavailable" in caveat for caveat in loaded.coverage.caveats)
+    assert "FRED price histories are spot or proxy series where configured." in loaded.coverage.caveats
+
+    disconnected = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient([], connected=False),
+        market_data=_FakeMarketData({}),
+        reference_provider=_BoilerplateReferenceProvider(),
+        enabled_instrument_ids=["wti"],
+    ).get_snapshot()
+    assert any("Futures curves are unavailable" in warning for warning in disconnected.warnings)
+
+
+class _RecordingFredClient:
+    def __init__(self):
+        self.requested: list[str] = []
+
+    def get_series_observations(self, series_id, **kwargs):
+        del kwargs
+        self.requested.append(series_id)
+        return [FredObservation(timestamp=datetime(2026, 10, 14), value=100.0)], _AUDIT_NOW
+
+
+def test_fred_precious_metal_fallbacks_are_explicitly_absent_unless_configured(monkeypatch):
+    def fake_fetch_json(url, params):
+        del url, params
+        return {"response": {"data": []}}
+
+    monkeypatch.delenv("COMMODITIES_FRED_GOLD_SERIES_ID", raising=False)
+    fred = _RecordingFredClient()
+    snapshot = EiaCommoditiesDataProvider(
+        api_key="test-key",
+        reference_provider=SampleCommoditiesDataProvider(),
+        fred_client=fred,
+        fetch_json=fake_fetch_json,
+    ).get_snapshot(force_refresh=True)
+
+    assert not {"GOLDAMGBD228NLBM", "SLVPRUSD", "PPLTUSDM"} & set(fred.requested)
+    assert "DCOILWTICO" in fred.requested
+    assert any("No FRED fallback is configured for Gold, Silver, Platinum" in warning for warning in snapshot.warnings)
+
+    monkeypatch.setenv("COMMODITIES_FRED_GOLD_SERIES_ID", "VERIFIEDGOLD")
+    configured = _RecordingFredClient()
+    snapshot = EiaCommoditiesDataProvider(
+        api_key="test-key",
+        reference_provider=SampleCommoditiesDataProvider(),
+        fred_client=configured,
+        fetch_json=fake_fetch_json,
+    ).get_snapshot(force_refresh=True)
+    assert "VERIFIEDGOLD" in configured.requested
+    gold = next(history for history in snapshot.price_histories if history.instrument_id == "gold")
+    assert gold.source_provider == "fred"
+    assert any("No FRED fallback is configured for Silver, Platinum" in warning for warning in snapshot.warnings)
+
+
+def test_cross_domain_links_declare_navigable_targets():
+    workspace = CommoditiesService(provider=SampleCommoditiesDataProvider()).get_workspace()
+
+    targets = {link.link_id: (link.target_tab, link.target_mode, link.target_ids) for link in workspace.cross_domain_links}
+
+    assert targets["maritime-energy-chokepoints"] == ("maritime", "chokepoints", {})
+    assert targets["macro-inflation-energy"] == ("macro", "snapshot", {"theme": "inflation"})
+    assert targets["macro-growth-copper-gold"] == ("macro", "snapshot", {"theme": "growth"})
+    assert targets["prediction-geopolitical-energy"] == ("prediction_markets", "screener", {})

@@ -3181,6 +3181,25 @@ export interface CommodityPriceBasis {
   transformation_note: string | null;
 }
 
+/** GUA-20261021-4: comparación fechada y con unidades de una referencia frente al titular. */
+export interface CommodityBasisComparison {
+  basis_id: string;
+  display_label: string;
+  kind: "same_series" | "aligned" | "basis" | "conflict" | "stale_reference" | "units_differ" | string;
+  provider: string;
+  value: number | null;
+  unit: string | null;
+  observed_at: string | null;
+  headline_value: number | null;
+  headline_unit: string | null;
+  headline_observed_at: string | null;
+  converted_value: number | null;
+  age_days: number | null;
+  difference: number | null;
+  difference_pct: number | null;
+  note: string;
+}
+
 export interface CommodityPriceReconciliation {
   instrument_id: string;
   status: string;
@@ -3192,6 +3211,8 @@ export interface CommodityPriceReconciliation {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  comparisons?: CommodityBasisComparison[];
+  stale_after_days?: number | null;
 }
 
 export interface CommoditySpreadDefinition {
@@ -3233,6 +3254,15 @@ export interface CommoditySpreadSnapshot {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** GUA-20261021-2: fecha de la última observación alineada; retrieved_at no lo es. */
+  observed_at?: string | null;
+  leg_observed_at?: Record<string, string | null>;
+  observation_lag_days?: number | null;
+  freshness?: "current" | "stale" | "unknown" | string;
+  stale_after_days?: number | null;
+  current_value?: number | null;
+  current_value_as_of?: string | null;
+  current_value_source?: string | null;
 }
 
 export interface CommodityInventorySeriesMetadata {
@@ -3444,6 +3474,10 @@ export interface CommodityCrossDomainLink {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** GUA-20261021-7: destino navegable del enlace. */
+  target_tab?: string | null;
+  target_mode?: string | null;
+  target_ids?: Record<string, string>;
 }
 
 export interface CommodityWorkspaceResponse {

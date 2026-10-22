@@ -119,6 +119,7 @@
     loadMacroSeriesHistory,
     loadMacroWorkspace,
     loadCommoditiesWorkspace,
+    requestCommodityInstrument,
     loadMaritimeWorkspace,
     loadNewsFeed,
     loadPortfolioPerformance,
@@ -2728,6 +2729,10 @@
     if (handoff.symbol) {
       selectSharedEquity(handoff.symbol, handoff.label ?? null, "sitrep");
     }
+    // P2 2026-10-21: la carga al abrir Commodities usa el instrumento pedido, no el WTI por defecto.
+    if (targetTab === "commodities" && handoff.commodityId) {
+      requestCommodityInstrument(handoff.commodityId);
+    }
 
     await selectTab(targetTab);
 
@@ -3175,6 +3180,7 @@
             macroHistories={$macroSeriesHistories}
             onLoadMacroSeries={loadMacroSeriesHistory}
             onSendToStrategyLab={handleStrategyLabHandoff}
+            onCrossDomainHandoff={openPredictionCrossDomainHandoff}
           />
         {:else if $activeTab === "prediction_markets"}
           <svelte:component

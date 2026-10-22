@@ -2580,17 +2580,36 @@ export async function loadMaritimeWorkspace(options: MaritimeLoadOptions = {}) {
   }
 }
 
+/**
+ * Instrumento de Commodities pedido y todavía sin cargar (P2 de la auditoría 2026-10-21: cabecera
+ * transitoria del mercado equivocado). La vista lo usa para mostrar la carga de ese instrumento en
+ * lugar de los datos del instrumento anterior.
+ */
+export const commoditiesRequestedInstrumentId = writable<string | null>(null);
+
+/** Fija el instrumento pedido antes de abrir la pestaña, para que su carga inicial no use WTI. */
+export function requestCommodityInstrument(instrumentId: string | null | undefined) {
+  const normalized = (instrumentId ?? "").trim().toLowerCase();
+  commoditiesRequestedInstrumentId.set(normalized || null);
+}
+
 export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOptions = {}) {
   beginLoading("commodities");
+  let requestedInstrumentId: string | null = null;
   try {
     const current = get(commoditiesWorkspace);
     const mode = options.mode ?? current?.mode ?? "overview";
     const payload = {
       mode,
       selected_instrument_id:
-        options.selectedInstrumentId ?? resolveCommodityInstrumentForMode(current, mode) ?? "wti",
+        options.selectedInstrumentId ??
+        get(commoditiesRequestedInstrumentId) ??
+        resolveCommodityInstrumentForMode(current, mode) ??
+        "wti",
       force_refresh: options.forceRefresh ?? false
     };
+    requestedInstrumentId = payload.selected_instrument_id;
+    commoditiesRequestedInstrumentId.set(requestedInstrumentId);
     const response = await queryCache.query<CommodityWorkspaceResponse>({
       scope: "commodities-workspace",
       key: stableQueryKey("/commodities/workspace", {
@@ -2609,6 +2628,10 @@ export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOp
     if (!isAbortError(error)) setError(error);
     return null;
   } finally {
+    // Solo la última petición limpia el instrumento pedido; una abortada no pisa a la siguiente.
+    if (requestedInstrumentId && get(commoditiesRequestedInstrumentId) === requestedInstrumentId) {
+      commoditiesRequestedInstrumentId.set(null);
+    }
     endLoading("commodities");
   }
 }
