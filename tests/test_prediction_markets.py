@@ -2782,6 +2782,254 @@ def test_event_book_route_returns_completeness(tmp_path):
         assert missing.status_code == 404
 
 
+# Escaleras acumulativas: plazos ("by <fecha>") y umbrales ("above X") anidados.
+PUTIN_EVENT = "Putin out as President of Russia by...?"
+PUTIN_TERMS = "Resolves yes if Vladimir Putin ceases to be President of Russia by the date in the market title."
+BTC_TERMS = "Resolves on the Binance BTC/USDT one minute candle close at noon Eastern on the listed date."
+
+
+def _ladder_market(
+    *,
+    key: str,
+    subtitle: str,
+    title: str,
+    probability: float,
+    end_time: datetime,
+    event_title: str,
+    terms: str,
+) -> PredictionMarketRecord:
+    base = _build_market(
+        market_id=f"polymarket:{key}",
+        venue="polymarket",
+        provider_market_id=key,
+        title=title,
+        event_title=event_title,
+        category="Politics",
+        current_probability=probability,
+        retrieved_at=datetime(2026, 10, 21, tzinfo=timezone.utc),
+    )
+    return replace(base, subtitle=subtitle, end_time=end_time, resolution_source=terms, description=terms)
+
+
+def _putin_rung(key: str, label: str, probability: float, end_time: datetime, *, title_cue: bool = True):
+    title = f"Putin out as President of Russia by {label}?" if title_cue else "Putin out as President of Russia?"
+    return _ladder_market(
+        key=key,
+        subtitle=label,
+        title=title,
+        probability=probability,
+        end_time=end_time,
+        event_title=PUTIN_EVENT,
+        terms=PUTIN_TERMS,
+    )
+
+
+def _putin_ladder(*, title_cue: bool = True) -> list[PredictionMarketRecord]:
+    # Datos del 2026-10-21: los tres primeros peldaños ya resolvieron a 0 y la
+    # suma (11.5 %) se pintaba como un libro completo con overround −88.5 %.
+    rungs = [
+        ("dec26", "December 31, 2026", 0.02, datetime(2027, 1, 1, 4, 59, tzinfo=timezone.utc)),
+        ("jul26", "July 31, 2026", 0.0, datetime(2026, 8, 1, 3, 59, tzinfo=timezone.utc)),
+        ("aug26", "August 31, 2026", 0.0, datetime(2026, 9, 1, 3, 59, tzinfo=timezone.utc)),
+        ("sep26", "September 30, 2026", 0.0, datetime(2026, 10, 1, 3, 59, tzinfo=timezone.utc)),
+        ("jun27", "June 30, 2027", 0.095, datetime(2027, 7, 1, 3, 59, tzinfo=timezone.utc)),
+    ]
+    return [
+        _putin_rung(key, label, probability, end_time, title_cue=title_cue)
+        for key, label, probability, end_time in rungs
+    ]
+
+
+@pytest.mark.parametrize("title_cue", [True, False], ids=["cue-in-each-title", "cue-in-event-title-only"])
+def test_event_book_reads_a_by_date_ladder_as_nested_deadlines_not_a_book(title_cue):
+    service, _ = _event_book_service(_putin_ladder(title_cue=title_cue))
+
+    book = service.get_event_book("polymarket:dec26")
+
+    assert book is not None
+    assert book.exclusivity_signal == "cumulative_ladder"
+    assert book.ladder_kind == "date"
+    # Nada de suma, overround ni favorito sobre plazos anidados.
+    assert book.probability_sum is None
+    assert book.implied_overround is None
+    assert book.overround_is_meaningful is False
+    assert book.favorite_market_id is None
+    assert [leg.subtitle for leg in book.legs] == [
+        "July 31, 2026",
+        "August 31, 2026",
+        "September 30, 2026",
+        "December 31, 2026",
+        "June 30, 2027",
+    ]
+    assert book.ladder_inversions == 0
+    assert all(not leg.ladder_flags for leg in book.legs)
+    # Vencer en fechas distintas es la estructura de la escalera, no una divergencia.
+    assert all(not leg.divergence_flags for leg in book.legs)
+    assert book.completeness.status == "complete"
+    assert "none are summed" in book.completeness.note
+    assert any("nested deadlines" in warning for warning in book.warnings)
+    assert not any("overround:" in warning for warning in book.warnings)
+
+
+def test_event_book_flags_a_later_deadline_quoted_below_an_earlier_one():
+    # `_build_market` cotiza cada leg a ±1 punto de su precio.
+    records = [
+        _putin_rung("dec26", "December 31, 2026", 0.05, datetime(2027, 1, 1, tzinfo=timezone.utc)),
+        _putin_rung("mar27", "March 31, 2027", 0.02, datetime(2027, 4, 1, tzinfo=timezone.utc)),
+        _putin_rung("jun27", "June 30, 2027", 0.09, datetime(2027, 7, 1, tzinfo=timezone.utc)),
+        _putin_rung("sep27", "September 30, 2027", 0.06, datetime(2027, 10, 1, tzinfo=timezone.utc)),
+        # Por debajo de junio en precio, pero dentro de su spread: no es una inversión.
+        _putin_rung("dec27", "December 31, 2027", 0.085, datetime(2028, 1, 1, tzinfo=timezone.utc)),
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:jun27")
+
+    assert book.ladder_kind == "date"
+    assert book.ladder_inversions == 2
+    flags = {leg.subtitle: leg.ladder_flags for leg in book.legs}
+    assert flags["December 31, 2026"] == [] and flags["June 30, 2027"] == []
+    assert flags["December 31, 2027"] == []
+    assert flags["March 31, 2027"] == [
+        "At 1.0%-3.0%, entirely below 4.0%-6.0% for the earlier deadline December 31, 2026; "
+        "a later deadline includes every earlier one."
+    ]
+    # La referencia es el peldaño anterior con el suelo más alto, no solo el inmediato.
+    assert "entirely below 8.0%-10.0% for the earlier deadline June 30, 2027" in flags["September 30, 2027"][0]
+    assert any("2 rung(s) break the ladder's monotonicity" in warning for warning in book.warnings)
+
+
+def test_event_book_does_not_flag_an_inversion_inside_the_quoted_spreads():
+    # Forma real del 2026-10-22: el último precio de 72,000 (99.8 %) queda por
+    # debajo del de 74,000 (99.9 %), pero ambos cotizan 99.9-100 %.
+    event = "Bitcoin above ___ on October 22?"
+    records = [
+        replace(
+            _btc_rung(f"btc{level}", f"{level},000", f"Will the price of Bitcoin be above ${level},000 on October 22?", p, event),
+            best_bid=0.999,
+            best_ask=1.0,
+        )
+        for level, p in ((72, 0.998), (74, 0.999), (76, 0.999))
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:btc72")
+
+    assert book.ladder_kind == "threshold"
+    assert book.ladder_inversions == 0
+    assert all(not leg.ladder_flags for leg in book.legs)
+
+
+def _btc_rung(key: str, subtitle: str, title: str, probability: float, event_title: str) -> PredictionMarketRecord:
+    return _ladder_market(
+        key=key,
+        subtitle=subtitle,
+        title=title,
+        probability=probability,
+        end_time=datetime(2026, 10, 22, 16, tzinfo=timezone.utc),
+        event_title=event_title,
+        terms=BTC_TERMS,
+    )
+
+
+def test_event_book_reads_above_thresholds_as_a_ladder_and_flags_an_inversion():
+    event = "Bitcoin above ___ on October 22?"
+    records = [
+        _btc_rung(f"btc{level}", f"{level},000", f"Will the price of Bitcoin be above ${level},000 on October 22?", p, event)
+        for level, p in ((76, 0.65), (72, 0.9), (74, 0.6))
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:btc72")
+
+    assert book.exclusivity_signal == "cumulative_ladder"
+    assert book.ladder_kind == "threshold"
+    assert book.probability_sum is None and book.implied_overround is None
+    assert [leg.subtitle for leg in book.legs] == ["72,000", "74,000", "76,000"]
+    assert book.ladder_inversions == 1
+    flagged = next(leg for leg in book.legs if leg.subtitle == "76,000")
+    assert flagged.ladder_flags == ["At 64.0%-66.0%, entirely above 59.0%-61.0% for 74,000, which includes this threshold."]
+    assert any("nested thresholds" in warning for warning in book.warnings)
+
+
+def test_event_book_reads_hit_levels_in_both_directions_as_a_ladder():
+    event = "What price will Bitcoin hit in 2026?"
+    records = [
+        _btc_rung("dip60", "↓ 60,000", "Will Bitcoin dip to $60,000 by December 31, 2026?", 0.3, event),
+        _btc_rung("hit95", "↑ 95,000", "Will Bitcoin reach $95,000 by December 31, 2026?", 0.2, event),
+        _btc_rung("hit85", "↑ 85,000", "Will Bitcoin reach $85,000 by December 31, 2026?", 0.45, event),
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:hit85")
+
+    # Mismo plazo en todos los legs: es una escalera de niveles, no de fechas.
+    assert book.ladder_kind == "threshold"
+    assert [leg.subtitle for leg in book.legs] == ["↓ 60,000", "↑ 85,000", "↑ 95,000"]
+    assert book.ladder_inversions == 0
+    assert book.probability_sum is None
+
+
+def _bucket_leg(index: int, label: str, probability: float) -> PredictionMarketRecord:
+    return _candidate_market(
+        index=index,
+        probability=probability,
+        subtitle=label,
+        end_time=datetime(2026, 10, 26, tzinfo=timezone.utc),
+        resolution_source="Resolves to the bucket containing the weekly transit count published by the tracker.",
+    )
+
+
+def test_event_book_keeps_the_book_check_for_mutually_exclusive_buckets():
+    records = [_bucket_leg(0, "<20", 0.4), _bucket_leg(1, "20-29", 0.35), _bucket_leg(2, "30+", 0.28)]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0")
+
+    assert book.exclusivity_signal == "venue_grouped_candidates"
+    assert book.ladder_kind is None
+    assert book.ladder_inversions == 0
+    assert book.overround_is_meaningful is True
+    assert book.probability_sum == pytest.approx(1.03)
+    assert book.implied_overround == pytest.approx(0.03)
+    assert book.favorite_market_id == "polymarket:race-0"
+    assert all(not leg.ladder_flags for leg in book.legs)
+
+
+def test_event_book_does_not_call_overlapping_buckets_exclusive():
+    records = [_bucket_leg(0, "20-30", 0.5), _bucket_leg(1, "25-35", 0.4), _bucket_leg(2, "40+", 0.1)]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0")
+
+    assert book.exclusivity_signal == "unverified"
+    assert book.ladder_kind is None
+    assert book.overround_is_meaningful is False
+    assert any("descriptive here, not an overround" in warning for warning in book.warnings)
+
+
+def test_event_book_route_serializes_the_ladder(tmp_path):
+    service, _ = _event_book_service(_putin_ladder())
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/prediction-markets/markets/polymarket:dec26/event-book")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["exclusivity_signal"] == "cumulative_ladder"
+        assert payload["ladder_kind"] == "date"
+        assert payload["ladder_inversions"] == 0
+        assert payload["probability_sum"] is None
+        assert payload["implied_overround"] is None
+        assert all(leg["ladder_flags"] == [] for leg in payload["legs"])
+
+
 # ── Calibration ──────────────────────────────────────────────────────────
 
 

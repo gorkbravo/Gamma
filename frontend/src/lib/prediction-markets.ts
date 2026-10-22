@@ -2,6 +2,8 @@ import type {
   CopilotWorkingAnalysis,
   PredictionCalibrationCurve,
   PredictionCalibrationSummary,
+  PredictionEventBook,
+  PredictionEventBookLeg,
   PredictionHistoryRange,
   PredictionMarket,
   PredictionMarketComparison,
@@ -374,6 +376,36 @@ export function comparisonLegLabel(comparison: PredictionMarketComparison | null
   return leg.title;
 }
 
+// ── Event Book: escaleras acumulativas ─────────────────────────────────
+
+export interface EventBookLadderSummary {
+  label: "Date ladder" | "Threshold ladder";
+  /** Regla de monotonicidad que comprueba el backend. */
+  rule: string;
+  inversions: number;
+  /** Primer y último peldaño cotizados, en el orden de la escalera. */
+  first: PredictionEventBookLeg | null;
+  last: PredictionEventBookLeg | null;
+}
+
+/**
+ * Resumen de un Event Book que es una escalera ("by Dec 31 / by Jun 30",
+ * "above 72k / above 74k"). Sus peldaños están anidados, así que no hay suma,
+ * overround ni favorito; `null` cuando el libro no es una escalera.
+ */
+export function eventBookLadderSummary(book: PredictionEventBook | null | undefined): EventBookLadderSummary | null {
+  if (!book || book.exclusivity_signal !== "cumulative_ladder") return null;
+  const priced = book.legs.filter((leg) => leg.probability != null);
+  const isDate = book.ladder_kind === "date";
+  return {
+    label: isDate ? "Date ladder" : "Threshold ladder",
+    rule: isDate ? "later ≥ earlier" : "nested levels",
+    inversions: book.ladder_inversions ?? 0,
+    first: priced[0] ?? null,
+    last: priced.at(-1) ?? null
+  };
+}
+
 // ── Agrupación por evento y hermanos (GUA-20261021-15) ─────────────────
 
 export type BucketBounds = readonly [number, number];
@@ -390,14 +422,15 @@ const BUCKET_PATTERNS: readonly { kind: "range" | "below" | "above"; pattern: Re
   {
     kind: "below",
     pattern: new RegExp(
-      String.raw`(?:\b(?:fewer than|less than|under|below|at most|no more than|up to)|<=?|≤)\s*(${BUCKET_NUMBER})`,
+      String.raw`(?:\b(?:fewer than|less than|under|below|at most|no more than|up to)|<=?|≤|↓)\s*(${BUCKET_NUMBER})`,
       "i"
     )
   },
   { kind: "below", pattern: new RegExp(String.raw`(${BUCKET_NUMBER})${BUCKET_UNIT}\s*or (?:fewer|less|below|lower)`, "i") },
   {
+    // ↑/↓ son las etiquetas de Polymarket para "toca el nivel" ("↑ 95,000").
     kind: "above",
-    pattern: new RegExp(String.raw`(?:\b(?:more than|greater than|over|above|at least)|>=?|≥)\s*(${BUCKET_NUMBER})`, "i")
+    pattern: new RegExp(String.raw`(?:\b(?:more than|greater than|over|above|at least)|>=?|≥|↑)\s*(${BUCKET_NUMBER})`, "i")
   },
   {
     kind: "above",

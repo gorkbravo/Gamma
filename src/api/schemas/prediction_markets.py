@@ -512,6 +512,7 @@ class PredictionEventBookLegModel(BaseModel):
     resolution_source: str | None = None
     is_anchor: bool = False
     divergence_flags: list[str] = Field(default_factory=list)
+    ladder_flags: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, leg: PredictionEventBookLeg) -> "PredictionEventBookLegModel":
@@ -543,6 +544,8 @@ class PredictionEventBookResponseModel(BaseModel):
     favorite_market_id: str | None = None
     exclusivity_signal: str = "unverified"
     overround_is_meaningful: bool = False
+    ladder_kind: str | None = None
+    ladder_inversions: int = 0
     completeness: PredictionEventBookCompletenessModel | None = None
     warnings: list[str] = Field(default_factory=list)
     source_provider: str = ""

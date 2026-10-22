@@ -1763,6 +1763,8 @@ export interface PredictionEventBookLeg {
   resolution_source: string | null;
   is_anchor: boolean;
   divergence_flags: string[];
+  /** Solo en escaleras: el peldaño contradice a otro anidado con él. */
+  ladder_flags: string[];
 }
 
 export interface PredictionEventBookCompleteness {
@@ -1784,9 +1786,13 @@ export interface PredictionEventBook {
   probability_sum: number | null;
   implied_overround: number | null;
   favorite_market_id: string | null;
+  /** "venue_grouped_candidates", "cumulative_ladder" o "unverified". */
   exclusivity_signal: string;
   /** Only when the book is complete, fully priced, and venue-grouped as candidates. */
   overround_is_meaningful: boolean;
+  /** Escalera acumulativa: sin suma ni overround; se revisa la monotonicidad. */
+  ladder_kind: "date" | "threshold" | null;
+  ladder_inversions: number;
   completeness: PredictionEventBookCompleteness | null;
   warnings: string[];
   source_provider: string;

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   CopilotWorkingAnalysis,
   PredictionMarket,
+  PredictionEventBook,
+  PredictionEventBookLeg,
   PredictionMarketComparison,
   RelatedPredictionMarket
 } from "../lib/api/types";
@@ -161,5 +163,81 @@ describe("Prediction Markets event grouping", () => {
     expect(body).toContain("Hormuz Traffic Returns to Normal");
     expect(body).toContain("cross_venue_analog | kalshi");
     expect(body).toMatch(/resolves Oct 31, 26/);
+  });
+});
+
+// Event Book: una escalera de plazos anidados no es un libro excluyente.
+function bookLeg(id: string, subtitle: string, probability: number, overrides: Partial<PredictionEventBookLeg> = {}): PredictionEventBookLeg {
+  return {
+    market_id: `polymarket:${id}`, venue: "polymarket", title: `Putin out as President of Russia by ${subtitle}?`, subtitle,
+    outcome_label: "Yes", probability, best_bid: null, best_ask: null, spread: null, volume: 1000, liquidity: 500,
+    open_interest: null, status: "open", end_time: null, resolution_source: null, is_anchor: false,
+    divergence_flags: [], ladder_flags: [], ...overrides
+  };
+}
+
+function eventBook(overrides: Partial<PredictionEventBook>): PredictionEventBook {
+  return {
+    venue: "polymarket", anchor_market_id: "polymarket:dec26", event_id: "polymarket:event:putin",
+    event_title: "Putin out as President of Russia by...?", provider_event_id: "putin", legs: [],
+    probability_sum: null, implied_overround: null, favorite_market_id: null, exclusivity_signal: "unverified",
+    overround_is_meaningful: false, ladder_kind: null, ladder_inversions: 0,
+    completeness: { status: "complete", legs_returned: 0, legs_priced: 0, cap: 160, truncated: false, note: "" },
+    warnings: [], source_provider: "polymarket", retrieved_at: null, origin: "test", transformation_note: null,
+    ...overrides
+  };
+}
+
+const renderContract = (book: PredictionEventBook) =>
+  render(PredictionMarketsView, { props: {
+    mode: "contract", detail: { ...bucket("dec26", "December 31, 2026", 0.02) }, eventBook: book,
+    onLoadScreener: vi.fn(), onSelectMarket: vi.fn()
+  } }).body;
+
+describe("Prediction Markets event book", () => {
+  it("labels a cumulative date ladder and shows monotonicity instead of a book sum", () => {
+    const body = renderContract(eventBook({
+      exclusivity_signal: "cumulative_ladder", ladder_kind: "date", ladder_inversions: 1,
+      legs: [
+        bookLeg("dec26", "December 31, 2026", 0.05, { is_anchor: true }),
+        bookLeg("mar27", "March 31, 2027", 0.03, {
+          ladder_flags: ["At 2.0%-3.0%, entirely below 4.0%-6.0% for the earlier deadline December 31, 2026; a later deadline includes every earlier one."]
+        }),
+        bookLeg("jun27", "June 30, 2027", 0.095)
+      ],
+      warnings: ["These contracts are nested deadlines: each later date includes every earlier one, so their probabilities are not summed and no overround applies."]
+    }));
+    expect(body).toContain("3 rungs");
+    expect(body).toContain("date ladder");
+    expect(body).toContain("Date ladder");
+    expect(body).toContain("nested | not summed");
+    expect(body).toContain("1 inverted");
+    expect(body).toContain("later ≥ earlier");
+    expect(body).toContain("5.0% → 9.5%");
+    expect(body).toContain("entirely below 4.0%-6.0% for the earlier deadline December 31, 2026");
+    expect(body).toMatch(/class="elevated[^"]*">inverted/);
+    // Ni suma, ni overround, ni favorito, ni "complete" como si fuera un libro.
+    expect(body).not.toContain("Book Sum");
+    expect(body).not.toContain("Overround");
+    expect(body).not.toContain("book-complete check");
+    expect(body).not.toContain("Favorite");
+    expect(body).not.toMatch(/legs \|/);
+  });
+
+  it("keeps the book-complete check for mutually exclusive buckets", () => {
+    const body = renderContract(eventBook({
+      exclusivity_signal: "venue_grouped_candidates", overround_is_meaningful: true,
+      probability_sum: 1.03, implied_overround: 0.03, favorite_market_id: "polymarket:b20",
+      legs: [bookLeg("b20", "<20", 0.4), bookLeg("b25", "20-29", 0.35), bookLeg("b30", "30+", 0.28)]
+    }));
+    expect(body).toContain("3 legs");
+    expect(body).toContain("Book Sum");
+    expect(body).toContain("103.0%");
+    expect(body).toContain("Overround");
+    expect(body).toContain("+3.0%");
+    expect(body).toContain("book-complete check");
+    expect(body).toContain("Favorite");
+    expect(body).not.toContain("ladder");
+    expect(body).not.toContain("Monotonicity");
   });
 });

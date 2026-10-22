@@ -11,6 +11,7 @@ import {
   calibrationCurveFor,
   describeCalibrationMethod,
   describeHistoryCoverage,
+  eventBookLadderSummary,
   flatScreenerEntries,
   formatResolution,
   groupRelatedMarkets,
@@ -28,6 +29,8 @@ import {
 import type {
   PredictionCalibrationCurve,
   PredictionCalibrationSummary,
+  PredictionEventBook,
+  PredictionEventBookLeg,
   PredictionMarket,
   PredictionOutcomeSeries,
   PredictionPairAnalytics,
@@ -480,6 +483,55 @@ describe("parseBucketBounds", () => {
     expect(parseBucketBounds("72° or above")).toEqual([72, Infinity]);
     expect(parseBucketBounds("Strait of Hormuz traffic returns to normal by October 31?")).toBeNull();
   });
+
+  it("reads Polymarket hit-level arrows as one-sided thresholds", () => {
+    expect(parseBucketBounds("↑ 95,000")).toEqual([95000, Infinity]);
+    expect(parseBucketBounds("↓ 60,000")).toEqual([-Infinity, 60000]);
+  });
+});
+
+describe("eventBookLadderSummary", () => {
+  function bookLeg(id: string, subtitle: string, probability: number | null): PredictionEventBookLeg {
+    return {
+      market_id: id, venue: "polymarket", title: `Putin out as President of Russia by ${subtitle}?`, subtitle,
+      outcome_label: "Yes", probability, best_bid: null, best_ask: null, spread: null, volume: null, liquidity: null,
+      open_interest: null, status: "open", end_time: null, resolution_source: null, is_anchor: false,
+      divergence_flags: [], ladder_flags: []
+    };
+  }
+
+  function book(overrides: Partial<PredictionEventBook>): PredictionEventBook {
+    return {
+      venue: "polymarket", anchor_market_id: "polymarket:dec26", event_id: "polymarket:event:putin",
+      event_title: "Putin out as President of Russia by...?", provider_event_id: "putin", legs: [],
+      probability_sum: null, implied_overround: null, favorite_market_id: null, exclusivity_signal: "unverified",
+      overround_is_meaningful: false, ladder_kind: null, ladder_inversions: 0, completeness: null, warnings: [],
+      source_provider: "polymarket", retrieved_at: null, origin: "test", transformation_note: null, ...overrides
+    };
+  }
+
+  it("summarises a date ladder from its first to its last priced rung", () => {
+    const summary = eventBookLadderSummary(book({
+      exclusivity_signal: "cumulative_ladder", ladder_kind: "date", ladder_inversions: 1,
+      legs: [bookLeg("sep26", "September 30, 2026", 0), bookLeg("dec26", "December 31, 2026", 0.02),
+        bookLeg("mar27", "March 31, 2027", null), bookLeg("jun27", "June 30, 2027", 0.095)]
+    }));
+    expect(summary?.label).toBe("Date ladder");
+    expect(summary?.rule).toBe("later ≥ earlier");
+    expect(summary?.inversions).toBe(1);
+    expect(summary?.first?.market_id).toBe("sep26");
+    // El último peldaño sin precio no cuenta como extremo del rango.
+    expect(summary?.last?.market_id).toBe("jun27");
+  });
+
+  it("labels threshold ladders and leaves exclusive books to the sum check", () => {
+    const threshold = eventBookLadderSummary(book({
+      exclusivity_signal: "cumulative_ladder", ladder_kind: "threshold", legs: [bookLeg("a", "72,000", 0.9)]
+    }));
+    expect(threshold?.label).toBe("Threshold ladder");
+    expect(eventBookLadderSummary(book({ exclusivity_signal: "venue_grouped_candidates", overround_is_meaningful: true }))).toBeNull();
+    expect(eventBookLadderSummary(null)).toBeNull();
+  });
 });
 
 describe("groupScreenerMarkets", () => {
@@ -537,6 +589,18 @@ describe("groupScreenerMarkets", () => {
       { ...makeMarket("kalshi:a35", 0.3), subtitle: "Above 3.5%", event_id: "kalshi:event:cpi" }
     ];
     const group = groupOf(groupScreenerMarkets(thresholds));
+    expect(group.kind).toBe("unverified");
+    expect(group.overround).toBeNull();
+  });
+
+  it("does not read hit levels with one resolution date as a candidate race", () => {
+    const end = "2026-12-31T23:59:00Z";
+    const levels = [
+      { ...makeMarket("polymarket:hit85", 0.45), subtitle: "↑ 85,000", event_id: "polymarket:event:btc", end_time: end },
+      { ...makeMarket("polymarket:hit95", 0.2), subtitle: "↑ 95,000", event_id: "polymarket:event:btc", end_time: end },
+      { ...makeMarket("polymarket:dip60", 0.3), subtitle: "↓ 60,000", event_id: "polymarket:event:btc", end_time: end }
+    ];
+    const group = groupOf(groupScreenerMarkets(levels));
     expect(group.kind).toBe("unverified");
     expect(group.overround).toBeNull();
   });

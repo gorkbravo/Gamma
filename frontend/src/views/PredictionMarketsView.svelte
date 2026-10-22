@@ -21,6 +21,7 @@
     predictionComparisonFromWorkingAnalysis,
     describeCalibrationMethod,
     describeHistoryCoverage,
+    eventBookLadderSummary,
     flatScreenerEntries,
     formatResolution,
     groupRelatedMarkets,
@@ -29,6 +30,7 @@
     toggleCalibrationLeadTime,
     toggleCompareSelection,
     type CalibrationBucketRow,
+    type EventBookLadderSummary,
     type OutcomeLadderRow,
     type PredictionEventGroup,
     type PredictionScreenerEntry,
@@ -542,6 +544,7 @@
   let eventBookFavorite: PredictionEventBookLeg | null = null;
   let eventBookFlagged = 0;
   let eventBookQuoted = 0;
+  let eventBookLadder: EventBookLadderSummary | null = null;
   let lastEventBookMarketId = "";
   let calibrationMarketId: string | null = null;
   let activeLeadTime: number | null = null;
@@ -650,6 +653,8 @@
   // A venue lists empty candidate slots inside a race. They belong in the sum
   // (they contribute zero) but should not read as live quotes.
   $: eventBookQuoted = eventBook?.legs.filter((leg) => (leg.liquidity ?? 0) || (leg.volume ?? 0)).length ?? 0;
+  // Plazos o umbrales anidados: el panel muestra monotonicidad en vez de suma.
+  $: eventBookLadder = eventBookLadderSummary(eventBook);
   $: if (mode === "contract" && detail?.market_id && onLoadEventBook && detail.market_id !== lastEventBookMarketId) {
     lastEventBookMarketId = detail.market_id;
     void onLoadEventBook(detail.market_id);
@@ -1328,36 +1333,78 @@
             <div class="table-header">
               <span>Event Book</span>
               <small>
-                {eventBook.legs.length} legs |
-                <span class={completenessTone(eventBook.completeness?.status)}
-                  >{eventBook.completeness?.status ?? "unknown"}</span
-                >
+                {#if eventBookLadder}
+                  <!-- Una escalera no es un libro: "complete" solo se muestra si algo falta. -->
+                  {eventBook.legs.length} rungs | <span class="muted">{eventBookLadder.label.toLowerCase()}</span>
+                  {#if eventBook.completeness && eventBook.completeness.status !== "complete"}
+                    | <span class={completenessTone(eventBook.completeness.status)}>{eventBook.completeness.status}</span>
+                  {/if}
+                {:else}
+                  {eventBook.legs.length} legs |
+                  <span class={completenessTone(eventBook.completeness?.status)}
+                    >{eventBook.completeness?.status ?? "unknown"}</span
+                  >
+                {/if}
               </small>
             </div>
-            <div class="kpi-strip">
-              <article class="metric">
-                <span>Book Sum</span>
-                <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
-                <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
-              </article>
-              <article class="metric">
-                <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
-                <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
-                  >{signedPct(eventBook.implied_overround)}</strong
-                >
-                <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
-              </article>
-              <article class="metric">
-                <span>Favorite</span>
-                <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
-                <small>{pct(eventBookFavorite?.probability)}</small>
-              </article>
-              <article class="metric">
-                <span>Flagged</span>
-                <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
-                <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
-              </article>
-            </div>
+            {#if eventBookLadder}
+              <div class="kpi-strip">
+                <article class="metric">
+                  <span>Structure</span>
+                  <strong>{eventBookLadder.label}</strong>
+                  <small>nested | not summed</small>
+                </article>
+                <article class="metric">
+                  <span>Monotonicity</span>
+                  <strong class={eventBookLadder.inversions > 0 ? "elevated" : ""}
+                    >{eventBookLadder.inversions > 0 ? `${eventBookLadder.inversions} inverted` : "Holds"}</strong
+                  >
+                  <small>{eventBookLadder.rule}</small>
+                </article>
+                <article class="metric">
+                  <span>Span</span>
+                  <strong class:absent={!eventBookLadder.first}
+                    >{eventBookLadder.first ? `${pct(eventBookLadder.first.probability)} → ${pct(eventBookLadder.last?.probability)}` : "N/A"}</strong
+                  >
+                  <small
+                    >{truncName(eventBookLadder.first?.subtitle ?? eventBookLadder.first?.title, 14)} → {truncName(
+                      eventBookLadder.last?.subtitle ?? eventBookLadder.last?.title,
+                      14
+                    )}</small
+                  >
+                </article>
+                <article class="metric">
+                  <span>Flagged</span>
+                  <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
+                  <small>resolution terms</small>
+                </article>
+              </div>
+            {:else}
+              <div class="kpi-strip">
+                <article class="metric">
+                  <span>Book Sum</span>
+                  <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
+                  <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
+                </article>
+                <article class="metric">
+                  <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
+                  <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
+                    >{signedPct(eventBook.implied_overround)}</strong
+                  >
+                  <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
+                </article>
+                <article class="metric">
+                  <span>Favorite</span>
+                  <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
+                  <small>{pct(eventBookFavorite?.probability)}</small>
+                </article>
+                <article class="metric">
+                  <span>Flagged</span>
+                  <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
+                  <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
+                </article>
+              </div>
+            {/if}
             <div class="table-scroll tall fills-viewport">
               <table>
                 <thead>
@@ -1369,7 +1416,7 @@
                     <th class="num">Spread</th>
                     <th class="num">Liquidity</th>
                     <th class="num">Volume</th>
-                    <th>Terms</th>
+                    <th>{eventBookLadder ? "Check" : "Terms"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1384,7 +1431,8 @@
                     >
                       <td class="wrap-cell">
                         <strong>{truncName(leg.subtitle ?? leg.title, 44)}</strong>
-                        {#if leg.divergence_flags.length}<small>{leg.divergence_flags[0]}</small>{/if}
+                        {#if leg.ladder_flags?.length}<small>{leg.ladder_flags[0]}</small>
+                        {:else if leg.divergence_flags.length}<small>{leg.divergence_flags[0]}</small>{/if}
                       </td>
                       <td class="num"><span class={marketTone(leg.probability)} class:absent={pct(leg.probability) === "N/A"}>{pct(leg.probability)}</span></td>
                       <td class="num" class:absent={pct(leg.best_bid) === "N/A"}>{pct(leg.best_bid)}</td>
@@ -1395,7 +1443,9 @@
                       <td class="num" class:absent={fmt(leg.liquidity) === "N/A"}>{fmt(leg.liquidity)}</td>
                       <td class="num" class:absent={fmt(leg.volume) === "N/A"}>{fmt(leg.volume)}</td>
                       <td>
-                        {#if leg.divergence_flags.length}
+                        {#if leg.ladder_flags?.length}
+                          <span class="elevated">inverted</span>
+                        {:else if leg.divergence_flags.length}
                           <span class="stale">differs</span>
                         {:else if unquoted}
                           <span class="muted">unquoted</span>
