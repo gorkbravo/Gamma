@@ -38,6 +38,7 @@ from src.services.macro_adapters import (
     DBnomicsMacroAdapter,
     IBKRMacroFXAdapter,
     FredMacroAdapter,
+    MacroEventsResult,
     TreasuryCurveAdapter,
     USMacroEventsAdapter,
 )
@@ -229,11 +230,13 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "ttl_hours": 72,
         "comparison_key": "labor_slack",
     },
+    # CCUSMA02EZM618N cotiza euros por dólar (USD/EUR, media mensual). Se invierte para que
+    # el valor coincida con el título EUR/USD y con los pesos de señal (GUA-20261021-5).
     "eu-eurusd": {
         "kind": "raw",
         "region": "EU",
         "provider_series_id": "CCUSMA02EZM618N",
-        "title": "EUR/USD Exchange Rate",
+        "title": "EUR/USD Exchange Rate (monthly avg)",
         "unit": "fx",
         "frequency": "monthly",
         "theme": "policy",
@@ -241,6 +244,8 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "history_days": 1200,
         "ttl_hours": 36,
         "comparison_key": "fx_proxy",
+        "invert": True,
+        "transformation_note": "FRED CCUSMA02EZM618N quotes euros per US dollar as a monthly average of daily rates; Gamma inverts it to US dollars per euro (EUR/USD). It lags the daily IBKR EUR/USD pair.",
     },
     "fx-eurusd": {
         "kind": "fx",
@@ -849,7 +854,12 @@ class MacroService:
             force_refresh=request.force_refresh,
             warnings=warnings,
         )
-        events = self.get_events(region=region, force_refresh=request.force_refresh)
+        events_result = self.get_events_result(region=region, force_refresh=request.force_refresh)
+        events = events_result.events
+        # Cada fuente oficial del calendario que falta deja su propio aviso con nombre.
+        for warning in events_result.warnings:
+            if warning not in warnings:
+                warnings.append(warning)
         linked_markets = self._build_linked_prediction_market_map(
             region=region,
             timeframe=timeframe,
@@ -1262,7 +1272,27 @@ class MacroService:
         return rows
 
     def get_events(self, *, region: str = "US", force_refresh: bool = False) -> list[MacroEventRecord]:
-        return self.events_adapter.list_events(region=self._normalize_region(region), as_of=now_utc(), force_refresh=force_refresh)
+        return self.get_events_result(region=region, force_refresh=force_refresh).events
+
+    def get_events_result(self, *, region: str = "US", force_refresh: bool = False) -> MacroEventsResult:
+        return self._load_events(region=self._normalize_region(region), as_of=now_utc(), force_refresh=force_refresh)
+
+    def _load_events(
+        self,
+        *,
+        region: str,
+        as_of: datetime,
+        force_refresh: bool,
+        limit: int | None = None,
+    ) -> MacroEventsResult:
+        options: dict[str, Any] = {"region": region, "as_of": as_of, "force_refresh": force_refresh}
+        if limit is not None:
+            options["limit"] = limit
+        # Los adaptadores que solo exponen list_events no informan de fuentes caídas.
+        loader = getattr(self.events_adapter, "load_events", None)
+        if callable(loader):
+            return loader(**options)
+        return MacroEventsResult(events=list(self.events_adapter.list_events(**options)))
 
     def _build_event_studies(
         self,
@@ -1274,12 +1304,12 @@ class MacroService:
     ) -> list[MacroEventStudy]:
         normalized_region = self._normalize_region(region)
         current_time = now_utc()
-        source_events = self.events_adapter.list_events(
+        source_events = self._load_events(
             region=normalized_region,
             as_of=current_time - timedelta(days=EVENT_STUDY_LOOKBACK_DAYS),
             force_refresh=force_refresh,
             limit=(EVENT_STUDY_RECENT_LIMIT + EVENT_STUDY_UPCOMING_LIMIT) * 3,
-        )
+        ).events
         recent_events = sorted(
             [event for event in source_events if event.scheduled_at <= current_time],
             key=lambda event: event.scheduled_at,
@@ -1560,6 +1590,8 @@ class MacroService:
     def _load_raw_history(self, series_id: str, meta: dict[str, Any], *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory:
         start, end = self._history_window(meta["history_days"], timeframe)
         points, retrieved_at = self.fred_adapter.get_series(meta["provider_series_id"], start=start, end=end, ttl=timedelta(hours=meta["ttl_hours"]), force_refresh=force_refresh)
+        if meta.get("invert"):
+            points = _invert_points(points, note=meta.get("transformation_note"))
         return MacroSeriesHistory(
             series_id=series_id,
             title=meta["title"],
@@ -3137,6 +3169,15 @@ class MacroService:
         if comparison_key is None:
             return None
         return SERIES_BY_COMPARISON_KEY.get(str(comparison_key), {}).get(comparison_region)
+
+
+def _invert_points(points: list[MacroSeriesPoint], *, note: str | None) -> list[MacroSeriesPoint]:
+    # Cambia la cotización (p. ej. EUR por USD -> USD por EUR); descarta valores no positivos.
+    return [
+        replace(point, value=1.0 / point.value, transformation_note=note or point.transformation_note)
+        for point in points
+        if point.value > 0
+    ]
 
 
 def _compute_yoy_points(raw_points: list[MacroSeriesPoint], *, retrieved_at: datetime, note: str, periods_per_year: int) -> list[MacroSeriesPoint]:

@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeCopilotResearchCardResult } from "./copilot-result";
+import {
+  isCopilotOutputBudgetCutoff,
+  isRetryableCopilotStatus,
+  normalizeCopilotResearchCardResult
+} from "./copilot-result";
+
+describe("Copilot retry helpers (GUA-20261021-6)", () => {
+  it("recognises output-budget cut-offs and retryable statuses", () => {
+    expect(isCopilotOutputBudgetCutoff({ status: "incomplete", message: "OpenAI ended the response early: max_output_tokens." })).toBe(true);
+    expect(isCopilotOutputBudgetCutoff({ status: "incomplete", message: "content_filter" })).toBe(false);
+    expect(isCopilotOutputBudgetCutoff({ status: "ready", message: "max_output_tokens" })).toBe(false);
+    expect(isRetryableCopilotStatus("incomplete")).toBe(true);
+    expect(isRetryableCopilotStatus("error")).toBe(true);
+    expect(isRetryableCopilotStatus("ready")).toBe(false);
+    expect(isRetryableCopilotStatus("awaiting_confirmation")).toBe(false);
+  });
+});
 
 describe("normalizeCopilotResearchCardResult", () => {
   it("fills in missing nested arrays so the drawer can render partial payloads", () => {

@@ -359,3 +359,68 @@ it("formats decimal-fraction DCF approval percentages accurately", async () => {
   expect(formatMutationValue(0, "percent")).toBe("0%");
   expect(formatMutationValue(null, "percent")).toBe("—");
 });
+
+describe("operator transcript noise (GUA-20261021-13, live check 2026-10-27)", () => {
+  function event(
+    sequence: number,
+    eventType: string,
+    title: string,
+    message: string | null,
+    warnings: string[] = []
+  ): CopilotResearchCardResult["operator_events"][number] {
+    return {
+      run_id: "run_1",
+      event_id: `event_${sequence}`,
+      sequence,
+      event_type: eventType,
+      timestamp: "2026-10-27T13:09:11Z",
+      step_id: null,
+      tool_id: null,
+      title,
+      message,
+      payload: {},
+      source_ids: [],
+      warnings
+    };
+  }
+
+  it("folds consecutive operator warnings into one block and the model progress into one row", () => {
+    const value = result(false);
+    value.status = "ready";
+    value.operator_events = [
+      event(1, "step-start", "Commodities workspace summary", "Started."),
+      event(2, "provider-progress", "Operator model progress", "Operator model emitted provider progress."),
+      event(3, "warning", "Operator warning", "Using cached IBKR curve for WTI.", ["Using cached IBKR curve for WTI."]),
+      event(4, "provider-progress", "Operator model progress", "Operator model emitted provider progress."),
+      event(5, "warning", "Operator warning", "Using cached IBKR curve for Brent.", ["Using cached IBKR curve for Brent."]),
+      event(6, "warning", "Operator warning", "Using cached IBKR curve for WTI.", ["Using cached IBKR curve for WTI."]),
+      event(7, "tool-result", "Commodity curve fundamentals", "Loaded."),
+      event(8, "warning", "Operator warning", "Per-run limit reached.", ["Per-run limit reached."]),
+      event(9, "provider-progress", "Operator model progress", "Operator model emitted provider progress.")
+    ];
+
+    const blocks = buildCopilotTranscriptBlocks(value);
+    const kinds = blocks.map((block) => block.kind);
+
+    expect(kinds.filter((kind) => kind === "operator-progress")).toHaveLength(1);
+    expect(blocks.find((block) => block.kind === "operator-progress")).toMatchObject({
+      count: 3,
+      firstSequence: 2,
+      lastSequence: 9
+    });
+    const grouped = blocks.find((block) => block.kind === "operator-warnings");
+    expect(grouped).toMatchObject({
+      title: "Operator warning",
+      warnings: ["Using cached IBKR curve for WTI.", "Using cached IBKR curve for Brent."],
+      firstSequence: 3,
+      lastSequence: 6
+    });
+    // El paso tras el grupo sigue en su sitio y un aviso aislado conserva su propio paso.
+    expect(kinds.slice(kinds.indexOf("operator-warnings"))).toEqual([
+      "operator-warnings",
+      "operator-step",
+      "operator-step",
+      "provider-meta"
+    ]);
+  });
+});

@@ -325,3 +325,31 @@ export function summarizeCopilotStorageRecovery(
     details: warnings.map(toStorageWarningDetail)
   };
 }
+
+type RetryTurnCandidate = { turn_id: string; prompt: string; result: { status: string; response_id: string | null } };
+type RetryChatTurn = { id: string; prompt: string; result: { status: string; response_id: string | null } };
+
+/**
+ * Persisted turn that Retry should rerun for the last chat turn.
+ *
+ * Live thread entries carry their own entry id, not the persisted `turn_id`, and a
+ * run cancelled or failed before the provider answered has no `response_id`: Retry
+ * stayed disabled until a reload (live check 2026-10-27). In that case the latest
+ * persisted turn is used when its prompt and status match the chat turn.
+ */
+export function findPersistedRetryTurn<T extends RetryTurnCandidate>(
+  persistedTurns: readonly T[],
+  lastTurn: RetryChatTurn | null | undefined
+): T | undefined {
+  if (!lastTurn) return undefined;
+  const direct = persistedTurns.find(
+    (turn) =>
+      turn.turn_id === lastTurn.id ||
+      (turn.result.response_id != null && turn.result.response_id === lastTurn.result.response_id)
+  );
+  if (direct) return direct;
+  const latest = persistedTurns[persistedTurns.length - 1];
+  return latest && latest.prompt.trim() === lastTurn.prompt.trim() && latest.result.status === lastTurn.result.status
+    ? latest
+    : undefined;
+}

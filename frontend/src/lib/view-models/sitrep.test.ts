@@ -12,12 +12,93 @@ import {
   resolveSitrepNewsEntityHandoff,
   resolveSitrepMarketHandoff,
   resolveSitrepTapeHandoff,
+  composeSitrepWorkspace,
+  mergeSitrepSectionMeta,
+  normalizeSitrepWorkspaceSections,
+  sitrepSectionFailed,
+  SITREP_WORKSPACE_SECTIONS,
   type SitrepFollowUp,
   type SitrepHandoffRequest,
   type SitrepMarketHandoffProfile,
   type SitrepMarketHandoffRow,
   type SitrepTapeHandoffRow,
 } from "./sitrep";
+import type { SitrepWorkspaceResponse } from "../api/types";
+
+function sectionResponse(section: string, overrides: Partial<SitrepWorkspaceResponse> = {}): SitrepWorkspaceResponse {
+  return {
+    equities_overview: null,
+    indices_overview: null,
+    macro_snapshot: null,
+    commodities: null,
+    prediction_markets: null,
+    news: null,
+    sections: [section],
+    section_warnings: [],
+    source_provider: "gamma_sitrep",
+    retrieved_at: "2026-10-21T10:31:00Z",
+    origin: "sitrep_service.workspace",
+    transformation_note: null,
+    ...overrides,
+  };
+}
+
+describe("sitrep progressive sections (GUA-20261021-12)", () => {
+  it("normalizes requested sections to the contract order", () => {
+    expect(normalizeSitrepWorkspaceSections()).toEqual([...SITREP_WORKSPACE_SECTIONS]);
+    expect(normalizeSitrepWorkspaceSections(["news", " MACRO ", "bogus"])).toEqual(["macro", "news"]);
+    expect(normalizeSitrepWorkspaceSections(["bogus"])).toEqual([...SITREP_WORKSPACE_SECTIONS]);
+  });
+
+  it("merges sections as they answer and keeps each failure isolated to its section", () => {
+    const pending = ["equities", "indices", "macro", "commodities", "prediction_markets"];
+    const afterNews = mergeSitrepSectionMeta(null, { section: "news", response: sectionResponse("news") }, pending);
+    expect(afterNews.sections).toEqual(["news"]);
+    expect(afterNews.pending_sections).toEqual(pending);
+
+    const macroFailure = "SITREP section 'macro' failed to load: FRED timed out";
+    const afterMacro = mergeSitrepSectionMeta(
+      afterNews,
+      {
+        section: "macro",
+        response: sectionResponse("macro", { section_warnings: [macroFailure], retrieved_at: "2026-10-21T10:31:30Z" }),
+      },
+      ["equities", "indices", "commodities", "prediction_markets"]
+    );
+    expect(afterMacro.sections).toEqual(["macro", "news"]);
+    expect(afterMacro.section_warnings).toEqual([macroFailure]);
+    expect(afterMacro.retrieved_at).toBe("2026-10-21T10:31:30Z");
+    expect(sitrepSectionFailed(afterMacro, "macro")).toBe(true);
+    expect(sitrepSectionFailed(afterMacro, "news")).toBe(false);
+
+    const afterTransport = mergeSitrepSectionMeta(afterMacro, { section: "commodities", error: "502 Bad Gateway" }, []);
+    expect(afterTransport.sections).toEqual(["macro", "news"]);
+    expect(afterTransport.section_warnings).toEqual([
+      macroFailure,
+      "SITREP section 'commodities' failed to load: 502 Bad Gateway",
+    ]);
+    expect(afterTransport.pending_sections).toEqual([]);
+
+    // Un reintento correcto sustituye solo el aviso de su propia sección.
+    const recovered = mergeSitrepSectionMeta(afterTransport, { section: "macro", response: sectionResponse("macro") }, []);
+    expect(recovered.section_warnings).toEqual(["SITREP section 'commodities' failed to load: 502 Bad Gateway"]);
+  });
+
+  it("recomposes the aggregate payload from per-section responses", () => {
+    const news = { items: [], source_provider: "rss", retrieved_at: "2026-10-21T10:31:00Z" } as never;
+    const composed = composeSitrepWorkspace(
+      {
+        news: sectionResponse("news", { news }),
+        macro: sectionResponse("macro"),
+      },
+      null
+    );
+    expect(composed?.sections).toEqual(["macro", "news"]);
+    expect(composed?.news).toBe(news);
+    expect(composed?.equities_overview).toBeNull();
+    expect(composeSitrepWorkspace({}, null)).toBeNull();
+  });
+});
 
 describe("sitrep handoff view model", () => {
   it.each<[SitrepMarketHandoffProfile, SitrepMarketHandoffRow, Partial<SitrepHandoffRequest>]>([

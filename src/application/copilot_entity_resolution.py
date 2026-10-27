@@ -53,7 +53,33 @@ _NON_TICKER_ACRONYMS = {
     "USD",
     "VAR",
     "WACC",
+    # Códigos de mercados y datos que no son emisores (GUA-20261021-13): "WTI" en una petición
+    # de crudo es el índice, no W&T Offshore. `$WTI` o "ticker WTI" siguen siendo explícitos.
+    "AIS",
+    "EIA",
+    "FRED",
+    "IEA",
+    "LNG",
+    "NGL",
+    "OPEC",
+    "RBOB",
+    "ULSD",
+    "WTI",
 }
+# Palabras con mayúscula que no prueban un nombre de empresa (materias primas, lugares de
+# mercado y meses de entrega como "Dec-26").
+_DOMAIN_NON_COMPANY_WORDS = {
+    "aluminum", "brent", "copper", "crude", "curve", "curves", "diesel", "futures", "gas",
+    "gasoline", "gold", "heating", "henry", "hormuz", "hub", "natural", "nickel", "oil",
+    "platinum", "silver", "spread", "spreads", "strait", "wti", "zinc",
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    "january", "february", "march", "april", "june", "july", "august", "september",
+    "october", "november", "december",
+    # Pestañas y venues de Gamma: "from Commodities" no nombra una empresa (verificación 2026-10-27).
+    "commodities", "copilot", "gamma", "kalshi", "operator", "polymarket", "sealanes", "sitrep",
+}
+# Fin de frase o de cláusula: la mayúscula que sigue es tipográfica, no un nombre propio.
+_SENTENCE_BREAK_CHARS = ".!?;:\n"
 _ENTITY_TRIGGER_TERMS = (
     "about ",
     "analyze",
@@ -179,8 +205,22 @@ def should_attempt_equity_resolution(prompt: str) -> bool:
         return False
     if any(term in lowered for term in _ENTITY_TRIGGER_TERMS):
         return True
-    words = re.findall(r"\b[A-Z][A-Za-z0-9&'-]{2,}\b", text)
-    return any(word.upper() not in _NON_TICKER_ACRONYMS for word in words[1:] or words)
+    matches = list(re.finditer(r"\b[A-Z][A-Za-z0-9&'-]{2,}\b", text))
+    # Solo cuentan las mayúsculas en mitad de frase: "Then state…" o "Read-only research" tras un
+    # punto no son nombres. Una sola palabra capitalizada ("Microsoft") se sigue considerando.
+    words = [match.group(0) for match in matches if not _starts_sentence(text, match.start())]
+    if not words and len(matches) == 1:
+        words = [matches[0].group(0)]
+    return any(
+        word.upper() not in _NON_TICKER_ACRONYMS
+        and word.lower().split("-")[0] not in _DOMAIN_NON_COMPANY_WORDS
+        for word in words
+    )
+
+
+def _starts_sentence(text: str, index: int) -> bool:
+    preceding = text[:index].rstrip(" \t\"'(")
+    return not preceding or preceding[-1] in _SENTENCE_BREAK_CHARS
 
 
 def resolve_equity_entity(
@@ -194,7 +234,10 @@ def resolve_equity_entity(
     warnings = list(extra_warnings or [])
     selected_ticker = str(context_ticker or "").strip().upper()
     if selected_ticker:
-        exact = _exact_ticker_matches(_safe_search(search_companies, selected_ticker, warnings), selected_ticker)
+        exact = _exact_ticker_matches(
+            _safe_search(search_companies, selected_ticker, warnings, verifying_ticker=selected_ticker),
+            selected_ticker,
+        )
         candidate = _candidate_from_row(exact[0], 1.0, "active_context") if exact else CopilotEntityResolutionCandidate(
             kind="ticker",
             id=selected_ticker,
@@ -217,7 +260,10 @@ def resolve_equity_entity(
     if explicit_tickers:
         exact_candidates: list[CopilotEntityResolutionCandidate] = []
         for ticker in explicit_tickers:
-            matches = _exact_ticker_matches(_safe_search(search_companies, ticker, warnings), ticker)
+            matches = _exact_ticker_matches(
+                _safe_search(search_companies, ticker, warnings, verifying_ticker=ticker),
+                ticker,
+            )
             if matches:
                 exact_candidates.append(_candidate_from_row(matches[0], 1.0, "explicit_ticker"))
         if len(exact_candidates) == 1:
@@ -376,14 +422,22 @@ def _safe_search(
     search_companies: SearchCompanies,
     query: str,
     warnings: list[str],
+    *,
+    verifying_ticker: str | None = None,
 ) -> list[FundamentalsSearchResult]:
     try:
         return list(search_companies(query, limit=12))
     except SecIdentityMissingError:
-        # Sin identidad SEC no hay búsqueda: se dice qué falta y dónde configurarlo.
+        # Sin identidad SEC no hay búsqueda: se dice qué falta y dónde configurarlo. Si solo se
+        # verificaba un ticker explícito, el aviso de "resolver nombres" no aplica (GUA-20261021-13).
         warning = (
-            "Gamma cannot resolve company names until your SEC EDGAR identity is set in Setup "
-            "(Settings > Run Setup). Give the ticker explicitly or add the identity."
+            f"Ticker {verifying_ticker} was used without SEC verification because your SEC EDGAR "
+            "identity is not set (Settings > Run Setup)."
+            if verifying_ticker
+            else (
+                "Gamma cannot resolve company names until your SEC EDGAR identity is set in Setup "
+                "(Settings > Run Setup). Give the ticker explicitly or add the identity."
+            )
         )
         if warning not in warnings:
             warnings.append(warning)

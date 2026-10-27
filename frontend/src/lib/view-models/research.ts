@@ -72,6 +72,9 @@ export interface StrategyPortfolioDraftLeg {
   valueKind: StrategyPortfolioValueKind;
   historyText: string;
   objectOptionId: string;
+  // Tipo de serie que trajo un handoff (p. ej. "FRED spot proxy DCOILBRENTEU"); se borra al
+  // editar la fuente del tramo (GUA-20261021-9).
+  sourceNote?: string;
 }
 
 export interface StrategyPortfolioDraftSummary {
@@ -226,6 +229,169 @@ export function ensureUniqueStrategyPortfolioDraftLegIds(legs: StrategyPortfolio
     unique.push({ ...leg, id });
   }
   return unique;
+}
+
+// ── Borrador del compositor guardado en este navegador (GUA-20260708-8) ──
+// Una recarga devolvía en silencio el libro por defecto QQQ/SPY/PM. El borrador se guarda en
+// localStorage con versión; si no encaja con el contrato, se ignora y se usa el de por defecto.
+
+export const STRATEGY_COMPOSER_DRAFT_STORAGE_KEY = "gamma.strategyLab.composerDraft.v1";
+export const STRATEGY_COMPOSER_DRAFT_STORAGE_VERSION = 1;
+
+export interface StoredStrategyComposerDraft {
+  benchmarkObject?: GammaResearchObject | null;
+  name: string;
+  benchmarkSymbol: string;
+  lookbackDays: number;
+  minObservations: number;
+  legs: StrategyPortfolioDraftLeg[];
+  selection: Record<string, boolean>;
+  weights: Record<string, number>;
+}
+
+const STORED_DRAFT_ASSET_CLASSES = new Set<StrategyPortfolioAssetClass>([
+  "equity",
+  "etf",
+  "commodity",
+  "prediction_contract",
+  "crypto",
+  "custom_stream"
+]);
+
+export function serializeStrategyComposerDraft(draft: StoredStrategyComposerDraft): string {
+  return JSON.stringify({ version: STRATEGY_COMPOSER_DRAFT_STORAGE_VERSION, draft });
+}
+
+function storedDraftLeg(value: unknown): StrategyPortfolioDraftLeg | null {
+  if (!isPlainRecord(value)) return null;
+  const weight = Number(value.weight);
+  const assetClass = String(value.assetClass ?? "") as StrategyPortfolioAssetClass;
+  const valueKind = value.valueKind === "level" ? "level" : value.valueKind === "return" ? "return" : null;
+  if (
+    typeof value.id !== "string" ||
+    !value.id ||
+    typeof value.label !== "string" ||
+    typeof value.identifier !== "string" ||
+    typeof value.historyText !== "string" ||
+    typeof value.objectOptionId !== "string" ||
+    !STORED_DRAFT_ASSET_CLASSES.has(assetClass) ||
+    !Number.isFinite(weight) ||
+    !valueKind
+  ) {
+    return null;
+  }
+  const leg: StrategyPortfolioDraftLeg = {
+    id: value.id,
+    label: value.label,
+    assetClass,
+    identifier: value.identifier,
+    weight,
+    valueKind,
+    historyText: value.historyText,
+    objectOptionId: value.objectOptionId
+  };
+  if (typeof value.sourceNote === "string" && value.sourceNote) leg.sourceNote = value.sourceNote;
+  if (isPlainRecord(value.retainedObject) && Array.isArray(value.retainedObject.return_points)) {
+    leg.retainedObject = value.retainedObject as unknown as GammaResearchObject;
+  }
+  return leg;
+}
+
+/** Devuelve el borrador guardado o `null` si falta, es de otra versión o está corrupto. */
+export function parseStoredStrategyComposerDraft(raw: string | null | undefined): StoredStrategyComposerDraft | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(parsed) || parsed.version !== STRATEGY_COMPOSER_DRAFT_STORAGE_VERSION || !isPlainRecord(parsed.draft)) {
+    return null;
+  }
+  const draft = parsed.draft;
+  const lookbackDays = Number(draft.lookbackDays);
+  const minObservations = Number(draft.minObservations);
+  const rawLegs = Array.isArray(draft.legs) ? draft.legs : null;
+  if (
+    typeof draft.name !== "string" ||
+    typeof draft.benchmarkSymbol !== "string" ||
+    !Number.isFinite(lookbackDays) ||
+    !Number.isFinite(minObservations) ||
+    !rawLegs ||
+    !rawLegs.length
+  ) {
+    return null;
+  }
+  const legs = rawLegs.map(storedDraftLeg);
+  if (legs.some((leg) => leg === null)) return null;
+  const numericRecord = (value: unknown) =>
+    isPlainRecord(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, item]) => Number.isFinite(Number(item))).map(([key, item]) => [key, Number(item)]))
+      : {};
+  const booleanRecord = (value: unknown) =>
+    isPlainRecord(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, item]) => typeof item === "boolean")) as Record<string, boolean>
+      : {};
+  return {
+    name: draft.name,
+    benchmarkSymbol: draft.benchmarkSymbol,
+    benchmarkObject: isPlainRecord(draft.benchmarkObject) ? (draft.benchmarkObject as unknown as GammaResearchObject) : null,
+    lookbackDays,
+    minObservations,
+    // Mismo saneado que al volver a la pestaña: ids repetidos rompían el `{#each}` (GUA-20261021-1).
+    legs: ensureUniqueStrategyPortfolioDraftLegIds(legs as StrategyPortfolioDraftLeg[]),
+    selection: booleanRecord(draft.selection),
+    weights: numericRecord(draft.weights)
+  };
+}
+
+/** Detalle de la fuente de un tramo con historia en línea: puntos, fecha final y tipo de serie. */
+export function strategyInlineHistoryDetail(leg: Pick<StrategyPortfolioDraftLeg, "historyText" | "sourceNote">): string {
+  const parsed = parseStrategyPortfolioHistoryText(leg.historyText);
+  const last = parsed.points.reduce<string | null>(
+    (latest, point) => (latest == null || point.timestamp > latest ? point.timestamp : latest),
+    null
+  );
+  const parts = [`${parsed.points.length} dated points${last ? ` to ${last.slice(0, 10)}` : ""}`];
+  if (leg.sourceNote) parts.push(leg.sourceNote);
+  return parts.join(" · ");
+}
+
+export interface StrategyBookWindowSummary {
+  // "Lookback 252 trading days · analysed 241 (2025-10-22 to 2026-10-14)"
+  windowLine: string | null;
+  lookbackNote: string | null;
+  staleLines: string[];
+  staleLabels: Set<string>;
+}
+
+/** Resume la ventana analizada frente al LOOKBACK y los tramos desfasados (GUA-20261021-9/-11). */
+export function summarizeStrategyBookWindow(diagnostics: Record<string, unknown> | null | undefined): StrategyBookWindowSummary {
+  const record = isPlainRecord(diagnostics) ? diagnostics : {};
+  const requested = Number(record.requested_lookback_days);
+  const aligned = Number(record.aligned_observation_count);
+  const start = typeof record.aligned_start === "string" ? record.aligned_start.slice(0, 10) : null;
+  const end = typeof record.aligned_end === "string" ? record.aligned_end.slice(0, 10) : null;
+  const dates = start && end ? ` (${start} to ${end})` : "";
+  const windowLine = Number.isFinite(requested) && requested > 0
+    ? `Lookback ${requested} trading days · analysed ${Number.isFinite(aligned) ? aligned : 0}${dates}`
+    : null;
+  const threshold = Number(record.stale_after_trading_days);
+  const asOf = typeof record.as_of_date === "string" ? record.as_of_date : null;
+  const staleLegs = Array.isArray(record.stale_legs) ? record.stale_legs.filter(isPlainRecord) : [];
+  const staleLines = staleLegs.map((leg) => {
+    const lag = Number(leg.trading_days_behind);
+    return `${String(leg.label ?? "Leg")} ends ${String(leg.available_end ?? "N/A")}, ${Number.isFinite(lag) ? lag : "?"} trading days before ${asOf ?? "today"}${
+      Number.isFinite(threshold) ? ` (stale above ${threshold})` : ""
+    }`;
+  });
+  return {
+    windowLine,
+    lookbackNote: typeof record.lookback_note === "string" && record.lookback_note ? record.lookback_note : null,
+    staleLines,
+    staleLabels: new Set(staleLegs.map((leg) => String(leg.label ?? "")))
+  };
 }
 
 export function buildPredictionMarketStrategyHandoff(
@@ -394,7 +560,10 @@ export function buildCommodityStrategyHandoff(
   if (workspace?.coverage.coverage_status && workspace.coverage.coverage_status !== "live") {
     warnings.push(`Commodity coverage is ${workspace.coverage.coverage_status}; review provider/source limitations.`);
   }
-  if (curve?.warnings.length) {
+  // Las caveats de la curva describen la cotización de futuros: solo aplican si el histórico del leg
+  // también es del frontal IBKR. Sobre un leg FRED/EIA spot confundían (verificación 2026-10-27).
+  const historyIsFuturesFront = String(history?.source_provider ?? "").startsWith("ibkr");
+  if (historyIsFuturesFront && curve?.warnings.length) {
     warnings.push(...curve.warnings.slice(0, 3));
   }
 
@@ -695,6 +864,8 @@ export function strategyResolvedHandoffToDraftLeg(
   if (!leg) {
     return null;
   }
+  // El resolver indica el tipo de serie (futuro frontal, continuo, proxy spot) (GUA-20261021-9).
+  const seriesLabel = resolved.provenance?.series_label;
   return {
     ...defaultStrategyPortfolioDraftLeg(index),
     label: leg.label,
@@ -703,7 +874,8 @@ export function strategyResolvedHandoffToDraftLeg(
     weight: leg.weight,
     valueKind: leg.value_kind,
     historyText: strategyDraftHistoryText(leg.return_points),
-    objectOptionId: ""
+    objectOptionId: "",
+    ...(typeof seriesLabel === "string" && seriesLabel ? { sourceNote: seriesLabel } : {})
   };
 }
 

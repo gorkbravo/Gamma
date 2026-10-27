@@ -1,16 +1,60 @@
 from __future__ import annotations
 
 import re
+import socket
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.models.provider_usage import ProviderUsageCall, ProviderUsageHealth, ProviderUsageSnapshot, ProviderUsageSummary
 from src.utils.time import now_utc
+from src.utils.tls import extended_trust_ssl_context
+
+# Fila explícita para llamadas sin proveedor identificable: nunca desaparecen ni se
+# reparten en ids ambiguos como "unknown" (GUA-20260903-10).
+UNATTRIBUTED_PROVIDER_ID = "unattributed"
+
+# Valores de ``source_provider`` que describen un estado o una mezcla, no un proveedor:
+# no deben sustituir al proveedor llamado (la fila "unavailable" del audit 2026-10-21).
+_PLACEHOLDER_PROVIDER_IDS = frozenset(
+    {"", "unknown", UNATTRIBUTED_PROVIDER_ID, "unavailable", "none", "null", "n/a", "mixed"}
+)
+
+# Ventana retenida por defecto. Con el registro HTTP una carga de SITREP genera decenas de
+# peticiones; 500 llamadas se llenaban en pocos minutos (GUA-20260903-10).
+DEFAULT_MAX_CALLS = 2000
+
+# Proveedor y endpoint del adaptador trazado que está en curso en este hilo/contexto. Las
+# peticiones HTTP anidadas lo usan para nombrar la función que las originó y como
+# atribución de reserva para hosts que no identifican un proveedor (feeds RSS, BLS...).
+_TRACE_CONTEXT: ContextVar[tuple[str, str] | None] = ContextVar("gamma_provider_trace", default=None)
+
+# Hosts de API externas -> proveedor. El host identifica el servicio real aunque la
+# llamada salga de un adaptador compuesto: las referencias EIA/FRED de las curvas IBKR se
+# atribuían a "ibkr" y sus HTTPError no se contaban en ningún sitio (GUA-20260903-10).
+_HTTP_HOST_PROVIDERS: tuple[tuple[str, str], ...] = (
+    ("stlouisfed.org", "fred"),
+    ("treasury.gov", "treasury"),
+    ("eia.gov", "eia"),
+    ("polymarket.com", "polymarket"),
+    ("kalshi.com", "kalshi"),
+    ("coingecko.com", "coingecko"),
+    ("geckoterminal.com", "geckoterminal"),
+    ("sec.gov", "sec"),
+    ("db.nomics.world", "dbnomics"),
+    ("census.gov", "census"),
+    ("openai.com", "openai"),
+    ("aisstream.io", "aisstream"),
+)
 
 
 @dataclass(frozen=True)
@@ -26,16 +70,17 @@ class ProviderActivationCondition:
 
 
 class ProviderUsageLedger:
-    def __init__(self, *, max_calls: int = 500, clock: Callable[[], Any] = now_utc) -> None:
+    def __init__(self, *, max_calls: int = DEFAULT_MAX_CALLS, clock: Callable[[], Any] = now_utc) -> None:
         self.max_calls = max(1, int(max_calls))
         self._clock = clock
         self._calls: deque[ProviderUsageCall] = deque(maxlen=self.max_calls)
         self._activation_conditions: dict[str, ProviderActivationCondition] = {}
+        self._lifetime_calls = 0
         self._lock = RLock()
 
     def register_activation_condition(self, condition: ProviderActivationCondition) -> None:
         with self._lock:
-            self._activation_conditions[_clean(condition.provider_id, "unknown")] = condition
+            self._activation_conditions[_attributed_provider_id(condition.provider_id)] = condition
 
     def record(
         self,
@@ -46,23 +91,27 @@ class ProviderUsageLedger:
         cache_status: str | None = None,
         duration_ms: float = 0.0,
         message: str | None = None,
+        kind: str = "provider",
     ) -> None:
         call = ProviderUsageCall(
-            provider_id=_clean(provider_id, "unknown"),
+            provider_id=_attributed_provider_id(provider_id),
             endpoint=_clean(endpoint, "unknown"),
             status=_normalize_status(status),
             cache_status=_normalize_cache_status(cache_status),
             duration_ms=max(0.0, float(duration_ms or 0.0)),
             recorded_at=self._clock(),
             message=str(message)[:500] if message else None,
+            kind="http" if kind == "http" else "provider",
         )
         with self._lock:
             self._calls.append(call)
+            self._lifetime_calls += 1
 
     def snapshot(self, *, limit: int = 50) -> ProviderUsageSnapshot:
         with self._lock:
             calls = list(self._calls)
             conditions = list(self._activation_conditions.values())
+            lifetime_calls = self._lifetime_calls
         summaries = _summarize(calls)
         recent_limit = max(0, int(limit))
         return ProviderUsageSnapshot(
@@ -71,6 +120,8 @@ class ProviderUsageLedger:
             health=_health_rows(summaries, conditions),
             recent_calls=list(reversed(calls[-recent_limit:])) if recent_limit else [],
             total_calls=len(calls),
+            lifetime_calls=lifetime_calls,
+            retained_limit=self.max_calls,
         )
 
 
@@ -95,24 +146,30 @@ class TraceableProvider:
 
         @wraps(value)
         def traced(*args: Any, **kwargs: Any) -> Any:
+            endpoint = self._endpoint(name)
             started = time.perf_counter()
+            # Las peticiones HTTP anidadas heredan este contexto (GUA-20260903-10).
+            token = _TRACE_CONTEXT.set((self._provider_id, endpoint))
             try:
                 result = value(*args, **kwargs)
             except Exception as exc:
                 self._ledger.record(
                     provider_id=self._provider_id,
-                    endpoint=self._endpoint(name),
+                    endpoint=endpoint,
                     status=_exception_status(exc),
                     duration_ms=(time.perf_counter() - started) * 1000,
                     message=_exception_message(exc, redact=self._endpoint_prefix == "copilot"),
                 )
                 raise
-            recorded_provider_id = _result_provider_id(result) or self._provider_id
+            finally:
+                _TRACE_CONTEXT.reset(token)
+            reported_provider_id, reported_cache_status = _result_provider_identity(result)
+            recorded_provider_id = reported_provider_id or self._provider_id
             self._ledger.record(
                 provider_id=recorded_provider_id,
-                endpoint=self._endpoint(name),
+                endpoint=endpoint,
                 status=_result_status(result),
-                cache_status=_result_cache_status(result),
+                cache_status=_result_cache_status(result) or reported_cache_status,
                 duration_ms=(time.perf_counter() - started) * 1000,
                 message=_result_message(
                     result,
@@ -150,6 +207,181 @@ def trace_provider(
     return TraceableProvider(provider, ledger, endpoint_prefix=endpoint_prefix, provider_id=provider_id)
 
 
+# ── Registro HTTP central (GUA-20260903-10) ──────────────────────────────
+#
+# Todos los adaptadores HTTP de Gamma usan ``urllib.request.urlopen`` sin ``context=``, que
+# delega en el opener global. Instalar un opener que registra cada petición cuenta todas las
+# llamadas externas (FRED, Tesoro, EIA, Polymarket, Kalshi, SEC, RSS...), incluidos los
+# HTTPError que los adaptadores capturan y convierten en avisos, sin tocar cada adaptador.
+
+_HTTP_RECORDER_LOCK = threading.Lock()
+_HTTP_RECORDER_STATE: dict[str, ProviderUsageLedger | None] = {"ledger": None}
+_HTTP_RECORDER_LOCAL = threading.local()
+
+
+class _UsageRecordingOpener(urllib.request.OpenerDirector):
+    """Opener global que registra cada petición en el ledger activo y la deja pasar igual."""
+
+    def __init__(self, base: urllib.request.OpenerDirector) -> None:
+        super().__init__()
+        for handler in list(getattr(base, "handlers", [])):
+            self.add_handler(handler)
+
+    def open(self, fullurl: Any, *args: Any, **kwargs: Any) -> Any:
+        ledger = _HTTP_RECORDER_STATE["ledger"]
+        depth = int(getattr(_HTTP_RECORDER_LOCAL, "depth", 0) or 0)
+        # Las redirecciones vuelven a entrar en open(): solo cuenta la petición exterior.
+        if ledger is None or depth:
+            return super().open(fullurl, *args, **kwargs)
+        _HTTP_RECORDER_LOCAL.depth = depth + 1
+        started = time.perf_counter()
+        try:
+            response = super().open(fullurl, *args, **kwargs)
+        except Exception as exc:
+            _record_http_call(
+                ledger,
+                fullurl,
+                status=_http_exception_status(exc),
+                duration_ms=(time.perf_counter() - started) * 1000,
+                message=_http_exception_message(exc, fullurl),
+            )
+            raise
+        finally:
+            _HTTP_RECORDER_LOCAL.depth = depth
+        code = _response_code(response)
+        _record_http_call(
+            ledger,
+            fullurl,
+            status="error" if code is not None and code >= 400 else "success",
+            duration_ms=(time.perf_counter() - started) * 1000,
+            message=f"HTTP {code} from {_url_location(fullurl)}" if code is not None and code >= 400 else None,
+        )
+        return response
+
+
+def install_http_usage_recorder(ledger: ProviderUsageLedger) -> None:
+    """Registra en ``ledger`` cada petición que pase por ``urllib.request.urlopen``.
+
+    Idempotente: una segunda instalación solo cambia el ledger activo (el último runtime
+    construido). Conserva los handlers de un opener instalado previamente.
+    """
+
+    with _HTTP_RECORDER_LOCK:
+        _HTTP_RECORDER_STATE["ledger"] = ledger
+        current = getattr(urllib.request, "_opener", None)
+        if isinstance(current, _UsageRecordingOpener):
+            return
+        # Sin opener previo, el HTTPS confía en las raíces del sistema más las de certifi: así una
+        # cadena como la del BCE (Sectigo E46, ausente del almacén de Windows) verifica en el primer
+        # intento por este opener y queda registrada, en vez de fallar y reintentarse fuera de él.
+        base = (
+            current
+            if isinstance(current, urllib.request.OpenerDirector)
+            else urllib.request.build_opener(urllib.request.HTTPSHandler(context=extended_trust_ssl_context()))
+        )
+        urllib.request.install_opener(_UsageRecordingOpener(base))
+
+
+def uninstall_http_usage_recorder() -> None:
+    """Deja de registrar peticiones HTTP (el opener sigue instalado y solo las deja pasar)."""
+
+    with _HTTP_RECORDER_LOCK:
+        _HTTP_RECORDER_STATE["ledger"] = None
+
+
+def http_provider_for_host(host: str | None) -> str | None:
+    text = str(host or "").strip().lower().rstrip(".")
+    if not text:
+        return None
+    for suffix, provider_id in _HTTP_HOST_PROVIDERS:
+        if text == suffix or text.endswith("." + suffix):
+            return provider_id
+    return None
+
+
+def _record_http_call(
+    ledger: ProviderUsageLedger,
+    fullurl: Any,
+    *,
+    status: str,
+    duration_ms: float,
+    message: str | None,
+) -> None:
+    host = _url_host(fullurl)
+    context = _TRACE_CONTEXT.get()
+    context_provider = context[0] if context and context[0].lower() not in _PLACEHOLDER_PROVIDER_IDS else None
+    provider_id = http_provider_for_host(host) or context_provider or UNATTRIBUTED_PROVIDER_ID
+    endpoint = f"http:{host or 'unknown-host'}"
+    if context:
+        endpoint = f"{endpoint} via {context[1]}"
+    try:
+        ledger.record(
+            provider_id=provider_id,
+            endpoint=endpoint,
+            status=status,
+            duration_ms=duration_ms,
+            message=message,
+            kind="http",
+        )
+    except Exception:  # noqa: BLE001 - el diagnóstico nunca debe romper la petición
+        return
+
+
+def _request_url(fullurl: Any) -> str:
+    return str(getattr(fullurl, "full_url", fullurl) or "")
+
+
+def _url_host(fullurl: Any) -> str:
+    try:
+        return (urlsplit(_request_url(fullurl)).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _url_location(fullurl: Any) -> str:
+    """Host y ruta, nunca la query: FRED y EIA llevan la clave de API en ella."""
+
+    try:
+        parts = urlsplit(_request_url(fullurl))
+    except ValueError:
+        return "unknown URL"
+    return f"{(parts.hostname or 'unknown-host').lower()}{parts.path or ''}"
+
+
+def _response_code(response: Any) -> int | None:
+    for attribute in ("status", "code"):
+        value = getattr(response, attribute, None)
+        if isinstance(value, int):
+            return value
+    getcode = getattr(response, "getcode", None)
+    if callable(getcode):
+        try:
+            value = getcode()
+        except Exception:  # noqa: BLE001
+            return None
+        return value if isinstance(value, int) else None
+    return None
+
+
+def _http_exception_status(exc: Exception) -> str:
+    reason = getattr(exc, "reason", None)
+    if isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(reason, (TimeoutError, socket.timeout)):
+        return "timeout"
+    return "error"
+
+
+def _http_exception_message(exc: Exception, fullurl: Any) -> str:
+    location = _url_location(fullurl)
+    if isinstance(exc, urllib.error.HTTPError):
+        reason = str(getattr(exc, "reason", "") or "").strip()
+        return f"HTTP {exc.code}{(' ' + reason) if reason else ''} from {location}"
+    reason = getattr(exc, "reason", None)
+    detail = str(reason if reason is not None else exc).strip() or exc.__class__.__name__
+    # Algunos errores (p. ej. "unknown url type") repiten la URL completa con su query.
+    detail = re.sub(r"\?[^\s'\"<>]*", "?<redacted>", detail)
+    return f"{exc.__class__.__name__}: {detail} ({location})"
+
+
 def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
     grouped: dict[str, list[ProviderUsageCall]] = {}
     for call in calls:
@@ -176,10 +408,11 @@ def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
                 call_count=call_count,
                 success_count=sum(1 for row in rows if row.status == "success"),
                 unavailable_count=sum(1 for row in rows if row.status == "unavailable"),
+                # Una respuesta parcial ("incomplete") no es un fallo: tiene su propio contador.
+                # Contarla en los dos inflaba "failed" (us_macro_events sin BLS, superficies IBKR
+                # con celdas ajustadas) y la salud decía "3 failed and 3 returned partial data".
                 error_count=sum(
-                    1
-                    for row in rows
-                    if row.status in {"error", "refused", "incomplete", "cancelled", "timeout"}
+                    1 for row in rows if row.status in {"error", "refused", "cancelled", "timeout"}
                 ),
                 incomplete_count=sum(1 for row in rows if row.status == "incomplete"),
                 cache_hit_count=sum(1 for row in rows if row.cache_status == "hit"),
@@ -190,6 +423,7 @@ def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
                 last_error=last_error,
                 last_called_at=last.recorded_at,
                 endpoints=endpoints,
+                http_request_count=sum(1 for row in rows if row.kind == "http"),
             )
         )
     return sorted(summaries, key=lambda row: (row.last_called_at is None, row.last_called_at), reverse=True)
@@ -204,6 +438,16 @@ def _health_rows(
     rows = [_health_for_condition(condition, by_provider.get(condition.provider_id)) for condition in conditions]
     for summary in summaries:
         if summary.provider_id not in condition_ids:
+            if summary.provider_id == UNATTRIBUTED_PROVIDER_ID:
+                rows.append(
+                    _health_for_summary(
+                        summary,
+                        summary.provider_id,
+                        "Unattributed calls",
+                        "A call reached Gamma's usage ledger without an identifiable provider.",
+                    )
+                )
+                continue
             rows.append(_health_for_summary(summary, summary.provider_id, summary.provider_id, "Provider was requested."))
     return sorted(rows, key=lambda row: (_health_sort_rank(row.health_status), row.provider_id))
 
@@ -351,8 +595,31 @@ def _provider_id_from_class(provider: Any) -> str:
 
 
 def _result_provider_id(result: Any) -> str | None:
-    value = getattr(result, "source_provider", None)
-    return _clean(value, "") or None
+    return _result_provider_identity(result)[0]
+
+
+def _result_provider_identity(result: Any) -> tuple[str | None, str | None]:
+    """Proveedor que declara el resultado y, si lo indica el sufijo, un acierto de caché.
+
+    Un ``source_provider`` de estado ("unavailable", "mixed"...) no nombra a nadie y no
+    sustituye al proveedor llamado; ``ibkr_cached`` es IBKR servido desde caché, no un
+    proveedor aparte (GUA-20260903-10).
+    """
+
+    value = _clean(getattr(result, "source_provider", None), "")
+    if not value or value.lower() in _PLACEHOLDER_PROVIDER_IDS:
+        return None, None
+    lowered = value.lower()
+    if lowered.endswith("_cached") and len(lowered) > len("_cached"):
+        return value[: -len("_cached")], "hit"
+    return value, None
+
+
+def _attributed_provider_id(value: Any) -> str:
+    text = _clean(value, "")
+    if not text or text.lower() in {"unknown", UNATTRIBUTED_PROVIDER_ID}:
+        return UNATTRIBUTED_PROVIDER_ID
+    return text
 
 
 def _result_status(result: Any) -> str:

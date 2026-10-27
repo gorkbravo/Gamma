@@ -127,6 +127,7 @@ class ProviderUsageCallModel(BaseModel):
     duration_ms: float
     recorded_at: datetime
     message: str | None = None
+    kind: str = "provider"
 
     @classmethod
     def from_domain(cls, row: ProviderUsageCall) -> "ProviderUsageCallModel":
@@ -148,6 +149,7 @@ class ProviderUsageSummaryModel(BaseModel):
     last_error: str | None = None
     last_called_at: datetime | None = None
     endpoints: list[str] = Field(default_factory=list)
+    http_request_count: int = 0
 
     @classmethod
     def from_domain(cls, row: ProviderUsageSummary) -> "ProviderUsageSummaryModel":
@@ -181,6 +183,8 @@ class ProviderUsageResponseModel(BaseModel):
     health: list[ProviderUsageHealthModel] = Field(default_factory=list)
     recent_calls: list[ProviderUsageCallModel] = Field(default_factory=list)
     total_calls: int = 0
+    lifetime_calls: int = 0
+    retained_limit: int = 0
     source_provider: str = "gamma"
     origin: str = "provider_usage_ledger.snapshot"
     transformation_note: str | None = None
@@ -193,6 +197,8 @@ class ProviderUsageResponseModel(BaseModel):
             health=[ProviderUsageHealthModel.from_domain(health) for health in row.health],
             recent_calls=[ProviderUsageCallModel.from_domain(call) for call in row.recent_calls],
             total_calls=row.total_calls,
+            lifetime_calls=row.lifetime_calls,
+            retained_limit=row.retained_limit,
             source_provider=row.source_provider,
             origin=row.origin,
             transformation_note=row.transformation_note,

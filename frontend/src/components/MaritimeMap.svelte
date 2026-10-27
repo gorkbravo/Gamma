@@ -3,6 +3,7 @@
   import maplibregl from "maplibre-gl";
   import "maplibre-gl/dist/maplibre-gl.css";
   import { WS_BASE } from "../lib/api/client";
+  import { apiInstantDate } from "../lib/time";
   import type {
     MaritimeAisPosition,
     MaritimeChokepointDefinition,
@@ -15,6 +16,7 @@
     MaritimeTrackSnippet,
     MaritimeVesselStatic,
   } from "../lib/api/types";
+  import type { MaritimeFocusResolution } from "../lib/view-models/maritime";
 
   export let positions: MaritimeAisPosition[] = [];
   export let vessels: MaritimeVesselStatic[] = [];
@@ -31,8 +33,8 @@
   export let onRefresh: ((forceRefresh?: boolean) => Promise<unknown> | void) | null = null;
   export let is3D = false;
   export let connected = false;
-  /** Chokepoint an inbound cross-tab handoff asked the map to open. */
-  export let focusChokepointId: string | null = null;
+  /** Enfoque resuelto de un handoff entrante: encuadre, resalte y nota de cobertura (GUA-20261021-7). */
+  export let focus: MaritimeFocusResolution | null = null;
 
   type OverlayKey = "chokepoints" | "tradeFlows" | "fleet" | "eventReplay";
   type DetailSelection =
@@ -99,7 +101,9 @@
   let settingsOpen = false;
   let displaySettingsOpen = false;
   let selectedDetail: DetailSelection = null;
-  let appliedFocusChokepointId: string | null = null;
+  let appliedFocusRequestId: number | null = null;
+  let dismissedFocusRequestId: number | null = null;
+  let highlightedChokepointIds: string[] = [];
   let activeOverlays: Record<OverlayKey, boolean> = {
     chokepoints: true,
     tradeFlows: false,
@@ -124,13 +128,9 @@
     null;
   $: replayMax = selectedReplayTrack ? Math.max(selectedReplayTrack.points.length - 1, 0) : 0;
   $: if (replayIndex > replayMax) replayIndex = replayMax;
-  // An inbound handoff names a chokepoint; open its detail shelf so the entity
-  // the sending tab selected is not lost on arrival.
-  $: if (focusChokepointId && focusChokepointId !== appliedFocusChokepointId && summaryIndex[focusChokepointId]) {
-    appliedFocusChokepointId = focusChokepointId;
-    activeOverlays = { ...activeOverlays, chokepoints: true };
-    selectedDetail = { kind: "chokepoint", id: focusChokepointId };
-  }
+  // Un handoff entrante encuadra, resalta y abre el chokepoint; cada requestId se aplica una vez.
+  $: if (mapReady && focus && focus.requestId !== appliedFocusRequestId) applyFocus(focus);
+  $: focusNoticeVisible = !!focus && focus.requestId !== dismissedFocusRequestId;
   $: selectedChokepoint = selectedDetail?.kind === "chokepoint" ? summaryIndex[selectedDetail.id] : null;
   $: selectedFlow = selectedDetail?.kind === "flow" ? flowSummaries.find((f) => f.flow_id === selectedDetail?.id) ?? null : null;
   $: selectedVessel = selectedDetail?.kind === "vessel" ? displayVessels.find((v) => v.vessel_id === selectedDetail?.id) ?? null : null;
@@ -218,6 +218,7 @@
             congestion_label: s?.congestion_label ?? "sample unavailable",
             commodities: (s?.commodity_links ?? c.strategic_commodities).join(", "),
             methodology: s?.methodology ?? "Coverage is defined by a static chokepoint bounding box.",
+            sample_note: s?.position_sample_note ?? "AIS sample state not reported",
             caveat: s?.caveats?.[0] ?? c.description ?? "Sample or partial AIS coverage only.",
             tone,
           },
@@ -318,8 +319,10 @@
     } else {
       map.dragRotate.disable();
       map.touchZoomRotate.disableRotation();
-      map.setPitch(0);
-      map.setBearing(0);
+      // setPitch/setBearing detienen cualquier animación de cámara aunque el valor no cambie:
+      // al llegar por un handoff cortaban el fitBounds del foco recién lanzado (GUA-20261021-7).
+      if (map.getPitch() !== 0) map.setPitch(0);
+      if (map.getBearing() !== 0) map.setBearing(0);
     }
   }
 
@@ -628,9 +631,7 @@
   $: coverageChipTooltip = `Subscribed but no vessels detected — ${coverage?.provider_label ?? "AISstream"} may have limited coverage here — open coverage map`;
 
   function shortDate(value: string | null | undefined) {
-    return value
-      ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-      : "N/A";
+    return apiInstantDate(value)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) ?? "N/A";
   }
 
   function number(value: number | null | undefined, digits = 1) {
@@ -670,7 +671,7 @@
     const tradeFlows = showOverlay("tradeFlows");
     const fleet = showOverlay("fleet");
     const eventReplay = showOverlay("eventReplay");
-    for (const id of ["chokepoints-fill", "chokepoints-outline", "chokepoints-labels"]) {
+    for (const id of ["chokepoints-fill", "chokepoints-outline", "chokepoints-focus", "chokepoints-labels"]) {
       setLayout(id, "visibility", chokepoints);
     }
     for (const id of ["flow-tracks-glow", "flow-tracks-line"]) {
@@ -680,6 +681,33 @@
     for (const id of ["replay-line-glow", "replay-line-body", "replay-point"]) {
       setLayout(id, "visibility", eventReplay);
     }
+  }
+
+  /** Encuadra y resalta el destino del handoff; un destino no resuelto solo muestra su aviso. */
+  function applyFocus(next: MaritimeFocusResolution) {
+    appliedFocusRequestId = next.requestId;
+    if (next.status !== "resolved") {
+      highlightedChokepointIds = [];
+      return;
+    }
+    activeOverlays = { ...activeOverlays, chokepoints: true };
+    highlightedChokepointIds = next.chokepointIds;
+    if (next.chokepointIds.length === 1) {
+      selectedDetail = { kind: "chokepoint", id: next.chokepointIds[0] };
+    }
+    if (!map) return;
+    // Deja sitio al cajón de detalle (arriba a la derecha) cuando el mapa es ancho.
+    const roomForDrawer = next.chokepointIds.length === 1 && (container?.clientWidth ?? 0) > 900;
+    map.fitBounds(next.bounds, {
+      padding: { top: 72, bottom: 80, left: 72, right: roomForDrawer ? 440 : 72 },
+      maxZoom: 6.5,
+      duration: 900,
+    });
+  }
+
+  function applyFocusHighlight(ids: string[]) {
+    if (!map || !mapReady || !map.getLayer("chokepoints-focus")) return;
+    map.setFilter("chokepoints-focus", ["in", ["get", "chokepoint_id"], ["literal", ids]] as never);
   }
 
   function applyDisplaySettings() {
@@ -997,6 +1025,19 @@
           "line-blur": 0.8,
         },
       });
+      // Resalte del destino de un handoff; el filtro se actualiza con highlightedChokepointIds.
+      map.addLayer({
+        id: "chokepoints-focus",
+        type: "line",
+        source: "chokepoint-areas",
+        filter: ["in", ["get", "chokepoint_id"], ["literal", highlightedChokepointIds]] as never,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": TEXT0,
+          "line-opacity": 0.95,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2, 6, 3],
+        },
+      });
       map.addSource("chokepoints", { type: "geojson", data: chokepointFeatureCollection() as never });
       map.addLayer({
         id: "chokepoints-labels",
@@ -1153,6 +1194,7 @@
               <div class="mp-row"><span>Vessels</span><span>${escapeHtml(String(props.total_vessel_count ?? 0))}</span></div>
               <div class="mp-row"><span>Score</span><span>${escapeHtml(number(Number(props.congestion_score ?? 0), 2))}</span></div>
               <div class="mp-row"><span>Label</span><span>${escapeHtml(String(props.congestion_label ?? "N/A"))}</span></div>
+              <div class="mp-row"><span>AIS sample</span><span>${escapeHtml(String(props.sample_note ?? "N/A"))}</span></div>
               <div class="mp-note">${escapeHtml(String(props.caveat ?? ""))}</div>
             </div>`
           )
@@ -1229,6 +1271,7 @@
   $: if (mapReady) void (displayPositions, displayVessels, ports, chokepoints, chokepointSummaries, tracks, replayIndex, replayTrackId, vesselGroupFilters, pushSources());
   $: if (mapReady) applyProjection();
   $: if (mapReady) void (activeOverlays, applyOverlayVisibility());
+  $: if (mapReady) applyFocusHighlight(highlightedChokepointIds);
   $: if (mapReady) void (displaySettings, applyDisplaySettings());
   $: connDotActive = mapZoom >= AIS_ZOOM_THRESHOLD && ["subscribed", "live"].includes(liveStatus);
   $: liveStatusLabel =
@@ -1278,6 +1321,23 @@
       </button>
     </div>
 
+    {#if focus && focusNoticeVisible}
+      <!-- Aviso del handoff: cobertura del destino o motivo por el que no se pudo localizar (GUA-20261021-7). -->
+      <section
+        class="focus-notice"
+        class:unresolved={focus.status === "unresolved"}
+        role="status"
+        aria-label="Sealanes handoff focus"
+      >
+        <div class="focus-copy">
+          <p class="shelf-label">{focus.sourceLabel ? `Handoff · ${focus.sourceLabel}` : "Handoff"}</p>
+          <strong>{focus.title}</strong>
+          <small>{focus.status === "resolved" ? focus.note : focus.message}</small>
+        </div>
+        <button type="button" class="shelf-action" on:click={() => { if (focus) dismissedFocusRequestId = focus.requestId; }}>Close</button>
+      </section>
+    {/if}
+
     {#if settingsOpen}
       <section class="settings-shelf" aria-label="Sealanes overlay settings">
         <div class="shelf-header">
@@ -1301,7 +1361,8 @@
         <div class="overlay-list">
           <button type="button" class:enabled={activeOverlays.chokepoints} on:click={() => toggleOverlay("chokepoints")}>
             <span>Chokepoints</span>
-            <small>{chokepointSummaries.length} boxes, hover/click for stress context</small>
+            <!-- Cuenta la geometría estática, no la muestra AIS (GUA-20261021-7). -->
+            <small>{chokepoints.length} boxes, hover/click for stress context</small>
           </button>
           <button type="button" class:enabled={activeOverlays.tradeFlows} on:click={() => toggleOverlay("tradeFlows")}>
             <span>Trade Flows</span>
@@ -1508,6 +1569,10 @@
           <div><span>Vessels</span><strong>{selectedChokepoint.total_vessel_count}</strong></div>
           <div><span>Score</span><strong class:absent={number(selectedChokepoint.congestion_score, 2) === "N/A"}>{number(selectedChokepoint.congestion_score, 2)}</strong></div>
           <div><span>Label</span><strong>{selectedChokepoint.congestion_label}</strong></div>
+        </div>
+        <div class="drawer-section">
+          <span>AIS Sample</span>
+          <p>{selectedChokepoint.position_sample_note ?? "AIS sample state not reported"}</p>
         </div>
         <div class="drawer-section">
           <span>Commodity Links</span>
@@ -1832,6 +1897,43 @@
     background: color-mix(in srgb, var(--bg-0, #070809) 94%, transparent);
     border: 1px solid var(--panel-border, #1e2228);
     pointer-events: auto;
+  }
+
+  /* Aviso de handoff entrante (GUA-20261021-7): mismo lenguaje que las bandejas. */
+  .focus-notice {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+    background: color-mix(in srgb, var(--bg-0, #070809) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent, #7aa6c8) 42%, var(--panel-border, #1e2228));
+    pointer-events: auto;
+  }
+
+  .focus-notice.unresolved {
+    border-color: color-mix(in srgb, var(--warning, #c49a5a) 50%, var(--panel-border, #1e2228));
+  }
+
+  .focus-copy {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .focus-copy strong {
+    color: var(--text-0, #f0f2f5);
+    font-size: var(--text-sm);
+  }
+
+  .focus-copy small {
+    color: var(--text-1, #c2c8d0);
+    font-size: var(--text-xs);
+    line-height: 1.35;
+  }
+
+  .focus-notice.unresolved .focus-copy small {
+    color: var(--warning, #c49a5a);
   }
 
   .settings-shelf {

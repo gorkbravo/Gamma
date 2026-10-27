@@ -1843,3 +1843,283 @@ def _prediction_market_record() -> PredictionMarketRecord:
         origin="polymarket.fixture",
         transformation_note="Fixture market.",
     )
+
+
+# ── Ventana LOOKBACK, desfase de tramos y avisos de proveedor (GUA-20261021-9 / -11) ──
+
+_AUDIT_TODAY = datetime(2026, 10, 21, 10, 30)
+_YF_CAVEAT = "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context."
+
+
+def _freeze_research_today(monkeypatch):
+    monkeypatch.setattr("src.application.research_service.now_utc", lambda: _AUDIT_TODAY)
+
+
+class _OverFetchingListedProvider:
+    """Imita a yfinance: devuelve más sesiones de las pedidas (margen de días naturales)."""
+
+    def __init__(self, *, end: str = "2026-10-20", source_provider: str = "yfinance") -> None:
+        self.end = end
+        self.source_provider = source_provider
+        self.requests: list[tuple[str, int]] = []
+
+    def load_instrument_history_result(self, instrument, lookback_days: int) -> ResearchHistoryResult:
+        self.requests.append((instrument.symbol, lookback_days))
+        periods = int(lookback_days * 1.27) + 1
+        index = pd.bdate_range(end=self.end, periods=periods)
+        seed = sum(ord(char) for char in instrument.symbol)
+        values = [100.0 + seed % 7 + 0.4 * math.sin(position / 5 + seed) + position * 0.01 for position in range(periods)]
+        return ResearchHistoryResult(
+            series=pd.Series(values, index=index),
+            source_provider=self.source_provider,
+            source_label="Fixture listed history",
+            origin="tests.listed",
+            freshness_label=FreshnessLabel.HISTORICAL,
+            warnings=[_YF_CAVEAT] if self.source_provider == "yfinance" else [],
+        )
+
+
+def _listed_service(tmp_path, provider) -> ResearchService:
+    return ResearchService(provider, saved_store=SavedResearchStore(tmp_path / "research"))
+
+
+def _inline_returns(count: int, *, end: str) -> list[ResearchObjectReturnPoint]:
+    index = pd.bdate_range(end=end, periods=count)
+    return [
+        ResearchObjectReturnPoint(timestamp=stamp.date().isoformat(), value=0.001 * ((position % 5) - 2))
+        for position, stamp in enumerate(index)
+    ]
+
+
+def test_listed_legs_analyse_exactly_the_lookback_in_trading_days(tmp_path, monkeypatch):
+    # Auditoría: LOOKBACK 252 con EWQ/EWG vía yfinance analizaba 319 sesiones (GUA-20261021-11).
+    _freeze_research_today(monkeypatch)
+    provider = _OverFetchingListedProvider()
+    service = _listed_service(tmp_path, provider)
+    request = StrategyLabPortfolioCompositionRequest(
+        name="EWQ minus EWG",
+        benchmark_symbol=None,
+        lookback_days=252,
+        legs=[
+            StrategyLabPortfolioLeg(label="EWQ", asset_class="etf", identifier="EWQ", weight=1.0),
+            StrategyLabPortfolioLeg(label="EWG", asset_class="etf", identifier="EWG", weight=-1.0),
+        ],
+    )
+
+    validation = service.validate_strategy_lab_portfolio(request)
+    composed = service.compose_strategy_lab_portfolio(request)
+
+    assert validation.valid is True
+    assert validation.aligned_observation_count == 252
+    assert [leg["observation_count"] for leg in validation.alignment_diagnostics["legs"]] == [252, 252]
+    assert validation.alignment_diagnostics["requested_lookback_days"] == 252
+    assert validation.alignment_diagnostics["lookback_unit"] == "trading_days"
+    assert validation.alignment_diagnostics["lookback_note"] is None
+    assert composed.metrics.observation_count == 252
+    assert composed.alignment_diagnostics["aligned_observation_count"] == 252
+    assert composed.alignment_diagnostics["aligned_end"].startswith("2026-10-20")
+
+
+def test_lookback_shortfall_names_the_short_legs(tmp_path, monkeypatch):
+    _freeze_research_today(monkeypatch)
+    service = _service(tmp_path)
+    request = StrategyLabPortfolioCompositionRequest(
+        name="Brent minus WTI",
+        benchmark_symbol=None,
+        lookback_days=252,
+        legs=[
+            StrategyLabPortfolioLeg(label="Brent", asset_class="commodity", identifier="BRENT", weight=1.0,
+                                    return_points=_inline_returns(247, end="2026-10-14")),
+            StrategyLabPortfolioLeg(label="WTI", asset_class="commodity", identifier="WTI", weight=-1.0,
+                                    return_points=_inline_returns(244, end="2026-10-14")),
+        ],
+    )
+
+    validation = service.validate_strategy_lab_portfolio(request)
+
+    note = validation.alignment_diagnostics["lookback_note"]
+    assert validation.aligned_observation_count == 244
+    assert note.startswith("Analysed 244 of the requested 252 trading days")
+    assert "Brent carries 247 return observations ending 2026-10-14" in note
+    assert "WTI carries 244" in note
+    assert note in validation.warnings
+
+
+def test_inline_legs_longer_than_the_lookback_are_trimmed_to_the_latest_sessions(tmp_path, monkeypatch):
+    _freeze_research_today(monkeypatch)
+    service = _service(tmp_path)
+    request = StrategyLabPortfolioCompositionRequest(
+        name="Long inline history",
+        benchmark_symbol=None,
+        lookback_days=60,
+        legs=[
+            StrategyLabPortfolioLeg(label="A", asset_class="custom_stream", identifier="A", weight=1.0,
+                                    return_points=_inline_returns(200, end="2026-10-20")),
+            StrategyLabPortfolioLeg(label="B", asset_class="custom_stream", identifier="B", weight=-0.5,
+                                    return_points=_inline_returns(150, end="2026-10-20")),
+        ],
+    )
+
+    validation = service.validate_strategy_lab_portfolio(request)
+    composed = service.compose_strategy_lab_portfolio(request)
+
+    assert validation.aligned_observation_count == 60
+    assert validation.alignment_diagnostics["shared_observations_before_lookback"] == 150
+    assert composed.metrics.observation_count == 60
+    assert all(len(leg.return_points) == 60 for leg in composed.risk_legs)
+
+
+def test_validate_book_warns_when_a_leg_window_lags_today(tmp_path, monkeypatch):
+    _freeze_research_today(monkeypatch)
+    service = _service(tmp_path)
+
+    validation = service.validate_strategy_lab_portfolio(
+        StrategyLabPortfolioCompositionRequest(
+            name="Stale spot proxy book",
+            benchmark_symbol=None,
+            lookback_days=252,
+            legs=[
+                StrategyLabPortfolioLeg(label="Brent spot proxy", asset_class="commodity", identifier="BRENT",
+                                        weight=1.0, return_points=_inline_returns(30, end="2026-10-14")),
+                StrategyLabPortfolioLeg(label="EWQ", asset_class="etf", identifier="EWQ", weight=-1.0,
+                                        return_points=_inline_returns(30, end="2026-10-20")),
+            ],
+        )
+    )
+
+    diagnostics = validation.alignment_diagnostics
+    assert validation.valid is True
+    assert diagnostics["as_of_date"] == "2026-10-21"
+    assert diagnostics["stale_after_trading_days"] == 3
+    # Del miércoles 14 al miércoles 21: jueves, viernes, lunes, martes y miércoles.
+    assert diagnostics["stale_legs"] == [
+        {"label": "Brent spot proxy", "available_end": "2026-10-14", "trading_days_behind": 5}
+    ]
+    legs = {leg["label"]: leg for leg in diagnostics["legs"]}
+    assert legs["Brent spot proxy"]["stale_window"] is True
+    assert legs["EWQ"]["trading_days_behind"] == 1 and legs["EWQ"]["stale_window"] is False
+    stale = [warning for warning in validation.warnings if warning.startswith("Stale window")]
+    assert len(stale) == 1 and "Brent spot proxy ends 2026-10-14, 5 trading days before today" in stale[0]
+
+
+def test_trading_days_behind_skips_weekends():
+    from datetime import date
+
+    assert ResearchService._trading_days_behind("2026-10-16T00:00:00", date(2026, 10, 19)) == 1  # viernes → lunes
+    assert ResearchService._trading_days_behind("2026-10-21", date(2026, 10, 21)) == 0
+    assert ResearchService._trading_days_behind(None, date(2026, 10, 21)) is None
+
+
+def test_benchmark_provider_caveats_stay_with_the_benchmark(tmp_path, monkeypatch):
+    # Auditoría: Validate Book mostraba el aviso de yfinance aunque ningún tramo lo usaba.
+    _freeze_research_today(monkeypatch)
+    service = _listed_service(tmp_path, _OverFetchingListedProvider())
+    inline_book = StrategyLabPortfolioCompositionRequest(
+        name="Inline book",
+        benchmark_symbol="SPY",
+        lookback_days=252,
+        legs=[
+            StrategyLabPortfolioLeg(label="Brent", asset_class="commodity", identifier="BRENT", weight=1.0,
+                                    return_points=_inline_returns(120, end="2026-10-20")),
+        ],
+    )
+
+    validation = service.validate_strategy_lab_portfolio(inline_book)
+    composed = service.compose_strategy_lab_portfolio(inline_book)
+
+    assert not any("yfinance" in warning for warning in validation.warnings)
+    assert _YF_CAVEAT in validation.alignment_diagnostics["benchmark"]["warnings"]
+    assert not any("yfinance" in warning for warning in composed.warnings)
+    assert _YF_CAVEAT in composed.alignment_diagnostics["benchmark"]["warnings"]
+
+    listed_book = StrategyLabPortfolioCompositionRequest(
+        name="Listed book",
+        benchmark_symbol=None,
+        lookback_days=252,
+        legs=[StrategyLabPortfolioLeg(label="EWQ", asset_class="etf", identifier="EWQ", weight=1.0)],
+    )
+    assert _YF_CAVEAT in service.validate_strategy_lab_portfolio(listed_book).warnings
+
+
+class _BrentSpotProxyCommoditiesService:
+    """Commodities con cabecera de futuros IBKR (BZZ6) e historia diaria FRED que acaba el 14."""
+
+    def get_workspace(self, request):
+        instrument = SimpleNamespace(
+            instrument_id="brent", symbol="BZ", name="Brent Crude Oil", family="energy", subgroup="crude",
+            quote_unit="USD/bbl", source_provider="ibkr", front_symbol="BZZ6", exchange="ICE",
+        )
+        index = pd.bdate_range(end="2026-10-14", periods=60)
+        history = SimpleNamespace(
+            instrument_id="brent",
+            label="Brent Crude Oil",
+            unit="USD/bbl",
+            points=[
+                SimpleNamespace(timestamp=stamp.to_pydatetime(), value=110.0 + (position % 7) * 0.5)
+                for position, stamp in enumerate(index)
+            ],
+            source_provider="fred",
+            retrieved_at=datetime(2026, 10, 21, 10, 0, tzinfo=timezone.utc),
+            origin="fred.series.observations:DCOILBRENTEU",
+            transformation_note="FRED price proxy mapped into the normalized commodity price-history model.",
+        )
+        return SimpleNamespace(
+            selected_instrument_id=request.selected_instrument_id, instruments=[instrument],
+            price_histories=[history], market_summaries=[], curves=[], warnings=[], source_provider="ibkr",
+            retrieved_at=datetime(2026, 10, 21, 10, 0, tzinfo=timezone.utc), origin="tests.brent",
+            coverage=SimpleNamespace(coverage_status="live", provider_label="IBKR"),
+        )
+
+
+def test_commodity_handoff_states_spot_proxy_series_and_end_date(tmp_path):
+    service = _service(tmp_path)
+    request = StrategyLabHandoffResolveRequest(
+        handoff=StrategyLabHandoffEnvelope(
+            source_tab="commodities", source_mode="overview", intended_target_tab="strategy_lab",
+            intended_target_mode="composer",
+            selected_entity=CrossTabHandoffEntity(entity_type="commodity_instrument", label="Brent Crude Oil",
+                                                  normalized_id="brent", provider_id="BZZ6", native_id="BZZ6"),
+            resolver_capability="return_leg", asset_class="commodity", value_kind="price",
+            default_side="long", default_weight=0.1, provider="ibkr",
+            normalized_ids={"instrument_id": "brent"}, timestamp="2026-10-21T10:00:00Z",
+        )
+    )
+
+    result = service.resolve_strategy_lab_handoff(request, commodities_service=_BrentSpotProxyCommoditiesService())
+
+    assert result.status == "resolved"
+    assert result.provenance["series_kind"] == "spot_proxy"
+    assert result.provenance["series_label"] == "FRED spot proxy DCOILBRENTEU"
+    assert result.provenance["series_end"] == "2026-10-14"
+    assert result.composer_draft_leg.label == "Brent Crude Oil spot proxy return stream"
+    assert result.date_coverage.label == "Commodity return history: FRED spot proxy DCOILBRENTEU"
+    assert any("not the BZZ6 futures" in warning and "2026-10-14" in warning for warning in result.warnings)
+    assert not any("front contract" in warning for warning in result.warnings)
+
+
+def test_commodity_handoff_labels_ibkr_front_futures_and_sample_series(tmp_path):
+    service = _service(tmp_path)
+
+    carried = service.resolve_strategy_lab_handoff(
+        _commodity_handoff(loaded_series=_carried_gold_series(120)),
+        commodities_service=_GoldCommoditiesService(reload_point_count=0),
+    )
+    assert carried.provenance["series_kind"] == "futures_front"
+    assert carried.provenance["series_contract"] == "GCU6"
+    assert carried.composer_draft_leg.label == "Gold front futures return stream"
+
+    sample = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="commodities", source_mode="overview", intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(entity_type="commodity_instrument", label="WTI Crude Oil",
+                                                      normalized_id="wti", provider_id="CL", native_id="CL"),
+                resolver_capability="return_leg", asset_class="commodity", value_kind="price",
+                default_side="long", default_weight=0.1, provider="sample_data",
+                normalized_ids={"instrument_id": "wti"}, timestamp="2026-03-01T00:00:00Z",
+            )
+        ),
+        commodities_service=CommoditiesService(provider=SampleCommoditiesDataProvider()),
+    )
+    assert sample.provenance["series_kind"] == "sample"

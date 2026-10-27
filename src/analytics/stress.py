@@ -10,8 +10,9 @@ from __future__ import annotations
    benchmark y mide en cada régimen la volatilidad, el VaR/ES histórico y la correlación de la
    cartera con el benchmark.
 
-Las fechas de los episodios son cierres del S&P 500 de pico a valle; conviene contrastarlas con
-una fuente oficial si se amplía la lista.
+Los episodios de renta variable usan cierres del S&P 500 de pico a valle; los de materias primas,
+liquidaciones del Brent (contrato frontal) en ventanas documentadas (GUA-20261021-9). Conviene
+contrastar las fechas con una fuente oficial si se amplía la lista.
 """
 
 from dataclasses import dataclass, field
@@ -26,6 +27,10 @@ from src.analytics.var import historical_var_cvar
 COVERAGE_TOLERANCE_DAYS = 7
 # Cobertura mínima (peso bruto cubierto / peso bruto total) para publicar el rendimiento del libro.
 MIN_EPISODE_COVERAGE = 0.5
+# Si el resultado neto es menor que esta fracción del movimiento bruto de las patas, las patas se
+# compensan y el reparto se mide sobre el movimiento bruto: dividir por un neto ≈ 0 daba
+# −2106.9 % / 2206.9 % en un libro BNO/USO (verificación en vivo 2026-10-27).
+NET_SHARE_MIN_FRACTION_OF_GROSS = 0.25
 
 
 @dataclass(frozen=True)
@@ -35,9 +40,13 @@ class StressEpisode:
     start: date
     end: date
     description: str
+    # Tipo de episodio y serie que fija la ventana: "equity" (S&P 500) o "commodity" (Brent).
+    kind: str = "equity"
+    anchor: str = "S&P 500 close-to-close peak to trough"
 
 
-# Cierres del S&P 500 de pico a valle de cada episodio.
+# Episodios de renta variable (S&P 500, pico a valle) y de materias primas (Brent frontal),
+# en orden cronológico de inicio.
 HISTORICAL_STRESS_EPISODES: tuple[StressEpisode, ...] = (
     StressEpisode(
         "gfc_2007_2009",
@@ -61,11 +70,31 @@ HISTORICAL_STRESS_EPISODES: tuple[StressEpisode, ...] = (
         "S&P 500 close-to-close peak to trough, 19 Feb to 23 Mar 2020.",
     ),
     StressEpisode(
+        "oil_crash_2020",
+        "2020 oil price war and demand collapse",
+        date(2020, 3, 5),
+        date(2020, 4, 21),
+        "Brent front-month settlement from 5 Mar 2020, the last close before the OPEC+ talks collapsed on "
+        "6 Mar, to its settlement low on 21 Apr 2020 (WTI's May contract settled below zero on 20 Apr).",
+        kind="commodity",
+        anchor="Brent front-month settlement",
+    ),
+    StressEpisode(
         "rates_2022",
         "2022 rate shock",
         date(2022, 1, 3),
         date(2022, 10, 12),
         "S&P 500 close-to-close peak to trough, 3 Jan to 12 Oct 2022.",
+    ),
+    StressEpisode(
+        "energy_shock_2022",
+        "2022 energy shock (invasion of Ukraine)",
+        date(2022, 2, 23),
+        date(2022, 3, 8),
+        "Brent front-month settlement from 23 Feb 2022, the last close before Russia invaded Ukraine on "
+        "24 Feb, to its settlement peak on 8 Mar 2022. A price spike: short-energy legs carry the loss.",
+        kind="commodity",
+        anchor="Brent front-month settlement",
     ),
     StressEpisode(
         "carry_unwind_2024",
@@ -113,6 +142,8 @@ class EpisodeReplayResult:
     observation_count: int
     legs: list[EpisodeLegResult] = field(default_factory=list)
     note: str | None = None
+    # Base de `contribution_share`: "net" (resultado del libro) o "gross" (Σ|P&L de las patas|).
+    contribution_basis: str = "net"
 
 
 def _price_on_or_before(series: pd.Series, when: pd.Timestamp) -> tuple[pd.Timestamp, float] | None:
@@ -237,13 +268,18 @@ def replay_episode(
     daily = nav.pct_change().dropna()
     worst_day_date = daily.idxmin() if not daily.empty else None
     book_return = float(sum(leg.weight * leg.episode_return for leg in legs if leg.status == "covered"))
+    gross_move = float(sum(abs(leg.weight * leg.episode_return) for leg in legs if leg.status == "covered"))
+    contribution_basis = (
+        "gross" if gross_move > 0 and abs(book_return) < NET_SHARE_MIN_FRACTION_OF_GROSS * gross_move else "net"
+    )
+    denominator = gross_move if contribution_basis == "gross" else book_return
     legs = [
         EpisodeLegResult(
             **{
                 **leg.__dict__,
                 "contribution_share": (
-                    float(leg.weight * leg.episode_return / book_return)
-                    if leg.status == "covered" and book_return != 0
+                    float(leg.weight * leg.episode_return / denominator)
+                    if leg.status == "covered" and denominator != 0
                     else None
                 ),
             }
@@ -270,6 +306,47 @@ def replay_episode(
             if status == "full"
             else f"{coverage:.0%} of gross exposure has history for this window; missing positions are treated as flat."
         ),
+        contribution_basis=contribution_basis,
+    )
+
+
+def price_history_window(prices: dict[str, pd.Series]) -> tuple[date | None, date | None]:
+    """Primera y última fecha con precio entre todas las posiciones (unión de ventanas)."""
+    starts: list[pd.Timestamp] = []
+    ends: list[pd.Timestamp] = []
+    for series in prices.values():
+        if series is None or series.empty:
+            continue
+        clean = _normalized_index(pd.to_numeric(series, errors="coerce").dropna())
+        if clean.empty:
+            continue
+        starts.append(clean.index.min())
+        ends.append(clean.index.max())
+    if not starts:
+        return None, None
+    return min(starts).date(), max(ends).date()
+
+
+def stress_coverage_summary(
+    results: list[EpisodeReplayResult],
+    history_start: date | None,
+    history_end: date | None,
+) -> str | None:
+    """Una sola línea cuando ningún episodio queda cubierto, con la ventana disponible del libro,
+    en lugar de una fila "No history" por episodio (GUA-20261021-9). Nunca sustituye un proxy."""
+    if not results or any(result.status != "unavailable" for result in results):
+        return None
+    # Si alguna posición cubre algún episodio (aunque no llegue al mínimo), se conservan las filas.
+    if any(leg.status == "covered" for result in results for leg in result.legs):
+        return None
+    first = min(result.episode.start for result in results)
+    last = max(result.episode.end for result in results)
+    span = f"the {len(results)} episodes run from {first.isoformat()} to {last.isoformat()}"
+    if history_start is None or history_end is None:
+        return f"No position has price history for any stress episode; {span}. No proxy history is substituted."
+    return (
+        f"No stress episode is covered: the book's price history runs {history_start.isoformat()} to "
+        f"{history_end.isoformat()}, and {span}. No proxy history is substituted."
     )
 
 

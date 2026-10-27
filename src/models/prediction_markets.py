@@ -327,6 +327,10 @@ class PredictionEventBookLeg:
     resolution_source: str | None
     is_anchor: bool = False
     divergence_flags: list[str] = field(default_factory=list)
+    # Solo en escaleras acumulativas: el peldaño contradice a otro que lo
+    # contiene o que él contiene (p. ej. una fecha posterior por debajo de una
+    # anterior).
+    ladder_flags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -355,6 +359,11 @@ class PredictionEventBook:
     `overround_is_meaningful` is the gate: the sum is only presented as an
     overround when the book is complete, fully priced, and the venue's own
     grouping indicates mutually exclusive candidates.
+
+    A cumulative ladder ("by Dec 31 / by Jun 30", "above 72k / above 74k") is
+    nested, not exclusive: `exclusivity_signal` is "cumulative_ladder", the legs
+    are ordered by rung, and there is no sum, overround or favorite. The check
+    that does apply is monotonicity, counted in `ladder_inversions`.
     """
 
     venue: str
@@ -368,6 +377,9 @@ class PredictionEventBook:
     favorite_market_id: str | None = None
     exclusivity_signal: str = "unverified"
     overround_is_meaningful: bool = False
+    # "date" (plazos anidados) o "threshold" (umbrales anidados); None si no es escalera.
+    ladder_kind: str | None = None
+    ladder_inversions: int = 0
     completeness: PredictionEventBookCompleteness | None = None
     warnings: list[str] = field(default_factory=list)
     source_provider: str = ""
@@ -471,6 +483,23 @@ class RelatedMarketRecord:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # GUA-20261021-15: hermanos por agrupación del venue. `sibling_scope` vale
+    # "same_event" o "same_series"; `sibling_order` es la posición dentro de ese
+    # grupo (orden de bucket o fecha de resolución). Ambos son None en análogos.
+    sibling_scope: str | None = None
+    sibling_order: int | None = None
+    sibling_label: str | None = None
+    group_id: str | None = None
+    group_title: str | None = None
+    end_time: datetime | None = None
+
+
+@dataclass(frozen=True)
+class RelatedMarketsResult:
+    """Filas de RELATED y avisos de lo que no se pudo cargar (p. ej. la serie del venue)."""
+
+    rows: list[RelatedMarketRecord]
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

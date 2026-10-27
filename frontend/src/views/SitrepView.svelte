@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import { onMount } from "svelte";
   import type Hls from "hls.js";
   import { flashOnMount } from "../lib/flash";
@@ -34,12 +35,14 @@
     resolveSitrepMarketHandoff,
     resolveSitrepNewsEntityHandoff,
     resolveSitrepTapeHandoff,
+    sitrepSectionFailed,
     type SitrepFollowUp,
     type SitrepFollowUpStatus,
     type SitrepHandoffRequest,
     type SitrepMarketHandoffProfile,
     type SitrepTapeHandoffRow,
     type SitrepWorkspaceMeta,
+    type SitrepWorkspaceSection,
   } from "../lib/view-models/sitrep";
 
   export let system: SystemStatus | null = null;
@@ -367,8 +370,8 @@
     if (!value) {
       return "N/A";
     }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
+    const date = apiInstantDate(value);
+    if (!date) {
       return value.slice(0, 16);
     }
     return date.toLocaleString("en-US", {
@@ -382,8 +385,8 @@
 
   function formatTime(value: string | null | undefined) {
     if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value.slice(11, 16);
+    const date = apiInstantDate(value);
+    if (!date) return value.slice(11, 16);
     return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   }
 
@@ -1239,6 +1242,26 @@
     };
   }
 
+  /**
+   * GUA-20261021-12: con la carga por secciones, una fila sin datos puede estar aún en
+   * vuelo ("loading", no es incidencia), haber fallado sola ("failed") o no pedirse nunca.
+   */
+  function missingProviderStatusRow(
+    id: string,
+    domain: string,
+    section: SitrepWorkspaceSection,
+    meta: SitrepWorkspaceMeta | null,
+    isLoading: boolean
+  ): ProviderStatusRow {
+    if (meta?.pending_sections?.includes(section) || (isLoading && !meta && !sitrepSectionFailed(meta, section))) {
+      return providerStatusRow(id, domain, null, "loading", null, false);
+    }
+    if (sitrepSectionFailed(meta, section)) {
+      return providerStatusRow(id, domain, null, "failed", null, true);
+    }
+    return providerStatusRow(id, domain, null, "not loaded", null, true);
+  }
+
   function buildProviderStatusRows(
     indicesData: ResearchOverviewResponse | null,
     overviewData: ResearchOverviewResponse | null,
@@ -1247,24 +1270,26 @@
     predictionData: PredictionMarketListResponse | null,
     newsData: NewsEventFeedResponse | null,
     windowLabel: string,
-    warningsByDomain: Record<string, string[]>
+    warningsByDomain: Record<string, string[]>,
+    meta: SitrepWorkspaceMeta | null = null,
+    isLoading = false
   ): ProviderStatusRow[] {
     const incidents = (domain: string) => warningsByDomain[domain] ?? [];
     const rows: ProviderStatusRow[] = [];
     rows.push(
       indicesData
         ? providerStatusRow("indices", "Indices", indicesData.source_provider, indicesData.freshness_label, indicesData.retrieved_at, false, incidents("indices"))
-        : providerStatusRow("indices", "Indices", null, "not loaded", null, true)
+        : missingProviderStatusRow("indices", "Indices", "indices", meta, isLoading)
     );
     rows.push(
       overviewData
         ? providerStatusRow("equities", "Equities", overviewData.source_provider, overviewData.freshness_label, overviewData.retrieved_at, false, incidents("equities"))
-        : providerStatusRow("equities", "Equities", null, "not loaded", null, true)
+        : missingProviderStatusRow("equities", "Equities", "equities", meta, isLoading)
     );
     rows.push(
       macroData
         ? providerStatusRow("macro", "FX / Rates", macroData.source_provider, `${windowLabel} window`, macroData.retrieved_at, false, incidents("macro"))
-        : providerStatusRow("macro", "FX / Rates", null, "not loaded", null, true)
+        : missingProviderStatusRow("macro", "FX / Rates", "macro", meta, isLoading)
     );
     if (commodityData) {
       const coverage = commodityData.coverage;
@@ -1280,7 +1305,7 @@
         )
       );
     } else {
-      rows.push(providerStatusRow("commodities", "Commodities", null, "not loaded", null, true));
+      rows.push(missingProviderStatusRow("commodities", "Commodities", "commodities", meta, isLoading));
     }
     if (predictionData) {
       const venues = predictionData.venues ?? [];
@@ -1302,7 +1327,7 @@
         )
       );
     } else {
-      rows.push(providerStatusRow("prediction", "Predictions", null, "not loaded", null, true));
+      rows.push(missingProviderStatusRow("prediction", "Predictions", "prediction_markets", meta, isLoading));
     }
     rows.push(
       newsData
@@ -1315,7 +1340,7 @@
             newsData.items.length === 0,
             incidents("news")
           )
-        : providerStatusRow("news", "News", null, "not loaded", null, true)
+        : missingProviderStatusRow("news", "News", "news", meta, isLoading)
     );
     return rows;
   }
@@ -1421,7 +1446,9 @@
     prediction,
     news,
     macroWindowLabel,
-    warningsByDomain
+    warningsByDomain,
+    workspaceMeta,
+    loading
   );
   $: predictionRetrievedAt = (prediction?.venues ?? [])
     .map((venue) => venue.retrieved_at)

@@ -163,7 +163,13 @@
             </button>
           {/if}
 
-          <button class="tab-button" class:selected={tab.id === activeTab} type="button" on:click={() => handleSelect(tab.id)}>
+          <button
+            class="tab-button"
+            class:selected={tab.id === activeTab}
+            type="button"
+            aria-current={tab.id === activeTab ? "page" : undefined}
+            on:click={() => handleSelect(tab.id)}
+          >
             <span class="tab-label">{tab.label}</span>
           </button>
         </div>

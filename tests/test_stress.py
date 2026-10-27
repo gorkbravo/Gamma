@@ -42,6 +42,19 @@ def test_episodes_are_well_formed_and_chronological():
     assert (covid.start, covid.end) == (date(2020, 2, 19), date(2020, 3, 23))
 
 
+def test_episode_library_includes_labelled_commodity_episodes():
+    # GUA-20261021-9: un libro de crudo no tenía ningún episodio propio de materias primas.
+    by_id = {episode.episode_id: episode for episode in HISTORICAL_STRESS_EPISODES}
+    oil = by_id["oil_crash_2020"]
+    energy = by_id["energy_shock_2022"]
+    assert (oil.start, oil.end) == (date(2020, 3, 5), date(2020, 4, 21))
+    assert (energy.start, energy.end) == (date(2022, 2, 23), date(2022, 3, 8))
+    assert {oil.kind, energy.kind} == {"commodity"}
+    assert oil.anchor == energy.anchor == "Brent front-month settlement"
+    assert by_id["covid_2020"].kind == "equity"
+    assert all(episode.kind in {"equity", "commodity"} for episode in HISTORICAL_STRESS_EPISODES)
+
+
 # ── Replay ───────────────────────────────────────────────────────────────
 
 
@@ -199,6 +212,62 @@ def test_service_replays_a_research_book_and_flags_non_listed_legs():
     assert provider.lookbacks and max(provider.lookbacks) > 1500
 
 
+def _commodity_book_leg(start: str, end: str, *, daily: float = -0.01) -> ResearchBookRiskLeg:
+    from src.models.research_lab import ResearchObjectReturnPoint
+
+    index = pd.bdate_range(start, end)
+    return ResearchBookRiskLeg(
+        leg_id=f"1:strategy_portfolio_leg:commodity:BRENT:{start}:{end}",
+        label="Brent Crude Oil spot proxy return stream",
+        symbol="BRENT",
+        instrument_id="brent",
+        weight=1.0,
+        return_points=[ResearchObjectReturnPoint(timestamp=stamp.isoformat(), value=daily) for stamp in index],
+    )
+
+
+def _empty_book_snapshot():
+    return PortfolioSnapshot(timestamp=datetime(2026, 10, 21), base_currency="USD", account_summary={},
+                             positions=[], net_liquidation=100000.0, total_market_value=100000.0, total_cash=0.0)
+
+
+def test_commodity_book_leg_replays_an_episode_with_its_own_history():
+    oil = next(episode for episode in HISTORICAL_STRESS_EPISODES if episode.episode_id == "oil_crash_2020")
+    leg = _commodity_book_leg("2020-01-02", "2020-06-30")
+    result = _service().compute_stress_replay(
+        RiskStressReplayRequest(snapshot=_empty_book_snapshot(), benchmark_symbol="SPY", base_currency="USD",
+                                source_scope="research_book", research_book_legs=[leg],
+                                episodes=(oil,), as_of=date(2026, 10, 21)),
+        data_provider=_Provider({}),
+    )
+
+    episode = result.episodes[0]
+    assert episode.status == "full"
+    assert episode.legs[0].status == "covered"
+    # Rendimiento propio del tramo (−1 % diario), sin proxy: (0,99)^n − 1 entre el 5 de marzo y el 21 de abril.
+    sessions = len(pd.bdate_range("2020-03-06", "2020-04-21"))
+    assert episode.book_return == pytest.approx(0.99 ** sessions - 1)
+    assert result.coverage_summary is None
+
+
+def test_stress_replay_summarises_a_book_without_history_for_any_episode():
+    leg = _commodity_book_leg("2025-10-22", "2026-10-14")
+    result = _service().compute_stress_replay(
+        RiskStressReplayRequest(snapshot=_empty_book_snapshot(), benchmark_symbol="SPY", base_currency="USD",
+                                source_scope="research_book", research_book_legs=[leg],
+                                as_of=date(2026, 10, 21)),
+        data_provider=_Provider({}),
+    )
+
+    assert all(episode.status == "unavailable" for episode in result.episodes)
+    assert (result.history_start, result.history_end) == (date(2025, 10, 22), date(2026, 10, 14))
+    assert result.coverage_summary.startswith(
+        "No stress episode is covered: the book's price history runs 2025-10-22 to 2026-10-14"
+    )
+    assert "No proxy history is substituted" in result.coverage_summary
+    assert f"the {len(HISTORICAL_STRESS_EPISODES)} episodes run from 2007-10-09" in result.coverage_summary
+
+
 def test_stress_replay_endpoint_and_regimes_in_risk_compute(tmp_path):
     runtime = build_runtime(mock_mode=True, cache_dir=tmp_path / "cache", history_dir=tmp_path / "data",
                             sample_data_dir="sample_data")
@@ -213,9 +282,36 @@ def test_stress_replay_endpoint_and_regimes_in_risk_compute(tmp_path):
         ]
         assert body["method"].startswith("Current weights are held")
         assert all(episode["status"] in {"full", "partial", "unavailable"} for episode in body["episodes"])
+        assert {episode["kind"] for episode in body["episodes"]} == {"equity", "commodity"}
+        assert "coverage_summary" in body and "history_start" in body
 
         risk = client.post("/risk/compute", json={"snapshot": snapshot, "include_monte_carlo": False}).json()
         assert "regime_analysis" in risk
         assert risk["regime_analysis"]["status"] in {"available", "unavailable"}
     finally:
         runtime.shutdown()
+
+
+def test_offsetting_legs_share_the_gross_move_instead_of_a_near_zero_net():
+    """Verificación en vivo 2026-10-27: BNO +25 % / USO −25 % en el episodio de aranceles daba
+    "SHARE OF RESULT −2106.9 % / 2206.9 %" al dividir cada pata por un resultado neto ≈ 0."""
+    prices = {
+        "BNO": _prices([100, 100, 95, 90, 85, 84, 82.6]),
+        "USO": _prices([100, 100, 95, 90, 84, 83, 81.8]),
+    }
+    result = replay_episode(prices, pd.Series({"BNO": 0.25, "USO": -0.25}), EPISODE, portfolio_value=100_000.0)
+
+    legs = {leg.key: leg for leg in result.legs}
+    gross = abs(legs["BNO"].weight * legs["BNO"].episode_return) + abs(legs["USO"].weight * legs["USO"].episode_return)
+    assert abs(result.book_return) < 0.25 * gross
+    assert result.contribution_basis == "gross"
+    assert legs["BNO"].contribution_share == pytest.approx(legs["BNO"].weight * legs["BNO"].episode_return / gross)
+    assert sum(abs(leg.contribution_share) for leg in result.legs) == pytest.approx(1.0)
+    assert all(abs(leg.contribution_share) <= 1.0 for leg in result.legs)
+
+
+def test_directional_books_keep_the_net_share():
+    prices = {"A": _prices([100, 100, 90, 85, 80, 82, 80]), "B": _prices([50, 50, 51, 53, 54, 55, 55])}
+    result = replay_episode(prices, pd.Series({"A": 0.6, "B": -0.4}), EPISODE, portfolio_value=1000.0)
+    assert result.contribution_basis == "net"
+    assert sum(leg.contribution_share for leg in result.legs) == pytest.approx(1.0)

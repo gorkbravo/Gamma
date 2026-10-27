@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -74,6 +77,7 @@ from src.services.macro_adapters import (
 from src.services.maritime_adapters import (
     AisstreamMaritimeDataProvider,
     SampleMaritimeDataProvider,
+    StaticMaritimeReferenceProvider,
     parse_aisstream_bounding_boxes,
 )
 from src.services.mock_copilot_provider import MockCopilotProvider
@@ -110,10 +114,38 @@ from src.utils.logging_config import setup_logging
 if TYPE_CHECKING:
     from src.services.app_context import AppDataContext
 
+logger = logging.getLogger(__name__)
+
+# Variable opt-in para conectar con TWS al arrancar (GUA-20261021-14a). Desactivada por defecto.
+IB_AUTO_CONNECT_ENV = "IB_AUTO_CONNECT"
+
 
 @dataclass
 class DesktopRuntimeState:
     app_context: AppDataContext
+
+
+@dataclass
+class IbAutoConnectState:
+    """Intento único, opcional y en segundo plano de conectar con TWS al arrancar (GUA-20261021-14a).
+
+    No reintenta: si TWS no responde, el usuario conecta desde Settings o Setup > Broker.
+    """
+
+    host: str
+    port: int
+    thread: threading.Thread | None = None
+    outcome: str = "pending"  # pending | connected | failed
+    detail: str = ""
+
+    def in_progress(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+    def wait(self, timeout_seconds: float) -> None:
+        """Espera a que termine el intento para que un Connect manual no compita con él."""
+        thread = self.thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(max(0.0, float(timeout_seconds)))
 
 
 @dataclass
@@ -161,6 +193,8 @@ class ApplicationRuntime:
     startup_settings: StartupSettings | None = None
     # Referencia directa (sin trazar) para aplicar en caliente la identidad SEC guardada.
     sec_fundamentals_adapter: SecFundamentalsAdapter | None = None
+    # Estado del auto-connect opcional a TWS (None si IB_AUTO_CONNECT no está activo).
+    ib_auto_connect: IbAutoConnectState | None = None
 
     @property
     def app_context(self) -> AppDataContext | None:
@@ -371,6 +405,11 @@ def build_runtime(
         },
         research_store=prediction_research_store,
     )
+    # La identidad SEC (nombre y email) también identifica las peticiones a bls.gov, que
+    # bloquea los robots sin datos de contacto; por eso se crea antes que MacroService.
+    sec_fundamentals_adapter = SecFundamentalsAdapter(
+        cache, identity=sec_identity_tuple(startup_settings.preferences)
+    )
     macro_service = MacroService(
         fred_adapter=trace_provider(
             FredMacroAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="fred"
@@ -379,7 +418,10 @@ def build_runtime(
             TreasuryCurveAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="treasury"
         ),
         events_adapter=trace_provider(
-            USMacroEventsAdapter(cache), provider_usage, endpoint_prefix="macro", provider_id="us_macro_events"
+            USMacroEventsAdapter(cache, contact_user_agent=sec_fundamentals_adapter.user_agent),
+            provider_usage,
+            endpoint_prefix="macro",
+            provider_id="us_macro_events",
         ),
         fx_adapter=trace_provider(
             IBKRMacroFXAdapter(market_data), provider_usage, endpoint_prefix="macro", provider_id="ibkr"
@@ -418,9 +460,6 @@ def build_runtime(
         dex_adapter=trace_provider(
             GeckoTerminalAdapter(cache), provider_usage, endpoint_prefix="crypto", provider_id="geckoterminal"
         ),
-    )
-    sec_fundamentals_adapter = SecFundamentalsAdapter(
-        cache, identity=sec_identity_tuple(startup_settings.preferences)
     )
     fundamentals_service = FundamentalsService(
         sec_adapter=trace_provider(
@@ -572,6 +611,59 @@ def reset_runtime() -> None:
         runtime = get_runtime()
         runtime.shutdown()
     get_runtime.cache_clear()
+
+
+def ib_auto_connect_enabled() -> bool:
+    return _parse_bool_env(IB_AUTO_CONNECT_ENV, False)
+
+
+def start_ib_auto_connect(runtime: ApplicationRuntime) -> IbAutoConnectState | None:
+    """Lanza, si se pidió, un único intento de conexión con TWS sin bloquear el arranque.
+
+    GUA-20261021-14a: el backend no conectaba con TWS hasta pulsar Test connection. Con
+    ``IB_AUTO_CONNECT=true`` y modo live se intenta una vez en un hilo daemon; ``ib.connect``
+    usa un timeout de 5 s, el resultado se registra en el log y nunca se reintenta. Nunca
+    corre en modo demo ni bajo pytest (la suite además elimina las variables ``IB_*``).
+    """
+    if not ib_auto_connect_enabled():
+        return None
+    if runtime.mock_mode:
+        logger.info("IBKR auto-connect skipped: Gamma is running in demo mode.")
+        return None
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
+    existing = runtime.ib_auto_connect
+    if existing is not None:
+        return existing
+    client = runtime.client
+    state = IbAutoConnectState(host=str(client.host), port=int(client.port))
+
+    def _attempt() -> None:
+        started = time.perf_counter()
+        try:
+            connected = bool(client.connect())
+        except Exception as exc:  # noqa: BLE001 - el arranque no debe fallar por TWS
+            connected = False
+            state.detail = str(exc) or exc.__class__.__name__
+        elapsed = time.perf_counter() - started
+        if connected:
+            state.outcome = "connected"
+            logger.info("IBKR auto-connect ok: %s:%s in %.1fs", state.host, state.port, elapsed)
+            return
+        state.outcome = "failed"
+        if not state.detail:
+            state.detail = f"TWS did not accept a connection at {state.host}:{state.port}."
+        logger.warning(
+            "IBKR auto-connect failed after %.1fs (%s); not retrying. Connect from Settings or Setup > Broker.",
+            elapsed,
+            state.detail,
+        )
+
+    state.thread = threading.Thread(target=_attempt, name="ibkr-auto-connect", daemon=True)
+    runtime.ib_auto_connect = state
+    logger.info("IBKR auto-connect: trying %s:%s once in the background.", state.host, state.port)
+    state.thread.start()
+    return state
 
 
 def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRuntimeState:
@@ -755,7 +847,9 @@ def _register_provider_activation_conditions(
             provider_id="eia",
             display_name="EIA commodities",
             expected_when="Commodities workspace is loaded with EIA/FRED official-provider configuration.",
-            configured=commodities_provider in {"eia", "official", "eia_fred", "fred", "ibkr_eia"}
+            # El proveedor IBKR también usa EIA como referencia cuando hay clave (GUA-20261021-14c).
+            configured=commodities_provider
+            in {"eia", "official", "eia_fred", "fred", "ibkr", "tws", "ibkr_eia", "ibkr_futures"}
             and bool((os.getenv("EIA_API_KEY", "") or "").strip()),
             active=False,
             idle_status="not_requested",
@@ -961,11 +1055,13 @@ def _build_maritime_provider(*, live_mode: bool = False):
     sample_provider = SampleMaritimeDataProvider()
     if provider not in {"aisstream", "aisstream_live", "live"}:
         if live_mode:
+            # La geografía estática no es dato de muestra: se conserva en live (GUA-20261021-7).
             return UnavailableMaritimeDataProvider(
                 warning=(
                     f"MARITIME_PROVIDER={provider} is disabled while Gamma is running in live mode; "
                     "sample maritime data was not loaded."
-                )
+                ),
+                reference_provider=StaticMaritimeReferenceProvider(),
             )
         return sample_provider
 
@@ -981,11 +1077,8 @@ def _build_maritime_provider(*, live_mode: bool = False):
     ] or None
     return AisstreamMaritimeDataProvider(
         api_key=os.getenv("AISSTREAM_API_KEY", ""),
-        reference_provider=UnavailableMaritimeDataProvider(
-            warning="AISstream reference definitions are unavailable until live provider configuration supplies them."
-        )
-        if live_mode
-        else sample_provider,
+        # En live, las cajas estáticas también definen la suscripción AIS; antes llegaba vacía (GUA-20261021-7).
+        reference_provider=StaticMaritimeReferenceProvider() if live_mode else sample_provider,
         bounding_boxes=bounding_boxes,
         message_types=message_types,
         sample_seconds=float(os.getenv("AISSTREAM_SAMPLE_SECONDS", "6") or 6.0),
@@ -1144,12 +1237,15 @@ class UnavailableMaritimeDataProvider:
     provider_id = "unavailable_maritime"
     provider_label = "Unavailable Maritime Provider"
 
-    def __init__(self, *, warning: str) -> None:
+    def __init__(self, *, warning: str, reference_provider: StaticMaritimeReferenceProvider | None = None) -> None:
         self.warning = warning
+        self.reference_provider = reference_provider
 
     def get_snapshot(self, *, force_refresh: bool = False) -> MaritimeProviderSnapshot:
         del force_refresh
         retrieved_at = now_utc()
+        # Solo geografía estática (cajas y puertos); nunca buques ni posiciones de muestra.
+        reference = self.reference_provider.get_snapshot() if self.reference_provider is not None else None
         coverage = MaritimeCoverageMetadata(
             coverage_status="unavailable",
             provider_id=self.provider_id,
@@ -1167,11 +1263,17 @@ class UnavailableMaritimeDataProvider:
         )
         return MaritimeProviderSnapshot(
             coverage=coverage,
+            ports=list(reference.ports) if reference is not None else [],
+            chokepoints=list(reference.chokepoints) if reference is not None else [],
             warnings=[self.warning],
             source_provider="unavailable",
             retrieved_at=retrieved_at,
             origin="gamma.maritime.unavailable",
-            transformation_note="No mock or sample maritime data was loaded.",
+            transformation_note=(
+                "No mock or sample maritime data was loaded; only static chokepoint and port reference geography."
+                if reference is not None
+                else "No mock or sample maritime data was loaded."
+            ),
         )
 
     def get_track(self, vessel_id: str, *, force_refresh: bool = False) -> MaritimeTrackSnippet | None:

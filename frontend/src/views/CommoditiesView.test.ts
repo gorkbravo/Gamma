@@ -1,6 +1,7 @@
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import type { CommodityWorkspaceResponse } from "../lib/api/types";
+import { commoditiesRequestedInstrumentId } from "../lib/stores/app";
 import CommoditiesView from "./CommoditiesView.svelte";
 
 describe("CommoditiesView", () => {
@@ -145,6 +146,32 @@ describe("CommoditiesView", () => {
     expect(body).toContain("Substitution Spreads");
   });
 
+  it("names the retired FRED metals fallbacks under the metals snapshot (live check 2026-10-27)", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "metals";
+    workspace.selected_instrument_id = "gold";
+    workspace.warnings = [
+      ...workspace.warnings,
+      "No FRED fallback is configured for Gold, Silver, Platinum: GOLDAMGBD228NLBM, SLVPRUSD, PPLTUSDM failed with HTTPError in the 2026-10-21 audit and are treated as discontinued, so these markets rely on IBKR futures only."
+    ];
+
+    const metals = render(CommoditiesView, {
+      props: { workspace, loading: false, mode: "metals", onLoadWorkspace: vi.fn(), onLoadMacroSeries: vi.fn() }
+    });
+    const energy = render(CommoditiesView, {
+      props: {
+        workspace: { ...workspace, mode: "energy" },
+        loading: false,
+        mode: "energy",
+        onLoadWorkspace: vi.fn(),
+        onLoadMacroSeries: vi.fn()
+      }
+    });
+
+    expect(metals.body).toContain("No FRED fallback is configured for Gold, Silver, Platinum");
+    expect(energy.body).not.toContain("No FRED fallback is configured");
+  });
+
   it("keeps instruments without loaded curves selectable for on-demand curve pulls", () => {
     const workspace = makeWorkspace();
     workspace.mode = "curves_spreads";
@@ -177,6 +204,146 @@ describe("CommoditiesView", () => {
     });
 
     expect(body).toContain('value="nickel"');
+  });
+
+  it("shows each spread's observation date, a stale tag and the same-snapshot live value (GUA-20261021-2)", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "energy";
+    workspace.spreads.push({
+      ...workspace.spreads[0],
+      definition: {
+        ...workspace.spreads[0].definition,
+        spread_id: "gasoline-crack",
+        label: "Gasoline 1-1 Crack Proxy",
+        spread_type: "inter_commodity",
+        left_leg_id: "gasoline",
+        right_leg_id: "wti",
+        unit: "USD/bbl",
+        formula: "product price * 42 - crude price"
+      },
+      value: 23.54,
+      percentile: 0.8,
+      observed_at: "2026-10-14T00:00:00",
+      observation_lag_days: 7,
+      freshness: "stale",
+      stale_after_days: 4,
+      leg_observed_at: { gasoline: "2026-10-14T00:00:00", wti: "2026-10-14T00:00:00" },
+      current_value: 33.51,
+      current_value_as_of: "2026-10-21T10:31:00",
+      current_value_source: "IBKR front futures RBX6 / CLZ6 from one snapshot"
+    });
+    workspace.spreads[0] = { ...workspace.spreads[0], observed_at: "2026-04-19T12:00:00", freshness: "current", observation_lag_days: 0 };
+
+    const { body } = render(CommoditiesView, {
+      props: { workspace, loading: false, mode: "energy", onLoadWorkspace: vi.fn() }
+    });
+
+    expect(body).toContain("Gasoline 1-1 Crack Proxy");
+    expect(body).toContain("2026-10-14");
+    expect(body).toContain("Stale 7d old");
+    expect(body).toContain("Live 33.51");
+    expect(body).toContain("2026-04-19");
+  });
+
+  it("lists stale basis references with their dates and units instead of a conflict (GUA-20261021-4)", () => {
+    const workspace = makeWorkspace();
+    const headline = {
+      ...workspace.market_summaries[0].quote_basis!,
+      basis_id: "wti:curve_front",
+      basis_type: "front_future",
+      display_label: "IBKR cached front future Dec 2026",
+      provider: "ibkr_cached",
+      value: 100.05,
+      timestamp: "2026-10-21T10:31:00",
+      source_timestamp: "2026-10-21T10:31:00",
+      contract_symbol: "CLZ6"
+    };
+    workspace.market_summaries[0] = { ...workspace.market_summaries[0], quote_basis: headline };
+    workspace.price_reconciliations[0] = {
+      ...workspace.price_reconciliations[0],
+      status: "stale_reference",
+      headline,
+      summary: "WTI Crude Oil reference quotes are stale (FRED spot proxy 2026-10-14).",
+      warnings: ["Stale commodity reference for WTI Crude Oil: headline 100.05 USD/bbl (2026-10-21) vs FRED spot proxy 101.91 USD/bbl (2026-10-14)."],
+      stale_after_days: 4,
+      comparisons: [
+        {
+          basis_id: "wti:history_latest",
+          display_label: "FRED spot proxy",
+          kind: "stale_reference",
+          provider: "fred",
+          value: 101.91,
+          unit: "USD/bbl",
+          observed_at: "2026-10-14T00:00:00",
+          headline_value: 100.05,
+          headline_unit: "USD/bbl",
+          headline_observed_at: "2026-10-21T10:31:00",
+          converted_value: 101.91,
+          age_days: 7,
+          difference: null,
+          difference_pct: null,
+          note: "Stale reference: quotes more than 4 days apart are not compared."
+        }
+      ]
+    };
+
+    const { body } = render(CommoditiesView, {
+      props: { workspace, loading: false, mode: "energy", onLoadWorkspace: vi.fn() }
+    });
+
+    expect(body).toContain("Basis Reconciliation");
+    expect(body).toContain("Stale reference");
+    expect(body).toContain("FRED spot proxy");
+    expect(body).toContain("2026-10-14");
+    expect(body).toContain("7d");
+    expect(body).not.toContain("Basis conflict");
+  });
+
+  it("makes cross-domain rows actionable when a handoff callback is wired (GUA-20261021-7)", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "events_cross_domain";
+    workspace.cross_domain_links.push({
+      ...workspace.cross_domain_links[0],
+      link_id: "maritime-energy-chokepoints",
+      target_domain: "maritime",
+      target_label: "Sealanes Energy Chokepoints",
+      relationship: "shipping_context",
+      target_tab: "maritime",
+      target_mode: "chokepoints",
+      target_ids: {}
+    });
+
+    const wired = render(CommoditiesView, {
+      props: {
+        workspace,
+        loading: false,
+        mode: "events_cross_domain",
+        onLoadWorkspace: vi.fn(),
+        onCrossDomainHandoff: vi.fn()
+      }
+    }).body;
+    expect(wired).toContain('aria-label="Open Sealanes Energy Chokepoints in maritime"');
+    expect(wired).toContain('aria-label="Open Macro Inflation in macro"');
+    expect(wired).toContain("clickable-row");
+
+    const unwired = render(CommoditiesView, {
+      props: { workspace, loading: false, mode: "events_cross_domain", onLoadWorkspace: vi.fn() }
+    }).body;
+    expect(unwired).not.toContain("clickable-row");
+  });
+
+  it("shows the requested instrument as loading instead of the previous market's basis", () => {
+    const workspace = makeWorkspace();
+    commoditiesRequestedInstrumentId.set("gold");
+    try {
+      const { body } = render(CommoditiesView, {
+        props: { workspace, loading: true, mode: "overview", onLoadWorkspace: vi.fn() }
+      });
+      expect(body).toContain("Loading</em> Gold");
+      expect(body).not.toContain("<em>Headline</em>");
+    } finally {
+      commoditiesRequestedInstrumentId.set(null);
+    }
   });
 });
 

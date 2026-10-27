@@ -3,11 +3,13 @@ import type { SystemStatus } from "./api/types";
 import { setupReportFixture } from "./setup-wizard.fixture";
 import {
   buildSetupChoices,
+  closesOnFinish,
   coverageSourceLabel,
   draftChanges,
   initialDraft,
   initialStepIndex,
   isSecIdentityMissingError,
+  lostCapabilities,
   restartNeeded,
   setupSteps,
   validateSecIdentity
@@ -131,6 +133,44 @@ describe("setup wizard view model", () => {
     expect(isSecIdentityMissingError("428 Precondition Required: SEC EDGAR needs your name")).toBe(true);
     expect(isSecIdentityMissingError("500 Internal Server Error")).toBe(false);
     expect(isSecIdentityMissingError(null)).toBe(false);
+  });
+
+  it("lists the capabilities lost by an empty SEC identity, a missing broker and unavailable tabs", () => {
+    const report = setupReportFixture();
+    const demoDraft = initialDraft(report, status);
+    expect(lostCapabilities(report, demoDraft).map((item) => item.id)).toEqual(["sec_identity"]);
+    expect(lostCapabilities(report, demoDraft)[0].capability).toMatch(/Fundamentals, Copilot company lookup/);
+
+    const filled = { ...demoDraft, secName: "Ada Tester", secEmail: "ada@example.com" };
+    expect(lostCapabilities(report, filled)).toEqual([]);
+
+    const live = setupReportFixture({
+      data_mode: { ...report.data_mode, current: "live" },
+      ibkr: { ...report.ibkr, status: "disconnected" }
+    });
+    const liveDraft = { ...initialDraft(live, status), dataMode: "live" as const };
+    expect(lostCapabilities(live, liveDraft).map((item) => item.id)).toEqual([
+      "sec_identity",
+      "broker",
+      "coverage:commodities"
+    ]);
+    expect(lostCapabilities(live, liveDraft)[1].fix).toContain("IB_AUTO_CONNECT=true");
+
+    const saved = setupReportFixture({
+      sec_identity: { status: "configured", source: "setup", locked_by: null, name: "Ada", email: "a@b.co", detail: "" }
+    });
+    const clearing = { ...initialDraft(saved, status), clearSecIdentity: true };
+    expect(lostCapabilities(saved, clearing).map((item) => item.id)).toEqual(["sec_identity"]);
+    const environment = setupReportFixture({
+      sec_identity: { ...saved.sec_identity, source: "environment", status: "configured" }
+    });
+    expect(lostCapabilities(environment, initialDraft(environment, status))).toEqual([]);
+  });
+
+  it("closes on Finish unless there is a restart or a note to read", () => {
+    expect(closesOnFinish({ restartRequired: false, lines: [] })).toBe(true);
+    expect(closesOnFinish({ restartRequired: true, lines: [] })).toBe(false);
+    expect(closesOnFinish({ restartRequired: false, lines: ["SEC identity saved for Fundamentals."] })).toBe(false);
   });
 
   it("labels coverage sources in product language", () => {

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import calendar
 import math
 import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from itertools import groupby
 from typing import TYPE_CHECKING, Sequence
 
 from src.application.prediction_market_taxonomy import build_cross_domain_handoffs
@@ -37,6 +39,7 @@ from src.models.prediction_markets import (
     PredictionSpreadPoint,
     PredictionVenueStatus,
     RelatedMarketRecord,
+    RelatedMarketsResult,
     WalletSummary,
 )
 from src.services.prediction_market_adapters import PredictionMarketAdapter, build_settlement_convergence
@@ -171,6 +174,17 @@ RELATED_RELATIONSHIP_PRIORITY = {
 # semantically related; below it they are venue-metadata artifacts (a venue can
 # group unrelated markets under one event/series id).
 RELATED_SAME_EVENT_MIN_SIMILARITY = 0.25
+# GUA-20261021-15: los hermanos de evento/serie van detrás del bloque de análogos
+# con cupo propio, para no desplazar los análogos entre venues.
+MAX_RELATED_EVENT_SIBLINGS = 16
+MAX_RELATED_SERIES_SIBLINGS = 12
+# Contratos de serie pedidos al venue antes de reducir a uno por evento hermano.
+RELATED_SERIES_FETCH_LIMIT = 120
+SIBLING_TRANSFORMATION_NOTE = (
+    "Siblings come from the venue's own event or series grouping. Same-event rows follow bucket order when "
+    "every leg names a numeric bucket, otherwise resolution date; same-series rows keep one contract per "
+    "sibling event, ordered by resolution date."
+)
 HISTORY_RANGE_DAYS: dict[str, int] = {
     "1d": 1,
     "1w": 7,
@@ -229,6 +243,9 @@ MAX_EVENT_BOOK_LEGS = 160
 # A sibling resolving this far from the book's median resolution date is not
 # resolving on the same terms, whatever its price says.
 EVENT_BOOK_RESOLUTION_DRIFT_DAYS = 3.0
+# Un peldaño de escalera se marca ante cualquier inversión estricta fuera de
+# los spreads cotizados; la tolerancia solo absorbe el ruido de coma flotante.
+EVENT_LADDER_MONOTONICITY_TOLERANCE = 1e-9
 MIN_PAIR_OVERLAP_POINTS = 12
 MAX_SPREAD_SERIES_POINTS = 600
 MAX_ALIGNED_GRID_POINTS = 2000
@@ -651,18 +668,47 @@ class PredictionMarketService:
             return None
         return adapter.get_wallet_summary(self._canonicalize_market(market))
 
-    def get_related_markets(self, market_id: str, *, limit: int = 8) -> list[RelatedMarketRecord]:
+    def get_related_markets(
+        self,
+        market_id: str,
+        *,
+        limit: int = 8,
+        sibling_limit: int = MAX_RELATED_EVENT_SIBLINGS,
+        series_limit: int = MAX_RELATED_SERIES_SIBLINGS,
+    ) -> list[RelatedMarketRecord]:
+        """Related contracts only; see `get_related_markets_result` for the warnings."""
+        return self.get_related_markets_result(
+            market_id, limit=limit, sibling_limit=sibling_limit, series_limit=series_limit
+        ).rows
+
+    def get_related_markets_result(
+        self,
+        market_id: str,
+        *,
+        limit: int = 8,
+        sibling_limit: int = MAX_RELATED_EVENT_SIBLINGS,
+        series_limit: int = MAX_RELATED_SERIES_SIBLINGS,
+    ) -> RelatedMarketsResult:
+        """Related contracts: the ranked analog block, then venue siblings.
+
+        The first `limit` rows are the existing analog ranking, unchanged. Event
+        siblings beyond that block and same-series siblings (GUA-20261021-15)
+        follow with their own caps, tagged with `sibling_scope` and ordered by
+        bucket or resolution date, so they never displace an analog.
+        """
         detail = self.get_market_detail(market_id)
         if detail is None:
-            return []
+            return RelatedMarketsResult(rows=[])
         adapter = self._resolve_adapter(market_id)
         if adapter is None:
-            return []
+            return RelatedMarketsResult(rows=[])
 
         related_rows: list[tuple[tuple[int, float, float, str], RelatedMarketRecord]] = []
-        seen: set[str] = set()
+        seen: set[str] = {detail.market_id}
+        # Hermanos de evento con enlace semántico real (no `weak_venue_link`).
+        event_siblings: list[PredictionMarketRecord] = []
 
-        for sibling in adapter.list_event_markets(detail, limit=max(limit * 2, 8)):
+        for sibling in adapter.list_event_markets(detail, limit=max(limit * 2, sibling_limit, 8)):
             candidate = self._annotate_market_freshness(self._canonicalize_market(sibling))
             if candidate.market_id in seen:
                 continue
@@ -675,6 +721,8 @@ class PredictionMarketService:
                 continue
             relationship, note, similarity = self._describe_related_market(detail, candidate, same_event=True)
             seen.add(candidate.market_id)
+            if relationship != "weak_venue_link":
+                event_siblings.append(candidate)
             related_rows.append(
                 (
                     self._related_sort_key(relationship, similarity, candidate),
@@ -731,15 +779,145 @@ class PredictionMarketService:
                     )
                 )
 
+        series_rows, series_warning = self._series_sibling_rows(detail, adapter, seen, limit=series_limit)
+
         related_rows.sort(key=lambda item: item[0])
         ordered = [row for _, row in related_rows]
         # Venue-metadata-only links are shown (clearly labeled) only when nothing
         # semantically related exists, so an AI-policy market no longer surfaces
         # unrelated venue-event artifacts ahead of or alongside real matches.
         strong = [row for row in ordered if row.relationship != "weak_venue_link"]
-        if strong:
-            return strong[:limit]
-        return ordered[: min(limit, 3)]
+        if strong or series_rows:
+            head = strong[:limit]
+        else:
+            head = ordered[: min(limit, 3)]
+
+        # GUA-20261021-15: los hermanos de evento se etiquetan y ordenan aunque ya
+        # estén en el bloque de análogos; el resto va detrás con cupo propio.
+        event_order = {
+            record.market_id: index for index, record in enumerate(_order_siblings(detail, event_siblings))
+        }
+        sibling_by_id = {record.market_id: record for record in event_siblings}
+
+        def tag_event_sibling(row: RelatedMarketRecord) -> RelatedMarketRecord:
+            candidate = sibling_by_id[row.market_id]
+            return replace(
+                row,
+                sibling_scope="same_event",
+                sibling_order=event_order[row.market_id],
+                sibling_label=_sibling_label(candidate),
+                group_id=detail.event_id,
+                group_title=detail.event_title,
+                end_time=candidate.end_time,
+            )
+
+        head = [tag_event_sibling(row) if row.market_id in event_order else row for row in head]
+        head_ids = {row.market_id for row in head}
+        in_head = sum(1 for row in head if row.sibling_scope == "same_event")
+        event_tail = sorted(
+            (tag_event_sibling(row) for row in strong if row.market_id in event_order and row.market_id not in head_ids),
+            key=lambda row: row.sibling_order if row.sibling_order is not None else 0,
+        )[: max(sibling_limit - in_head, 0)]
+        return RelatedMarketsResult(
+            rows=[*head, *event_tail, *series_rows],
+            warnings=[series_warning] if series_warning else [],
+        )
+
+    def _series_sibling_rows(
+        self,
+        detail: PredictionMarketRecord,
+        adapter: PredictionMarketAdapter,
+        seen: set[str],
+        *,
+        limit: int,
+    ) -> tuple[list[RelatedMarketRecord], str | None]:
+        """One contract per sibling event of the venue series (GUA-20261021-15).
+
+        A dated ladder ("by Oct 31 / Nov 30 / Dec 31") lives in separate events
+        joined only by the series, which the event endpoint cannot see. Returns
+        the rows and, when the series lookup fails, a warning naming the series.
+        """
+        fetch_series = getattr(adapter, "list_series_markets", None)
+        if not callable(fetch_series) or not detail.provider_series_id or limit <= 0:
+            return [], None
+        try:
+            raw_rows = fetch_series(detail, limit=RELATED_SERIES_FETCH_LIMIT)
+        except Exception as exc:
+            # La serie es contexto adicional: su fallo no vacía RELATED, pero se avisa en lugar
+            # de omitir los hermanos en silencio (verificación en vivo 2026-10-27).
+            series_label = detail.series_title or detail.provider_series_id
+            return [], (
+                f"Same-series siblings from {detail.venue.title()} series '{series_label}' are missing: "
+                f"the series lookup failed ({exc.__class__.__name__}). Other related rows are unaffected."
+            )
+
+        by_event: dict[str, list[PredictionMarketRecord]] = {}
+        for raw in raw_rows:
+            candidate = self._annotate_market_freshness(self._canonicalize_market(raw))
+            if candidate.market_id in seen:
+                continue
+            # Los del propio evento ya los cubre el bloque de mismo evento.
+            if detail.event_id and candidate.event_id == detail.event_id:
+                continue
+            if self._is_excluded_topic_market(candidate):
+                continue
+            if candidate.freshness and candidate.freshness.is_broken:
+                continue
+            # Una serie puede ser un cajón de sastre del venue: sin solape léxico
+            # no es un hermano.
+            if self._similarity(detail, candidate) < RELATED_SAME_EVENT_MIN_SIMILARITY:
+                continue
+            by_event.setdefault(candidate.event_id or candidate.market_id, []).append(candidate)
+
+        anchor_label = str(detail.subtitle or "").strip().lower()
+        picks: list[tuple[PredictionMarketRecord, str]] = []
+        for legs in by_event.values():
+            series_title = detail.series_title or "this series"
+            if len(legs) == 1:
+                pick = legs[0]
+                note = f"Shares the venue series '{series_title}'; separate event resolving {_day_label(pick.end_time)}."
+            else:
+                same_bucket = next(
+                    (leg for leg in legs if anchor_label and str(leg.subtitle or "").strip().lower() == anchor_label),
+                    None,
+                )
+                if same_bucket is not None:
+                    pick = same_bucket
+                    note = f"Same bucket ({same_bucket.subtitle}) in a sibling event of the series '{series_title}'."
+                else:
+                    pick = max(legs, key=lambda leg: (leg.current_probability or -1.0, leg.title.lower()))
+                    note = (
+                        f"Most likely bucket of the sibling event '{pick.event_title or pick.title}' "
+                        f"in the series '{series_title}'."
+                    )
+            picks.append((pick, note))
+
+        picks.sort(key=lambda item: (_end_sort_value(item[0]), item[0].title.lower()))
+        rows: list[RelatedMarketRecord] = []
+        for index, (pick, note) in enumerate(picks[:limit]):
+            seen.add(pick.market_id)
+            rows.append(
+                RelatedMarketRecord(
+                    market_id=pick.market_id,
+                    venue=pick.venue,
+                    title=pick.title,
+                    probability=pick.current_probability,
+                    price_gap=_price_gap(detail.current_probability, pick.current_probability),
+                    relationship="same_series",
+                    note=note,
+                    source_provider=pick.source_provider,
+                    retrieved_at=pick.retrieved_at,
+                    origin="prediction_market_service.same_series",
+                    transformation_note=SIBLING_TRANSFORMATION_NOTE,
+                    sibling_scope="same_series",
+                    sibling_order=index,
+                    sibling_label=_sibling_label(pick),
+                    group_id=detail.series_id,
+                    group_title=detail.series_title,
+                    end_time=pick.end_time,
+                )
+            )
+        return rows, None
 
     def get_cross_domain_handoffs(self, market_id: str) -> list[CrossTabHandoffEnvelope] | None:
         """Outward handoffs this contract can open with a resolvable target."""
@@ -834,7 +1012,8 @@ class PredictionMarketService:
         transformation_note = (
             "Sibling contracts are taken from the venue's own event grouping. The probability sum is only "
             "presented as an overround when the book is complete, every leg is priced, and the venue groups the "
-            "legs as mutually exclusive candidates."
+            "legs as mutually exclusive candidates. Nested deadlines or thresholds are read as a cumulative "
+            "ladder: ordered by rung, never summed, and checked for monotonicity instead."
         )
 
         if not detail.provider_event_id:
@@ -897,25 +1076,38 @@ class PredictionMarketService:
 
         truncated = len(records) > cap
         records = records[:cap]
-        records.sort(key=lambda row: (-(row.current_probability or -1.0), row.title.lower()))
+        ladder = _event_ladder(records, detail.event_title)
+        if ladder is not None:
+            # La escalera se lee peldaño a peldaño; ordenar por probabilidad
+            # escondería justo la monotonicidad que hay que revisar.
+            rank = {market_id: index for index, market_id in enumerate(ladder.order)}
+            records.sort(key=lambda row: rank[row.market_id])
+        else:
+            records.sort(key=lambda row: (-(row.current_probability or -1.0), row.title.lower()))
 
-        divergence = self._event_book_divergence(records)
+        # En una escalera de fechas cada peldaño vence en otra fecha por
+        # construcción: eso es la estructura, no una divergencia de términos.
+        divergence = self._event_book_divergence(records, check_timing=ladder is None or ladder.kind != "date")
         legs = [
             self._event_book_leg(
                 record,
                 is_anchor=record.market_id == detail.market_id,
                 divergence_flags=divergence.get(record.market_id, []),
+                ladder_flags=ladder.flags.get(record.market_id, []) if ladder is not None else [],
             )
             for record in records
         ]
 
         priced = [leg for leg in legs if leg.probability is not None]
-        probability_sum = sum(leg.probability or 0.0 for leg in priced) if priced else None
-        exclusivity_signal = self._event_exclusivity_signal(records)
+        # Los peldaños anidados no se suman: ni la suma ni el overround tienen sentido.
+        probability_sum = sum(leg.probability or 0.0 for leg in priced) if priced and ladder is None else None
+        exclusivity_signal = "cumulative_ladder" if ladder is not None else self._event_exclusivity_signal(records)
         complete = len(legs) > 1 and not truncated and len(priced) == len(legs)
         overround_is_meaningful = complete and exclusivity_signal == "venue_grouped_candidates"
 
-        if truncated:
+        if ladder is not None:
+            status, note = self._event_ladder_coverage(ladder, legs, priced, truncated=truncated, cap=cap)
+        elif truncated:
             status = "truncated"
             note = f"The venue returned more than {cap} sibling contracts; the sum covers only the {cap} shown."
         elif len(legs) <= 1:
@@ -929,7 +1121,24 @@ class PredictionMarketService:
             note = f"All {len(legs)} contracts the venue lists under this event are included in the sum."
 
         warnings: list[str] = []
-        if not overround_is_meaningful and probability_sum is not None and len(legs) > 1:
+        if ladder is not None:
+            nested = "deadlines" if ladder.kind == "date" else "thresholds"
+            includes = (
+                "each later date includes every earlier one"
+                if ladder.kind == "date"
+                else "each threshold includes every more extreme one in the same direction"
+            )
+            warnings.append(
+                f"These contracts are nested {nested}: {includes}, so their probabilities are not summed and no "
+                "overround applies.",
+            )
+            if ladder.inversions:
+                warnings.append(
+                    f"{ladder.inversions} rung(s) break the ladder's monotonicity even after allowing for their "
+                    "bid-ask spreads. Stale, closed or differently-worded rungs can produce this; it is a research "
+                    "question, not an arbitrage.",
+                )
+        elif not overround_is_meaningful and probability_sum is not None and len(legs) > 1:
             warnings.append(
                 "The probability sum is descriptive here, not an overround: "
                 + (
@@ -955,9 +1164,14 @@ class PredictionMarketService:
             legs=legs,
             probability_sum=probability_sum,
             implied_overround=(probability_sum - 1.0) if probability_sum is not None and len(legs) > 1 else None,
-            favorite_market_id=legs[0].market_id if legs and legs[0].probability is not None else None,
+            # En una escalera el peldaño más amplio siempre sería el "favorito": no se informa.
+            favorite_market_id=(
+                legs[0].market_id if ladder is None and legs and legs[0].probability is not None else None
+            ),
             exclusivity_signal=exclusivity_signal,
             overround_is_meaningful=overround_is_meaningful,
+            ladder_kind=ladder.kind if ladder is not None else None,
+            ladder_inversions=ladder.inversions if ladder is not None else 0,
             completeness=PredictionEventBookCompleteness(
                 status=status,
                 legs_returned=len(legs),
@@ -979,6 +1193,7 @@ class PredictionMarketService:
         *,
         is_anchor: bool = False,
         divergence_flags: list[str] | None = None,
+        ladder_flags: list[str] | None = None,
     ) -> PredictionEventBookLeg:
         return PredictionEventBookLeg(
             market_id=record.market_id,
@@ -998,7 +1213,29 @@ class PredictionMarketService:
             resolution_source=record.resolution_source,
             is_anchor=is_anchor,
             divergence_flags=list(divergence_flags or []),
+            ladder_flags=list(ladder_flags or []),
         )
+
+    @staticmethod
+    def _event_ladder_coverage(
+        ladder: "_EventLadder",
+        legs: list[PredictionEventBookLeg],
+        priced: list[PredictionEventBookLeg],
+        *,
+        truncated: bool,
+        cap: int,
+    ) -> tuple[str, str]:
+        """Completeness of a ladder, worded for rungs that are checked, not summed."""
+        rungs = "deadlines" if ladder.kind == "date" else "thresholds"
+        if truncated:
+            return "truncated", f"The venue returned more than {cap} sibling contracts; only the {cap} rungs shown are checked."
+        if len(priced) < len(legs):
+            return (
+                "partial_pricing",
+                f"{len(legs) - len(priced)} of {len(legs)} rungs have no current probability and are skipped in the "
+                "monotonicity check.",
+            )
+        return "complete", f"All {len(legs)} nested {rungs} the venue lists under this event are shown; none are summed."
 
     @staticmethod
     def _event_exclusivity_signal(records: list[PredictionMarketRecord]) -> str:
@@ -1006,7 +1243,9 @@ class PredictionMarketService:
 
         Gamma never infers exclusivity from prices. The only evidence it will
         act on is structural: a venue that gives each leg its own distinct
-        group-item label under one event title is describing a race.
+        group-item label under one event title is describing a race. Numeric
+        bucket labels that overlap ("20-30" next to "25-35") are not exclusive
+        whatever their labels say.
         """
         if len(records) < 3:
             return "unverified"
@@ -1018,16 +1257,27 @@ class PredictionMarketService:
         event_ids = {record.provider_event_id for record in records if record.provider_event_id}
         if len(event_ids) != 1:
             return "unverified"
+        bounds = [_bucket_bounds(record) for record in records]
+        if all(value is not None for value in bounds):
+            ordered = sorted(value for value in bounds if value is not None)
+            # Rangos que se tocan (0-5 / 5-10) siguen siendo excluyentes.
+            if any(previous[1] > current[0] for previous, current in zip(ordered, ordered[1:])):
+                return "unverified"
         return "venue_grouped_candidates"
 
     @staticmethod
-    def _event_book_divergence(records: list[PredictionMarketRecord]) -> dict[str, list[str]]:
+    def _event_book_divergence(
+        records: list[PredictionMarketRecord],
+        *,
+        check_timing: bool = True,
+    ) -> dict[str, list[str]]:
         """Flag siblings whose resolution terms or timing differ from the book.
 
         Two contracts priced the same are only comparable if they resolve the
         same way. Divergent wording or a resolution date days away from the rest
         of the book is exactly the case a user would otherwise read as a
-        mispricing.
+        mispricing. `check_timing` is off for a date ladder, whose rungs resolve
+        on different dates by construction.
         """
         flags: dict[str, list[str]] = {}
         texts = {
@@ -1052,7 +1302,7 @@ class PredictionMarketService:
                         )
 
         end_times = [ensure_utc(record.end_time) for record in records if record.end_time is not None]
-        if len(end_times) >= 3:
+        if check_timing and len(end_times) >= 3:
             reference = _median_datetime(end_times)
             for record in records:
                 end_time = ensure_utc(record.end_time)
@@ -2523,6 +2773,324 @@ def _extract_threshold_tokens(*texts: str | None) -> list[str]:
                 continue
             thresholds.append(cleaned)
     return thresholds
+
+
+# GUA-20261021-15: lectura de buckets numéricos ("20-24", "fewer than 20",
+# "40 or more", "70° to 71°"). Gana la coincidencia más temprana del texto.
+_BUCKET_NUMBER = r"\$?\d[\d,]*(?:\.\d+)?"
+_BUCKET_UNIT = r"\s*[%°]?"
+_BUCKET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("range", re.compile(rf"({_BUCKET_NUMBER}){_BUCKET_UNIT}\s*(?:-|–|—|to|and)\s*({_BUCKET_NUMBER})", re.IGNORECASE)),
+    (
+        "below",
+        re.compile(
+            rf"(?:\b(?:fewer than|less than|under|below|at most|no more than|up to)|<=?|≤|↓)\s*({_BUCKET_NUMBER})",
+            re.IGNORECASE,
+        ),
+    ),
+    ("below", re.compile(rf"({_BUCKET_NUMBER}){_BUCKET_UNIT}\s*or (?:fewer|less|below|lower)", re.IGNORECASE)),
+    (
+        "above",
+        re.compile(
+            # ↑/↓ son las etiquetas de Polymarket para "toca el nivel" ("↑ 95,000").
+            rf"(?:\b(?:more than|greater than|over|above|at least)|>=?|≥|↑)\s*({_BUCKET_NUMBER})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "above",
+        re.compile(rf"({_BUCKET_NUMBER}){_BUCKET_UNIT}\s*(?:\+|or (?:more|above|higher|greater))", re.IGNORECASE),
+    ),
+)
+
+
+def _bucket_number(text: str) -> float | None:
+    try:
+        return float(text.replace("$", "").replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _parse_bucket_bounds(text: str | None) -> tuple[float, float] | None:
+    """Return (lower, upper) for a bucket label, open ends as infinities."""
+    best: tuple[int, int, tuple[float, float]] | None = None
+    for kind, pattern in _BUCKET_PATTERNS:
+        match = pattern.search(str(text or ""))
+        if match is None:
+            continue
+        if kind == "range":
+            left, right = _bucket_number(match.group(1)), _bucket_number(match.group(2))
+            if left is None or right is None:
+                continue
+            bounds = (min(left, right), max(left, right))
+        else:
+            value = _bucket_number(match.group(1))
+            if value is None:
+                continue
+            bounds = (-math.inf, value) if kind == "below" else (value, math.inf)
+        candidate = (match.start(), -(match.end() - match.start()), bounds)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    return best[2] if best else None
+
+
+def _bucket_bounds(record: PredictionMarketRecord) -> tuple[float, float] | None:
+    # La etiqueta de grupo del venue (groupItemTitle / yes_sub_title) manda; el
+    # título solo se usa si no hay etiqueta legible.
+    return _parse_bucket_bounds(record.subtitle) or _parse_bucket_bounds(record.title)
+
+
+def _end_sort_value(record: PredictionMarketRecord) -> float:
+    end_time = ensure_utc(record.end_time)
+    return end_time.timestamp() if end_time is not None else math.inf
+
+
+def _order_siblings(
+    anchor: PredictionMarketRecord,
+    siblings: list[PredictionMarketRecord],
+) -> list[PredictionMarketRecord]:
+    """Bucket order when every leg (anchor included) names a distinct numeric
+    bucket; otherwise resolution date, then probability."""
+    bounds = {record.market_id: _bucket_bounds(record) for record in siblings}
+    every_bound = [_bucket_bounds(anchor), *bounds.values()]
+    bucket_mode = bool(siblings) and all(value is not None for value in every_bound)
+    bucket_mode = bucket_mode and len(set(every_bound)) == len(every_bound)
+    if bucket_mode:
+        return sorted(siblings, key=lambda record: (bounds[record.market_id], record.title.lower()))
+    return sorted(
+        siblings,
+        key=lambda record: (_end_sort_value(record), -(record.current_probability or -1.0), record.title.lower()),
+    )
+
+
+def _sibling_label(record: PredictionMarketRecord) -> str | None:
+    label = str(record.subtitle or "").strip()
+    return label or None
+
+
+def _day_label(value: datetime | None) -> str:
+    stamp = ensure_utc(value)
+    return stamp.strftime("%Y-%m-%d") if stamp is not None else "on an unstated date"
+
+
+# ── Escaleras acumulativas del Event Book ─────────────────────────────
+# "Putin out as President of Russia by...?" lista plazos anidados (cada fecha
+# posterior incluye las anteriores) y "Bitcoin above ___ on October 22?",
+# umbrales anidados. Sumar sus probabilidades no tiene sentido; lo que sí debe
+# cumplirse es la monotonicidad entre peldaños.
+# Lista literal: `calendar.month_abbr` depende del locale del proceso.
+_LADDER_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_LADDER_MONTH = rf"(?:{'|'.join(_LADDER_MONTHS)})[a-z]*\.?"
+_LADDER_YEAR = r"(?:19|20)\d{2}"
+_LADDER_DATE = (
+    rf"(?:(?:the\s+)?end\s+of\s+)?"
+    rf"(?:{_LADDER_MONTH}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+{_LADDER_YEAR})?"
+    # Un año suelto seguido de una palabra ("by 2000 votes") no es un plazo.
+    rf"|{_LADDER_MONTH}\s+{_LADDER_YEAR}|q[1-4]\s+{_LADDER_YEAR}|{_LADDER_YEAR}(?!\s*[a-z0-9]))\b"
+)
+_DEADLINE_CUE = re.compile(rf"\b(by|before|no later than)\s+({_LADDER_DATE})", re.IGNORECASE)
+_DEADLINE_LABEL = re.compile(rf"^\s*(?:(by|before)\s+)?({_LADDER_DATE})\s*\??\s*$", re.IGNORECASE)
+# Título de evento con el plazo en blanco: "... by...?", "... before ___?".
+_OPEN_DEADLINE_TITLE = re.compile(r"\b(?:by|before)\s*(?:\.{2,}|…|_{2,})\s*\??\s*$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class _LadderRung:
+    record: PredictionMarketRecord
+    # Posición en la escalera: ordinal del día límite o nivel del umbral.
+    key: float
+    # +1: la probabilidad no puede bajar al subir `key` (plazos, "below X");
+    # -1: no puede subir ("above X").
+    direction: int
+
+
+@dataclass(frozen=True)
+class _EventLadder:
+    kind: str
+    order: list[str]
+    flags: dict[str, list[str]]
+    inversions: int
+
+
+def _deadline_date(expression: str, *, before: bool) -> date | None:
+    """Last day a deadline expression allows; None when it names no year.
+
+    "by June 30, 2027" is June 30; "by 2027" and "by the end of 2027" are
+    Dec 31, 2027; "before 2027" is Dec 31, 2026.
+    """
+    text = re.sub(r"^(?:the\s+)?end\s+of\s+", "", expression.strip().lower())
+    year_match = re.search(_LADDER_YEAR, text)
+    if year_match is None:
+        return None
+    year = int(year_match.group(0))
+    quarter = re.match(r"q([1-4])\b", text)
+    month_match = re.match(r"([a-z]{3})[a-z]*\.?\s+(?:(\d{1,2})(?:st|nd|rd|th)?\b)?", text)
+    try:
+        if quarter is not None:
+            last_month = int(quarter.group(1)) * 3
+            start = date(year, last_month - 2, 1)
+            end = date(year, last_month, calendar.monthrange(year, last_month)[1])
+        elif month_match is not None and month_match.group(1) in _LADDER_MONTHS:
+            month = _LADDER_MONTHS.index(month_match.group(1)) + 1
+            if month_match.group(2):
+                start = end = date(year, month, int(month_match.group(2)))
+            else:
+                start = date(year, month, 1)
+                end = date(year, month, calendar.monthrange(year, month)[1])
+        else:
+            start, end = date(year, 1, 1), date(year, 12, 31)
+    except ValueError:
+        return None
+    return start - timedelta(days=1) if before else end
+
+
+def _record_deadline(record: PredictionMarketRecord, *, open_title: bool) -> tuple[str, date | None] | None:
+    """(deadline text, last allowed day) when the leg reads as a "by <date>" rung."""
+    match = None
+    for text in (record.subtitle, record.title):
+        match = _DEADLINE_CUE.search(str(text or ""))
+        if match is not None:
+            break
+    if match is None and open_title:
+        # El título del evento lleva el "by"; la etiqueta del leg solo la fecha.
+        match = _DEADLINE_LABEL.match(str(record.subtitle or ""))
+    if match is None:
+        return None
+    expression = match.group(2)
+    day = _deadline_date(expression, before=str(match.group(1) or "").lower() == "before")
+    if day is None:
+        # Sin año en la etiqueta ("by June 30"): lo fija la fecha de resolución del venue.
+        end_time = ensure_utc(record.end_time)
+        day = end_time.date() if end_time is not None else None
+    return expression.strip().lower(), day
+
+
+def _event_ladder(records: list[PredictionMarketRecord], event_title: str | None) -> _EventLadder | None:
+    """Classify an event book as a cumulative ladder, or None when it is not one.
+
+    Date ladder: every leg is a "by <date>" rung, at least two deadlines
+    differ, and no numeric threshold varies. Threshold ladder: every leg is a
+    one-sided threshold ("above 72,000", "↑ 95,000"), some direction has two or
+    more levels, and no deadline varies. A grid that varies both is neither.
+    """
+    if len(records) < 2:
+        return None
+    open_title = bool(_OPEN_DEADLINE_TITLE.search(str(event_title or "")))
+    deadlines = [_record_deadline(record, open_title=open_title) for record in records]
+    bounds = [_bucket_bounds(record) for record in records]
+
+    if all(deadline is not None for deadline in deadlines) and len(set(bounds)) <= 1:
+        distinct = {deadline[1] if deadline[1] is not None else deadline[0] for deadline in deadlines if deadline}
+        if len(distinct) >= 2:
+            rungs = [
+                _LadderRung(
+                    record=record,
+                    key=float(deadline[1].toordinal()) if deadline and deadline[1] is not None else math.inf,
+                    direction=1,
+                )
+                for record, deadline in zip(records, deadlines)
+            ]
+            return _build_event_ladder("date", rungs)
+
+    deadline_days = {deadline[1] for deadline in deadlines if deadline is not None and deadline[1] is not None}
+    if len(deadline_days) > 1:
+        return None
+    rungs = []
+    for record, bound in zip(records, bounds):
+        if bound is None or math.isinf(bound[0]) == math.isinf(bound[1]):
+            return None
+        below = math.isinf(bound[0])
+        rungs.append(_LadderRung(record=record, key=bound[1] if below else bound[0], direction=1 if below else -1))
+    levels = {direction: {rung.key for rung in rungs if rung.direction == direction} for direction in (1, -1)}
+    if max(len(keys) for keys in levels.values()) < 2:
+        # Un "below X" y un "above X" son complementarios, no una escalera.
+        return None
+    return _build_event_ladder("threshold", rungs)
+
+
+def _rung_band(record: PredictionMarketRecord) -> tuple[float, float] | None:
+    """Price band a rung can be read at: bid-ask when both sides quote, else the price.
+
+    Comparing last prices alone flags noise: on 2026-10-22 "Bitcoin above
+    74,000" printed 99.9 % against 99.8 % for 72,000 while both quoted
+    99.9-100 %.
+    """
+    bid, ask = record.best_bid, record.best_ask
+    if bid is not None and ask is not None and bid <= ask:
+        return bid, ask
+    probability = record.current_probability
+    return (probability, probability) if probability is not None else None
+
+
+def _build_event_ladder(kind: str, rungs: list[_LadderRung]) -> _EventLadder:
+    """Order the rungs and flag every one that contradicts a rung nested with it.
+
+    A rung is flagged only when its whole band sits on the wrong side of a
+    nested rung's band, so an inversion inside the quoted spreads is not one.
+    """
+    ordered = sorted(rungs, key=lambda rung: (rung.key, -rung.direction, rung.record.title.lower()))
+    bands = {rung.record.market_id: _rung_band(rung.record) for rung in ordered}
+    flags: dict[str, list[str]] = {}
+    for direction in (1, -1):
+        priced = [
+            rung
+            for rung in ordered
+            if rung.direction == direction and bands[rung.record.market_id] is not None and math.isfinite(rung.key)
+        ]
+        # Referencia entre las claves estrictamente menores. Con +1 los peldaños
+        # anteriores están contenidos en el actual: manda el suelo más alto. Con
+        # -1 contienen al actual: manda el techo más bajo.
+        reference: _LadderRung | None = None
+        for _, tier_rows in groupby(priced, key=lambda rung: rung.key):
+            tier = list(tier_rows)
+            if reference is not None:
+                ref_low, ref_high = bands[reference.record.market_id] or (0.0, 0.0)
+                for rung in tier:
+                    low, high = bands[rung.record.market_id] or (0.0, 0.0)
+                    gap = ref_low - high if direction > 0 else low - ref_high
+                    if gap > EVENT_LADDER_MONOTONICITY_TOLERANCE:
+                        flags.setdefault(rung.record.market_id, []).append(
+                            _ladder_flag(kind, direction, rung, reference, bands),
+                        )
+            for rung in tier:
+                low, high = bands[rung.record.market_id] or (0.0, 0.0)
+                if reference is None:
+                    reference = rung
+                    continue
+                ref_low, ref_high = bands[reference.record.market_id] or (0.0, 0.0)
+                if (direction > 0 and low > ref_low) or (direction < 0 and high < ref_high):
+                    reference = rung
+    return _EventLadder(
+        kind=kind,
+        order=[rung.record.market_id for rung in ordered],
+        flags=flags,
+        inversions=len(flags),
+    )
+
+
+def _band_text(band: tuple[float, float] | None) -> str:
+    low, high = band or (0.0, 0.0)
+    return f"{low:.1%}" if abs(high - low) <= EVENT_LADDER_MONOTONICITY_TOLERANCE else f"{low:.1%}-{high:.1%}"
+
+
+def _ladder_flag(
+    kind: str,
+    direction: int,
+    rung: _LadderRung,
+    reference: _LadderRung,
+    bands: dict[str, tuple[float, float] | None],
+) -> str:
+    current = _band_text(bands[rung.record.market_id])
+    other = _band_text(bands[reference.record.market_id])
+    label = _sibling_label(reference.record) or reference.record.title
+    if kind == "date":
+        return (
+            f"At {current}, entirely below {other} for the earlier deadline {label}; "
+            "a later deadline includes every earlier one."
+        )
+    if direction > 0:
+        return f"At {current}, entirely below {other} for {label}, which this threshold includes."
+    return f"At {current}, entirely above {other} for {label}, which includes this threshold."
 
 
 def _price_gap(left: float | None, right: float | None) -> float | None:

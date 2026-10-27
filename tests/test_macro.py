@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
+import ssl
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
@@ -16,6 +19,7 @@ from src.models.prediction_markets import PredictionMarketRecord, PredictionMark
 from src.services.cache import CacheService
 from src.services.fred import FredObservation
 from src.services.macro_adapters import (
+    MACRO_CALENDAR_USER_AGENT,
     CensusTradePartnerAdapter,
     CensusTradePartnerResult,
     DBnomicsMacroAdapter,
@@ -23,11 +27,15 @@ from src.services.macro_adapters import (
     TreasuryCurveAdapter,
     USMacroEventsAdapter,
 )
+from src.services.provider_usage import ProviderUsageLedger, trace_provider
+from offline_fixtures import MACRO_CALENDAR_CAPTURED_AT, macro_calendar_fixture
 
 
 NOW = datetime(2026, 3, 20, 12, 0, 0)
 FRED_RETRIEVED_AT = datetime(2026, 3, 20, 9, 0, 0)
 EVENTS_RETRIEVED_AT = datetime(2026, 3, 20, 10, 0, 0)
+# Contacto ficticio: bls.gov solo se consulta con nombre y email configurados.
+TEST_CONTACT = "Test Analyst analyst@example.com"
 TREASURY_RETRIEVED_AT = datetime(2026, 3, 20, 11, 0, 0)
 FX_RETRIEVED_AT = datetime(2026, 3, 20, 8, 30, 0)
 
@@ -405,7 +413,9 @@ def test_us_macro_events_adapter_parses_official_sources_and_marks_global_transf
             return employment_html
         raise AssertionError(f"Unexpected URL: {url}")
 
-    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+    adapter = USMacroEventsAdapter(
+        CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text, contact_user_agent=lambda: TEST_CONTACT
+    )
 
     us_rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
     global_rows = adapter.list_events(region="Global", as_of=datetime(2026, 4, 15, 0, 0, 0))
@@ -451,9 +461,17 @@ def test_us_macro_events_adapter_expands_official_event_coverage_across_us_and_e
     </table>
     """.strip()
     bea_html = """
-    <div class="release-date">April 30</div>
-    <small class="text-muted">8:30 AM</small>
-    <h3>Gross Domestic Product, 1st Quarter 2026 (Advance Estimate)</h3>
+    <table id="release-schedule-table">
+      <thead><tr><th scope="col">Year 2026</th><th></th><th>Release</th></tr></thead>
+      <tbody>
+        <tr class="scheduled-releases-type-press">
+          <td class="scheduled-date no-wrap"><div class="release-date">April 30</div>
+          <small class="text-muted">8:30 AM</small></td>
+          <td></td>
+          <td class="release-title views-field">Gross Domestic Product, 1st Quarter 2026 (Advance Estimate)</td>
+        </tr>
+      </tbody>
+    </table>
     """.strip()
     ecb_html = """
     <dl>
@@ -479,7 +497,9 @@ def test_us_macro_events_adapter_expands_official_event_coverage_across_us_and_e
             return ecb_html
         raise AssertionError(f"Unexpected URL: {url}")
 
-    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+    adapter = USMacroEventsAdapter(
+        CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text, contact_user_agent=lambda: TEST_CONTACT
+    )
 
     us_rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
     eu_rows = adapter.list_events(region="EU", as_of=datetime(2026, 4, 1, 0, 0, 0))
@@ -534,7 +554,9 @@ def test_us_macro_events_adapter_keeps_same_day_future_bls_release(tmp_path, mon
             return employment_html
         raise AssertionError(f"Unexpected URL: {url}")
 
-    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+    adapter = USMacroEventsAdapter(
+        CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text, contact_user_agent=lambda: TEST_CONTACT
+    )
 
     rows = adapter.list_events(region="US", as_of=datetime(2026, 5, 1, 11, 0, 0))
 
@@ -560,14 +582,280 @@ def test_us_macro_events_adapter_skips_blocked_sources_and_keeps_remaining_event
             return fomc_html
         raise HTTPError(url, 403, "Forbidden", hdrs=None, fp=None)
 
-    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+    adapter = USMacroEventsAdapter(
+        CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text, contact_user_agent=lambda: TEST_CONTACT
+    )
 
     with caplog.at_level(logging.WARNING, logger="src.services.macro_adapters"):
-        rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
+        result = adapter.load_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
 
-    assert [row.event_id for row in rows] == ["fomc:2026-05-06"]
-    assert rows[0].title == "FOMC Meeting (May 6-7)"
-    assert "Macro events source" not in caplog.text
+    assert [row.event_id for row in result.events] == ["fomc:2026-05-06"]
+    assert result.events[0].title == "FOMC Meeting (May 6-7)"
+    # El fallo no ensucia el log de la aplicación: vuelve como aviso con la fuente nombrada.
+    assert "Macro calendar source" not in caplog.text
+    assert result.status == "incomplete"
+    bls_hint = "bls.gov refused the automated request, check the contact name and email in Setup"
+    assert result.warnings == [
+        f"Macro calendar: BLS CPI release schedule unavailable (HTTP 403 from www.bls.gov; {bls_hint}).",
+        f"Macro calendar: BLS PPI release schedule unavailable (HTTP 403 from www.bls.gov; {bls_hint}).",
+        f"Macro calendar: BLS Employment Situation release schedule unavailable (HTTP 403 from www.bls.gov; {bls_hint}).",
+        f"Macro calendar: BLS JOLTS release schedule unavailable (HTTP 403 from www.bls.gov; {bls_hint}).",
+        "Macro calendar: BEA release schedule unavailable (HTTP 403 from www.bea.gov).",
+    ]
+
+
+def test_us_macro_events_adapter_parses_saved_official_calendars(tmp_path, monkeypatch):
+    """Páginas reales del 2026-10-22: con los parsers anteriores la Fed perdía las reuniones
+    sombreadas, BEA devolvía una sola fila "Quick Links" y el BCE ninguna."""
+
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: MACRO_CALENDAR_CAPTURED_AT)
+    adapter = USMacroEventsAdapter(
+        CacheService(base_dir=tmp_path / "cache"), fetch_text=macro_calendar_fixture, contact_user_agent=lambda: TEST_CONTACT
+    )
+
+    us = adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT, limit=200)
+    eu = adapter.load_events(region="EU", as_of=MACRO_CALENDAR_CAPTURED_AT, limit=200)
+
+    assert (us.status, us.warnings) == ("ready", [])
+    assert (eu.status, eu.warnings) == ("ready", [])
+    by_id = {row.event_id: row for row in us.events}
+
+    fomc = [row for row in us.events if row.source_provider == "federalreserve"]
+    # Cada reunión se fecha el día de la decisión (el último), no el primero.
+    assert [row.scheduled_at.date().isoformat() for row in fomc] == [
+        "2026-10-28", "2026-12-09",
+        "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09", "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08",
+    ]
+    assert by_id["fomc:2026-12-08"].title == "FOMC Meeting (December 8-9, SEP)"
+    assert by_id["fomc:2026-10-27"].title == "FOMC Meeting (October 27-28)"
+    # Comunicado a las 14:00 de Nueva York: 18:00 UTC con horario de verano (EDT), 19:00 en invierno (EST).
+    assert by_id["fomc:2026-10-27"].scheduled_at == datetime(2026, 10, 28, 18, 0)
+    assert by_id["fomc:2026-12-08"].scheduled_at == datetime(2026, 12, 9, 19, 0)
+
+    assert by_id["bls:cpi_release:2026-11-10"].scheduled_at == datetime(2026, 11, 10, 13, 30)
+    assert by_id["bls:cpi_release:2026-11-10"].relative_label == "October 2026"
+    assert by_id["bls:employment_situation:2026-11-06"].importance == "high"
+    assert by_id["bls:jolts:2026-12-01"].scheduled_at == datetime(2026, 12, 1, 15, 0)
+    assert sum(1 for row in us.events if row.event_id.startswith("bls:ppi_release:")) == 14
+
+    bea = [row for row in us.events if row.source_provider == "bea"]
+    # Solo News Releases: la fila "data" (Experimental R&D) queda fuera.
+    assert len(bea) == 13
+    assert not any("Experimental Research" in row.title for row in bea)
+    gdp = by_id["bea:gdp-advance-estimate-3rd-quarter-2026:2026-10-29"]
+    assert gdp.scheduled_at == datetime(2026, 10, 29, 12, 30)
+    assert gdp.importance == "high"
+    # El año del título es el periodo de referencia; el de la publicación sale de la cabecera.
+    recreation = next(row for row in bea if row.title.startswith("Outdoor Recreation"))
+    assert recreation.scheduled_at == datetime(2026, 11, 18, 15, 0)
+
+    ecb_titles = [(row.scheduled_at.date().isoformat(), row.title) for row in eu.events]
+    assert ecb_titles[:4] == [
+        ("2026-10-28", "Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 1)"),
+        ("2026-10-29", "Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 2), followed by press conference"),
+        ("2026-12-16", "Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 1)"),
+        ("2026-12-17", "Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 2), followed by press conference"),
+    ]
+    assert not any("non-monetary" in title for _, title in ecb_titles)
+    assert not any(title.startswith("Press conference following") for _, title in ecb_titles)
+    # El día de la rueda de prensa es el de la decisión: 14:15 en Fráncfort (CET = UTC+1 en
+    # octubre tras el cambio de hora). El día 1 sigue fechado sin hora.
+    decision_day = next(row for row in eu.events if row.title.endswith("followed by press conference"))
+    assert decision_day.scheduled_at == datetime(2026, 10, 29, 13, 15)
+    assert eu.events[0].scheduled_at == datetime(2026, 10, 28, 0, 0)
+
+
+def test_fomc_meeting_stays_upcoming_until_its_decision(tmp_path):
+    """Verificación en vivo 2026-10-27: el FOMC del 27-28 de octubre desaparecía de "próximos"
+    el día 27 porque se fechaba a las 00:00 del primer día, con la decisión aún pendiente."""
+    html = """
+    <h4><a id="fomc2026">2026 FOMC Meetings</a></h4>
+    <div class="fomc-meeting__month"><strong>October</strong></div>
+    <div class="fomc-meeting__date">27-28</div>
+    """
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"))
+
+    rows = adapter._parse_fomc_page(html, MACRO_CALENDAR_CAPTURED_AT)
+
+    assert [(row.event_id, row.scheduled_at) for row in rows] == [("fomc:2026-10-27", datetime(2026, 10, 28, 18, 0))]
+    first_day_afternoon = datetime(2026, 10, 27, 13, 0)
+    assert rows[0].scheduled_at > first_day_afternoon
+
+
+def test_fomc_parser_handles_two_month_meetings_and_skips_notation_votes(tmp_path):
+    html = """
+    <div class="panel panel-default"><div class="panel-heading"><h4><a id="1">2024 FOMC Meetings</a></h4></div>
+    <div class="fomc-meeting__month col-md-2"><strong>Apr/May</strong></div>
+    <div class="fomc-meeting__date col-lg-1">30-1</div>
+    <div class="fomc-meeting--shaded fomc-meeting__month col-md-2"><strong>August</strong></div>
+    <div class="fomc-meeting__date col-lg-1">22 (notation vote)</div>
+    """
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"))
+
+    rows = adapter._parse_fomc_page(html, MACRO_CALENDAR_CAPTURED_AT)
+
+    assert [(row.event_id, row.title) for row in rows] == [("fomc:2024-04-30", "FOMC Meeting (Apr/May 30-1)")]
+    # La decisión cae el 1 de mayo, el último día de la reunión a caballo entre meses.
+    assert rows[0].scheduled_at == datetime(2024, 5, 1, 18, 0)
+
+
+def test_us_macro_events_adapter_skips_bls_without_contact_and_names_it(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: MACRO_CALENDAR_CAPTURED_AT)
+    requested: list[str] = []
+
+    def recording_fetch(url: str) -> str:
+        requested.append(url)
+        return macro_calendar_fixture(url)
+
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=recording_fetch)
+
+    result = adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT, limit=200)
+
+    assert not any("bls.gov" in url for url in requested)
+    assert {row.source_provider for row in result.events} == {"federalreserve", "bea"}
+    assert result.status == "incomplete"
+    assert result.warnings == [
+        "Macro calendar: BLS release dates (CPI, PPI, Employment Situation, JOLTS) were not requested because no "
+        "contact name and email is configured; bls.gov blocks automated requests that carry no contact details. "
+        "Add your name and email in Setup (Settings > Run Setup) to load them."
+    ]
+
+
+class _FakeCalendarResponse:
+    def __init__(self, body: str) -> None:
+        self._body = body.encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> "_FakeCalendarResponse":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+
+def test_us_macro_events_default_fetch_sends_contact_only_to_bls_and_extra_roots_only_to_ecb(tmp_path, monkeypatch):
+    """Un User-Agent de navegador desde urllib es lo que bls.gov rechazaba con 403; el BCE
+    encadena a una raíz Sectigo que el almacén de Windows puede no tener."""
+
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: MACRO_CALENDAR_CAPTURED_AT)
+    calls: list[tuple[str, str, bool]] = []
+
+    def fake_urlopen(request, *args, **kwargs):
+        with_context = isinstance(kwargs.get("context"), ssl.SSLContext)
+        calls.append((request.full_url, request.get_header("User-agent"), with_context))
+        assert request.get_header("Accept", "").startswith("text/html")
+        # Como en Windows sin la raíz Sectigo E46: el opener por defecto no verifica el BCE.
+        if "ecb.europa.eu" in request.full_url and not with_context:
+            raise URLError(ssl.SSLCertVerificationError(1, "certificate verify failed: unable to get local issuer certificate"))
+        return _FakeCalendarResponse(macro_calendar_fixture(request.full_url))
+
+    monkeypatch.setattr("src.services.macro_adapters.urlopen", fake_urlopen)
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), contact_user_agent=lambda: TEST_CONTACT)
+
+    us = adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT)
+    eu = adapter.load_events(region="EU", as_of=MACRO_CALENDAR_CAPTURED_AT)
+
+    assert us.warnings == [] and eu.warnings == []
+    agents = {url: agent for url, agent, _ in calls}
+    assert agents[USMacroEventsAdapter.CPI_URL] == f"{MACRO_CALENDAR_USER_AGENT} ({TEST_CONTACT})"
+    assert agents[USMacroEventsAdapter.JOLTS_URL] == f"{MACRO_CALENDAR_USER_AGENT} ({TEST_CONTACT})"
+    for url in (USMacroEventsAdapter.FOMC_URL, USMacroEventsAdapter.BEA_SCHEDULE_URL, USMacroEventsAdapter.ECB_CALENDAR_URL):
+        assert agents[url] == MACRO_CALENDAR_USER_AGENT
+    assert not any("Mozilla" in agent for agent in agents.values())
+    # Primer intento por el opener global (el registrador de uso en la app); solo el BCE, y solo tras
+    # el fallo de certificado, se reintenta con las raíces de certifi.
+    assert [url for url, _, extra_roots in calls if extra_roots] == [USMacroEventsAdapter.ECB_CALENDAR_URL]
+    assert [extra_roots for url, _, extra_roots in calls if url == USMacroEventsAdapter.ECB_CALENDAR_URL] == [False, True]
+
+
+def test_us_macro_events_adapter_serves_stale_copy_backs_off_and_names_failed_sources(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: MACRO_CALENDAR_CAPTURED_AT)
+    requested: list[str] = []
+    failing = {"on": False}
+
+    def fetch(url: str) -> str:
+        requested.append(url)
+        if failing["on"] and "bls.gov" in url:
+            raise HTTPError(url, 403, "Forbidden", hdrs=None, fp=None)
+        if failing["on"] and "ecb.europa.eu" in url:
+            raise URLError(ssl.SSLCertVerificationError(1, "certificate verify failed: unable to get local issuer certificate"))
+        if failing["on"] and "bea.gov" in url:
+            return "<html><body>Schedule moved</body></html>"
+        return macro_calendar_fixture(url)
+
+    adapter = USMacroEventsAdapter(
+        CacheService(base_dir=tmp_path / "cache"), fetch_text=fetch, contact_user_agent=lambda: TEST_CONTACT
+    )
+    assert adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT).warnings == []
+
+    # La copia guardada caduca y las fuentes empiezan a fallar.
+    monkeypatch.setattr("src.services.macro_adapters._MACRO_CALENDAR_TTL", timedelta(0))
+    failing["on"] = True
+    us = adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT, limit=200)
+    eu = adapter.load_events(region="EU", as_of=MACRO_CALENDAR_CAPTURED_AT)
+
+    assert any(row.event_id == "bls:cpi_release:2026-11-10" for row in us.events), "the stale BLS copy is still served"
+    assert us.warnings[0].startswith("Macro calendar: BLS CPI release schedule refresh failed (HTTP 403 from www.bls.gov")
+    assert us.warnings[0].endswith("showing the copy retrieved 2026-10-22 13:00 UTC.")
+    assert sum("refresh failed" in warning for warning in us.warnings) == 4
+    assert us.warnings[-1] == (
+        "Macro calendar: BEA release schedule returned no recognizable events; the official page layout may have changed."
+    )
+    assert eu.events == []
+    assert eu.warnings == [
+        "Macro calendar: ECB Governing Council calendar unavailable (TLS certificate for www.ecb.europa.eu could not be verified)."
+    ]
+
+    # Dentro del intervalo de espera no se vuelve a pedir una fuente que acaba de fallar.
+    requested.clear()
+    again = adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT, limit=200)
+    assert not any("bls.gov" in url for url in requested)
+    assert sum("refresh failed" in warning for warning in again.warnings) == 4
+
+    requested.clear()
+    adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT, force_refresh=True)
+    assert sum("bls.gov" in url for url in requested) == 4
+
+
+@pytest.mark.live_network
+@pytest.mark.skipif(os.getenv("GAMMA_RUN_LIVE_MACRO_CALENDARS") != "true", reason="Explicit opt-in required")
+def test_live_official_macro_calendars_load_from_every_source(tmp_path):
+    """Opt-in: pide las siete páginas oficiales con la identidad del entorno (bls.gov la exige)."""
+
+    name = os.getenv("GAMMA_SEC_USER_NAME", "").strip()
+    email = os.getenv("GAMMA_SEC_USER_EMAIL", "").strip()
+    if not (name and email):
+        pytest.skip("bls.gov needs GAMMA_SEC_USER_NAME and GAMMA_SEC_USER_EMAIL")
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), contact_user_agent=lambda: f"{name} {email}")
+    as_of = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
+
+    us = adapter.load_events(region="US", as_of=as_of, force_refresh=True, limit=500)
+    eu = adapter.load_events(region="EU", as_of=as_of, force_refresh=True, limit=500)
+
+    assert us.warnings == [] and eu.warnings == []
+    assert {row.source_provider for row in us.events} == {"federalreserve", "bls", "bea"}
+    assert {row.relative_label for row in us.events if row.source_provider == "bls"}
+    assert {row.source_provider for row in eu.events} == {"ecb"}
+
+
+def test_traced_macro_calendar_reports_named_missing_sources_as_incomplete(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: MACRO_CALENDAR_CAPTURED_AT)
+    ledger = ProviderUsageLedger()
+    adapter = trace_provider(
+        USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=macro_calendar_fixture),
+        ledger,
+        endpoint_prefix="macro",
+        provider_id="us_macro_events",
+    )
+
+    adapter.load_events(region="US", as_of=MACRO_CALENDAR_CAPTURED_AT)
+
+    call = ledger.snapshot().recent_calls[0]
+    assert call.provider_id == "us_macro_events"
+    assert call.status == "incomplete"
+    assert call.message is not None and call.message.startswith("Macro calendar: BLS release dates")
 
 
 def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch):
@@ -789,6 +1077,9 @@ def test_macro_service_snapshot_survives_partial_event_source_failures(tmp_path,
     assert snapshot.region == "US"
     assert snapshot.upcoming_events
     assert [event.event_id for event in snapshot.upcoming_events] == ["fomc:2026-05-06"]
+    # Cada fuente que falta queda nombrada en los avisos del snapshot.
+    assert any(warning.startswith("Macro calendar: BLS release dates") for warning in snapshot.warnings)
+    assert "Macro calendar: BEA release schedule unavailable (HTTP 403 from www.bea.gov)." in snapshot.warnings
 
 
 def test_macro_service_builds_recent_event_window_studies(monkeypatch):
@@ -946,6 +1237,22 @@ def test_macro_service_supports_inverse_snapshot_fx_chart_series(monkeypatch):
     assert history.source_provider == "ibkr"
     assert history.points
     assert history.points[-1].value == 0.93
+
+
+def test_eu_eurusd_series_is_inverted_to_match_its_eur_usd_title(monkeypatch):
+    """GUA-20261021-5: CCUSMA02EZM618N cotiza EUR por USD; sin invertir mostraba 0.852 como "EUR/USD"."""
+
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    history = service.get_series_history("eu-eurusd", region="EU", timeframe="1Y")
+
+    assert history is not None
+    assert history.title.startswith("EUR/USD")
+    assert abs(history.points[-1].value - 1 / 0.85) < 1e-12
+    assert history.points[0].value > 1.0
+    assert "inverts" in (history.transformation_note or "")
+    assert all(point.transformation_note == history.transformation_note for point in history.points)
 
 
 def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):

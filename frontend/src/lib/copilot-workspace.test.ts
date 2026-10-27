@@ -6,6 +6,7 @@ import type {
 } from "./api/types";
 import {
   describeCopilotSession,
+  findPersistedRetryTurn,
   resolveComposerDraft,
   resolveInFlightPrompt,
   resolveWorkingAnalysisTarget,
@@ -440,5 +441,29 @@ describe("copilot storage recovery summary", () => {
 
     expect(summarized?.headline).toBe("2 storage records preserved");
     expect(summarized?.details).toHaveLength(2);
+  });
+});
+
+describe("copilot retry turn lookup (live check 2026-10-27)", () => {
+  const prompt = "In two sentences: is the Hormuz normalization probability consistent with the curves?";
+  const persisted = [
+    { turn_id: "turn_ready", prompt: "Earlier question", result: { status: "ready", response_id: "resp_1" } },
+    { turn_id: "turn_cancelled", prompt, result: { status: "cancelled", response_id: null } }
+  ];
+
+  it("finds a cancelled live turn that has neither the persisted id nor a response id", () => {
+    const live = { id: "entry_7", prompt: `${prompt} `, result: { status: "cancelled", response_id: null } };
+    expect(findPersistedRetryTurn(persisted, live)?.turn_id).toBe("turn_cancelled");
+  });
+
+  it("still matches by turn id or response id first", () => {
+    expect(findPersistedRetryTurn(persisted, { id: "turn_ready", prompt: "x", result: { status: "error", response_id: null } })?.turn_id).toBe("turn_ready");
+    expect(findPersistedRetryTurn(persisted, { id: "entry_1", prompt: "x", result: { status: "incomplete", response_id: "resp_1" } })?.turn_id).toBe("turn_ready");
+  });
+
+  it("does not guess when the latest persisted turn is a different request", () => {
+    const other = { id: "entry_8", prompt: "Another prompt", result: { status: "cancelled", response_id: null } };
+    expect(findPersistedRetryTurn(persisted, other)).toBeUndefined();
+    expect(findPersistedRetryTurn(persisted, null)).toBeUndefined();
   });
 });

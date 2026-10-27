@@ -101,6 +101,79 @@ def test_sitrep_service_degrades_failing_sections_into_warnings():
     assert any("macro" in warning and "exploded" in warning for warning in result.section_warnings)
 
 
+def test_sitrep_single_section_requests_load_inline_and_isolate_failures():
+    """GUA-20261021-12: la vista pide cada sección por separado y en paralelo."""
+    import threading
+
+    callers: list[str] = []
+
+    class _FailingMacroService:
+        def get_snapshot(self, request):
+            callers.append(threading.current_thread().name)
+            raise RuntimeError("FRED timed out")
+
+    class _NewsFeed:
+        def latest(self, *, limit=25, force_refresh=False):
+            from src.models.news import NewsEventFeed
+            from src.models.provenance import FreshnessLabel
+            from src.utils.time import now_utc
+
+            callers.append(threading.current_thread().name)
+            return NewsEventFeed(
+                items=[],
+                source_provider="sample_news",
+                retrieved_at=now_utc(),
+                origin="test",
+                freshness_label=FreshnessLabel.MOCKED,
+                warnings=[],
+                transformation_note=None,
+            )
+
+    service = SitrepService(
+        research_service=None,  # type: ignore[arg-type]
+        macro_service=_FailingMacroService(),  # type: ignore[arg-type]
+        commodities_service=None,  # type: ignore[arg-type]
+        prediction_market_service=None,  # type: ignore[arg-type]
+        news_service=_NewsFeed(),  # type: ignore[arg-type]
+    )
+
+    news = service.get_workspace(SitrepWorkspaceRequest(sections=("news",)))
+    macro = service.get_workspace(SitrepWorkspaceRequest(sections=("macro",)))
+
+    assert news.sections == ("news",) and news.news is not None and news.section_warnings == []
+    assert macro.sections == ("macro",) and macro.macro_snapshot is None
+    assert macro.section_warnings == ["SITREP section 'macro' failed to load: FRED timed out"]
+    # Una sola sección no salta a un pool: corre en el hilo de la petición.
+    assert callers == [threading.current_thread().name] * 2
+
+
+def test_sitrep_per_section_requests_rebuild_the_aggregate(tmp_path):
+    client = _build_client(tmp_path)
+    try:
+        aggregate = client.get("/sitrep/workspace").json()
+        for section in SITREP_SECTIONS:
+            response = client.get("/sitrep/workspace", params={"sections": section})
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["sections"] == [section]
+            assert payload["section_warnings"] == []
+        field_by_section = {
+            "equities": "equities_overview",
+            "indices": "indices_overview",
+            "macro": "macro_snapshot",
+            "commodities": "commodities",
+            "prediction_markets": "prediction_markets",
+            "news": "news",
+        }
+        for section, field in field_by_section.items():
+            payload = client.get("/sitrep/workspace", params={"sections": section}).json()
+            assert payload[field] is not None
+            assert all(payload[other] is None for other in field_by_section.values() if other != field)
+            assert aggregate[field] is not None
+    finally:
+        client.app.state.runtime.shutdown()
+
+
 def test_sitrep_unknown_sections_fall_back_to_all():
     normalized = SitrepWorkspaceRequest(sections=("bogus",))
     from src.application.sitrep_service import _normalize_sections

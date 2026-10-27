@@ -1,7 +1,7 @@
 import { derived, get, writable } from "svelte/store";
 import { compositionValidation } from "../strategy-experiments";
 import { deleteJson, getJson, getNdjsonStream, getText, patchJson, postJson, postNdjsonStream, postText } from "../api/client";
-import { normalizeCopilotResearchCardResult } from "../copilot-result";
+import { isCopilotOutputBudgetCutoff, normalizeCopilotResearchCardResult } from "../copilot-result";
 import {
   createCopilotRunState,
   isTerminalCopilotRunEvent,
@@ -43,6 +43,9 @@ export {
 import {
   buildResearchBookObjectFromStrategyComposition,
   defaultStrategyPortfolioDraftLeg,
+  parseStoredStrategyComposerDraft,
+  serializeStrategyComposerDraft,
+  STRATEGY_COMPOSER_DRAFT_STORAGE_KEY,
   type StrategyPortfolioDraftLeg
 } from "../view-models/research";
 import {
@@ -56,12 +59,17 @@ import {
   SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY,
   SITREP_FOLLOW_UP_STORAGE_KEY,
   buildSitrepFollowUpCreatePayload,
+  composeSitrepWorkspace,
   findSitrepFollowUpByRow,
+  mergeSitrepSectionMeta,
+  normalizeSitrepWorkspaceSections,
   parseSitrepFollowUps,
   type SitrepFollowUp,
   type SitrepFollowUpStatus,
+  type SitrepSectionOutcome,
   type SitrepTapeHandoffRow,
-  type SitrepWorkspaceMeta
+  type SitrepWorkspaceMeta,
+  type SitrepWorkspaceSection
 } from "../view-models/sitrep";
 import type {
   ActionResponse,
@@ -464,6 +472,21 @@ export const macroEvents = writable<MacroEventsResponse | null>(null);
 export const macroSeriesHistories = writable<Record<string, MacroSeriesHistory>>({});
 export const newsFeed = writable<NewsEventFeedResponse | null>(null);
 export const commoditiesWorkspace = writable<CommodityWorkspaceResponse | null>(null);
+// Instrumentos de Commodities vistos en esta sesión (GUA-20261021-6). Solo identidades: el
+// backend detalla sus curvas en el contexto de Copilot además de la del seleccionado.
+const MAX_VIEWED_COMMODITY_INSTRUMENTS = 6;
+let viewedCommodityInstrumentIds: string[] = [];
+commoditiesWorkspace.subscribe((workspace) => {
+  const instrumentId = workspace?.selected_instrument_id;
+  if (!instrumentId) return;
+  viewedCommodityInstrumentIds = [
+    instrumentId,
+    ...viewedCommodityInstrumentIds.filter((item) => item !== instrumentId)
+  ].slice(0, MAX_VIEWED_COMMODITY_INSTRUMENTS);
+});
+export function getViewedCommodityInstrumentIds(): string[] {
+  return [...viewedCommodityInstrumentIds];
+}
 export const maritimeWorkspace = writable<MaritimeWorkspaceResponse | null>(null);
 export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
 export const selectedPredictionMarketId = writable<string | null>(null);
@@ -755,7 +778,34 @@ export function defaultStrategyComposerDraft(): StrategyComposerDraft {
   };
 }
 
-export const strategyComposerDraft = writable<StrategyComposerDraft>(defaultStrategyComposerDraft());
+// El borrador también se guarda en este navegador: una recarga lo restaura en vez de volver en
+// silencio al libro por defecto (GUA-20260708-8). Best-effort; el store sigue mandando.
+function loadPersistedStrategyComposerDraft(): StrategyComposerDraft | null {
+  try {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    return parseStoredStrategyComposerDraft(localStorage.getItem(STRATEGY_COMPOSER_DRAFT_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function persistStrategyComposerDraft(draft: StrategyComposerDraft) {
+  try {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
+    localStorage.setItem(STRATEGY_COMPOSER_DRAFT_STORAGE_KEY, serializeStrategyComposerDraft(draft));
+  } catch {
+    // Cuota llena o almacenamiento bloqueado: el borrador sigue vivo en memoria.
+  }
+}
+
+export const strategyComposerDraft = writable<StrategyComposerDraft>(
+  loadPersistedStrategyComposerDraft() ?? defaultStrategyComposerDraft()
+);
+strategyComposerDraft.subscribe(persistStrategyComposerDraft);
 
 export function resetStrategyComposerDraft() {
   strategyComposerDraft.set(defaultStrategyComposerDraft());
@@ -1763,52 +1813,96 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
   }
 }
 
-export async function loadSitrepWorkspace(options: { forceRefresh?: boolean } = {}) {
-  const params = new URLSearchParams();
-  if (options.forceRefresh) params.set("force_refresh", "true");
-  const query = params.toString();
-  const path = query ? `/sitrep/workspace?${query}` : "/sitrep/workspace";
-  beginLoading("researchOverview");
-  beginLoading("macro");
-  beginLoading("commodities");
-  setLoading("prediction", true);
-  setLoading("news", true);
-  try {
-    const workspace = await queryCache.query<SitrepWorkspaceResponse>({
-      scope: "sitrep-workspace",
-      key: stableQueryKey("/sitrep/workspace", {}),
-      staleTimeMs: 5 * 60_000,
-      forceRefresh: options.forceRefresh,
-      fetcher: (signal) => getJson<SitrepWorkspaceResponse>(path, { signal }),
-      onData: (data) => {
-        if (data.equities_overview) researchOverview.set(data.equities_overview);
-        if (data.indices_overview) sitrepIndicesOverview.set(data.indices_overview);
-        if (data.macro_snapshot) macroSnapshot.set(data.macro_snapshot);
-        if (data.commodities) commoditiesWorkspace.set(data.commodities);
-        if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
-        if (data.news) newsFeed.set(data.news);
-        sitrepWorkspaceMeta.set({
-          retrieved_at: data.retrieved_at,
-          sections: data.sections,
-          section_warnings: data.section_warnings
+// Clave de carga de cada sección de SITREP (mismas claves que la carga agregada anterior).
+const SITREP_SECTION_LOADING: Record<SitrepWorkspaceSection, { key: string; counted: boolean }> = {
+  equities: { key: "researchOverview", counted: true },
+  indices: { key: "researchOverview", counted: true },
+  macro: { key: "macro", counted: true },
+  commodities: { key: "commodities", counted: true },
+  prediction_markets: { key: "prediction", counted: false },
+  news: { key: "news", counted: false }
+};
+
+function applySitrepSectionData(data: SitrepWorkspaceResponse) {
+  if (data.equities_overview) researchOverview.set(data.equities_overview);
+  if (data.indices_overview) sitrepIndicesOverview.set(data.indices_overview);
+  if (data.macro_snapshot) macroSnapshot.set(data.macro_snapshot);
+  if (data.commodities) commoditiesWorkspace.set(data.commodities);
+  if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
+  if (data.news) newsFeed.set(data.news);
+}
+
+/**
+ * GUA-20261021-12: una petición por sección (`sections=<id>`), en paralelo, en lugar de una
+ * agregada que esperaba al proveedor más lento. Cada tablero se pinta al llegar, cada sección
+ * tiene su propia caché y su error queda aislado en los metadatos.
+ */
+export async function loadSitrepWorkspace(
+  options: { forceRefresh?: boolean; sections?: readonly string[] } = {}
+) {
+  const sections = normalizeSitrepWorkspaceSections(options.sections);
+  const pending = new Set<string>(sections);
+  const responses: Partial<Record<SitrepWorkspaceSection, SitrepWorkspaceResponse>> = {};
+  const failures: unknown[] = [];
+
+  const updateMeta = (outcome: SitrepSectionOutcome) => {
+    const previous = get(sitrepWorkspaceMeta);
+    const next = mergeSitrepSectionMeta(previous, outcome, [...pending]);
+    // Sin ninguna sección respondida no se publica meta: Copilot sigue exigiendo datos.
+    if (previous || next.sections.length) sitrepWorkspaceMeta.set(next);
+  };
+
+  const current = get(sitrepWorkspaceMeta);
+  if (current) sitrepWorkspaceMeta.set({ ...current, pending_sections: [...sections] });
+
+  await Promise.all(
+    sections.map(async (section) => {
+      const loadingState = SITREP_SECTION_LOADING[section];
+      if (loadingState.counted) beginLoading(loadingState.key);
+      else setLoading(loadingState.key, true);
+      const params = new URLSearchParams({ sections: section });
+      if (options.forceRefresh) params.set("force_refresh", "true");
+      const path = `/sitrep/workspace?${params.toString()}`;
+      try {
+        await queryCache.query<SitrepWorkspaceResponse>({
+          scope: `sitrep-workspace:${section}`,
+          key: stableQueryKey("/sitrep/workspace", { sections: section }),
+          staleTimeMs: 5 * 60_000,
+          forceRefresh: options.forceRefresh,
+          fetcher: (signal) => getJson<SitrepWorkspaceResponse>(path, { signal }),
+          onData: (data) => {
+            responses[section] = data;
+            pending.delete(section);
+            applySitrepSectionData(data);
+            updateMeta({ section, response: data });
+            if (data.section_warnings.length) {
+              console.warn(`SITREP section '${section}' degraded:`, data.section_warnings);
+            }
+          }
         });
-        if (data.section_warnings.length) {
-          console.warn("SITREP workspace sections degraded:", data.section_warnings);
+      } catch (error) {
+        pending.delete(section);
+        if (isAbortError(error)) {
+          updateMeta({ section, response: responses[section] ?? null });
+          return;
         }
+        failures.push(error);
+        updateMeta({ section, error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (loadingState.counted) endLoading(loadingState.key);
+        else setLoading(loadingState.key, false);
       }
-    });
+    })
+  );
+
+  const workspace = composeSitrepWorkspace(responses, get(sitrepWorkspaceMeta));
+  if (workspace) {
     lastError.set("");
-    return workspace;
-  } catch (error) {
-    if (!isAbortError(error)) setError(error);
-    return null;
-  } finally {
-    endLoading("researchOverview");
-    endLoading("macro");
-    endLoading("commodities");
-    setLoading("prediction", false);
-    setLoading("news", false);
+  } else if (failures.length) {
+    // Solo un fallo total llega al error global; uno parcial queda en su sección.
+    setError(failures[0]);
   }
+  return workspace;
 }
 
 interface SitrepFollowUpListResponse {
@@ -2550,17 +2644,36 @@ export async function loadMaritimeWorkspace(options: MaritimeLoadOptions = {}) {
   }
 }
 
+/**
+ * Instrumento de Commodities pedido y todavía sin cargar (P2 de la auditoría 2026-10-21: cabecera
+ * transitoria del mercado equivocado). La vista lo usa para mostrar la carga de ese instrumento en
+ * lugar de los datos del instrumento anterior.
+ */
+export const commoditiesRequestedInstrumentId = writable<string | null>(null);
+
+/** Fija el instrumento pedido antes de abrir la pestaña, para que su carga inicial no use WTI. */
+export function requestCommodityInstrument(instrumentId: string | null | undefined) {
+  const normalized = (instrumentId ?? "").trim().toLowerCase();
+  commoditiesRequestedInstrumentId.set(normalized || null);
+}
+
 export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOptions = {}) {
   beginLoading("commodities");
+  let requestedInstrumentId: string | null = null;
   try {
     const current = get(commoditiesWorkspace);
     const mode = options.mode ?? current?.mode ?? "overview";
     const payload = {
       mode,
       selected_instrument_id:
-        options.selectedInstrumentId ?? resolveCommodityInstrumentForMode(current, mode) ?? "wti",
+        options.selectedInstrumentId ??
+        get(commoditiesRequestedInstrumentId) ??
+        resolveCommodityInstrumentForMode(current, mode) ??
+        "wti",
       force_refresh: options.forceRefresh ?? false
     };
+    requestedInstrumentId = payload.selected_instrument_id;
+    commoditiesRequestedInstrumentId.set(requestedInstrumentId);
     const response = await queryCache.query<CommodityWorkspaceResponse>({
       scope: "commodities-workspace",
       key: stableQueryKey("/commodities/workspace", {
@@ -2579,6 +2692,10 @@ export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOp
     if (!isAbortError(error)) setError(error);
     return null;
   } finally {
+    // Solo la última petición limpia el instrumento pedido; una abortada no pisa a la siguiente.
+    if (requestedInstrumentId && get(commoditiesRequestedInstrumentId) === requestedInstrumentId) {
+      commoditiesRequestedInstrumentId.set(null);
+    }
     endLoading("commodities");
   }
 }
@@ -3694,6 +3811,8 @@ type CopilotLoadOptions = {
   activeTabId?: TabId | "research";
   reasoningEffort?: CopilotReasoningEffort;
   selectedProfile?: CopilotProfile;
+  // "expanded" lo pide Continue tras un corte por max_output_tokens (GUA-20261021-6).
+  outputBudget?: "standard" | "expanded";
 };
 
 function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
@@ -3817,7 +3936,8 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         current_tab: "commodities",
         workspace_mode: workspaceMode,
         commodities_state: {
-          workspace: get(commoditiesWorkspace)
+          workspace: get(commoditiesWorkspace),
+          viewed_instrument_ids: getViewedCommodityInstrumentIds()
         }
       };
     case "maritime":
@@ -4300,6 +4420,7 @@ export async function streamCopilotResearchCard(
         ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
         : {}),
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+      ...(options.outputBudget ? { output_budget: options.outputBudget } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
     };
@@ -4526,6 +4647,7 @@ export async function executeCopilotOperatorPlan(
       ...(normalizeCopilotProfile(options.selectedProfile)
         ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
         : {}),
+      ...(options.outputBudget ? { output_budget: options.outputBudget } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
     };
@@ -4606,6 +4728,8 @@ export async function retryCopilotTurn(turnId: string) {
     synthesisDomains: turn.selected_scope_domains as CopilotBaseDomain[],
     selectedProfile: normalizeCopilotProfile(turn.selected_profile as CopilotProfile),
     reasoningEffort: normalizeReasoningEffort(turn.reasoning_effort as CopilotReasoningEffort),
+    // Continue tras un corte por presupuesto pide más tokens; el servidor fija el techo.
+    ...(isCopilotOutputBudgetCutoff(turn.result) ? { outputBudget: "expanded" as const } : {}),
   };
   return turn.role === "research_operator"
     ? executeCopilotOperatorPlan(turn.domain as CopilotDomain, turn.prompt, options)

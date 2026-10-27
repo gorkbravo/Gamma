@@ -41,8 +41,17 @@
   export let selectionMessage: string | null = null;
   export let onClose: () => void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
-  export let onGenerate: (prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void;
-  export let onRunOperator: (prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
+  type CopilotRetryOptions = { outputBudget?: "standard" | "expanded" };
+  export let onGenerate: (
+    prompt?: string,
+    selectedProfile?: CopilotProfile,
+    options?: CopilotRetryOptions
+  ) => Promise<unknown> | void;
+  export let onRunOperator: (
+    prompt?: string,
+    selectedProfile?: CopilotProfile,
+    options?: CopilotRetryOptions
+  ) => Promise<unknown> | void = () => {};
   export let onOpenWorkspace: (
     thread: CopilotThreadState,
     role: "research_agent" | "research_operator",
@@ -80,6 +89,22 @@
         : await onGenerate(promptText.trim(), selectedProfile);
     if (result != null) {
       promptText = "";
+    }
+  }
+
+  // Retry/Continue del último turno del panel (GUA-20261021-6): reutiliza el prompt original;
+  // el hilo del panel está ligado a la huella de su contexto, así que el contexto es el mismo.
+  function entryWasOperator(entry: CopilotThreadEntry) {
+    return entry.result.operator_events.length > 0 || entry.result.provider.endsWith("_operator");
+  }
+
+  async function handleRetryEntry(entry: CopilotThreadEntry, expandBudget: boolean) {
+    if (!available || loading || !entry.prompt.trim()) return;
+    const options: CopilotRetryOptions = expandBudget ? { outputBudget: "expanded" } : {};
+    if (entryWasOperator(entry)) {
+      await onRunOperator(entry.prompt, selectedProfile, options);
+    } else {
+      await onGenerate(entry.prompt, selectedProfile, options);
     }
   }
 
@@ -225,6 +250,10 @@
                 {onOpenSource}
                 onConfirmMutation={roleMode === "operator" && !loading ? onConfirmMutation : null}
                 onRejectMutation={roleMode === "operator" && !loading ? onRejectMutation : null}
+                onRetry={index === threadEntries.length - 1 && entry.prompt.trim()
+                  ? ({ expandBudget }) => handleRetryEntry(entry, expandBudget)
+                  : null}
+                retryDisabled={!available || loading}
               />
             </div>
           </div>

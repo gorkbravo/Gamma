@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import { onMount } from "svelte";
 
   import type { ResearchScriptOutput, StrategyLabResult } from "../lib/api/types";
@@ -81,7 +82,7 @@
 
   const shortHash = (value: string | null | undefined) => value ? value.slice(0, 12) : "—";
   const shortDate = (value: string | null | undefined) => value
-    ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    ? apiInstantDate(value)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) ?? "—"
     : "—";
   const cell = (value: unknown) => value === null || value === undefined
     ? "—"

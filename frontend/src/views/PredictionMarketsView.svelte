@@ -3,6 +3,7 @@
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
+  import { apiInstantDate } from "../lib/time";
   import { flashOnChange } from "../lib/flash";
   import {
     CALIBRATION_LEAD_TIME_CHOICES,
@@ -20,12 +21,20 @@
     predictionComparisonFromWorkingAnalysis,
     describeCalibrationMethod,
     describeHistoryCoverage,
+    eventBookLadderSummary,
+    flatScreenerEntries,
     formatResolution,
+    groupRelatedMarkets,
+    groupScreenerMarkets,
     sortPairsByDislocation,
     toggleCalibrationLeadTime,
     toggleCompareSelection,
     type CalibrationBucketRow,
-    type OutcomeLadderRow
+    type EventBookLadderSummary,
+    type OutcomeLadderRow,
+    type PredictionEventGroup,
+    type PredictionScreenerEntry,
+    type RelatedMarketSection
   } from "../lib/prediction-markets";
   import type {
     CopilotWorkingAnalysis,
@@ -125,6 +134,8 @@
   export let onSendToStrategyLab:
     | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
     | undefined = undefined;
+  /** GUA-20261021-15: agrupar por evento es opcional; la vista plana sigue siendo la de partida. */
+  export let groupEvents = false;
 
   const modes: { id: PredictionMarketsMode; label: string }[] = [
     { id: "screener", label: "Screener" },
@@ -165,6 +176,7 @@
   let compareNotice = "";
   let lastComparedKey = "";
   let showOutcomeOverlay = true;
+  let expandedGroups: string[] = [];
 
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
@@ -173,9 +185,10 @@
   const fmt = (value: number | null | undefined, digits = 0) =>
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString("en-US") : "N/A";
+    apiInstantDate(value)?.toLocaleString("en-US") ?? "N/A";
+  // Año completo: "resolves Jan 8, 28" no decía si era 2028 (verificación 2026-10-27).
   const dayStamp = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }) : "N/A";
+    apiInstantDate(value)?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? "N/A";
   const compactId = (value: string | null | undefined) => {
     const text = String(value ?? "").trim();
     if (!text) return "N/A";
@@ -465,6 +478,34 @@
     sendMarketRowToStrategyLab(market, action === "add-open");
   }
 
+  function toggleGroup(key: string) {
+    expandedGroups = expandedGroups.includes(key)
+      ? expandedGroups.filter((item) => item !== key)
+      : [...expandedGroups, key];
+  }
+
+  const GROUP_KIND_LABELS: Record<PredictionEventGroup["kind"], string> = {
+    buckets: "buckets",
+    candidates: "candidates",
+    unverified: "ladder"
+  };
+
+  // La suma solo se lee como sobreprecio cuando el libro visible es excluyente y completo.
+  function groupSumNote(group: PredictionEventGroup) {
+    if (group.overround != null) return `${signedPct(group.overround)} vs 100%`;
+    if (group.kind === "buckets") return "partial book in view";
+    if (group.pricedLegs < group.legs.length) return "lower bound";
+    return "descriptive";
+  }
+
+  function relatedCaption(row: RelatedMarketSection["rows"][number]) {
+    if (row.sibling_scope === "same_event") return `${row.sibling_label ?? "leg"} | ${row.relationship}`;
+    if (row.sibling_scope === "same_series") {
+      return `resolves ${dayStamp(row.end_time)}${row.sibling_label ? ` | ${row.sibling_label}` : ""}`;
+    }
+    return `${row.relationship} | ${row.venue}`;
+  }
+
   function closeStrategyMenu() {
     strategyContextMenu = { ...strategyContextMenu, open: false };
   }
@@ -504,6 +545,7 @@
   let eventBookFavorite: PredictionEventBookLeg | null = null;
   let eventBookFlagged = 0;
   let eventBookQuoted = 0;
+  let eventBookLadder: EventBookLadderSummary | null = null;
   let lastEventBookMarketId = "";
   let calibrationMarketId: string | null = null;
   let activeLeadTime: number | null = null;
@@ -571,6 +613,15 @@
   $: topWallet = wallet?.participants?.[0] ?? null;
   $: biggestGap =
     related?.related?.slice().sort((left, right) => (right.price_gap ?? -1) - (left.price_gap ?? -1))[0] ?? null;
+  // GUA-20261021-15: RELATED separa análogos de hermanos de evento y de serie.
+  let relatedSections: RelatedMarketSection[] = [];
+  $: relatedSections = groupRelatedMarkets(related?.related ?? []);
+  let groupedEntries: PredictionScreenerEntry[] = [];
+  let screenerEntries: PredictionScreenerEntry[] = [];
+  let eventGroupCount = 0;
+  $: groupedEntries = groupScreenerMarkets(screener?.markets ?? []);
+  $: eventGroupCount = groupedEntries.filter((entry) => entry.type === "group").length;
+  $: screenerEntries = groupEvents ? groupedEntries : flatScreenerEntries(screener?.markets ?? []);
   $: hasWalletRows = Boolean(wallet?.participants?.length);
   $: watchlist = savedResearch?.watchlist ?? [];
   // The working basket is stored as a reserved set so it survives a browser
@@ -603,6 +654,8 @@
   // A venue lists empty candidate slots inside a race. They belong in the sum
   // (they contribute zero) but should not read as live quotes.
   $: eventBookQuoted = eventBook?.legs.filter((leg) => (leg.liquidity ?? 0) || (leg.volume ?? 0)).length ?? 0;
+  // Plazos o umbrales anidados: el panel muestra monotonicidad en vez de suma.
+  $: eventBookLadder = eventBookLadderSummary(eventBook);
   $: if (mode === "contract" && detail?.market_id && onLoadEventBook && detail.market_id !== lastEventBookMarketId) {
     lastEventBookMarketId = detail.market_id;
     void onLoadEventBook(detail.market_id);
@@ -873,6 +926,17 @@
             {/each}
           </div>
           <div class="filter-actions">
+            <button
+              type="button"
+              class="ghost-button"
+              class:selected={groupEvents}
+              aria-pressed={groupEvents}
+              disabled={!eventGroupCount && !groupEvents}
+              title="Group contracts of the same venue event into one row with its bucket distribution"
+              on:click={() => (groupEvents = !groupEvents)}
+            >
+              Group {eventGroupCount}
+            </button>
             <button type="button" class="ghost-button" on:click={resetFilters}>Reset</button>
             <button type="button" on:click={() => runScreener(true)} disabled={loading}>Refresh</button>
           </div>
@@ -901,70 +965,72 @@
             </thead>
             <tbody>
               {#if screener?.markets?.length}
-                {#each screener.markets as market (market.market_id)}
-                  <tr
-                    tabindex="0"
-                    aria-label={`Actions for ${market.title}`}
-                    class:selected={market.market_id === detail?.market_id}
-                    on:click={() => openContract(market.market_id)}
-                    on:contextmenu={(event) => openMarketStrategyMenu(event, market)}
-                    on:keydown={(event) => handleMarketRowKeydown(event, market)}
-                  >
-                    <td class="tick-col">
-                      <button
-                        type="button"
-                        class="tick"
-                        class:on={compareSelection.includes(market.market_id)}
-                        aria-label="Toggle comparison"
-                        on:click|stopPropagation={() => toggleCompare(market.market_id)}
+                {#each screenerEntries as entry (entry.key)}
+                  {#if entry.type === "group"}
+                    {@const group = entry.group}
+                    {@const expanded = expandedGroups.includes(group.key)}
+                    <!-- GUA-20261021-15: cabecera del evento con distribución, Σ y bucket más probable. -->
+                    <tr
+                      class="group-row"
+                      tabindex="0"
+                      aria-expanded={expanded}
+                      aria-label={`Event group ${group.eventTitle}`}
+                      on:click={() => toggleGroup(group.key)}
+                      on:keydown={(event) => activateRowOnKey(event, () => toggleGroup(group.key))}
+                    >
+                      <td class="tick-col"><span class="group-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span></td>
+                      <td class="tick-col"><span class="group-count">{group.legs.length}</span></td>
+                      <td>
+                        <div class="market-title">
+                          <strong>{group.eventTitle}</strong>
+                          <small>
+                            {group.legs.length} legs in view | {GROUP_KIND_LABELS[group.kind]} | mode {group.mode?.label ?? "N/A"}
+                            {pct(group.mode?.probability)}
+                          </small>
+                          <span
+                            class="dist-strip"
+                            role="img"
+                            aria-label={`Distribution: ${group.legs.map((leg) => `${leg.label} ${pct(leg.probability)}`).join(", ")}`}
+                          >
+                            {#each group.legs as leg (leg.market.market_id)}
+                              <span
+                                class="dist-bar"
+                                class:mode={leg.isMode}
+                                style={`height:${Math.max(Math.round(leg.share * 100), 6)}%`}
+                                title={`${leg.label}: ${pct(leg.probability)}`}
+                              ></span>
+                            {/each}
+                          </span>
+                        </div>
+                      </td>
+                      <td class="num">
+                        <span class:elevated={group.overround != null && Math.abs(group.overround) >= 0.05}
+                          >Σ {pct(group.probabilitySum)}</span
+                        >
+                        <small class="cell-note">{groupSumNote(group)}</small>
+                      </td>
+                      <td class="num absent">—</td>
+                      <td class="num" class:absent={fmt(group.volume24h) === "N/A"}>{fmt(group.volume24h)}</td>
+                      <td class="num" class:absent={fmt(group.volume) === "N/A"}>{fmt(group.volume)}</td>
+                      <td class="num" class:absent={fmt(group.liquidity) === "N/A"}>{fmt(group.liquidity)}</td>
+                      <td class="num absent">—</td>
+                      <td class="num absent">—</td>
+                      <td class="num">{daysLabel(daysUntil(group.soonestEnd))}</td>
+                      <td><span class="venue-label">{group.venue === "polymarket" ? "PM" : "KL"}</span></td>
+                      <td
+                        ><span class={`tag-chip compact-chip ${freshnessTone(group.worstFreshness)}`}
+                          >{group.worstFreshness ?? "N/A"}</span
+                        ></td
                       >
-                        {compareSelection.includes(market.market_id) ? "◼" : "◻"}
-                      </button>
-                    </td>
-                    <td class="tick-col">
-                      <button
-                        type="button"
-                        class="tick"
-                        class:on={isWatched(market.market_id)}
-                        aria-label="Toggle watchlist"
-                        on:click|stopPropagation={() => toggleWatch(market)}
-                      >
-                        {isWatched(market.market_id) ? "★" : "☆"}
-                      </button>
-                    </td>
-                    <td>
-                      <div class="market-title">
-                        <strong>{market.title}</strong>
-                        <small>
-                          {market.event_title ?? market.category ?? "Uncategorized"}
-                          {#if market.research_score != null}| rank {market.research_score.toFixed(0)}{/if}
-                        </small>
-                      </div>
-                    </td>
-                    <td class="num"
-                      ><span class={marketTone(market.current_probability)} class:absent={pct(market.current_probability) === "N/A"}>{pct(market.current_probability)}</span></td
-                    >
-                    <td class="num {toneOf(market.recent_price_change)}"
-                      ><span
-                        use:flashOnChange={{
-                          value: market.recent_price_change,
-                          direction: directionOf(market.recent_price_change)
-                        }}>{signedPct(market.recent_price_change)}</span
-                      ></td
-                    >
-                    <td class="num" class:absent={fmt(market.volume_24h) === "N/A"}>{fmt(market.volume_24h)}</td>
-                    <td class="num" class:absent={fmt(market.volume) === "N/A"}>{fmt(market.volume)}</td>
-                    <td class="num" class:absent={fmt(market.liquidity) === "N/A"}>{fmt(market.liquidity)}</td>
-                    <td class="num" class:absent={fmt(market.open_interest) === "N/A"}>{fmt(market.open_interest)}</td>
-                    <td class="num" class:absent={pct(market.spread, 1) === "N/A"}>{pct(market.spread, 1)}</td>
-                    <td class="num">{daysLabel(daysUntil(market.end_time))}</td>
-                    <td><span class="venue-label">{market.venue === "polymarket" ? "PM" : "KL"}</span></td>
-                    <td
-                      ><span class={`tag-chip compact-chip ${freshnessTone(market.freshness?.status)}`}
-                        >{market.freshness?.status ?? "N/A"}</span
-                      ></td
-                    >
-                  </tr>
+                    </tr>
+                    {#if expanded}
+                      {#each group.legs as leg (leg.market.market_id)}
+                        {@render screenerMarketRow(leg.market, leg.label)}
+                      {/each}
+                    {/if}
+                  {:else}
+                    {@render screenerMarketRow(entry.market, null)}
+                  {/if}
                 {/each}
               {:else}
                 <tr><td colspan="13" class="empty-row">{loading ? "LOADING..." : "No markets matched."}</td></tr>
@@ -1268,36 +1334,78 @@
             <div class="table-header">
               <span>Event Book</span>
               <small>
-                {eventBook.legs.length} legs |
-                <span class={completenessTone(eventBook.completeness?.status)}
-                  >{eventBook.completeness?.status ?? "unknown"}</span
-                >
+                {#if eventBookLadder}
+                  <!-- Una escalera no es un libro: "complete" solo se muestra si algo falta. -->
+                  {eventBook.legs.length} rungs | <span class="muted">{eventBookLadder.label.toLowerCase()}</span>
+                  {#if eventBook.completeness && eventBook.completeness.status !== "complete"}
+                    | <span class={completenessTone(eventBook.completeness.status)}>{eventBook.completeness.status}</span>
+                  {/if}
+                {:else}
+                  {eventBook.legs.length} legs |
+                  <span class={completenessTone(eventBook.completeness?.status)}
+                    >{eventBook.completeness?.status ?? "unknown"}</span
+                  >
+                {/if}
               </small>
             </div>
-            <div class="kpi-strip">
-              <article class="metric">
-                <span>Book Sum</span>
-                <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
-                <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
-              </article>
-              <article class="metric">
-                <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
-                <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
-                  >{signedPct(eventBook.implied_overround)}</strong
-                >
-                <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
-              </article>
-              <article class="metric">
-                <span>Favorite</span>
-                <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
-                <small>{pct(eventBookFavorite?.probability)}</small>
-              </article>
-              <article class="metric">
-                <span>Flagged</span>
-                <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
-                <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
-              </article>
-            </div>
+            {#if eventBookLadder}
+              <div class="kpi-strip">
+                <article class="metric">
+                  <span>Structure</span>
+                  <strong>{eventBookLadder.label}</strong>
+                  <small>nested | not summed</small>
+                </article>
+                <article class="metric">
+                  <span>Monotonicity</span>
+                  <strong class={eventBookLadder.inversions > 0 ? "elevated" : ""}
+                    >{eventBookLadder.inversions > 0 ? `${eventBookLadder.inversions} inverted` : "Holds"}</strong
+                  >
+                  <small>{eventBookLadder.rule}</small>
+                </article>
+                <article class="metric">
+                  <span>Span</span>
+                  <strong class:absent={!eventBookLadder.first}
+                    >{eventBookLadder.first ? `${pct(eventBookLadder.first.probability)} → ${pct(eventBookLadder.last?.probability)}` : "N/A"}</strong
+                  >
+                  <small
+                    >{truncName(eventBookLadder.first?.subtitle ?? eventBookLadder.first?.title, 14)} → {truncName(
+                      eventBookLadder.last?.subtitle ?? eventBookLadder.last?.title,
+                      14
+                    )}</small
+                  >
+                </article>
+                <article class="metric">
+                  <span>Flagged</span>
+                  <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
+                  <small>resolution terms</small>
+                </article>
+              </div>
+            {:else}
+              <div class="kpi-strip">
+                <article class="metric">
+                  <span>Book Sum</span>
+                  <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
+                  <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
+                </article>
+                <article class="metric">
+                  <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
+                  <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
+                    >{signedPct(eventBook.implied_overround)}</strong
+                  >
+                  <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
+                </article>
+                <article class="metric">
+                  <span>Favorite</span>
+                  <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
+                  <small>{pct(eventBookFavorite?.probability)}</small>
+                </article>
+                <article class="metric">
+                  <span>Flagged</span>
+                  <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
+                  <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
+                </article>
+              </div>
+            {/if}
             <div class="table-scroll tall fills-viewport">
               <table>
                 <thead>
@@ -1309,7 +1417,7 @@
                     <th class="num">Spread</th>
                     <th class="num">Liquidity</th>
                     <th class="num">Volume</th>
-                    <th>Terms</th>
+                    <th>{eventBookLadder ? "Check" : "Terms"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1324,7 +1432,8 @@
                     >
                       <td class="wrap-cell">
                         <strong>{truncName(leg.subtitle ?? leg.title, 44)}</strong>
-                        {#if leg.divergence_flags.length}<small>{leg.divergence_flags[0]}</small>{/if}
+                        {#if leg.ladder_flags?.length}<small>{leg.ladder_flags[0]}</small>
+                        {:else if leg.divergence_flags.length}<small>{leg.divergence_flags[0]}</small>{/if}
                       </td>
                       <td class="num"><span class={marketTone(leg.probability)} class:absent={pct(leg.probability) === "N/A"}>{pct(leg.probability)}</span></td>
                       <td class="num" class:absent={pct(leg.best_bid) === "N/A"}>{pct(leg.best_bid)}</td>
@@ -1335,7 +1444,9 @@
                       <td class="num" class:absent={fmt(leg.liquidity) === "N/A"}>{fmt(leg.liquidity)}</td>
                       <td class="num" class:absent={fmt(leg.volume) === "N/A"}>{fmt(leg.volume)}</td>
                       <td>
-                        {#if leg.divergence_flags.length}
+                        {#if leg.ladder_flags?.length}
+                          <span class="elevated">inverted</span>
+                        {:else if leg.divergence_flags.length}
                           <span class="stale">differs</span>
                         {:else if unquoted}
                           <span class="muted">unquoted</span>
@@ -1602,7 +1713,7 @@
             <span>Related</span>
             <small>{related?.related.length ?? 0} links</small>
           </div>
-          {#if related?.related?.length}
+          {#if relatedSections.length}
             <table>
               <thead>
                 <tr>
@@ -1613,31 +1724,51 @@
                 </tr>
               </thead>
               <tbody>
-                {#each related.related as market (market.market_id)}
-                  <tr class="clickable-row" on:click={() => onSelectMarket(market.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => onSelectMarket(market.market_id))}>
-                    <td class="wrap-cell">
-                      <strong>{truncName(market.title, 40)}</strong>
-                      <small>{market.relationship} | {market.venue}</small>
-                    </td>
-                    <td class="num" class:absent={pct(market.probability) === "N/A"}>{pct(market.probability)}</td>
-                    <td class="num {(market.price_gap ?? 0) >= 0.1 ? 'elevated' : ''}">{pct(market.price_gap)}</td>
-                    <td class="tick-col">
-                      <button
-                        type="button"
-                        class="tick"
-                        class:on={compareSelection.includes(market.market_id)}
-                        aria-label="Toggle comparison"
-                        on:click|stopPropagation={() => toggleCompare(market.market_id)}
-                      >
-                        {compareSelection.includes(market.market_id) ? "◼" : "◻"}
-                      </button>
+                {#each relatedSections as section (section.id)}
+                  <!-- GUA-20261021-15: hermanos de evento/serie separados de los análogos. -->
+                  <tr class="section-row">
+                    <td colspan="4">
+                      <span>{section.label}</span>
+                      <small>
+                        {section.rows.length}{#if section.groupTitle}
+                          | {truncName(section.groupTitle, 44)}{/if}
+                      </small>
                     </td>
                   </tr>
+                  {#each section.rows as market (market.market_id)}
+                    <tr class="clickable-row" on:click={() => onSelectMarket(market.market_id)} tabindex="0" on:keydown={(event) => activateRowOnKey(event, () => onSelectMarket(market.market_id))}>
+                      <td class="wrap-cell" title={market.note ?? undefined}>
+                        <strong>{truncName(market.title, 40)}</strong>
+                        <small>{relatedCaption(market)}</small>
+                      </td>
+                      <td class="num" class:absent={pct(market.probability) === "N/A"}>{pct(market.probability)}</td>
+                      <td class="num {(market.price_gap ?? 0) >= 0.1 ? 'elevated' : ''}">{pct(market.price_gap)}</td>
+                      <td class="tick-col">
+                        <button
+                          type="button"
+                          class="tick"
+                          class:on={compareSelection.includes(market.market_id)}
+                          aria-label="Toggle comparison"
+                          on:click|stopPropagation={() => toggleCompare(market.market_id)}
+                        >
+                          {compareSelection.includes(market.market_id) ? "◼" : "◻"}
+                        </button>
+                      </td>
+                    </tr>
+                  {/each}
                 {/each}
               </tbody>
             </table>
           {:else}
             <p class="empty-state">No linked markets.</p>
+          {/if}
+          {#if related?.warnings?.length}
+            <!-- Lo que no se pudo cargar (p. ej. la serie del venue) se dice, no se omite. -->
+            <div class="panel-notes">
+              {#each related.warnings as warning}
+                <div class="note-row"><span class="note-tag">Warning</span><p>{warning}</p></div>
+              {/each}
+            </div>
           {/if}
         </article>
       </aside>
@@ -2163,6 +2294,74 @@
     onClose={closeStrategyMenu}
   />
 </section>
+
+<!-- Fila del screener; `legLabel` solo llega cuando la fila es un leg de un grupo de evento. -->
+{#snippet screenerMarketRow(market: PredictionMarket, legLabel: string | null)}
+  <tr
+    tabindex="0"
+    aria-label={`Actions for ${market.title}`}
+    class:selected={market.market_id === detail?.market_id}
+    class:group-leg={legLabel != null}
+    on:click={() => openContract(market.market_id)}
+    on:contextmenu={(event) => openMarketStrategyMenu(event, market)}
+    on:keydown={(event) => handleMarketRowKeydown(event, market)}
+  >
+    <td class="tick-col">
+      <button
+        type="button"
+        class="tick"
+        class:on={compareSelection.includes(market.market_id)}
+        aria-label="Toggle comparison"
+        on:click|stopPropagation={() => toggleCompare(market.market_id)}
+      >
+        {compareSelection.includes(market.market_id) ? "◼" : "◻"}
+      </button>
+    </td>
+    <td class="tick-col">
+      <button
+        type="button"
+        class="tick"
+        class:on={isWatched(market.market_id)}
+        aria-label="Toggle watchlist"
+        on:click|stopPropagation={() => toggleWatch(market)}
+      >
+        {isWatched(market.market_id) ? "★" : "☆"}
+      </button>
+    </td>
+    <td>
+      <div class="market-title">
+        <strong>{market.title}</strong>
+        <small>
+          {#if legLabel != null}bucket {legLabel}{:else}{market.event_title ?? market.category ?? "Uncategorized"}{/if}
+          {#if market.research_score != null}| rank {market.research_score.toFixed(0)}{/if}
+        </small>
+      </div>
+    </td>
+    <td class="num"
+      ><span class={marketTone(market.current_probability)} class:absent={pct(market.current_probability) === "N/A"}>{pct(market.current_probability)}</span></td
+    >
+    <td class="num {toneOf(market.recent_price_change)}"
+      ><span
+        use:flashOnChange={{
+          value: market.recent_price_change,
+          direction: directionOf(market.recent_price_change)
+        }}>{signedPct(market.recent_price_change)}</span
+      ></td
+    >
+    <td class="num" class:absent={fmt(market.volume_24h) === "N/A"}>{fmt(market.volume_24h)}</td>
+    <td class="num" class:absent={fmt(market.volume) === "N/A"}>{fmt(market.volume)}</td>
+    <td class="num" class:absent={fmt(market.liquidity) === "N/A"}>{fmt(market.liquidity)}</td>
+    <td class="num" class:absent={fmt(market.open_interest) === "N/A"}>{fmt(market.open_interest)}</td>
+    <td class="num" class:absent={pct(market.spread, 1) === "N/A"}>{pct(market.spread, 1)}</td>
+    <td class="num">{daysLabel(daysUntil(market.end_time))}</td>
+    <td><span class="venue-label">{market.venue === "polymarket" ? "PM" : "KL"}</span></td>
+    <td
+      ><span class={`tag-chip compact-chip ${freshnessTone(market.freshness?.status)}`}
+        >{market.freshness?.status ?? "N/A"}</span
+      ></td
+    >
+  </tr>
+{/snippet}
 
 <style>
   .temporary-comparison { margin-bottom: var(--space-4); }
@@ -2782,6 +2981,62 @@
     display: grid;
     gap: var(--space-1);
     min-width: 16rem;
+  }
+
+  /* ── Grupos de evento y secciones RELATED (GUA-20261021-15) ── */
+
+  tbody tr.group-row {
+    background: var(--surface-soft);
+  }
+
+  .group-caret,
+  .group-count {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+  }
+
+  tbody tr.group-leg td:nth-child(3) {
+    padding-left: var(--space-6);
+  }
+
+  .dist-strip {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 1rem;
+    max-width: 16rem;
+  }
+
+  .dist-bar {
+    flex: 0 0 0.45rem;
+    background: color-mix(in srgb, var(--chart-primary) 45%, transparent);
+  }
+
+  .dist-bar.mode {
+    background: var(--chart-primary);
+  }
+
+  .cell-note {
+    display: block;
+    font-size: var(--text-2xs);
+  }
+
+  tbody tr.section-row td {
+    background: var(--surface-0);
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: normal;
+  }
+
+  tbody tr.section-row:hover {
+    background: transparent;
+  }
+
+  .section-row span {
+    font-weight: 600;
+    margin-right: var(--space-2);
   }
 
   .empty-row,

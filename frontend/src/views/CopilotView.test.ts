@@ -402,4 +402,52 @@ describe("CopilotView", () => {
     // The composer itself is empty once the submission was accepted.
     expect(body).toMatch(/<textarea[^>]*>\s*<\/textarea>/);
   });
+
+  it("shows a finished Operator run once, as its thread turn (live check 2026-10-27)", () => {
+    const operatorResult = {
+      domain: "synthesis" as const,
+      current_tab: "copilot",
+      status: "ready",
+      provider: "openai_responses",
+      model: "gpt-6.1-sol",
+      response_id: "resp_operator",
+      message: "Research Operator synthesized the requested conclusion.",
+      card: null,
+      sources: [],
+      tool_traces: [],
+      operator_events: [
+        {
+          run_id: "run_1", event_id: "event_1", sequence: 1, event_type: "final-report",
+          timestamp: "2026-10-27T13:09:52Z", step_id: null, tool_id: null, title: "Final operator report",
+          message: "Complete.", payload: {}, source_ids: [], warnings: []
+        }
+      ],
+      warnings: []
+    };
+    // Un turno persistido del Operator pone la vista en modo Operator, como tras una ejecución real.
+    const activeSession = {
+      ...detail(session("session_1")),
+      turns: [{ turn_id: "turn_1", turn_index: 0, prompt: "Load the Brent curve.", role: "research_operator", selected_profile: "auto", result: operatorResult }]
+    };
+    const { body } = render(CopilotView, {
+      props: baseProps({
+        operatorResult,
+        activeSession,
+        synthesisSurface: {
+          ...surface(),
+          thread: {
+            domain: "synthesis",
+            contextFingerprint: "fp",
+            latestResponseId: "resp_operator",
+            entries: [
+              { entryId: "entry_1", turnIndex: 1, prompt: "Load the Brent curve.", continuedFromResponseId: null, result: operatorResult }
+            ]
+          }
+        }
+      })
+    });
+    // Antes la misma ejecución se pintaba como turno del hilo y otra vez como "OPERATOR RUN".
+    expect(body).not.toContain("OPERATOR RUN");
+    expect(body.match(/Research Operator synthesized the requested conclusion\./g) ?? []).toHaveLength(1);
+  });
 });

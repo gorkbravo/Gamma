@@ -431,6 +431,8 @@ export interface ProviderUsageCall {
   duration_ms: number;
   recorded_at: string;
   message: string | null;
+  /** "http" para peticiones salientes registradas en urllib (GUA-20260903-10). */
+  kind?: "provider" | "http" | string;
 }
 
 export interface ProviderUsageSummary {
@@ -447,6 +449,9 @@ export interface ProviderUsageSummary {
   last_error: string | null;
   last_called_at: string | null;
   endpoints: string[];
+  incomplete_count?: number;
+  /** Peticiones HTTP incluidas en call_count (GUA-20260903-10). */
+  http_request_count?: number;
 }
 
 export interface ProviderUsageHealth {
@@ -470,6 +475,9 @@ export interface ProviderUsageResponse {
   health: ProviderUsageHealth[];
   recent_calls: ProviderUsageCall[];
   total_calls: number;
+  /** Todo lo registrado desde el arranque; total_calls es la ventana retenida (GUA-20260903-10). */
+  lifetime_calls?: number;
+  retained_limit?: number;
   source_provider: string;
   origin: string;
   transformation_note: string | null;
@@ -1352,6 +1360,9 @@ export interface RiskStressEpisode {
   start: string;
   end: string;
   description: string;
+  // Tipo de episodio y serie que fija la ventana (GUA-20261021-9).
+  kind?: "equity" | "commodity" | string;
+  anchor?: string | null;
   status: "full" | "partial" | "unavailable" | string;
   book_return: number | null;
   book_pnl: number | null;
@@ -1364,6 +1375,8 @@ export interface RiskStressEpisode {
   gross_weight: number;
   observation_count: number;
   legs: RiskStressLeg[];
+  /** "net": share of the book result; "gross": share of Σ|leg P&L| when legs offset. */
+  contribution_basis?: "net" | "gross" | string;
   note: string | null;
 }
 
@@ -1375,6 +1388,10 @@ export interface RiskStressReplay {
   lookback_days: number;
   method: string;
   warnings: string[];
+  // Ventana de precios disponible y resumen de una línea si ningún episodio queda cubierto.
+  history_start?: string | null;
+  history_end?: string | null;
+  coverage_summary?: string | null;
 }
 
 export interface PredictionMarketOutcome {
@@ -1648,11 +1665,20 @@ export interface RelatedPredictionMarket {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  // GUA-20261021-15: hermanos por agrupación del venue (null en análogos).
+  sibling_scope?: "same_event" | "same_series" | null;
+  sibling_order?: number | null;
+  sibling_label?: string | null;
+  group_id?: string | null;
+  group_title?: string | null;
+  end_time?: string | null;
 }
 
 export interface RelatedPredictionMarketListResponse {
   market_id: string;
   related: RelatedPredictionMarket[];
+  /** Fuentes de RELATED que fallaron (p. ej. la consulta de series del venue). */
+  warnings?: string[];
 }
 
 export interface PredictionBookLevel {
@@ -1741,6 +1767,8 @@ export interface PredictionEventBookLeg {
   resolution_source: string | null;
   is_anchor: boolean;
   divergence_flags: string[];
+  /** Solo en escaleras: el peldaño contradice a otro anidado con él. */
+  ladder_flags: string[];
 }
 
 export interface PredictionEventBookCompleteness {
@@ -1762,9 +1790,13 @@ export interface PredictionEventBook {
   probability_sum: number | null;
   implied_overround: number | null;
   favorite_market_id: string | null;
+  /** "venue_grouped_candidates", "cumulative_ladder" o "unverified". */
   exclusivity_signal: string;
   /** Only when the book is complete, fully priced, and venue-grouped as candidates. */
   overround_is_meaningful: boolean;
+  /** Escalera acumulativa: sin suma ni overround; se revisa la monotonicidad. */
+  ladder_kind: "date" | "threshold" | null;
+  ladder_inversions: number;
   completeness: PredictionEventBookCompleteness | null;
   warnings: string[];
   source_provider: string;
@@ -3029,6 +3061,7 @@ export interface MacroDivergenceListResponse {
 export interface MacroEventsResponse {
   region: string;
   events: MacroEvent[];
+  warnings?: string[];
 }
 
 export interface CommodityCoverageMetadata {
@@ -3167,6 +3200,25 @@ export interface CommodityPriceBasis {
   transformation_note: string | null;
 }
 
+/** GUA-20261021-4: comparación fechada y con unidades de una referencia frente al titular. */
+export interface CommodityBasisComparison {
+  basis_id: string;
+  display_label: string;
+  kind: "same_series" | "aligned" | "basis" | "conflict" | "stale_reference" | "units_differ" | string;
+  provider: string;
+  value: number | null;
+  unit: string | null;
+  observed_at: string | null;
+  headline_value: number | null;
+  headline_unit: string | null;
+  headline_observed_at: string | null;
+  converted_value: number | null;
+  age_days: number | null;
+  difference: number | null;
+  difference_pct: number | null;
+  note: string;
+}
+
 export interface CommodityPriceReconciliation {
   instrument_id: string;
   status: string;
@@ -3178,6 +3230,8 @@ export interface CommodityPriceReconciliation {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  comparisons?: CommodityBasisComparison[];
+  stale_after_days?: number | null;
 }
 
 export interface CommoditySpreadDefinition {
@@ -3219,6 +3273,15 @@ export interface CommoditySpreadSnapshot {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** GUA-20261021-2: fecha de la última observación alineada; retrieved_at no lo es. */
+  observed_at?: string | null;
+  leg_observed_at?: Record<string, string | null>;
+  observation_lag_days?: number | null;
+  freshness?: "current" | "stale" | "unknown" | string;
+  stale_after_days?: number | null;
+  current_value?: number | null;
+  current_value_as_of?: string | null;
+  current_value_source?: string | null;
 }
 
 export interface CommodityInventorySeriesMetadata {
@@ -3430,6 +3493,10 @@ export interface CommodityCrossDomainLink {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** GUA-20261021-7: destino navegable del enlace. */
+  target_tab?: string | null;
+  target_mode?: string | null;
+  target_ids?: Record<string, string>;
 }
 
 export interface CommodityWorkspaceResponse {
@@ -3472,6 +3539,8 @@ export interface MaritimeCoverageMetadata {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** Ventana del muestreo AIS en segundos; null si no se tomó muestra (GUA-20261021-7). */
+  sample_window_seconds?: number | null;
 }
 
 export interface MaritimeVesselIdentity {
@@ -3590,6 +3659,8 @@ export interface MaritimeChokepointSummary {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  /** Estado de la muestra AIS en la caja, p. ej. "No live AIS positions in last 6 s sample" (GUA-20261021-7). */
+  position_sample_note?: string | null;
 }
 
 export interface MaritimeFlowSummary {
@@ -4589,6 +4660,8 @@ export interface IvSurface {
   collection: IvSurfaceCollection | null;
   quality: IvSurfaceQuality | null;
   pairs: IvOptionPair[];
+  /** GUA-20261021-10: sesión USA al tomar la foto ("regular" / "closed"); null si se desconoce. */
+  market_session?: string | null;
 }
 
 export interface ActionResponse {

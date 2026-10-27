@@ -8,6 +8,7 @@ import type {
   FundamentalsSourceTrace,
   FundamentalsStatementView
 } from "../api/types";
+import { apiInstantDate } from "../time";
 import type { FundamentalsDcfSavePayload } from "../stores/app";
 
 export type FundamentalsMode = "overview" | "financials" | "peers" | "dcf" | "reverse_valuation" | "reference";
@@ -408,7 +409,7 @@ export function snapshotDisplayName(name: string | null | undefined, createdAt: 
   if (!createdAt) {
     return "DCF snapshot";
   }
-  return `Snapshot ${new Date(createdAt).toLocaleString("en-US", {
+  return `Snapshot ${(apiInstantDate(createdAt) ?? new Date(createdAt)).toLocaleString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",

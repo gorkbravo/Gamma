@@ -4,6 +4,7 @@
   import LandingPage from "./components/LandingPage.svelte";
   import SetupWizard from "./components/SetupWizard.svelte";
   import Shell from "./components/Shell.svelte";
+  import ViewErrorBoundary from "./components/ViewErrorBoundary.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
   import { installExternalLinkHandler, openExternalUrl } from "./lib/external-links";
@@ -14,6 +15,7 @@
     getOrderedWorkspaceTabs,
     getTabModes,
     getTabByShortcutIndex,
+    getTabLabel,
     getWorkspaceHomeTab,
     isWorkspaceTab,
     type NavigationRouteMatch,
@@ -118,6 +120,7 @@
     loadMacroSeriesHistory,
     loadMacroWorkspace,
     loadCommoditiesWorkspace,
+    requestCommodityInstrument,
     loadMaritimeWorkspace,
     loadNewsFeed,
     loadPortfolioPerformance,
@@ -298,6 +301,7 @@
   import type { SitrepHandoffRequest, SitrepWorkspaceMeta } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
+  import { maritimeFocusFromHandoff, type MaritimeFocusRequest } from "./lib/view-models/maritime";
   import type { RiskMode } from "./lib/risk-workspace";
 
   type LazyViewComponent = any;
@@ -348,8 +352,8 @@
   let researchWorkingAnalysis: CopilotWorkingAnalysis | null = null;
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
-  // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway.
-  let maritimeFocusChokepointId: string | null = null;
+  // Set by an inbound cross-tab handoff so Sealanes opens on the named waterway (GUA-20261021-7).
+  let maritimeFocusRequest: MaritimeFocusRequest | null = null;
   let predictionMarketsMode: PredictionMarketsMode = persistedMode(
     restoredWorkspaceState,
     "prediction_markets",
@@ -2252,7 +2256,12 @@
     navigationSearchResetToken += 1;
   }
 
-  async function handleGenerateCopilot(prompt = "", selectedProfile?: CopilotProfile) {
+  // `outputBudget` solo lo envía Continue tras un corte por max_output_tokens (GUA-20261021-6).
+  async function handleGenerateCopilot(
+    prompt = "",
+    selectedProfile?: CopilotProfile,
+    retryOptions: { outputBudget?: "standard" | "expanded" } = {}
+  ) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -2262,10 +2271,15 @@
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
       selectedProfile,
+      outputBudget: retryOptions.outputBudget,
     });
   }
 
-  async function handleRunOperatorCopilot(prompt = "", selectedProfile?: CopilotProfile) {
+  async function handleRunOperatorCopilot(
+    prompt = "",
+    selectedProfile?: CopilotProfile,
+    retryOptions: { outputBudget?: "standard" | "expanded" } = {}
+  ) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -2275,6 +2289,7 @@
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
       selectedProfile,
+      outputBudget: retryOptions.outputBudget,
     });
   }
 
@@ -2520,9 +2535,11 @@
       });
       return;
     } else if (targetTab === "maritime") {
-      const mode = (handoff.intended_target_mode ?? "live_map") as MaritimeMode;
-      maritimeMode = mode;
-      await loadMaritimeWorkspace({ mode });
+      // La pestaña ya está seleccionada; solo se fija el enfoque (GUA-20261021-7).
+      maritimeFocusRequest = maritimeFocusFromHandoff({ ...handoff, intended_target_tab: "maritime" });
+      maritimeMode =
+        maritimeFocusRequest?.lens ?? ((handoff.intended_target_mode ?? "live_map") as MaritimeMode);
+      await loadMaritimeWorkspace({ mode: maritimeMode });
       return;
     } else if (targetTab === "prediction_markets") {
       const marketId =
@@ -2724,6 +2741,10 @@
     if (handoff.symbol) {
       selectSharedEquity(handoff.symbol, handoff.label ?? null, "sitrep");
     }
+    // P2 2026-10-21: la carga al abrir Commodities usa el instrumento pedido, no el WTI por defecto.
+    if (targetTab === "commodities" && handoff.commodityId) {
+      requestCommodityInstrument(handoff.commodityId);
+    }
 
     await selectTab(targetTab);
 
@@ -2776,6 +2797,22 @@
   }
 
   /**
+   * Abre Sealanes enfocado en la entidad de un handoff (GUA-20261021-7).
+   *
+   * Contrato de recepción para cualquier pestaña: un CrossTabHandoffEnvelope con
+   * intended_target_tab "maritime". La vista resuelve el destino contra la
+   * geografía estática; si no lo encuentra, lo dice en lugar de callar.
+   */
+  async function openMaritimeFocusHandoff(handoff: CrossTabHandoffEnvelope) {
+    const request = maritimeFocusFromHandoff({ ...handoff, intended_target_tab: "maritime" });
+    if (!request) return;
+    workspaceMode = "research";
+    maritimeFocusRequest = request;
+    maritimeMode = request.lens;
+    await selectTab("maritime");
+  }
+
+  /**
    * Open a Prediction Markets outward handoff in its target tab.
    *
    * The envelope carries the entity, the target mode, and the contract's own
@@ -2788,17 +2825,17 @@
     const entityLabel = handoff.selected_entity?.label ?? targetTab;
 
     if (targetTab === "maritime") {
-      maritimeFocusChokepointId = ids.chokepoint_id ?? null;
+      await openMaritimeFocusHandoff(handoff);
+    } else {
+      await openSitrepHandoff({
+        targetTab,
+        targetMode: handoff.intended_target_mode ?? undefined,
+        commodityId: ids.commodity_id ?? null,
+        region: ids.region ?? null,
+        theme: ids.theme ?? null,
+        timeframe: ids.timeframe ?? null
+      });
     }
-
-    await openSitrepHandoff({
-      targetTab,
-      targetMode: handoff.intended_target_mode ?? undefined,
-      commodityId: ids.commodity_id ?? null,
-      region: ids.region ?? null,
-      theme: ids.theme ?? null,
-      timeframe: ids.timeframe ?? null
-    });
 
     consoleEntries = [
       {
@@ -3007,6 +3044,8 @@
       />
 
       <section class="workspace-main">
+        <!-- La vista activa falla sola: TabBar, atajos y topbar siguen vivos; Retry o cambiar de pestaña la remonta (GUA-20261021-1). -->
+        <ViewErrorBoundary resetKey={$activeTab}>
         {#if activeViewLoadError}
           <div class="view-load-state" role="alert">
             <strong>Unable to load view</strong>
@@ -3153,6 +3192,7 @@
             macroHistories={$macroSeriesHistories}
             onLoadMacroSeries={loadMacroSeriesHistory}
             onSendToStrategyLab={handleStrategyLabHandoff}
+            onCrossDomainHandoff={openPredictionCrossDomainHandoff}
           />
         {:else if $activeTab === "prediction_markets"}
           <svelte:component
@@ -3251,7 +3291,7 @@
             bind:mode={maritimeMode}
             workspace={$maritimeWorkspace}
             loading={$loading.maritime}
-            focusChokepointId={maritimeFocusChokepointId}
+            focusRequest={maritimeFocusRequest}
             onLoadWorkspace={loadMaritimeWorkspace}
           />
         {:else if $activeTab === "copilot"}
@@ -3340,6 +3380,7 @@
             onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {/if}
+        </ViewErrorBoundary>
       </section>
     </section>
 

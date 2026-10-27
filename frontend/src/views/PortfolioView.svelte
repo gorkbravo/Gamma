@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import AllocationDonut from "../components/AllocationDonut.svelte";
   import DiagnosticsPanel, { type DiagnosticsEntry } from "../components/DiagnosticsPanel.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
@@ -113,8 +114,8 @@
 
   const timeLabel = (value: string | null | undefined) => {
     if (!value) return "Never";
-    const parsed = new Date(value);
-    return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString("en-US") : value;
+    const parsed = apiInstantDate(value);
+    return parsed ? parsed.toLocaleString("en-US") : value;
   };
 
   function currentLookbackDays() {

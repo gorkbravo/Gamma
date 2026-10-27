@@ -212,6 +212,9 @@ class CopilotResearchCardRequest:
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
     synthesis: CopilotSynthesisRequest | None = None
     entity_resolution: "CopilotEntityResolution | None" = None
+    # "expanded" lo pide Continue tras un corte por max_output_tokens; el servidor fija el techo
+    # (GUA-20261021-6).
+    output_budget: str | None = None
 
 
 @dataclass(frozen=True)

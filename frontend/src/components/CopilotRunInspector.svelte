@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiInstantDate } from "../lib/time";
   import type {
     CopilotDiagnostics,
     CopilotResearchCardResult,
@@ -81,8 +82,9 @@
   }
 
   function compactDate(value: string | null | undefined) {
-    return value
-      ? new Date(value).toLocaleString(undefined, {
+    const date = apiInstantDate(value);
+    return date
+      ? date.toLocaleString(undefined, {
           month: "short",
           day: "numeric",
           hour: "2-digit",

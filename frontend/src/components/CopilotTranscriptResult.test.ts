@@ -461,3 +461,108 @@ describe("CopilotTranscriptResult", () => {
     expect(body).toContain("GOOGL · Alphabet Inc. · NASDAQ");
   });
 });
+
+// GUA-20261021-6 / GUA-20261021-13: tarjeta parcial, Retry/Continue y ruido de trazas.
+describe("CopilotTranscriptResult usability audit 2026-10-21", () => {
+  it("renders Markdown tables as tables and omits empty sections", () => {
+    const tabled = result();
+    tabled.card = {
+      ...tabled.card!,
+      rationale: "| Delivery | Brent | WTI |\n| --- | ---: | ---: |\n| Dec-26 | 111.05 | 99.93 |",
+      proposed_test: "",
+      hypothesis: "   "
+    };
+    const { body } = render(CopilotTranscriptResult, { props: { result: tabled } });
+    expect(body).toContain("rich-table");
+    expect(body).toMatch(/<th[^>]*>Delivery<\/th>/);
+    expect(body).toMatch(/<td[^>]*>111.05<\/td>/);
+    expect(body).not.toContain("| Delivery |");
+    expect(body).not.toContain("Proposed test");
+    expect(body).not.toContain("Hypothesis");
+  });
+
+  it("collapses repeated operator warnings and model progress (live check 2026-10-27)", () => {
+    const value = result();
+    const base = {
+      run_id: "run_1", timestamp: "2026-10-27T13:09:11Z", step_id: null, tool_id: null, payload: {}, source_ids: []
+    };
+    value.operator_events = [
+      ...Array.from({ length: 40 }, (_, index) => ({
+        ...base, event_id: `progress_${index}`, sequence: index + 1, event_type: "provider-progress",
+        title: "Operator model progress", message: "Operator model emitted provider progress.", warnings: []
+      })),
+      ...["Using cached IBKR curve for WTI.", "Using cached IBKR curve for Brent.", "Stale commodity reference for WTI."].map(
+        (message, index) => ({
+          ...base, event_id: `warning_${index}`, sequence: 41 + index, event_type: "warning",
+          title: "Operator warning", message, warnings: [message]
+        })
+      ),
+      {
+        ...base, event_id: "lone", sequence: 50, event_type: "warning", title: "Plan warning",
+        message: "Plan note.", warnings: ["Plan note."]
+      }
+    ];
+    const { body } = render(CopilotTranscriptResult, { props: { result: value } });
+    expect(body.match(/Operator model emitted provider progress/g) ?? []).toHaveLength(0);
+    expect(body).toContain("40 provider progress updates (token usage), collapsed.");
+    expect(body).toContain("Operator warning · 3");
+    expect(body).toContain("Show 3 warnings");
+    // Un aviso que ya es el mensaje del paso no se pinta otra vez en la lista.
+    expect(body.match(/Plan note\./g) ?? []).toHaveLength(1);
+  });
+
+  it("shows a partial card with a Continue action after an output-budget cut-off", () => {
+    const partial = result();
+    partial.status = "incomplete";
+    partial.message =
+      "OpenAI ended the response early: max_output_tokens. The output budget was 23,600 tokens, reasoning included.";
+    partial.card = { ...partial.card!, proposed_test: "", next_steps: [] };
+    const withRetry = render(CopilotTranscriptResult, {
+      props: { result: partial, onRetry: () => null }
+    }).body;
+    expect(withRetry).toContain("Partial answer");
+    expect(withRetry).toMatch(/>\s*Continue\s*<\/button>/);
+    expect(withRetry).toContain("The equity is exposed to a renewed rate shock.");
+
+    const withoutRetry = render(CopilotTranscriptResult, { props: { result: partial } }).body;
+    expect(withoutRetry).not.toMatch(/>\s*Continue\s*<\/button>/);
+
+    const failed = result();
+    failed.status = "error";
+    failed.card = null;
+    failed.message = "OpenAI request timed out.";
+    expect(render(CopilotTranscriptResult, { props: { result: failed, onRetry: () => null } }).body)
+      .toMatch(/>\s*Retry\s*<\/button>/);
+  });
+
+  it("keeps raw JSON step and report objects collapsed by default", () => {
+    const operatorResult = result();
+    operatorResult.card = null;
+    operatorResult.operator_events = [
+      {
+        run_id: "run_1",
+        event_id: "event_1",
+        sequence: 1,
+        event_type: "final-report",
+        timestamp: "2026-10-21T10:47:45Z",
+        step_id: null,
+        tool_id: null,
+        title: "Final operator report",
+        message: "Operator report completed.",
+        payload: {
+          status: "ready",
+          executed_steps: ["step-1"],
+          outputs: { "step-1": { working_analysis: { analysis_id: "work_1", inputs: { legs: [1, 2] } } } }
+        },
+        source_ids: [],
+        warnings: []
+      }
+    ];
+    const { body } = render(CopilotTranscriptResult, { props: { result: operatorResult } });
+    // Escalares visibles en la tabla del informe; el objeto `outputs` va en un <details> cerrado.
+    expect(body).toMatch(/<dt[^>]*>executed steps<\/dt><dd[^>]*>step-1<\/dd>/);
+    expect(body).toMatch(/<details class="raw-json[^"]*"><summary[^>]*>outputs \(JSON\)<\/summary>/);
+    expect(body).not.toMatch(/<details class="raw-json[^"]*" open/);
+    expect(body).not.toMatch(/<dd[^>]*>\{/);
+  });
+});

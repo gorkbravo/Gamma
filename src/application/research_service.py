@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from concurrent.futures import Future
 import math
 from threading import Lock
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from src.analytics.research_overview import (
@@ -74,6 +75,12 @@ from src.services.data_providers import ResearchDataProvider, normalize_snapshot
 from src.services.research_market_data import ResearchHistoryResult
 from src.services.saved_research_store import SavedResearchStore
 from src.utils.time import ensure_utc, now_utc
+
+
+# Umbral de desfase de un tramo del libro: se avisa si su ventana termina más de N sesiones
+# (lunes a viernes; los festivos de mercado no se modelan) antes de hoy. Tres sesiones toleran
+# el cierre de ayer, un fin de semana y un festivo sin avisar (GUA-20261021-9).
+STRATEGY_LAB_STALE_LEG_TRADING_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -1005,11 +1012,6 @@ class ResearchService:
                 f"Provider reload returned {len(reloaded_prices)} usable observation(s) for the "
                 f"{len(carried_prices)} loaded in Commodities; Gamma used the series carried by the handoff."
             )
-            if carried_series.contract_symbol:
-                warnings.append(
-                    f"Carried commodity series is the {carried_series.contract_symbol} basis shown in Commodities; "
-                    "it is not roll-adjusted."
-                )
         else:
             history_source = "provider_reload"
             prices = reloaded_prices
@@ -1018,6 +1020,24 @@ class ResearchService:
             warnings.append(f"Dropped {invalid_points} commodity history point(s) with invalid timestamps or prices.")
 
         price_series = pd.Series(prices).sort_index().astype(float) if prices else pd.Series(dtype=float)
+        # Tipo de serie (futuro frontal, continuo, proxy spot) y fecha final, para que el tramo no
+        # se confunda con el futuro que muestra Commodities (GUA-20261021-9).
+        series = self._commodity_series_descriptor(
+            history,
+            instrument=instrument,
+            carried_series=carried_series if history_source == "handoff_payload" else None,
+            price_series=price_series,
+        )
+        if series["series_kind"] == "futures_front" and series.get("series_contract"):
+            warnings.append(
+                f"Commodity series is the {series['series_contract']} front contract; it is not roll-adjusted."
+            )
+        headline_contract = getattr(instrument, "front_symbol", None)
+        if series["series_kind"] == "spot_proxy" and headline_contract:
+            warnings.append(
+                f"{label} uses the {series['series_label']} through {series['series_end'] or 'N/A'}, "
+                f"not the {headline_contract} futures quoted in Commodities; spot-proxy returns can differ from futures returns."
+            )
         returns = clean_return_series(price_series.pct_change().dropna())
         points = [
             ResearchObjectReturnPoint(timestamp=pd.Timestamp(index).isoformat(), value=float(value))
@@ -1038,6 +1058,7 @@ class ResearchService:
             history_source=history_source,
             carried_series=carried_series if history_source == "handoff_payload" else None,
         )
+        provenance.update(series)
         if len(points) < 5:
             # A handoff that found nothing and one that found a stub are different
             # problems: the first is a data-availability failure the user can act
@@ -1073,7 +1094,7 @@ class ResearchService:
         research_object = GammaResearchObject(
             object_id=f"commodities:{resolved_id}:return_stream:{points[0].timestamp}:{points[-1].timestamp}",
             object_type="commodity_return_stream",
-            display_name=f"{label} commodity return stream",
+            display_name=f"{label} {series['series_short']} return stream",
             source_tab="commodities",
             source_mode=handoff.source_mode,
             resolver_capabilities=["return_leg", "benchmark"],
@@ -1111,7 +1132,11 @@ class ResearchService:
             status="resolved",
             resolved_capability="return_leg",
             composer_draft_leg=leg,
-            date_coverage=CrossTabHandoffTimeframe(label="Commodity return history", start=points[0].timestamp, end=points[-1].timestamp),
+            date_coverage=CrossTabHandoffTimeframe(
+                label=f"Commodity return history: {series['series_label']}",
+                start=points[0].timestamp,
+                end=points[-1].timestamp,
+            ),
             provider_summary=provider,
             provenance=provenance,
             warnings=list(dict.fromkeys(warnings)),
@@ -1327,6 +1352,61 @@ class ResearchService:
         return prices, invalid_points
 
     @staticmethod
+    def _commodity_series_descriptor(
+        history: Any,
+        *,
+        instrument: Any,
+        carried_series: CrossTabHandoffSeries | None,
+        price_series: pd.Series,
+    ) -> dict[str, Any]:
+        """Clasifica la serie de precios que alimenta el tramo con los datos que ya trae el
+        payload (proveedor, origen, etiqueta, nota). No consulta otro proveedor (GUA-20261021-9)."""
+        provider = str(
+            getattr(history, "source_provider", None) or getattr(carried_series, "source_provider", None) or ""
+        ).strip().lower()
+        origin = str(getattr(history, "origin", None) or getattr(carried_series, "origin", None) or "").strip()
+        text = " ".join(
+            str(value or "")
+            for value in (
+                getattr(history, "label", None),
+                getattr(history, "transformation_note", None),
+                getattr(carried_series, "transformation_note", None),
+            )
+        ).lower()
+        series_id = origin.split(":", 1)[1].strip() if ":" in origin else ""
+        contract = (
+            (carried_series.contract_symbol if carried_series is not None else None)
+            or getattr(instrument, "front_symbol", None)
+            or None
+        )
+        if provider == "sample_data" or origin.startswith("sample_"):
+            kind, short, label = "sample", "sample", "sample data (not a market quotation)"
+        elif provider == "ibkr" or origin.startswith("ibkr."):
+            kind, short = "futures_front", "front futures"
+            label = f"IBKR front futures {contract}, not roll-adjusted" if contract else "IBKR front futures, not roll-adjusted"
+        elif "continuous" in text and "not a back-adjusted continuous" not in text:
+            kind, short = "continuous_futures", "continuous futures"
+            label = f"{provider.upper() or 'provider'} continuous front futures"
+        elif provider in {"fred", "eia"} or origin.startswith(("fred.", "eia.")) or "spot" in text:
+            kind, short = "spot_proxy", "spot proxy"
+            source = provider.upper() if provider else "provider"
+            label = f"{source} spot proxy {series_id}".strip() if series_id else f"{source} spot proxy"
+        else:
+            kind, short = "unclassified", "commodity"
+            label = f"{provider or 'unknown provider'} price history (series type not reported)"
+        start = pd.Timestamp(price_series.index[0]).date().isoformat() if not price_series.empty else None
+        end = pd.Timestamp(price_series.index[-1]).date().isoformat() if not price_series.empty else None
+        return {
+            "series_kind": kind,
+            "series_short": short,
+            "series_label": label,
+            "series_contract": contract if kind == "futures_front" else None,
+            "series_id": series_id or None,
+            "series_start": start,
+            "series_end": end,
+        }
+
+    @staticmethod
     def _commodity_handoff_provenance(
         *,
         workspace: Any,
@@ -1461,6 +1541,7 @@ class ResearchService:
             )
 
         aligned = pd.DataFrame(leg_series).dropna(how="any")
+        aligned, shared_before_lookback = self._trim_aligned_to_lookback(aligned, request.lookback_days)
         if len(aligned) < min_observations:
             raise ResearchValidationError(
                 self._composition_alignment_failure_errors(
@@ -1478,6 +1559,17 @@ class ResearchService:
             "benchmark": None,
             "fail_closed": True,
         }
+        if request.lookback_days is not None:
+            alignment_diagnostics.update(
+                self._lookback_diagnostics(
+                    leg_diagnostics,
+                    lookback_days=int(request.lookback_days),
+                    shared_before_lookback=shared_before_lookback,
+                    aligned_observations=int(len(aligned)),
+                    warnings=warnings,
+                )
+            )
+        alignment_diagnostics.update(self._leg_staleness_diagnostics(leg_diagnostics, warnings=warnings))
         weighted_columns = aligned.mul(pd.Series(leg_weight_map), axis="columns")
         composition_returns = weighted_columns.sum(axis="columns").astype(float)
         contribution_columns = weighted_columns
@@ -1626,13 +1718,15 @@ class ResearchService:
         benchmark_object = request.benchmark_object
         benchmark_symbol = str(request.benchmark_symbol or "").strip().upper()
         if benchmark_object is None and benchmark_symbol:
+            # Las advertencias del proveedor del benchmark viajan en su diagnóstico, no entre las
+            # del libro: no deben atribuirse a tramos que no usan ese proveedor (GUA-20261021-9).
             benchmark_object = self._listed_history_object(
                 label=f"{benchmark_symbol} Benchmark",
                 identifier=benchmark_symbol,
                 asset_class="benchmark",
                 lookback_days=lookback_days,
                 min_observations=min_observations,
-                warnings=warnings,
+                warnings=[],
                 capabilities=["benchmark", "return_leg"],
             )
 
@@ -1644,6 +1738,7 @@ class ResearchService:
                 overlays=list(request.overlays),
                 benchmark_object=benchmark_object,
                 min_observations=min_observations,
+                lookback_days=lookback_days,
             )
         )
         return StrategyLabCompositionResult(
@@ -1743,6 +1838,7 @@ class ResearchService:
             )
 
         aligned = pd.DataFrame(leg_series).dropna(how="any") if leg_series else pd.DataFrame()
+        aligned, shared_before_lookback = self._trim_aligned_to_lookback(aligned, lookback_days)
         aligned_count = int(len(aligned))
         if not usable:
             errors.append("The book has no usable return legs; add at least one non-zero resolvable leg.")
@@ -1764,10 +1860,24 @@ class ResearchService:
             "benchmark": None,
             "fail_closed": True,
         }
+        if usable:
+            alignment_diagnostics.update(
+                self._lookback_diagnostics(
+                    leg_diagnostics,
+                    lookback_days=lookback_days,
+                    shared_before_lookback=shared_before_lookback,
+                    aligned_observations=aligned_count,
+                    warnings=warnings,
+                )
+            )
+        alignment_diagnostics.update(self._leg_staleness_diagnostics(leg_diagnostics, warnings=warnings))
 
         benchmark_object = request.benchmark_object
         benchmark_symbol = str(request.benchmark_symbol or "").strip().upper()
         if benchmark_object is None and benchmark_symbol:
+            # Las advertencias del proveedor del benchmark quedan en su diagnóstico; solo se citan
+            # en el libro, con prefijo, si el benchmark no se pudo cargar (GUA-20261021-9).
+            benchmark_provider_warnings: list[str] = []
             try:
                 benchmark_object = self._listed_history_object(
                     label=f"{benchmark_symbol} Benchmark",
@@ -1775,10 +1885,11 @@ class ResearchService:
                     asset_class="benchmark",
                     lookback_days=lookback_days,
                     min_observations=min_observations,
-                    warnings=warnings,
+                    warnings=benchmark_provider_warnings,
                     capabilities=["benchmark", "return_leg"],
                 )
             except ResearchValidationError as exc:
+                warnings.extend(f"Benchmark {benchmark_symbol}: {message}" for message in benchmark_provider_warnings)
                 warnings.extend(f"Benchmark {benchmark_symbol}: {message}" for message in exc.errors)
                 benchmark_object = None
         if benchmark_object is not None:
@@ -1849,6 +1960,97 @@ class ResearchService:
             return None
         value = index[0] if first else index[-1]
         return pd.Timestamp(value).isoformat()
+
+    @staticmethod
+    def _trim_aligned_to_lookback(aligned: pd.DataFrame, lookback_days: int | None) -> tuple[pd.DataFrame, int]:
+        """Conserva las últimas N fechas compartidas; LOOKBACK cuenta sesiones, no días
+        naturales (GUA-20261021-11). Devuelve también cuántas fechas compartían antes."""
+        shared = int(len(aligned))
+        if lookback_days is None or int(lookback_days) <= 0 or shared <= int(lookback_days):
+            return aligned, shared
+        return aligned.iloc[-int(lookback_days):], shared
+
+    @staticmethod
+    def _lookback_diagnostics(
+        leg_diagnostics: list[dict[str, Any]],
+        *,
+        lookback_days: int,
+        shared_before_lookback: int,
+        aligned_observations: int,
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        """Explica la ventana analizada frente al LOOKBACK pedido (GUA-20261021-11)."""
+        note: str | None = None
+        if 0 < aligned_observations < lookback_days:
+            short_legs = [
+                diagnostic
+                for diagnostic in leg_diagnostics
+                if int(diagnostic.get("observation_count") or 0) < lookback_days
+            ]
+            if short_legs:
+                reasons = "; ".join(
+                    f"{diagnostic['label']} carries {diagnostic['observation_count']} return observations"
+                    f" ending {str(diagnostic.get('available_end') or 'N/A')[:10]}"
+                    for diagnostic in short_legs
+                )
+            else:
+                reasons = "the legs' dates overlap on fewer sessions than requested"
+            note = (
+                f"Analysed {aligned_observations} of the requested {lookback_days} trading days: {reasons}."
+            )
+            warnings.append(note)
+        return {
+            "requested_lookback_days": int(lookback_days),
+            "lookback_unit": "trading_days",
+            "shared_observations_before_lookback": int(shared_before_lookback),
+            "lookback_note": note,
+        }
+
+    @staticmethod
+    def _trading_days_behind(end: Any, today: date) -> int | None:
+        """Sesiones (lunes a viernes) entre el último dato de un tramo y hoy, hoy incluido."""
+        if end is None or end == "":
+            return None
+        timestamp = pd.to_datetime(end, errors="coerce")
+        if pd.isna(timestamp):
+            return None
+        timestamp = pd.Timestamp(timestamp)
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+        end_date = timestamp.date()
+        if end_date >= today:
+            return 0
+        return int(np.busday_count(end_date + timedelta(days=1), today + timedelta(days=1)))
+
+    @classmethod
+    def _leg_staleness_diagnostics(
+        cls,
+        leg_diagnostics: list[dict[str, Any]],
+        *,
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        """Marca los tramos cuya ventana acaba más de N sesiones antes de hoy (GUA-20261021-9)."""
+        today = (ensure_utc(now_utc()) or now_utc()).date()
+        threshold = STRATEGY_LAB_STALE_LEG_TRADING_DAYS
+        stale_legs: list[dict[str, Any]] = []
+        for diagnostic in leg_diagnostics:
+            lag = cls._trading_days_behind(diagnostic.get("available_end"), today)
+            diagnostic["trading_days_behind"] = lag
+            diagnostic["stale_window"] = bool(lag is not None and lag > threshold)
+            if lag is None or lag <= threshold:
+                continue
+            end = str(diagnostic.get("available_end") or "")[:10]
+            stale_legs.append({"label": diagnostic["label"], "available_end": end, "trading_days_behind": lag})
+            warnings.append(
+                f"Stale window: {diagnostic['label']} ends {end}, {lag} trading days before today "
+                f"({today.isoformat()}); the book cannot analyse anything after that date. "
+                f"Threshold: more than {threshold} trading days (weekends excluded, exchange holidays not modelled)."
+            )
+        return {
+            "as_of_date": today.isoformat(),
+            "stale_after_trading_days": threshold,
+            "stale_legs": stale_legs,
+        }
 
     @staticmethod
     def _composition_alignment_failure_errors(
@@ -1958,6 +2160,10 @@ class ResearchService:
             raise ResearchValidationError([f"{label} history is unavailable for {normalized_identifier}."])
         returns = compute_returns(align_prices({normalized_identifier: series.astype(float)}))[normalized_identifier]
         returns = clean_return_series(returns)
+        # Los proveedores piden días naturales de margen (yfinance: 1,8×N + 10) para cubrir fines
+        # de semana; sin este recorte LOOKBACK 252 analizaba ~319 sesiones (GUA-20261021-11).
+        if lookback_days > 0 and len(returns) > lookback_days:
+            returns = returns.iloc[-int(lookback_days):]
         if len(returns) < min_observations:
             raise ResearchValidationError(
                 [f"{label} needs at least {min_observations} return observations from listed history."]

@@ -40,6 +40,18 @@ class IVStreamResult:
     messages: list[str] = field(default_factory=list)
 
 
+# Fallos del motor que no dependen de la profundidad pedida: no se reintenta con otra.
+_DEPTH_INDEPENDENT_FAILURES = (
+    "Unable to qualify underlying contract",
+    "No underlying price",
+    "No option chain available",
+)
+
+
+def _is_depth_independent_failure(message: str) -> bool:
+    return any(marker in str(message or "") for marker in _DEPTH_INDEPENDENT_FAILURES)
+
+
 class IVService:
     def __init__(
         self,
@@ -51,7 +63,9 @@ class IVService:
         self.usage_ledger = usage_ledger
         self.market_data_mode = normalize_market_data_mode(market_data_mode)
         self._engine: IVSurfaceEngine | None = None
-        self._active_symbol = "SPY"
+        # GUA-20261021-10: sin sesión iniciada no hay símbolo activo; antes se
+        # informaba "SPY" y el estado vacío nombraba un símbolo no pedido.
+        self._active_symbol: str | None = None
         self._active_depth_preset = "standard"
         self._active_surface_model = "linear"
         self._engine_config = {
@@ -326,8 +340,14 @@ class IVService:
             if latest is not None:
                 loaded_preset = preset
                 break
+            if any(_is_depth_independent_failure(message) for message in attempt_messages):
+                # Otra profundidad no arregla un símbolo desconocido ni una cadena inexistente.
+                break
 
         if latest is None:
+            failure = next((message for message in messages if _is_depth_independent_failure(message)), None)
+            if failure:
+                warnings.append(failure)
             warnings.append(f"No options surface snapshot available yet for {symbol}.")
         elif loaded_preset and loaded_preset != depth_preset:
             warnings.append(
@@ -389,6 +409,10 @@ class IVService:
             while time.time() < deadline:
                 latest = engine.snapshot()
                 if latest is not None:
+                    break
+                if not engine.is_running():
+                    # El hilo del motor terminó (p. ej. "Unable to qualify underlying contract"): esperar
+                    # el plazo completo dejaba la vista en LOADING ~40 s sin error (verificación 2026-10-27).
                     break
                 time.sleep(0.1)
         finally:

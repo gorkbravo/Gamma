@@ -2,12 +2,15 @@ import type {
   CopilotWorkingAnalysis,
   PredictionCalibrationCurve,
   PredictionCalibrationSummary,
+  PredictionEventBook,
+  PredictionEventBookLeg,
   PredictionHistoryRange,
   PredictionMarket,
   PredictionMarketComparison,
   PredictionOutcomeSeries,
   PredictionPairAnalytics,
-  PredictionProbabilityHistoryResponse
+  PredictionProbabilityHistoryResponse,
+  RelatedPredictionMarket
 } from "./api/types";
 import { resolveWorkingAnalysisTarget } from "./copilot-workspace";
 
@@ -371,4 +374,302 @@ export function comparisonLegLabel(comparison: PredictionMarketComparison | null
     return marketId;
   }
   return leg.title;
+}
+
+// ── Event Book: escaleras acumulativas ─────────────────────────────────
+
+export interface EventBookLadderSummary {
+  label: "Date ladder" | "Threshold ladder";
+  /** Regla de monotonicidad que comprueba el backend. */
+  rule: string;
+  inversions: number;
+  /** Primer y último peldaño cotizados, en el orden de la escalera. */
+  first: PredictionEventBookLeg | null;
+  last: PredictionEventBookLeg | null;
+}
+
+/**
+ * Resumen de un Event Book que es una escalera ("by Dec 31 / by Jun 30",
+ * "above 72k / above 74k"). Sus peldaños están anidados, así que no hay suma,
+ * overround ni favorito; `null` cuando el libro no es una escalera.
+ */
+export function eventBookLadderSummary(book: PredictionEventBook | null | undefined): EventBookLadderSummary | null {
+  if (!book || book.exclusivity_signal !== "cumulative_ladder") return null;
+  const priced = book.legs.filter((leg) => leg.probability != null);
+  const isDate = book.ladder_kind === "date";
+  return {
+    label: isDate ? "Date ladder" : "Threshold ladder",
+    rule: isDate ? "later ≥ earlier" : "nested levels",
+    inversions: book.ladder_inversions ?? 0,
+    first: priced[0] ?? null,
+    last: priced.at(-1) ?? null
+  };
+}
+
+// ── Agrupación por evento y hermanos (GUA-20261021-15) ─────────────────
+
+export type BucketBounds = readonly [number, number];
+
+// Misma lectura que el resolver del backend: "20-24", "fewer than 20",
+// "40 or more", "70° to 71°". Gana la coincidencia más temprana del texto.
+const BUCKET_NUMBER = String.raw`\$?\d[\d,]*(?:\.\d+)?`;
+const BUCKET_UNIT = String.raw`\s*[%°]?`;
+const BUCKET_PATTERNS: readonly { kind: "range" | "below" | "above"; pattern: RegExp }[] = [
+  {
+    kind: "range",
+    pattern: new RegExp(String.raw`(${BUCKET_NUMBER})${BUCKET_UNIT}\s*(?:-|–|—|to|and)\s*(${BUCKET_NUMBER})`, "i")
+  },
+  {
+    kind: "below",
+    pattern: new RegExp(
+      String.raw`(?:\b(?:fewer than|less than|under|below|at most|no more than|up to)|<=?|≤|↓)\s*(${BUCKET_NUMBER})`,
+      "i"
+    )
+  },
+  { kind: "below", pattern: new RegExp(String.raw`(${BUCKET_NUMBER})${BUCKET_UNIT}\s*or (?:fewer|less|below|lower)`, "i") },
+  {
+    // ↑/↓ son las etiquetas de Polymarket para "toca el nivel" ("↑ 95,000").
+    kind: "above",
+    pattern: new RegExp(String.raw`(?:\b(?:more than|greater than|over|above|at least)|>=?|≥|↑)\s*(${BUCKET_NUMBER})`, "i")
+  },
+  {
+    kind: "above",
+    pattern: new RegExp(String.raw`(${BUCKET_NUMBER})${BUCKET_UNIT}\s*(?:\+|or (?:more|above|higher|greater))`, "i")
+  }
+];
+
+function bucketNumber(text: string): number | null {
+  const value = Number(text.replace(/[$,]/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+/** (inferior, superior) de una etiqueta de bucket; los extremos abiertos son ±Infinity. */
+export function parseBucketBounds(text: string | null | undefined): BucketBounds | null {
+  const source = String(text ?? "");
+  let best: { start: number; length: number; bounds: BucketBounds } | null = null;
+  for (const { kind, pattern } of BUCKET_PATTERNS) {
+    const match = pattern.exec(source);
+    if (!match) continue;
+    let bounds: BucketBounds;
+    if (kind === "range") {
+      const left = bucketNumber(match[1]);
+      const right = bucketNumber(match[2]);
+      if (left == null || right == null) continue;
+      bounds = [Math.min(left, right), Math.max(left, right)];
+    } else {
+      const value = bucketNumber(match[1]);
+      if (value == null) continue;
+      bounds = kind === "below" ? [-Infinity, value] : [value, Infinity];
+    }
+    const candidate = { start: match.index, length: match[0].length, bounds };
+    if (!best || candidate.start < best.start || (candidate.start === best.start && candidate.length > best.length)) {
+      best = candidate;
+    }
+  }
+  return best?.bounds ?? null;
+}
+
+/** La etiqueta de grupo del venue manda; el título solo si no hay etiqueta legible. */
+export function marketBucketBounds(market: Pick<PredictionMarket, "subtitle" | "title">): BucketBounds | null {
+  return parseBucketBounds(market.subtitle) ?? parseBucketBounds(market.title);
+}
+
+/**
+ * `buckets`: rangos numéricos sin solape, excluyentes por estructura.
+ * `candidates`: una etiqueta distinta por leg y misma fecha de resolución.
+ * `unverified`: escalera de fechas o umbrales; la suma es solo descriptiva.
+ */
+export type PredictionEventGroupKind = "buckets" | "candidates" | "unverified";
+
+export interface PredictionEventGroupLeg {
+  market: PredictionMarket;
+  label: string;
+  probability: number | null;
+  /** Altura de la barra de distribución relativa al leg más probable (0-1). */
+  share: number;
+  isMode: boolean;
+}
+
+export interface PredictionEventGroup {
+  key: string;
+  eventId: string;
+  eventTitle: string;
+  venue: string;
+  kind: PredictionEventGroupKind;
+  /** `complete` solo cuando los buckets visibles cubren la recta sin huecos. */
+  coverage: "complete" | "partial" | "unknown";
+  legs: PredictionEventGroupLeg[];
+  pricedLegs: number;
+  probabilitySum: number | null;
+  /** Σ − 100% solo cuando el libro visible es excluyente, completo y todo cotizado. */
+  overround: number | null;
+  mode: PredictionEventGroupLeg | null;
+  volume24h: number | null;
+  volume: number | null;
+  liquidity: number | null;
+  soonestEnd: string | null;
+  worstFreshness: string | null;
+}
+
+export type PredictionScreenerEntry =
+  | { type: "market"; key: string; market: PredictionMarket }
+  | { type: "group"; key: string; group: PredictionEventGroup };
+
+const CANDIDATE_RESOLUTION_DRIFT_MS = 3 * 86_400_000;
+const FRESHNESS_RANK: Record<string, number> = { fresh: 0, delayed: 1, closed: 1, stale: 2, broken: 3 };
+
+function endMs(market: PredictionMarket): number {
+  const parsed = market.end_time ? Date.parse(market.end_time) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+function sumOrNull(values: (number | null | undefined)[]): number | null {
+  const present = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return present.length ? present.reduce((total, value) => total + value, 0) : null;
+}
+
+function legLabel(market: PredictionMarket): string {
+  return market.subtitle?.trim() || market.title;
+}
+
+function classifyEventLegs(members: PredictionMarket[]): {
+  kind: PredictionEventGroupKind;
+  coverage: PredictionEventGroup["coverage"];
+  ordered: PredictionMarket[];
+} {
+  const bounds = members.map((market) => marketBucketBounds(market));
+  if (bounds.every((value): value is BucketBounds => value != null)) {
+    const keyed = members.map((market, index) => ({ market, bounds: bounds[index] as BucketBounds }));
+    keyed.sort((left, right) => left.bounds[0] - right.bounds[0] || left.bounds[1] - right.bounds[1]);
+    const distinct = new Set(keyed.map((item) => item.bounds.join(":"))).size === keyed.length;
+    // Rangos que se tocan (0-5 / 5-10) son excluyentes; "above 3" y "above 3.5" no.
+    const exclusive = keyed.every((item, index) => index === 0 || keyed[index - 1].bounds[1] <= item.bounds[0]);
+    if (distinct) {
+      const ordered = keyed.map((item) => item.market);
+      if (!exclusive) return { kind: "unverified", coverage: "unknown", ordered };
+      // Buckets enteros (20-24 / 25-29) dejan un hueco de 1; uno mayor es un bucket que falta en la vista.
+      const contiguous = keyed.every((item, index) => index === 0 || item.bounds[0] - keyed[index - 1].bounds[1] <= 1);
+      const first = keyed[0].bounds[0];
+      const last = keyed[keyed.length - 1].bounds[1];
+      const closedEnds = (first === -Infinity || first === 0) && last === Infinity;
+      return { kind: "buckets", coverage: contiguous && closedEnds ? "complete" : "partial", ordered };
+    }
+  }
+  const labels = members.map((market) => market.subtitle?.trim().toLowerCase() ?? "");
+  const ends = members.map(endMs).filter(Number.isFinite);
+  const sameResolution = ends.length === members.length && Math.max(...ends) - Math.min(...ends) <= CANDIDATE_RESOLUTION_DRIFT_MS;
+  if (labels.every(Boolean) && new Set(labels).size === labels.length && sameResolution) {
+    const ordered = [...members].sort((left, right) => (right.current_probability ?? -1) - (left.current_probability ?? -1));
+    return { kind: "candidates", coverage: "unknown", ordered };
+  }
+  const ordered = [...members].sort(
+    (left, right) => endMs(left) - endMs(right) || (right.current_probability ?? -1) - (left.current_probability ?? -1)
+  );
+  return { kind: "unverified", coverage: "unknown", ordered };
+}
+
+export function buildEventGroup(members: PredictionMarket[]): PredictionEventGroup {
+  const { kind, coverage, ordered } = classifyEventLegs(members);
+  const priced = ordered.filter((market) => market.current_probability != null);
+  const maxProbability = Math.max(0, ...priced.map((market) => market.current_probability as number));
+  let modeIndex = -1;
+  ordered.forEach((market, index) => {
+    const probability = market.current_probability;
+    if (probability != null && (modeIndex < 0 || probability > (ordered[modeIndex].current_probability ?? -1))) {
+      modeIndex = index;
+    }
+  });
+  const legs = ordered.map((market, index) => ({
+    market,
+    label: legLabel(market),
+    probability: market.current_probability,
+    share: maxProbability > 0 && market.current_probability != null ? market.current_probability / maxProbability : 0,
+    isMode: index === modeIndex
+  }));
+  const probabilitySum = sumOrNull(ordered.map((market) => market.current_probability));
+  const anchor = ordered[0];
+  const worst = ordered
+    .map((market) => market.freshness?.status ?? null)
+    .filter((status): status is string => Boolean(status))
+    .sort((left, right) => (FRESHNESS_RANK[right] ?? 1) - (FRESHNESS_RANK[left] ?? 1))[0] ?? null;
+  const soonest = [...ordered].sort((left, right) => endMs(left) - endMs(right))[0];
+  return {
+    key: `${anchor.venue}|${anchor.event_id}`,
+    eventId: anchor.event_id ?? anchor.market_id,
+    eventTitle: anchor.event_title?.trim() || anchor.title,
+    venue: anchor.venue,
+    kind,
+    coverage,
+    legs,
+    pricedLegs: priced.length,
+    probabilitySum,
+    overround:
+      kind === "buckets" && coverage === "complete" && priced.length === ordered.length && probabilitySum != null
+        ? probabilitySum - 1
+        : null,
+    mode: modeIndex >= 0 ? legs[modeIndex] : null,
+    volume24h: sumOrNull(ordered.map((market) => market.volume_24h)),
+    volume: sumOrNull(ordered.map((market) => market.volume)),
+    liquidity: sumOrNull(ordered.map((market) => market.liquidity)),
+    soonestEnd: soonest?.end_time ?? null,
+    worstFreshness: worst
+  };
+}
+
+/**
+ * Agrupa las filas del screener que comparten evento del venue. El grupo ocupa
+ * la posición de su primer miembro, así el ranking del screener se conserva;
+ * los contratos sin hermanos en la vista siguen como filas sueltas.
+ */
+export function groupScreenerMarkets(markets: PredictionMarket[]): PredictionScreenerEntry[] {
+  const eventKey = (market: PredictionMarket) => (market.event_id ? `${market.venue}|${market.event_id}` : null);
+  const members = new Map<string, PredictionMarket[]>();
+  for (const market of markets) {
+    const key = eventKey(market);
+    if (key) members.set(key, [...(members.get(key) ?? []), market]);
+  }
+  const entries: PredictionScreenerEntry[] = [];
+  const emitted = new Set<string>();
+  for (const market of markets) {
+    const key = eventKey(market);
+    const group = key ? members.get(key) : undefined;
+    if (!key || !group || group.length < 2) {
+      entries.push({ type: "market", key: market.market_id, market });
+      continue;
+    }
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    entries.push({ type: "group", key, group: buildEventGroup(group) });
+  }
+  return entries;
+}
+
+export function flatScreenerEntries(markets: PredictionMarket[]): PredictionScreenerEntry[] {
+  return markets.map((market) => ({ type: "market", key: market.market_id, market }));
+}
+
+export interface RelatedMarketSection {
+  id: "analog" | "same_event" | "same_series";
+  label: string;
+  groupTitle: string | null;
+  rows: RelatedPredictionMarket[];
+}
+
+const bySiblingOrder = (left: RelatedPredictionMarket, right: RelatedPredictionMarket) =>
+  (left.sibling_order ?? Number.MAX_SAFE_INTEGER) - (right.sibling_order ?? Number.MAX_SAFE_INTEGER);
+
+/**
+ * Secciones del panel RELATED: los análogos en el orden del backend y, aparte,
+ * los hermanos de evento (orden de bucket) y de serie (fecha de resolución).
+ */
+export function groupRelatedMarkets(rows: RelatedPredictionMarket[]): RelatedMarketSection[] {
+  const analogs = rows.filter((row) => !row.sibling_scope);
+  const sameEvent = rows.filter((row) => row.sibling_scope === "same_event").sort(bySiblingOrder);
+  const sameSeries = rows.filter((row) => row.sibling_scope === "same_series").sort(bySiblingOrder);
+  const sections: RelatedMarketSection[] = [
+    { id: "analog", label: "Analogs", groupTitle: null, rows: analogs },
+    { id: "same_event", label: "Same event", groupTitle: sameEvent[0]?.group_title ?? null, rows: sameEvent },
+    { id: "same_series", label: "Same series", groupTitle: sameSeries[0]?.group_title ?? null, rows: sameSeries }
+  ];
+  return sections.filter((section) => section.rows.length > 0);
 }

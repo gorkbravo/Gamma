@@ -512,6 +512,7 @@ class PredictionEventBookLegModel(BaseModel):
     resolution_source: str | None = None
     is_anchor: bool = False
     divergence_flags: list[str] = Field(default_factory=list)
+    ladder_flags: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, leg: PredictionEventBookLeg) -> "PredictionEventBookLegModel":
@@ -543,6 +544,8 @@ class PredictionEventBookResponseModel(BaseModel):
     favorite_market_id: str | None = None
     exclusivity_signal: str = "unverified"
     overround_is_meaningful: bool = False
+    ladder_kind: str | None = None
+    ladder_inversions: int = 0
     completeness: PredictionEventBookCompletenessModel | None = None
     warnings: list[str] = Field(default_factory=list)
     source_provider: str = ""
@@ -664,6 +667,13 @@ class RelatedMarketModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    # GUA-20261021-15: agrupación de hermanos (mismo evento / misma serie).
+    sibling_scope: str | None = None
+    sibling_order: int | None = None
+    sibling_label: str | None = None
+    group_id: str | None = None
+    group_title: str | None = None
+    end_time: datetime | None = None
 
     @classmethod
     def from_domain(cls, row: RelatedMarketRecord) -> "RelatedMarketModel":
@@ -673,6 +683,8 @@ class RelatedMarketModel(BaseModel):
 class RelatedMarketListResponseModel(BaseModel):
     market_id: str
     related: list[RelatedMarketModel] = Field(default_factory=list)
+    # Lo que no se pudo cargar (p. ej. la consulta de series del venue), en lugar de omitirlo.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CalibrationBucketModel(BaseModel):

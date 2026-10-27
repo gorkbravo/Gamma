@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import contextvars
 import json
 import math
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Protocol
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -98,6 +101,10 @@ class IbkrFutureRootConfig:
     label: str
     trading_class: str | None = None
     multiplier: str | None = None
+    # GUA-20261021-8: meses activos (códigos FGHJKMNQUVXZ) que forman la curva; None = todos los listados.
+    liquid_months: str | None = None
+    # Días antes del primer día del mes de entrega en que el contrato deja de ser el front; None = sin regla.
+    delivery_roll_days: int | None = None
 
 
 def _env_series_id(name: str, default: str) -> str:
@@ -208,9 +215,6 @@ FRED_PRICE_SERIES: tuple[FredPriceConfig, ...] = (
     FredPriceConfig("DCOILWTICO", "wti", "WTI Spot Proxy", "USD/bbl"),
     FredPriceConfig("DCOILBRENTEU", "brent", "Brent Spot Proxy", "USD/bbl"),
     FredPriceConfig("DHHNGSP", "henry_hub", "Henry Hub Spot Proxy", "USD/MMBtu"),
-    FredPriceConfig("GOLDAMGBD228NLBM", "gold", "Gold London AM Fix", "USD/oz"),
-    FredPriceConfig("SLVPRUSD", "silver", "Silver Price Proxy", "USD/oz"),
-    FredPriceConfig("PPLTUSDM", "platinum", "Platinum Price Proxy", "USD/oz"),
     FredPriceConfig("PCOPPUSDM", "copper", "Copper Price Proxy", "USD/metric ton"),
     FredPriceConfig("PALUMUSDM", "aluminum", "Aluminum Price Proxy", "USD/metric ton"),
     FredPriceConfig("PZINCUSDM", "zinc", "Zinc Price Proxy", "USD/metric ton"),
@@ -220,6 +224,38 @@ FRED_PRICE_SERIES: tuple[FredPriceConfig, ...] = (
     FredPriceConfig("PIORECRUSDM", "iron_ore", "Iron Ore Price Proxy", "USD/metric ton"),
     FredPriceConfig("PURANUSDM", "uranium", "Uranium Price Proxy", "USD/lb"),
 )
+
+# GUA-20261021-8: las series FRED de metales preciosos fallaban con HTTPError en cada refresco.
+# GOLDAMGBD228NLBM y SLVPRUSD eran precios LBMA que FRED dejó de publicar (no verificado en red en
+# esta revisión) y PPLTUSDM no es una serie FRED conocida. No hay sustituto FRED verificado, así que
+# el respaldo queda ausente de forma explícita; una serie verificada se puede activar por entorno.
+FRED_PRECIOUS_METAL_FALLBACKS: tuple[tuple[str, str, str, str], ...] = (
+    ("gold", "Gold", "COMMODITIES_FRED_GOLD_SERIES_ID", "GOLDAMGBD228NLBM"),
+    ("silver", "Silver", "COMMODITIES_FRED_SILVER_SERIES_ID", "SLVPRUSD"),
+    ("platinum", "Platinum", "COMMODITIES_FRED_PLATINUM_SERIES_ID", "PPLTUSDM"),
+)
+
+
+def _fred_price_series_configs() -> tuple[tuple[FredPriceConfig, ...], list[str]]:
+    """Series FRED activas más avisos por cada respaldo de metal precioso ausente."""
+    configs = list(FRED_PRICE_SERIES)
+    absent: list[tuple[str, str]] = []
+    for instrument_id, label, env_name, retired_id in FRED_PRECIOUS_METAL_FALLBACKS:
+        series_id = (os.getenv(env_name) or "").strip()
+        if series_id:
+            configs.append(FredPriceConfig(series_id, instrument_id, f"{label} FRED Price Proxy", "USD/oz"))
+        else:
+            absent.append((label, retired_id))
+    warnings = []
+    if absent:
+        labels = ", ".join(label for label, _ in absent)
+        retired = ", ".join(series_id for _, series_id in absent)
+        warnings.append(
+            f"No FRED fallback is configured for {labels}: {retired} failed with HTTPError in the 2026-10-21 audit "
+            "and are treated as discontinued, so these markets rely on IBKR futures only. "
+            "Set COMMODITIES_FRED_<METAL>_SERIES_ID to a verified FRED series to restore a fallback."
+        )
+    return tuple(configs), warnings
 
 EIA_PRICE_SERIES: tuple[EiaPriceConfig, ...] = (
     EiaPriceConfig(
@@ -242,15 +278,83 @@ IBKR_FUTURES_ROOTS: tuple[IbkrFutureRootConfig, ...] = (
     IbkrFutureRootConfig("henry_hub", "NG", "NYMEX", "USD", "USD/MMBtu", "Henry Hub Natural Gas", trading_class="NG"),
     IbkrFutureRootConfig("gasoline", "RB", "NYMEX", "USD", "USD/gal", "RBOB Gasoline", trading_class="RB"),
     IbkrFutureRootConfig("heating_oil", "HO", "NYMEX", "USD", "USD/gal", "Heating Oil / Diesel", trading_class="HO"),
-    IbkrFutureRootConfig("gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC"),
-    IbkrFutureRootConfig("silver", "SI", "COMEX", "USD", "USD/oz", "Silver", trading_class="SI"),
-    IbkrFutureRootConfig("platinum", "PL", "NYMEX", "USD", "USD/oz", "Platinum", trading_class="PL"),
-    IbkrFutureRootConfig("copper", "HG", "COMEX", "USD", "USD/lb", "Copper", trading_class="HG"),
-    IbkrFutureRootConfig("aluminum", "ALI", "COMEX", "USD", "USD/metric ton", "Aluminum", trading_class="ALI"),
-    IbkrFutureRootConfig("zinc", "ZS", "LME", "USD", "USD/metric ton", "Zinc", trading_class="ZS"),
+    # GUA-20261021-8: los metales saltan el mes de entrega (y los 5 días previos) y, donde el volumen se
+    # concentra en un calendario, usan solo sus meses activos. Oro: G/J/M/Q/Z (V está listado pero es
+    # fino); plata y cobre: H/K/N/U/Z; platino: F/J/N/V. Aluminio y zinc son mensuales.
+    IbkrFutureRootConfig(
+        "gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC", liquid_months="GJMQZ", delivery_roll_days=5
+    ),
+    IbkrFutureRootConfig(
+        "silver", "SI", "COMEX", "USD", "USD/oz", "Silver", trading_class="SI", liquid_months="HKNUZ", delivery_roll_days=5
+    ),
+    IbkrFutureRootConfig(
+        "platinum", "PL", "NYMEX", "USD", "USD/oz", "Platinum", trading_class="PL", liquid_months="FJNV", delivery_roll_days=5
+    ),
+    IbkrFutureRootConfig(
+        "copper", "HG", "COMEX", "USD", "USD/lb", "Copper", trading_class="HG", liquid_months="HKNUZ", delivery_roll_days=5
+    ),
+    IbkrFutureRootConfig(
+        "aluminum", "ALI", "COMEX", "USD", "USD/metric ton", "Aluminum", trading_class="ALI", delivery_roll_days=5
+    ),
+    IbkrFutureRootConfig("zinc", "ZS", "LME", "USD", "USD/metric ton", "Zinc", trading_class="ZS", delivery_roll_days=5),
 )
 
+# GUA-20261021-8: un descubrimiento de contratos fallido no se reintenta en cada refresco de la sesión.
+IBKR_DISCOVERY_FAILURE_RETRY_SECONDS = 600
+
+# Texto genérico de curvas no disponibles que solo vale si ninguna curva de futuros se cargó.
+_CURVE_UNAVAILABLE_BOILERPLATE_PREFIXES = (
+    "Futures curves are unavailable in this provider slice",
+    "Futures curves are still sample-derived in this provider slice",
+)
+_CURVE_UNAVAILABLE_CAVEAT_MARKERS = (
+    "futures curves remain unavailable unless a futures provider is added",
+    "futures curves remain sample unless a futures provider is added",
+)
+
+
+def _without_curve_unavailable_boilerplate(values: list[str]) -> list[str]:
+    """Quita los avisos de 'curvas no disponibles' cuando IBKR sí cargó curvas (hallazgo de texto obsoleto)."""
+    rows: list[str] = []
+    for value in values:
+        text = str(value or "")
+        if text.startswith(_CURVE_UNAVAILABLE_BOILERPLATE_PREFIXES):
+            continue
+        if any(marker in text for marker in _CURVE_UNAVAILABLE_CAVEAT_MARKERS):
+            # Conserva la parte sobre FRED y elimina la afirmación de curvas ausentes.
+            text = text.split(";", 1)[0].strip().rstrip(".") + "."
+        rows.append(text)
+    return rows
+
 MONTH_CODES = "FGHJKMNQUVXZ"
+
+
+# Peticiones simultáneas a EIA/FRED al construir la referencia de Commodities.
+EIA_REFERENCE_MAX_CONCURRENT_REQUESTS = 6
+
+
+def _run_concurrently(
+    jobs: list[Callable[[], Any]],
+    *,
+    max_workers: int,
+) -> list[tuple[Any, Exception | None]]:
+    """Ejecuta trabajos de E/S en paralelo y devuelve `(resultado, error)` en su orden.
+
+    Cada trabajo corre en una copia del contexto actual, así el registro de uso HTTP sigue
+    atribuyendo la llamada al proveedor que la hizo. Con un solo hilo corre en serie.
+    """
+
+    def guarded(job: Callable[[], Any]) -> tuple[Any, Exception | None]:
+        try:
+            return job(), None
+        except Exception as exc:  # noqa: BLE001 - cada fallo se convierte en un aviso
+            return None, exc
+
+    if max_workers <= 1 or len(jobs) <= 1:
+        return [guarded(job) for job in jobs]
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(jobs)), thread_name_prefix="commodities-ref") as pool:
+        futures = [pool.submit(contextvars.copy_context().run, guarded, job) for job in jobs]
+        return [future.result() for future in futures]
 
 
 def default_eia_fetcher(url: str, params: dict[str, Any] | None = None) -> Any:
@@ -348,6 +452,7 @@ class EiaCommoditiesDataProvider:
         fred_client: FredClient | None = None,
         fetch_json: JsonFetcher | None = None,
         cache_seconds: int = 21_600,
+        max_concurrent_requests: int = EIA_REFERENCE_MAX_CONCURRENT_REQUESTS,
     ) -> None:
         self.api_key = str(api_key or "").strip()
         self.cache = cache
@@ -355,6 +460,7 @@ class EiaCommoditiesDataProvider:
         self.fred_client = fred_client
         self.fetch_json = fetch_json or default_eia_fetcher
         self.cache_seconds = max(0, int(cache_seconds))
+        self.max_concurrent_requests = max(1, int(max_concurrent_requests))
 
     def get_snapshot(
         self,
@@ -377,15 +483,39 @@ class EiaCommoditiesDataProvider:
 
         retrieved_at = now_utc().replace(microsecond=0)
         warnings: list[str] = []
+        inventory_configs = [config for config in EIA_INVENTORY_SERIES if config.series_id]
+        price_configs = [config for config in EIA_PRICE_SERIES if config.series_id]
+        fred_configs: tuple[FredPriceConfig, ...] = ()
+        fred_absent_warnings: list[str] = []
+        if self.fred_client is not None:
+            fred_configs, fred_absent_warnings = _fred_price_series_configs()
+        # Cada serie es una petición HTTP independiente. En frío (caché de 6 h vencida) las ~25
+        # series tardaban ~22 s en serie y frenaban la sección Commodities del SITREP
+        # (verificación en vivo 2026-10-27); se piden en paralelo y se leen en el orden de antes.
+        jobs: list[Callable[[], Any]] = [
+            *(
+                (lambda config=config: self._fetch_eia_inventory_series(config, force_refresh=force_refresh))
+                for config in inventory_configs
+            ),
+            *(
+                (lambda config=config: self._fetch_eia_price_history(config, force_refresh=force_refresh))
+                for config in price_configs
+            ),
+            *(
+                (lambda config=config: self._fetch_fred_price_history(config, force_refresh=force_refresh))
+                for config in fred_configs
+            ),
+        ]
+        outcomes = _run_concurrently(jobs, max_workers=self.max_concurrent_requests)
+        inventory_outcomes = outcomes[: len(inventory_configs)]
+        price_outcomes = outcomes[len(inventory_configs) : len(inventory_configs) + len(price_configs)]
+        fred_outcomes = outcomes[len(inventory_configs) + len(price_configs) :]
+
         inventories = {series.metadata.series_id: series for series in reference.inventory_series}
         official_count = 0
-        for config in EIA_INVENTORY_SERIES:
-            if not config.series_id:
-                continue
-            try:
-                series = self._fetch_eia_inventory_series(config, force_refresh=force_refresh)
-            except Exception as exc:
-                warnings.append(f"EIA series {config.series_id} failed: {exc.__class__.__name__}.")
+        for config, (series, error) in zip(inventory_configs, inventory_outcomes):
+            if error is not None:
+                warnings.append(f"EIA series {config.series_id} failed: {error.__class__.__name__}.")
                 continue
             if series.points:
                 inventories[series.metadata.series_id] = series
@@ -393,13 +523,9 @@ class EiaCommoditiesDataProvider:
 
         price_histories = {history.instrument_id: history for history in reference.price_histories}
         eia_price_count = 0
-        for config in EIA_PRICE_SERIES:
-            if not config.series_id:
-                continue
-            try:
-                history = self._fetch_eia_price_history(config, force_refresh=force_refresh)
-            except Exception as exc:
-                warnings.append(f"EIA price series {config.series_id} failed: {exc.__class__.__name__}.")
+        for config, (history, error) in zip(price_configs, price_outcomes):
+            if error is not None:
+                warnings.append(f"EIA price series {config.series_id} failed: {error.__class__.__name__}.")
                 continue
             if history.points:
                 price_histories[history.instrument_id] = history
@@ -407,11 +533,10 @@ class EiaCommoditiesDataProvider:
 
         fred_count = 0
         if self.fred_client is not None:
-            for config in FRED_PRICE_SERIES:
-                try:
-                    history = self._fetch_fred_price_history(config, force_refresh=force_refresh)
-                except Exception as exc:
-                    warnings.append(f"FRED series {config.series_id} failed: {exc.__class__.__name__}.")
+            warnings.extend(fred_absent_warnings)
+            for config, (history, error) in zip(fred_configs, fred_outcomes):
+                if error is not None:
+                    warnings.append(f"FRED series {config.series_id} failed: {error.__class__.__name__}.")
                     continue
                 if history.points:
                     price_histories[history.instrument_id] = history
@@ -708,6 +833,7 @@ class IbkrCommoditiesDataProvider:
         quote_timeout_seconds: float = 4.0,
         contract_details_timeout_seconds: float = 12.0,
         quote_batch_size: int = 8,
+        discovery_failure_ttl_seconds: int | None = None,
     ) -> None:
         self.client = client
         self.market_data = market_data
@@ -743,6 +869,12 @@ class IbkrCommoditiesDataProvider:
         self.quote_timeout_seconds = max(0.5, float(quote_timeout_seconds or 4.0))
         self.contract_details_timeout_seconds = max(1.0, float(contract_details_timeout_seconds or 12.0))
         self.quote_batch_size = max(1, int(quote_batch_size or 1))
+        # GUA-20261021-8: caché negativa de sesión (en memoria) para descubrimientos de contratos fallidos.
+        default_failure_ttl = self.contract_cache_seconds or 21_600
+        self.discovery_failure_ttl_seconds = max(
+            0, int(default_failure_ttl if discovery_failure_ttl_seconds is None else discovery_failure_ttl_seconds)
+        )
+        self._discovery_failures: dict[str, tuple[float, str, datetime]] = {}
 
     def get_snapshot(
         self,
@@ -777,6 +909,8 @@ class IbkrCommoditiesDataProvider:
         priced_nodes = 0
         selected = _slug(selected_instrument_id or (self.startup_instrument_ids[0] if self.startup_instrument_ids else ""))
         target_ids = self._target_instrument_ids(selected)
+        pending_curves: list[tuple[IbkrFutureRootConfig, list[tuple[Contract, Any]]]] = []
+        replaced_references: dict[str, CommodityPriceHistory] = {}
 
         for instrument in reference.instruments:
             if instrument.instrument_id not in self.enabled_instrument_ids:
@@ -817,19 +951,30 @@ class IbkrCommoditiesDataProvider:
             warnings.extend(detail_warnings)
             if not contracts:
                 warnings.append(
-                    f"IBKR returned no active futures contracts for {config.label} ({config.symbol} {config.exchange}); keeping fallback curve."
+                    f"No active IBKR futures contracts are available for {config.label} ({config.symbol} {config.exchange}); keeping fallback curve."
                 )
                 continue
+            pending_curves.append((config, contracts))
 
-            quote_contracts = [contract for contract, _detail in contracts]
+        # Todas las cotizaciones en un solo lote: pedirlas raíz a raíz costaba ~0,9 s por
+        # instrumento aunque cada uno tuviera dos contratos (~11 s para diez raíces en la
+        # verificación en vivo 2026-10-27); el lote las agrupa en bloques de quote_batch_size.
+        quotes: dict[str, QuoteSnapshot] = {}
+        quote_failure: str | None = None
+        if pending_curves:
             try:
-                quotes, quote_warnings = self._fetch_quotes(quote_contracts)
+                quotes, quote_warnings = self._fetch_quotes(
+                    [contract for _config, contracts in pending_curves for contract, _detail in contracts]
+                )
+                warnings.extend(quote_warnings)
             except Exception as exc:
-                warnings.append(f"IBKR quote fetch failed for {config.label}: {exc.__class__.__name__}.")
-                continue
-            warnings.extend(quote_warnings)
+                quote_failure = exc.__class__.__name__
             delayed_nodes += sum(1 for snapshot in quotes.values() if snapshot.delayed)
 
+        for config, contracts in pending_curves:
+            if quote_failure is not None:
+                warnings.append(f"IBKR quote fetch failed for {config.label}: {quote_failure}.")
+                continue
             curve = self._build_curve(config, contracts, quotes, retrieved_at)
             curve_priced_nodes = sum(1 for node in curve.nodes if node.price is not None)
             priced_nodes += curve_priced_nodes
@@ -838,6 +983,9 @@ class IbkrCommoditiesDataProvider:
                 if self.history_days > 0 and curve.nodes and contracts:
                     history = self._fetch_front_history(config, contracts[0][0], retrieved_at)
                     if history.points:
+                        previous = history_by_id.get(config.instrument_id)
+                        if previous is not None and previous.source_provider != "ibkr":
+                            replaced_references[config.instrument_id] = previous
                         history_by_id[config.instrument_id] = history
                 curve = self._attach_dated_prior_reference(curve, history)
                 curve_by_id[config.instrument_id] = curve
@@ -882,7 +1030,7 @@ class IbkrCommoditiesDataProvider:
                     "Startup/warm IBKR curves are limited separately from the allowed commodities universe; non-selected roots use cached or fallback data.",
                     "Historical futures-curve context accumulates from Gamma's local daily snapshots; IBKR is not treated as a bulk curve-history warehouse.",
                     "EIA/FRED/sample fallback data may still supply fundamentals, events, or proxy price histories.",
-                    *reference.coverage.caveats,
+                    *_without_curve_unavailable_boilerplate(reference.coverage.caveats),
                     *warnings,
                 ]
             ),
@@ -909,9 +1057,11 @@ class IbkrCommoditiesDataProvider:
             curve_snapshots=list(curve_by_id.values()),
             inventory_series=reference.inventory_series,
             events=reference.events,
+            reference_price_histories=list(replaced_references.values()),
             warnings=_dedupe(
                 [
-                    *reference.warnings,
+                    # Con curvas IBKR cargadas, el aviso de "curvas no disponibles" de la referencia ya no es cierto.
+                    *_without_curve_unavailable_boilerplate(reference.warnings),
                     *warnings,
                     f"Fresh IBKR curves loaded for {len(ibkr_curve_ids)} commodity instruments with {priced_nodes} priced nodes.",
                     f"Cached IBKR curves reused for {len(cached_curve_ids)} commodity instruments." if cached_curve_ids else "",
@@ -1001,10 +1151,18 @@ class IbkrCommoditiesDataProvider:
         warnings: list[str] = []
         requested_depth = max(1, int(depth or self.contract_depth))
         cached = None if force_refresh else self._cached_contracts(config)
-        if cached and len(cached) >= requested_depth:
-            return cached[:requested_depth], [
-                f"Using cached IBKR contract discovery for {config.label}; no reqContractDetails request was made."
-            ]
+        if cached:
+            # La regla de entrega se reaplica: una lista en caché puede cruzar el inicio del mes de entrega.
+            cached, cached_notes = _select_active_contracts(config, cached, retrieved_at)
+            if len(cached) >= requested_depth:
+                return cached[:requested_depth], [
+                    *cached_notes,
+                    f"Using cached IBKR contract discovery for {config.label}; no reqContractDetails request was made.",
+                ]
+        failure = self._recent_discovery_failure(config)
+        if failure is not None:
+            # GUA-20261021-8: no se repite una petición que ya falló en esta sesión (ni con refresco forzado).
+            return [], [failure]
         seed = Contract(
             symbol=config.symbol,
             secType="FUT",
@@ -1019,6 +1177,12 @@ class IbkrCommoditiesDataProvider:
                 timeout=self.contract_details_timeout_seconds,
             ) or []
         except Exception as exc:
+            self._record_discovery_failure(
+                config,
+                f"{exc.__class__.__name__} during reqContractDetails",
+                retrieved_at,
+                ttl_seconds=min(self.discovery_failure_ttl_seconds, IBKR_DISCOVERY_FAILURE_RETRY_SECONDS),
+            )
             return [], [f"IBKR contract discovery failed for {config.label}: {exc.__class__.__name__}."]
 
         rows: list[tuple[Contract, Any, str, datetime | None]] = []
@@ -1041,22 +1205,70 @@ class IbkrCommoditiesDataProvider:
             seen.add(dedupe_key)
             rows.append((contract, detail, month_key, expiry))
 
+        if not rows:
+            # IBKR responde con error 200 "No security definition" y una lista vacía; se recuerda en la sesión.
+            self._record_discovery_failure(
+                config,
+                "no FUT contract definitions returned (IBKR error 200 'No security definition' or an empty chain)",
+                retrieved_at,
+                ttl_seconds=self.discovery_failure_ttl_seconds,
+            )
+            return [], [
+                f"IBKR returned no futures contract definitions for {config.label} ({config.symbol} {config.exchange}); "
+                "Gamma will not retry this root again this session until the negative cache expires."
+            ]
+        getattr(self, "_discovery_failures", {}).pop(config.instrument_id, None)
+
         rows.sort(key=lambda row: (row[2], row[3] or datetime.max))
+        active, selection_notes = _select_active_contracts(
+            config, [(contract, detail) for contract, detail, _month_key, _expiry in rows], retrieved_at
+        )
+        warnings.extend(selection_notes)
         cache_depth = max(requested_depth, self.contract_depth, self.breadth_contract_depth)
-        cached_selection = [(contract, detail) for contract, detail, _month_key, _expiry in rows[:cache_depth]]
+        cached_selection = active[:cache_depth]
         selected = cached_selection[:requested_depth]
-        if len(rows) > requested_depth:
+        if len(active) > requested_depth:
             warnings.append(
-                f"IBKR returned {len(rows)} active {config.label} contracts; Gamma kept the front {requested_depth} nodes."
+                f"IBKR returned {len(active)} active {config.label} contracts; Gamma kept the front {requested_depth} nodes."
             )
         if cached_selection:
             self._store_contracts(config, cached_selection)
         return selected, warnings
 
+    def _recent_discovery_failure(self, config: IbkrFutureRootConfig) -> str | None:
+        entry = getattr(self, "_discovery_failures", {}).get(config.instrument_id)
+        if entry is None:
+            return None
+        deadline, reason, failed_at = entry
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            self._discovery_failures.pop(config.instrument_id, None)
+            return None
+        return (
+            f"IBKR contract discovery for {config.label} ({config.symbol} {config.exchange}) failed earlier this session "
+            f"at {failed_at.replace(microsecond=0).isoformat()} ({reason}); Gamma is not retrying it for another "
+            f"{max(1, int(math.ceil(remaining / 60)))} min or until a backend restart."
+        )
+
+    def _record_discovery_failure(
+        self,
+        config: IbkrFutureRootConfig,
+        reason: str,
+        failed_at: datetime,
+        *,
+        ttl_seconds: int,
+    ) -> None:
+        if ttl_seconds <= 0:
+            return
+        if not hasattr(self, "_discovery_failures"):
+            self._discovery_failures = {}
+        self._discovery_failures[config.instrument_id] = (time.monotonic() + ttl_seconds, reason, failed_at)
+
     def _contract_cache_key(self, instrument_id: str) -> str:
         if self.cache is None:
             return ""
-        return self.cache.make_key("commodities", "ibkr", "contracts-v2", instrument_id)
+        # v3: la selección de meses activos/entrega de GUA-20261021-8 invalida listas anteriores.
+        return self.cache.make_key("commodities", "ibkr", "contracts-v3", instrument_id)
 
     def _cached_contracts(self, config: IbkrFutureRootConfig) -> list[tuple[Contract, Any]]:
         if self.cache is None or self.contract_cache_seconds <= 0:
@@ -1175,6 +1387,16 @@ class IbkrCommoditiesDataProvider:
                         "Node changes are not computed from Gamma's local curve-history cache."
                     ),
                 )
+            )
+        if config.liquid_months:
+            warnings.append(
+                f"{config.label} curve nodes use the active delivery months {', '.join(config.liquid_months)} only; "
+                "thin serial months are omitted."
+            )
+        if config.delivery_roll_days is not None:
+            warnings.append(
+                f"{config.label} front node skips contracts in their delivery month or within "
+                f"{config.delivery_roll_days} days of it."
             )
         return CommodityCurveSnapshot(
             instrument_id=config.instrument_id,
@@ -1812,9 +2034,93 @@ def _ibkr_root_configs_from_env() -> tuple[IbkrFutureRootConfig, ...]:
                 label=str(override.get("label") or config.label).strip(),
                 trading_class=str(override.get("trading_class") or config.trading_class or "").strip().upper() or None,
                 multiplier=str(override.get("multiplier") or config.multiplier or "").strip() or None,
+                liquid_months=_normalize_month_codes(override.get("liquid_months", config.liquid_months)),
+                delivery_roll_days=_optional_int(override.get("delivery_roll_days", config.delivery_roll_days)),
             )
         )
     return tuple(rows)
+
+
+def _normalize_month_codes(value: Any) -> str | None:
+    codes = "".join(char for char in str(value or "").upper() if char in MONTH_CODES)
+    return codes or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _select_active_contracts(
+    config: IbkrFutureRootConfig,
+    contracts: list[tuple[Contract, Any]],
+    retrieved_at: datetime,
+) -> tuple[list[tuple[Contract, Any]], list[str]]:
+    """GUA-20261021-8: quita meses en entrega y meses finos para que el front sea el contrato activo."""
+    notes: list[str] = []
+    selected = list(contracts)
+    if config.delivery_roll_days is not None:
+        cutoff = retrieved_at.date() + timedelta(days=config.delivery_roll_days)
+        kept: list[tuple[Contract, Any]] = []
+        skipped: list[str] = []
+        for contract, detail in selected:
+            month_start = _contract_month_start(contract, detail)
+            if month_start is not None and month_start <= cutoff:
+                skipped.append(_ibkr_contract_symbol(contract, config))
+            else:
+                kept.append((contract, detail))
+        if skipped and kept:
+            notes.append(
+                f"Skipped {config.label} {', '.join(skipped)}: in or within {config.delivery_roll_days} days of the "
+                "delivery month, so the front node is the next deliverable contract."
+            )
+            selected = kept
+        elif skipped:
+            notes.append(
+                f"Every listed {config.label} contract is in or near its delivery month; Gamma kept them rather than show no curve."
+            )
+    if config.liquid_months:
+        active = [row for row in selected if _contract_month_code(row[0], row[1]) in config.liquid_months]
+        thin = [_ibkr_contract_symbol(row[0], config) for row in selected if row not in active]
+        if len(active) >= 2:
+            if thin:
+                shown = ", ".join(thin[:6]) + (" ..." if len(thin) > 6 else "")
+                notes.append(
+                    f"{config.label} curve keeps the active months {', '.join(config.liquid_months)}; "
+                    f"skipped thin serial contract(s) {shown}."
+                )
+            selected = active
+        elif thin:
+            notes.append(
+                f"Fewer than two {config.label} contracts fall in the active months {', '.join(config.liquid_months)}; "
+                "Gamma kept every listed month."
+            )
+    return selected, notes
+
+
+def _contract_month_start(contract: Contract, detail: Any = None) -> date | None:
+    month_key = _ibkr_contract_month_key(contract, detail)
+    if len(month_key) != 6:
+        return None
+    try:
+        return date(int(month_key[:4]), int(month_key[4:6]), 1)
+    except ValueError:
+        return None
+
+
+def _contract_month_code(contract: Contract, detail: Any = None) -> str:
+    month_key = _ibkr_contract_month_key(contract, detail)
+    if len(month_key) != 6:
+        return ""
+    try:
+        month = int(month_key[4:6])
+    except ValueError:
+        return ""
+    return MONTH_CODES[month - 1] if 1 <= month <= 12 else ""
 
 
 def _parse_ibkr_root_overrides(raw: str | None) -> dict[str, dict[str, Any]]:

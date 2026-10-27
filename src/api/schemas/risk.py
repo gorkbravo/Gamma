@@ -100,6 +100,9 @@ class RiskStressEpisodeModel(BaseModel):
     start: str
     end: str
     description: str
+    # Tipo de episodio ("equity" | "commodity") y serie que fija la ventana (GUA-20261021-9).
+    kind: str = "equity"
+    anchor: str | None = None
     status: str
     book_return: float | None = None
     book_pnl: float | None = None
@@ -113,6 +116,8 @@ class RiskStressEpisodeModel(BaseModel):
     observation_count: int = 0
     legs: list[RiskStressLegModel] = Field(default_factory=list)
     note: str | None = None
+    # "net": reparto del resultado del libro; "gross": de Σ|P&L de las patas| (patas compensadas).
+    contribution_basis: str = "net"
 
 
 class RiskStressReplayResponseModel(BaseModel):
@@ -123,6 +128,9 @@ class RiskStressReplayResponseModel(BaseModel):
     lookback_days: int
     method: str
     warnings: list[str] = Field(default_factory=list)
+    history_start: str | None = None
+    history_end: str | None = None
+    coverage_summary: str | None = None
 
     @classmethod
     def from_domain(cls, result: RiskStressReplayResult) -> "RiskStressReplayResponseModel":
@@ -156,6 +164,8 @@ class RiskStressReplayResponseModel(BaseModel):
                     start=row.episode.start.isoformat(),
                     end=row.episode.end.isoformat(),
                     description=row.episode.description,
+                    kind=row.episode.kind,
+                    anchor=row.episode.anchor,
                     status=row.status,
                     book_return=_to_float(row.book_return),
                     book_pnl=_to_float(row.book_pnl),
@@ -169,6 +179,7 @@ class RiskStressReplayResponseModel(BaseModel):
                     observation_count=int(row.observation_count),
                     legs=legs,
                     note=row.note,
+                    contribution_basis=row.contribution_basis,
                 )
             )
         return cls(
@@ -179,6 +190,9 @@ class RiskStressReplayResponseModel(BaseModel):
             lookback_days=int(result.lookback_days),
             method=result.method,
             warnings=list(result.warnings),
+            history_start=iso(result.history_start),
+            history_end=iso(result.history_end),
+            coverage_summary=result.coverage_summary,
         )
 
 

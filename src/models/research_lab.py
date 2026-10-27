@@ -119,6 +119,9 @@ class StrategyLabCompositionRequest:
     overlays: list[GammaResearchObject] = field(default_factory=list)
     benchmark_object: GammaResearchObject | None = None
     min_observations: int = 5
+    # Sesiones (observaciones diarias de rendimiento) que analiza el libro; None = sin recorte
+    # (GUA-20261021-11).
+    lookback_days: int | None = None
 
 
 @dataclass(frozen=True)

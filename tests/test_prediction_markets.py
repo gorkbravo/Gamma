@@ -2782,6 +2782,254 @@ def test_event_book_route_returns_completeness(tmp_path):
         assert missing.status_code == 404
 
 
+# Escaleras acumulativas: plazos ("by <fecha>") y umbrales ("above X") anidados.
+PUTIN_EVENT = "Putin out as President of Russia by...?"
+PUTIN_TERMS = "Resolves yes if Vladimir Putin ceases to be President of Russia by the date in the market title."
+BTC_TERMS = "Resolves on the Binance BTC/USDT one minute candle close at noon Eastern on the listed date."
+
+
+def _ladder_market(
+    *,
+    key: str,
+    subtitle: str,
+    title: str,
+    probability: float,
+    end_time: datetime,
+    event_title: str,
+    terms: str,
+) -> PredictionMarketRecord:
+    base = _build_market(
+        market_id=f"polymarket:{key}",
+        venue="polymarket",
+        provider_market_id=key,
+        title=title,
+        event_title=event_title,
+        category="Politics",
+        current_probability=probability,
+        retrieved_at=datetime(2026, 10, 21, tzinfo=timezone.utc),
+    )
+    return replace(base, subtitle=subtitle, end_time=end_time, resolution_source=terms, description=terms)
+
+
+def _putin_rung(key: str, label: str, probability: float, end_time: datetime, *, title_cue: bool = True):
+    title = f"Putin out as President of Russia by {label}?" if title_cue else "Putin out as President of Russia?"
+    return _ladder_market(
+        key=key,
+        subtitle=label,
+        title=title,
+        probability=probability,
+        end_time=end_time,
+        event_title=PUTIN_EVENT,
+        terms=PUTIN_TERMS,
+    )
+
+
+def _putin_ladder(*, title_cue: bool = True) -> list[PredictionMarketRecord]:
+    # Datos del 2026-10-21: los tres primeros peldaños ya resolvieron a 0 y la
+    # suma (11.5 %) se pintaba como un libro completo con overround −88.5 %.
+    rungs = [
+        ("dec26", "December 31, 2026", 0.02, datetime(2027, 1, 1, 4, 59, tzinfo=timezone.utc)),
+        ("jul26", "July 31, 2026", 0.0, datetime(2026, 8, 1, 3, 59, tzinfo=timezone.utc)),
+        ("aug26", "August 31, 2026", 0.0, datetime(2026, 9, 1, 3, 59, tzinfo=timezone.utc)),
+        ("sep26", "September 30, 2026", 0.0, datetime(2026, 10, 1, 3, 59, tzinfo=timezone.utc)),
+        ("jun27", "June 30, 2027", 0.095, datetime(2027, 7, 1, 3, 59, tzinfo=timezone.utc)),
+    ]
+    return [
+        _putin_rung(key, label, probability, end_time, title_cue=title_cue)
+        for key, label, probability, end_time in rungs
+    ]
+
+
+@pytest.mark.parametrize("title_cue", [True, False], ids=["cue-in-each-title", "cue-in-event-title-only"])
+def test_event_book_reads_a_by_date_ladder_as_nested_deadlines_not_a_book(title_cue):
+    service, _ = _event_book_service(_putin_ladder(title_cue=title_cue))
+
+    book = service.get_event_book("polymarket:dec26")
+
+    assert book is not None
+    assert book.exclusivity_signal == "cumulative_ladder"
+    assert book.ladder_kind == "date"
+    # Nada de suma, overround ni favorito sobre plazos anidados.
+    assert book.probability_sum is None
+    assert book.implied_overround is None
+    assert book.overround_is_meaningful is False
+    assert book.favorite_market_id is None
+    assert [leg.subtitle for leg in book.legs] == [
+        "July 31, 2026",
+        "August 31, 2026",
+        "September 30, 2026",
+        "December 31, 2026",
+        "June 30, 2027",
+    ]
+    assert book.ladder_inversions == 0
+    assert all(not leg.ladder_flags for leg in book.legs)
+    # Vencer en fechas distintas es la estructura de la escalera, no una divergencia.
+    assert all(not leg.divergence_flags for leg in book.legs)
+    assert book.completeness.status == "complete"
+    assert "none are summed" in book.completeness.note
+    assert any("nested deadlines" in warning for warning in book.warnings)
+    assert not any("overround:" in warning for warning in book.warnings)
+
+
+def test_event_book_flags_a_later_deadline_quoted_below_an_earlier_one():
+    # `_build_market` cotiza cada leg a ±1 punto de su precio.
+    records = [
+        _putin_rung("dec26", "December 31, 2026", 0.05, datetime(2027, 1, 1, tzinfo=timezone.utc)),
+        _putin_rung("mar27", "March 31, 2027", 0.02, datetime(2027, 4, 1, tzinfo=timezone.utc)),
+        _putin_rung("jun27", "June 30, 2027", 0.09, datetime(2027, 7, 1, tzinfo=timezone.utc)),
+        _putin_rung("sep27", "September 30, 2027", 0.06, datetime(2027, 10, 1, tzinfo=timezone.utc)),
+        # Por debajo de junio en precio, pero dentro de su spread: no es una inversión.
+        _putin_rung("dec27", "December 31, 2027", 0.085, datetime(2028, 1, 1, tzinfo=timezone.utc)),
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:jun27")
+
+    assert book.ladder_kind == "date"
+    assert book.ladder_inversions == 2
+    flags = {leg.subtitle: leg.ladder_flags for leg in book.legs}
+    assert flags["December 31, 2026"] == [] and flags["June 30, 2027"] == []
+    assert flags["December 31, 2027"] == []
+    assert flags["March 31, 2027"] == [
+        "At 1.0%-3.0%, entirely below 4.0%-6.0% for the earlier deadline December 31, 2026; "
+        "a later deadline includes every earlier one."
+    ]
+    # La referencia es el peldaño anterior con el suelo más alto, no solo el inmediato.
+    assert "entirely below 8.0%-10.0% for the earlier deadline June 30, 2027" in flags["September 30, 2027"][0]
+    assert any("2 rung(s) break the ladder's monotonicity" in warning for warning in book.warnings)
+
+
+def test_event_book_does_not_flag_an_inversion_inside_the_quoted_spreads():
+    # Forma real del 2026-10-22: el último precio de 72,000 (99.8 %) queda por
+    # debajo del de 74,000 (99.9 %), pero ambos cotizan 99.9-100 %.
+    event = "Bitcoin above ___ on October 22?"
+    records = [
+        replace(
+            _btc_rung(f"btc{level}", f"{level},000", f"Will the price of Bitcoin be above ${level},000 on October 22?", p, event),
+            best_bid=0.999,
+            best_ask=1.0,
+        )
+        for level, p in ((72, 0.998), (74, 0.999), (76, 0.999))
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:btc72")
+
+    assert book.ladder_kind == "threshold"
+    assert book.ladder_inversions == 0
+    assert all(not leg.ladder_flags for leg in book.legs)
+
+
+def _btc_rung(key: str, subtitle: str, title: str, probability: float, event_title: str) -> PredictionMarketRecord:
+    return _ladder_market(
+        key=key,
+        subtitle=subtitle,
+        title=title,
+        probability=probability,
+        end_time=datetime(2026, 10, 22, 16, tzinfo=timezone.utc),
+        event_title=event_title,
+        terms=BTC_TERMS,
+    )
+
+
+def test_event_book_reads_above_thresholds_as_a_ladder_and_flags_an_inversion():
+    event = "Bitcoin above ___ on October 22?"
+    records = [
+        _btc_rung(f"btc{level}", f"{level},000", f"Will the price of Bitcoin be above ${level},000 on October 22?", p, event)
+        for level, p in ((76, 0.65), (72, 0.9), (74, 0.6))
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:btc72")
+
+    assert book.exclusivity_signal == "cumulative_ladder"
+    assert book.ladder_kind == "threshold"
+    assert book.probability_sum is None and book.implied_overround is None
+    assert [leg.subtitle for leg in book.legs] == ["72,000", "74,000", "76,000"]
+    assert book.ladder_inversions == 1
+    flagged = next(leg for leg in book.legs if leg.subtitle == "76,000")
+    assert flagged.ladder_flags == ["At 64.0%-66.0%, entirely above 59.0%-61.0% for 74,000, which includes this threshold."]
+    assert any("nested thresholds" in warning for warning in book.warnings)
+
+
+def test_event_book_reads_hit_levels_in_both_directions_as_a_ladder():
+    event = "What price will Bitcoin hit in 2026?"
+    records = [
+        _btc_rung("dip60", "↓ 60,000", "Will Bitcoin dip to $60,000 by December 31, 2026?", 0.3, event),
+        _btc_rung("hit95", "↑ 95,000", "Will Bitcoin reach $95,000 by December 31, 2026?", 0.2, event),
+        _btc_rung("hit85", "↑ 85,000", "Will Bitcoin reach $85,000 by December 31, 2026?", 0.45, event),
+    ]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:hit85")
+
+    # Mismo plazo en todos los legs: es una escalera de niveles, no de fechas.
+    assert book.ladder_kind == "threshold"
+    assert [leg.subtitle for leg in book.legs] == ["↓ 60,000", "↑ 85,000", "↑ 95,000"]
+    assert book.ladder_inversions == 0
+    assert book.probability_sum is None
+
+
+def _bucket_leg(index: int, label: str, probability: float) -> PredictionMarketRecord:
+    return _candidate_market(
+        index=index,
+        probability=probability,
+        subtitle=label,
+        end_time=datetime(2026, 10, 26, tzinfo=timezone.utc),
+        resolution_source="Resolves to the bucket containing the weekly transit count published by the tracker.",
+    )
+
+
+def test_event_book_keeps_the_book_check_for_mutually_exclusive_buckets():
+    records = [_bucket_leg(0, "<20", 0.4), _bucket_leg(1, "20-29", 0.35), _bucket_leg(2, "30+", 0.28)]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0")
+
+    assert book.exclusivity_signal == "venue_grouped_candidates"
+    assert book.ladder_kind is None
+    assert book.ladder_inversions == 0
+    assert book.overround_is_meaningful is True
+    assert book.probability_sum == pytest.approx(1.03)
+    assert book.implied_overround == pytest.approx(0.03)
+    assert book.favorite_market_id == "polymarket:race-0"
+    assert all(not leg.ladder_flags for leg in book.legs)
+
+
+def test_event_book_does_not_call_overlapping_buckets_exclusive():
+    records = [_bucket_leg(0, "20-30", 0.5), _bucket_leg(1, "25-35", 0.4), _bucket_leg(2, "40+", 0.1)]
+    service, _ = _event_book_service(records)
+
+    book = service.get_event_book("polymarket:race-0")
+
+    assert book.exclusivity_signal == "unverified"
+    assert book.ladder_kind is None
+    assert book.overround_is_meaningful is False
+    assert any("descriptive here, not an overround" in warning for warning in book.warnings)
+
+
+def test_event_book_route_serializes_the_ladder(tmp_path):
+    service, _ = _event_book_service(_putin_ladder())
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/prediction-markets/markets/polymarket:dec26/event-book")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["exclusivity_signal"] == "cumulative_ladder"
+        assert payload["ladder_kind"] == "date"
+        assert payload["ladder_inversions"] == 0
+        assert payload["probability_sum"] is None
+        assert payload["implied_overround"] is None
+        assert all(leg["ladder_flags"] == [] for leg in payload["legs"])
+
+
 # ── Calibration ──────────────────────────────────────────────────────────
 
 
@@ -3066,3 +3314,453 @@ def test_calibration_route_exposes_lead_times_and_rejects_unsupported_ones(tmp_p
 
         rejected = client.get("/prediction-markets/markets/polymarket:settled-0/calibration?lead=999")
         assert rejected.status_code == 422
+
+
+# ── Hermanos de evento y serie (GUA-20261021-15) ─────────────────────────
+
+_SIBLING_RETRIEVED_AT = datetime(2026, 10, 21, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _sibling_market(
+    provider_market_id: str,
+    title: str,
+    *,
+    probability: float,
+    end_time: datetime,
+    event_id: str,
+    event_title: str | None = None,
+    subtitle: str | None = None,
+    series_id: str = "hormuz-normal",
+    series_title: str = "Hormuz Traffic Returns to Normal",
+    venue: str = "polymarket",
+) -> PredictionMarketRecord:
+    base = _build_market(
+        market_id=f"{venue}:{provider_market_id}",
+        venue=venue,
+        provider_market_id=provider_market_id,
+        title=title,
+        event_title=event_title or title,
+        category="Geopolitics",
+        series_title=series_title,
+        current_probability=probability,
+        retrieved_at=_SIBLING_RETRIEVED_AT,
+    )
+    return replace(
+        base,
+        subtitle=subtitle,
+        end_time=end_time,
+        event_id=f"{venue}:event:{event_id}",
+        provider_event_id=event_id,
+        series_id=f"{venue}:series:{series_id}",
+        provider_series_id=series_id,
+    )
+
+
+class _SiblingAdapter(_EventBookAdapter):
+    """Venue con agrupación por evento y por serie, como Polymarket/Kalshi."""
+
+    def __init__(
+        self,
+        records: list[PredictionMarketRecord],
+        *,
+        provider: str = "polymarket",
+        series_error: Exception | None = None,
+    ) -> None:
+        super().__init__(records)
+        self.provider = provider
+        self.series_error = series_error
+        self.series_requests: list[str] = []
+
+    def list_event_markets(self, market: PredictionMarketRecord, *, limit: int = 12):
+        return [
+            row
+            for row in self.records
+            if row.market_id != market.market_id and row.provider_event_id == market.provider_event_id
+        ][:limit]
+
+    def list_series_markets(self, market: PredictionMarketRecord, *, limit: int = 120):
+        self.series_requests.append(market.provider_series_id or "")
+        if self.series_error is not None:
+            raise self.series_error
+        return [
+            row
+            for row in self.records
+            if row.market_id != market.market_id and row.provider_series_id == market.provider_series_id
+        ][:limit]
+
+
+def _hormuz_ladder() -> list[PredictionMarketRecord]:
+    title = "Strait of Hormuz traffic returns to normal by {}?"
+    return [
+        _sibling_market(
+            "2176270", title.format("December 31"), probability=0.11,
+            end_time=datetime(2026, 12, 31, tzinfo=timezone.utc), event_id="e-dec",
+        ),
+        # Orden del venue deliberadamente distinto del de resolución.
+        _sibling_market(
+            "2176269", title.format("November 30"), probability=0.05,
+            end_time=datetime(2026, 11, 30, tzinfo=timezone.utc), event_id="e-nov",
+        ),
+        _sibling_market(
+            "2176268", title.format("October 31"), probability=0.007,
+            end_time=datetime(2026, 10, 31, tzinfo=timezone.utc), event_id="e-oct",
+        ),
+        # Cajón de sastre del venue bajo la misma serie: sin solape léxico.
+        _sibling_market(
+            "catch-all", "Will Argentina dollarize by 2027?", probability=0.18,
+            end_time=datetime(2027, 6, 30, tzinfo=timezone.utc), event_id="e-arg",
+        ),
+        # Abierto pese a haber vencido: freshness rota, no se presenta como vigente.
+        _sibling_market(
+            "2176267", title.format("September 30"), probability=0.01,
+            end_time=datetime(2026, 9, 30, tzinfo=timezone.utc), event_id="e-sep",
+        ),
+    ]
+
+
+def test_related_links_same_series_siblings_in_resolution_order():
+    service = PredictionMarketService(adapters={"polymarket": _SiblingAdapter(_hormuz_ladder())})
+
+    related = service.get_related_markets("polymarket:2176270")
+
+    # Antes: "0 links", porque cada fecha es un evento propio del venue.
+    assert [row.market_id for row in related] == ["polymarket:2176268", "polymarket:2176269"]
+    assert {row.relationship for row in related} == {"same_series"}
+    assert [row.sibling_scope for row in related] == ["same_series", "same_series"]
+    assert [row.sibling_order for row in related] == [0, 1]
+    assert {row.group_title for row in related} == {"Hormuz Traffic Returns to Normal"}
+    assert related[0].end_time == datetime(2026, 10, 31, tzinfo=timezone.utc)
+    assert related[0].price_gap == pytest.approx(0.103)
+    assert "Hormuz Traffic Returns to Normal" in (related[0].note or "")
+    assert related[0].source_provider == "polymarket"
+    assert related[0].retrieved_at == _SIBLING_RETRIEVED_AT
+    assert related[0].transformation_note
+
+
+def test_related_keeps_cross_venue_analogs_ahead_of_series_siblings():
+    kalshi_analog = _sibling_market(
+        "KXHORMUZ-DEC", "Will Strait of Hormuz traffic return to normal by December 31?",
+        probability=0.14, end_time=datetime(2026, 12, 31, tzinfo=timezone.utc),
+        event_id="KXHORMUZ", series_id="KXHORMUZ", series_title="KXHORMUZ", venue="kalshi",
+    )
+    service = PredictionMarketService(
+        adapters={
+            "polymarket": _SiblingAdapter(_hormuz_ladder()),
+            "kalshi": _SiblingAdapter([kalshi_analog], provider="kalshi"),
+        }
+    )
+
+    related = service.get_related_markets("polymarket:2176270", limit=1)
+
+    assert related[0].market_id == "kalshi:KXHORMUZ-DEC"
+    assert related[0].relationship == "cross_venue_analog"
+    assert related[0].sibling_scope is None
+    assert [row.market_id for row in related[1:]] == ["polymarket:2176268", "polymarket:2176269"]
+
+
+def _weekly_bucket(
+    provider_market_id: str,
+    label: str,
+    wording: str,
+    probability: float,
+    *,
+    week: str,
+    event_id: str,
+    end_time: datetime,
+) -> PredictionMarketRecord:
+    return _sibling_market(
+        provider_market_id,
+        f"Will {wording} ships transit the Strait of Hormuz between {week}?",
+        probability=probability,
+        end_time=end_time,
+        event_id=event_id,
+        event_title=f"How many ships transit the Strait of Hormuz week of {week.split('-')[0]}?",
+        subtitle=label,
+        series_id="hormuz-weekly",
+        series_title="Hormuz Weekly Transits",
+    )
+
+
+def _weekly_book() -> list[PredictionMarketRecord]:
+    week_1, end_1 = "October 19-October 25", datetime(2026, 10, 26, tzinfo=timezone.utc)
+    week_2, end_2 = "October 26-November 1", datetime(2026, 11, 2, tzinfo=timezone.utc)
+    week_3, end_3 = "November 2-November 8", datetime(2026, 11, 9, tzinfo=timezone.utc)
+    return [
+        _weekly_bucket("wk1-25", "25-29", "25-29", 0.35, week=week_1, event_id="wk-1019", end_time=end_1),
+        # Orden del venue barajado: el resolver debe devolver orden de bucket.
+        _weekly_bucket("wk1-40", "40+", "40 or more", 0.03, week=week_1, event_id="wk-1019", end_time=end_1),
+        _weekly_bucket("wk1-lt20", "<20", "fewer than 20", 0.08, week=week_1, event_id="wk-1019", end_time=end_1),
+        _weekly_bucket("wk1-30", "30-34", "30-34", 0.22, week=week_1, event_id="wk-1019", end_time=end_1),
+        _weekly_bucket("wk1-20", "20-24", "20-24", 0.27, week=week_1, event_id="wk-1019", end_time=end_1),
+        _weekly_bucket("wk1-35", "35-39", "35-39", 0.05, week=week_1, event_id="wk-1019", end_time=end_1),
+        # Semana siguiente: tiene el mismo bucket que el contrato abierto.
+        _weekly_bucket("wk2-30", "30-34", "30-34", 0.40, week=week_2, event_id="wk-1026", end_time=end_2),
+        _weekly_bucket("wk2-25", "25-29", "25-29", 0.30, week=week_2, event_id="wk-1026", end_time=end_2),
+        # Tercera semana con buckets distintos: se enlaza su bucket más probable.
+        _weekly_bucket("wk3-15", "15-19", "15-19", 0.30, week=week_3, event_id="wk-1102", end_time=end_3),
+        _weekly_bucket("wk3-0", "0-14", "0-14", 0.60, week=week_3, event_id="wk-1102", end_time=end_3),
+    ]
+
+
+def test_related_orders_same_event_buckets_and_reduces_series_events_to_one_contract():
+    kalshi_analog = replace(
+        _weekly_bucket(
+            "KXHORMUZW-30", "<30", "fewer than 30", 0.62, week="October 19-October 25",
+            event_id="KXHORMUZW", end_time=datetime(2026, 10, 26, tzinfo=timezone.utc),
+        ),
+        market_id="kalshi:KXHORMUZW-30",
+        venue="kalshi",
+        source_provider="kalshi",
+        event_id="kalshi:event:KXHORMUZW",
+        series_id="kalshi:series:KXHORMUZW",
+        provider_series_id="KXHORMUZW",
+    )
+    service = PredictionMarketService(
+        adapters={
+            "polymarket": _SiblingAdapter(_weekly_book()),
+            "kalshi": _SiblingAdapter([kalshi_analog], provider="kalshi"),
+        }
+    )
+
+    related = service.get_related_markets("polymarket:wk1-25", limit=2)
+
+    # El bloque de análogos conserva su forma: el análogo entre venues va primero.
+    assert related[0].market_id == "kalshi:KXHORMUZW-30"
+    assert related[0].relationship == "cross_venue_analog"
+
+    same_event = sorted(
+        (row for row in related if row.sibling_scope == "same_event"),
+        key=lambda row: row.sibling_order,
+    )
+    assert [row.sibling_label for row in same_event] == ["<20", "20-24", "30-34", "35-39", "40+"]
+    assert [row.sibling_order for row in same_event] == [0, 1, 2, 3, 4]
+    assert {row.group_title for row in same_event} == {
+        "How many ships transit the Strait of Hormuz week of October 19?"
+    }
+    # Las filas de evento conservan su etiqueta analítica (umbral adyacente, etc.).
+    assert all(row.relationship != "same_series" for row in same_event)
+
+    same_series = [row for row in related if row.sibling_scope == "same_series"]
+    assert [row.market_id for row in same_series] == ["polymarket:wk2-25", "polymarket:wk3-0"]
+    assert "Same bucket (25-29)" in (same_series[0].note or "")
+    assert "Most likely bucket" in (same_series[1].note or "")
+    assert {row.group_title for row in same_series} == {"Hormuz Weekly Transits"}
+    # Ningún contrato aparece dos veces, ni el propio contrato abierto.
+    ids = [row.market_id for row in related]
+    assert len(ids) == len(set(ids))
+    assert "polymarket:wk1-25" not in ids
+
+
+def test_related_caps_event_siblings_outside_the_analog_block():
+    service = PredictionMarketService(adapters={"polymarket": _SiblingAdapter(_weekly_book())})
+
+    related = service.get_related_markets("polymarket:wk1-25", limit=1, sibling_limit=3, series_limit=0)
+
+    assert len([row for row in related if row.sibling_scope == "same_event"]) == 3
+    assert not any(row.sibling_scope == "same_series" for row in related)
+
+
+def test_related_survives_a_failed_series_lookup():
+    adapter = _SiblingAdapter(_weekly_book(), series_error=RuntimeError("series endpoint down"))
+    service = PredictionMarketService(adapters={"polymarket": adapter})
+
+    related = service.get_related_markets("polymarket:wk1-25")
+
+    assert adapter.series_requests == ["hormuz-weekly"]
+    assert len([row for row in related if row.sibling_scope == "same_event"]) == 5
+    assert not any(row.sibling_scope == "same_series" for row in related)
+
+    # Verificación en vivo 2026-10-27: el fallo ya no se omite en silencio.
+    result = service.get_related_markets_result("polymarket:wk1-25")
+    assert [row.market_id for row in result.rows] == [row.market_id for row in related]
+    assert len(result.warnings) == 1
+    assert "series lookup failed (RuntimeError)" in result.warnings[0]
+    assert "Same-series siblings from Polymarket series" in result.warnings[0]
+
+
+def test_related_route_reports_a_failed_series_lookup(tmp_path):
+    adapter = _SiblingAdapter(_weekly_book(), series_error=RuntimeError("series endpoint down"))
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = PredictionMarketService(adapters={"polymarket": adapter})
+
+    with TestClient(create_app(runtime)) as client:
+        payload = client.get("/prediction-markets/markets/polymarket:wk1-25/related").json()
+
+    assert payload["related"]
+    assert len(payload["warnings"]) == 1
+    assert "series lookup failed" in payload["warnings"][0]
+
+
+def test_related_route_serializes_sibling_grouping(tmp_path):
+    service = PredictionMarketService(adapters={"polymarket": _SiblingAdapter(_hormuz_ladder())})
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/prediction-markets/markets/polymarket:2176270/related")
+        assert response.status_code == 200
+        rows = response.json()["related"]
+        assert [row["market_id"] for row in rows] == ["polymarket:2176268", "polymarket:2176269"]
+        assert rows[0]["sibling_scope"] == "same_series"
+        assert rows[0]["sibling_order"] == 0
+        assert rows[0]["group_title"] == "Hormuz Traffic Returns to Normal"
+        assert rows[0]["group_id"] == "polymarket:series:hormuz-normal"
+        # Sin afirmar el formato exacto del instante (el sufijo de zona puede variar).
+        assert rows[0]["end_time"].startswith("2026-10-31")
+        assert rows[0]["source_provider"] == "polymarket"
+        assert rows[0]["retrieved_at"]
+        assert response.json()["warnings"] == []
+
+
+def _polymarket_series_raw_market(market_id: str, question: str, *, price: float, end_date: str) -> dict:
+    return {
+        "id": market_id,
+        "question": question,
+        "outcomes": '["Yes", "No"]',
+        "outcomePrices": f'["{price}", "{1 - price}"]',
+        "clobTokenIds": f'["{market_id}-yes", "{market_id}-no"]',
+        "active": True,
+        "closed": False,
+        "lastTradePrice": price,
+        "endDate": end_date,
+    }
+
+
+def _polymarket_series_anchor() -> PredictionMarketRecord:
+    return _sibling_market(
+        "m-dec", "Strait of Hormuz traffic returns to normal by December 31?", probability=0.11,
+        end_time=datetime(2026, 12, 31, tzinfo=timezone.utc), event_id="e-dec", series_id="s-1",
+    )
+
+
+def test_polymarket_series_markets_filter_by_series_and_drop_the_anchor(tmp_path):
+    calls: list[tuple[str, dict]] = []
+    series_stub = [{"id": "s-1", "title": "Hormuz Traffic Returns to Normal"}]
+
+    def fake_fetch(url: str, params: dict | None = None):
+        calls.append((url, dict(params or {})))
+        if url.endswith("/events"):
+            return [
+                {"id": "e-oct", "title": "Hormuz normal by October 31?", "series": series_stub, "markets": [
+                    _polymarket_series_raw_market(
+                        "m-oct", "Strait of Hormuz traffic returns to normal by October 31?",
+                        price=0.007, end_date="2026-10-31T00:00:00Z",
+                    ),
+                ]},
+                {"id": "e-dec", "title": "Hormuz normal by December 31?", "series": series_stub, "markets": [
+                    _polymarket_series_raw_market(
+                        "m-dec", "Strait of Hormuz traffic returns to normal by December 31?",
+                        price=0.11, end_date="2026-12-31T00:00:00Z",
+                    ),
+                ]},
+                # Si el venue ignorase el filtro, otra serie no debe colarse.
+                {"id": "e-other", "title": "Unrelated", "series": [{"id": "s-9", "title": "Other"}], "markets": [
+                    _polymarket_series_raw_market(
+                        "m-other", "Unrelated contract?", price=0.5, end_date="2026-11-01T00:00:00Z",
+                    ),
+                ]},
+            ]
+        return {}
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+
+    rows = adapter.list_series_markets(_polymarket_series_anchor())
+
+    assert [row.market_id for row in rows] == ["polymarket:m-oct"]
+    assert rows[0].series_id == "polymarket:series:s-1"
+    assert rows[0].series_title == "Hormuz Traffic Returns to Normal"
+    assert rows[0].event_id == "polymarket:event:e-oct"
+    assert rows[0].origin == "polymarket.gamma.series_events"
+    url, params = calls[0]
+    assert url.endswith("/events")
+    assert params["series_id"] == "s-1"
+    assert params["closed"] == "false"
+
+
+def test_polymarket_series_markets_fall_back_to_the_series_detail(tmp_path):
+    calls: list[str] = []
+
+    def fake_fetch(url: str, params: dict | None = None):
+        calls.append(url)
+        if url.endswith("/events"):
+            return []
+        if url.endswith("/series/s-1"):
+            return {
+                "id": "s-1",
+                "title": "Hormuz Traffic Returns to Normal",
+                "events": [
+                    {"id": "e-nov", "endDate": "2026-11-30T00:00:00Z", "closed": False},
+                    {"id": "e-old", "endDate": "2026-06-30T00:00:00Z", "closed": True},
+                ],
+            }
+        if url.endswith("/events/e-nov"):
+            return {"id": "e-nov", "title": "Hormuz normal by November 30?", "markets": [
+                _polymarket_series_raw_market(
+                    "m-nov", "Strait of Hormuz traffic returns to normal by November 30?",
+                    price=0.05, end_date="2026-11-30T00:00:00Z",
+                ),
+            ]}
+        return {}
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+
+    rows = adapter.list_series_markets(_polymarket_series_anchor())
+
+    assert [row.market_id for row in rows] == ["polymarket:m-nov"]
+    assert rows[0].series_title == "Hormuz Traffic Returns to Normal"
+    # Un evento cerrado no se pide cuando el contrato abierto está vigente.
+    assert not any(url.endswith("/events/e-old") for url in calls)
+
+
+def test_kalshi_series_markets_use_the_series_ticker_and_guard_other_series(tmp_path):
+    calls: list[tuple[str, dict]] = []
+
+    def fake_fetch(url: str, params: dict | None = None):
+        calls.append((url, dict(params or {})))
+        if url.endswith("/events"):
+            return {"events": [
+                {
+                    "event_ticker": "KXHORMUZ-26NOV", "series_ticker": "KXHORMUZ",
+                    "title": "Hormuz normal by Nov 30?", "category": "World",
+                    "markets": [{
+                        "ticker": "KXHORMUZ-26NOV-T60", "event_ticker": "KXHORMUZ-26NOV",
+                        "title": "Hormuz normal by Nov 30?", "status": "active",
+                        "last_price_dollars": "0.06", "expiration_time": "2026-11-30T00:00:00Z",
+                    }],
+                },
+                {
+                    "event_ticker": "KXOTHER-1", "series_ticker": "KXOTHER", "title": "Other",
+                    "markets": [{
+                        "ticker": "KXOTHER-1-A", "event_ticker": "KXOTHER-1",
+                        "status": "active", "last_price_dollars": "0.5",
+                    }],
+                },
+            ]}
+        return {}
+
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    anchor = _sibling_market(
+        "KXHORMUZ-26DEC-T60", "Hormuz normal by Dec 31?", probability=0.12,
+        end_time=datetime(2026, 12, 31, tzinfo=timezone.utc), event_id="KXHORMUZ-26DEC",
+        series_id="KXHORMUZ", series_title="KXHORMUZ", venue="kalshi",
+    )
+
+    rows = adapter.list_series_markets(anchor)
+
+    assert [row.market_id for row in rows] == ["kalshi:KXHORMUZ-26NOV-T60"]
+    assert rows[0].series_id == "kalshi:series:KXHORMUZ"
+    assert rows[0].event_id == "kalshi:event:KXHORMUZ-26NOV"
+    url, params = calls[0]
+    assert url.endswith("/events")
+    assert params["series_ticker"] == "KXHORMUZ"
+    assert params["with_nested_markets"] == "true"

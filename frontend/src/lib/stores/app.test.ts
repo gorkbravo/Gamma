@@ -2561,54 +2561,146 @@ describe("app store orchestration", () => {
     expect(get(copilotThreads).synthesis.entries[0]?.result.response_id).toBe("resp_synthesis_2");
   });
 
-  it("fans a /sitrep/workspace payload out into the per-domain stores", async () => {
+  it("loads each SITREP section in its own concurrent request and renders them as they arrive (GUA-20261021-12)", async () => {
     researchOverview.set(null);
     sitrepIndicesOverview.set(null);
     macroSnapshot.set(null);
     commoditiesWorkspace.set(null);
     predictionMarketScreener.set(null);
     newsFeed.set(null);
-    const workspace = {
+    sitrepWorkspaceMeta.set(null);
+    const sectionPayload = (section: string, overrides: Record<string, unknown> = {}) => ({
       equities_overview: null,
       indices_overview: null,
-      macro_snapshot: makeMacroSnapshot(),
+      macro_snapshot: null,
       commodities: null,
-      prediction_markets: { markets: [], venues: [], warnings: [] },
+      prediction_markets: null,
+      news: null,
+      sections: [section],
+      section_warnings: [],
+      source_provider: "gamma_sitrep",
+      retrieved_at: "2026-10-21T10:31:00Z",
+      origin: "sitrep_service.workspace",
+      transformation_note: null,
+      ...overrides
+    });
+    const newsPayload = sectionPayload("news", {
       news: {
         items: [],
-        source_provider: "sample_news",
-        retrieved_at: "2026-07-12T18:00:00Z",
+        source_provider: "rss",
+        retrieved_at: "2026-10-21T10:31:00Z",
         origin: "test",
-        freshness_label: "mocked",
+        freshness_label: "live",
         warnings: [],
         transformation_note: null
-      },
-      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
-      section_warnings: ["SITREP section 'commodities' failed to load: boom"],
-      source_provider: "gamma_sitrep",
-      retrieved_at: "2026-07-12T18:00:00Z",
-      origin: "sitrep_service.workspace",
-      transformation_note: null
-    };
-    const fetchMock = vi.fn().mockResolvedValue(ok(workspace));
+      }
+    });
+    const deferred = new Map<string, (value: unknown) => void>();
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      const section = new URL(String(url), "http://gamma.test").searchParams.get("sections") ?? "";
+      if (section === "commodities") return Promise.reject(new Error("network down"));
+      return new Promise((resolve) => deferred.set(section, resolve));
+    });
     vi.stubGlobal("fetch", fetchMock);
+
+    const pending = loadSitrepWorkspace();
+    await vi.waitFor(() => expect(deferred.size).toBe(5));
+
+    // Seis peticiones concurrentes, una por sección del contrato.
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    const requested = fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0]), "http://gamma.test").searchParams.get("sections")
+    );
+    expect(requested).toEqual(["equities", "indices", "macro", "commodities", "prediction_markets", "news"]);
+
+    // News llega primero y se pinta sin esperar al resto.
+    deferred.get("news")?.(ok(newsPayload));
+    await vi.waitFor(() => expect(get(newsFeed)?.source_provider).toBe("rss"));
+    expect(get(macroSnapshot)).toBeNull();
+    expect(get(sitrepWorkspaceMeta)?.sections).toEqual(["news"]);
+    expect(get(sitrepWorkspaceMeta)?.pending_sections).toEqual(["equities", "indices", "macro", "prediction_markets"]);
+
+    deferred.get("macro")?.(
+      ok(
+        sectionPayload("macro", {
+          macro_snapshot: makeMacroSnapshot(),
+          section_warnings: [],
+          retrieved_at: "2026-10-21T10:31:20Z"
+        })
+      )
+    );
+    deferred.get("prediction_markets")?.(
+      ok(sectionPayload("prediction_markets", { prediction_markets: { markets: [], venues: [], warnings: [] } }))
+    );
+    deferred.get("equities")?.(
+      ok(sectionPayload("equities", { section_warnings: ["SITREP section 'equities' failed to load: yfinance 429"] }))
+    );
+    deferred.get("indices")?.(ok(sectionPayload("indices")));
+
+    const result = await pending;
+
+    expect(get(macroSnapshot)).not.toBeNull();
+    expect(get(predictionMarketScreener)).not.toBeNull();
+    expect(get(researchOverview)).toBeNull();
+    expect(get(commoditiesWorkspace)).toBeNull();
+    expect(result?.source_provider).toBe("gamma_sitrep");
+    expect(result?.news?.source_provider).toBe("rss");
+    // Los fallos quedan aislados en su sección; el error global no se toca.
+    expect(get(lastError)).toBe("");
+    expect(get(sitrepWorkspaceMeta)).toEqual({
+      retrieved_at: "2026-10-21T10:31:20Z",
+      sections: ["equities", "indices", "macro", "prediction_markets", "news"],
+      section_warnings: [
+        "SITREP section 'commodities' failed to load: network down",
+        "SITREP section 'equities' failed to load: yfinance 429"
+      ],
+      pending_sections: []
+    });
+  });
+
+  it("serves a warm SITREP reload from the per-section cache without new requests", async () => {
+    sitrepWorkspaceMeta.set(null);
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      const section = new URL(String(url), "http://gamma.test").searchParams.get("sections") ?? "";
+      return Promise.resolve(
+        ok({
+          equities_overview: null,
+          indices_overview: null,
+          macro_snapshot: null,
+          commodities: null,
+          prediction_markets: null,
+          news: null,
+          sections: [section],
+          section_warnings: [],
+          source_provider: "gamma_sitrep",
+          retrieved_at: "2026-10-21T10:31:00Z",
+          origin: "sitrep_service.workspace",
+          transformation_note: null
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadSitrepWorkspace();
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    await loadSitrepWorkspace();
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+
+    await loadSitrepWorkspace({ sections: ["news"], forceRefresh: true });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(String(fetchMock.mock.calls[6]?.[0])).toContain("sections=news");
+    expect(String(fetchMock.mock.calls[6]?.[0])).toContain("force_refresh=true");
+  });
+
+  it("reports a SITREP load where every section failed as a global error", async () => {
+    sitrepWorkspaceMeta.set(null);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("backend down")));
 
     const result = await loadSitrepWorkspace();
 
-    expect(result?.source_provider).toBe("gamma_sitrep");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/sitrep/workspace");
-    expect(get(macroSnapshot)).not.toBeNull();
-    expect(get(newsFeed)?.source_provider).toBe("sample_news");
-    expect(get(predictionMarketScreener)).not.toBeNull();
-    expect(get(researchOverview)).toBeNull();
-    expect(get(sitrepIndicesOverview)).toBeNull();
-    expect(get(commoditiesWorkspace)).toBeNull();
-    expect(get(sitrepWorkspaceMeta)).toEqual({
-      retrieved_at: "2026-07-12T18:00:00Z",
-      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
-      section_warnings: ["SITREP section 'commodities' failed to load: boom"]
-    });
+    expect(result).toBeNull();
+    expect(get(lastError)).toContain("backend down");
+    expect(get(sitrepWorkspaceMeta)).toBeNull();
   });
 });
 

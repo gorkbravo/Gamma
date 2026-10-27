@@ -93,6 +93,11 @@ POLYMARKET_SETTLEMENT_EPSILON = 1e-3
 # The gamma `/markets` endpoint caps a page at 100 rows whatever limit is asked
 # for, so a deeper pull has to page (verified 2026-07-27).
 POLYMARKET_PAGE_SIZE = 100
+# GUA-20261021-15: eventos de una serie leídos para enlazar hermanos. La vía de
+# respaldo (detalle de serie) hace una petición por evento, así que va más acotada.
+POLYMARKET_SERIES_EVENT_LIMIT = 24
+POLYMARKET_SERIES_FALLBACK_EVENTS = 6
+KALSHI_SERIES_EVENT_LIMIT = 24
 POLYMARKET_MAX_INTERVAL_FIDELITY = 1440
 POLYMARKET_INTERVAL_COVERAGE_DAYS: tuple[tuple[str, float], ...] = (
     ("1h", 1 / 24),
@@ -818,6 +823,81 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             )
         return [record for record in records if record.market_id != market.market_id][:limit]
 
+    def list_series_markets(self, market: PredictionMarketRecord, *, limit: int = 120) -> list[PredictionMarketRecord]:
+        """Contratos de otros eventos de la misma serie del venue (GUA-20261021-15).
+
+        Un mismo tema con varias fechas ("by Oct 31 / Nov 30 / Dec 31") vive en
+        eventos distintos unidos solo por la serie, así que el endpoint de evento
+        no los ve. Capacidad opcional: el servicio la sondea con getattr.
+        """
+        series_id = market.provider_series_id
+        if not series_id:
+            return []
+        status_key = "open" if market.status == "open" else "all"
+        params: dict[str, Any] = {"series_id": series_id, "limit": POLYMARKET_SERIES_EVENT_LIMIT}
+        if status_key == "open":
+            params.update({"active": "true", "closed": "false"})
+        cache_key = self.cache.make_key("prediction_markets", self.provider, "series_events", series_id, status_key)
+        payload, retrieved_at = self._fetch_cached_json(cache_key, f"{self._gamma_base}/events", params)
+        events = payload if isinstance(payload, list) else []
+        records = self._series_event_records(events, series_id=series_id, retrieved_at=retrieved_at)
+        if not records:
+            # El filtro `series_id` de /events no está verificado en vivo; si no
+            # devuelve eventos de la serie se recurre al detalle de la serie.
+            records = self._series_detail_records(series_id, open_only=status_key == "open")
+        return [record for record in records if record.market_id != market.market_id][:limit]
+
+    def _series_event_records(
+        self,
+        events: list[Any],
+        *,
+        series_id: str,
+        retrieved_at: datetime,
+    ) -> list[PredictionMarketRecord]:
+        records: list[PredictionMarketRecord] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            # Guardia: si el venue ignora el filtro, un evento de otra serie no
+            # debe presentarse como hermano.
+            event_series = event.get("series") if isinstance(event.get("series"), list) else []
+            if series_id not in {str(row.get("id") or "").strip() for row in event_series if isinstance(row, dict)}:
+                continue
+            stub = self._search_event_stub(event)
+            for item in event.get("markets") or []:
+                if not isinstance(item, dict):
+                    continue
+                enriched = dict(item)
+                enriched["events"] = [stub]
+                records.append(
+                    self._normalize_market(enriched, retrieved_at=retrieved_at, origin="polymarket.gamma.series_events")
+                )
+        return records
+
+    def _series_detail_records(self, series_id: str, *, open_only: bool) -> list[PredictionMarketRecord]:
+        cache_key = self.cache.make_key("prediction_markets", self.provider, "series", series_id)
+        payload, _ = self._fetch_cached_json(cache_key, f"{self._gamma_base}/series/{series_id}")
+        if not isinstance(payload, dict):
+            return []
+        series_stub = {"id": payload.get("id") or series_id, "title": payload.get("title")}
+        stubs = [event for event in payload.get("events") or [] if isinstance(event, dict) and event.get("id")]
+        if open_only:
+            stubs = [event for event in stubs if str(event.get("closed")).strip().lower() != "true"]
+        # Acotado: un evento por petición, los más próximos a resolver primero.
+        stubs.sort(key=lambda event: str(event.get("endDate") or "9999"))
+        records: list[PredictionMarketRecord] = []
+        for stub in stubs[:POLYMARKET_SERIES_FALLBACK_EVENTS]:
+            event_id = str(stub.get("id")).strip()
+            event_key = self.cache.make_key("prediction_markets", self.provider, "event", event_id)
+            event_payload, event_retrieved_at = self._fetch_cached_json(event_key, f"{self._gamma_base}/events/{event_id}")
+            if not isinstance(event_payload, dict):
+                continue
+            event = dict(event_payload)
+            if not isinstance(event.get("series"), list) or not event.get("series"):
+                event["series"] = [series_stub]
+            records.extend(self._series_event_records([event], series_id=series_id, retrieved_at=event_retrieved_at))
+        return records
+
     def build_calibration_summary(self, *, sample_size: int = 30) -> CalibrationSummary:
         records = self.list_markets(status="closed", limit=max(sample_size * 2, 40))
         return self._build_calibration_summary(
@@ -1238,6 +1318,48 @@ class KalshiAdapter(BasePredictionMarketAdapter):
             )
             for item in raw_markets
         ]
+        return [record for record in records if record.market_id != market.market_id][:limit]
+
+    def list_series_markets(self, market: PredictionMarketRecord, *, limit: int = 120) -> list[PredictionMarketRecord]:
+        """Contratos de otros eventos de la misma serie de Kalshi (GUA-20261021-15)."""
+        series_ticker = market.provider_series_id
+        if not series_ticker:
+            return []
+        status_key = "open" if market.status == "open" else "all"
+        params: dict[str, Any] = {
+            "series_ticker": series_ticker,
+            "with_nested_markets": "true",
+            "limit": KALSHI_SERIES_EVENT_LIMIT,
+        }
+        if status_key == "open":
+            params["status"] = "open"
+        cache_key = self.cache.make_key("prediction_markets", self.provider, "series_events", series_ticker, status_key)
+        payload, retrieved_at = self._fetch_cached_json(cache_key, f"{self._trade_base}/events", params)
+        records: list[PredictionMarketRecord] = []
+        for event in (payload.get("events", []) if isinstance(payload, dict) else []):
+            if not isinstance(event, dict):
+                continue
+            # Guardia: un evento de otra serie no es hermano aunque llegue en la respuesta.
+            if str(event.get("series_ticker") or "").strip() != series_ticker:
+                continue
+            event_payload = {
+                "event": {
+                    "title": event.get("title"),
+                    "category": event.get("category"),
+                    "series_ticker": event.get("series_ticker"),
+                }
+            }
+            for item in event.get("markets") or []:
+                if not isinstance(item, dict):
+                    continue
+                records.append(
+                    self._normalize_market(
+                        item,
+                        retrieved_at=retrieved_at,
+                        origin="kalshi.series_events",
+                        event_payload=event_payload,
+                    )
+                )
         return [record for record in records if record.market_id != market.market_id][:limit]
 
     def build_calibration_summary(self, *, sample_size: int = 30) -> CalibrationSummary:

@@ -88,6 +88,125 @@ STRUCTURED_CARD_PARSE_ERRORS = {
     "OpenAI returned a non-JSON research card payload.",
 }
 
+# Presupuesto de salida del Research Agent (GUA-20261021-6). Una síntesis de cinco contextos
+# y cuatro partes se cortaba con el techo fijo de 1.400 tokens. El presupuesto escala con el
+# perfil, los contextos incluidos y las partes pedidas, y nunca supera el techo documentado
+# (la reserva mínima de 25.000 que recomienda la guía oficial de razonamiento). Es un techo:
+# solo se facturan los tokens generados.
+RESEARCH_CARD_OUTPUT_TOKENS_BY_PROFILE = {"quick": 2_000, "standard": 4_000, "deep": 8_000}
+RESEARCH_CARD_OUTPUT_TOKENS_PER_EXTRA_CONTEXT = 1_500
+RESEARCH_CARD_OUTPUT_TOKENS_PER_EXTRA_SECTION = 600
+MAX_RESEARCH_CARD_OUTPUT_TOKENS = 25_000
+MAX_REQUESTED_SECTIONS = 8
+OUTPUT_BUDGET_EXPANDED = "expanded"
+_SECTION_MARKER_PATTERN = re.compile(r"(?:^|[\s(])(?:\d{1,2}[.)]|[a-f]\))(?=\s)", re.MULTILINE)
+
+
+def requested_section_count(prompt: str | None) -> int:
+    """Partes que pide el usuario: marcadores numerados o preguntas (GUA-20261021-6)."""
+    text = str(prompt or "")
+    markers = len(_SECTION_MARKER_PATTERN.findall(text))
+    questions = text.count("?")
+    return max(1, min(MAX_REQUESTED_SECTIONS, max(markers, questions)))
+
+
+def expanded_output_budget(budget: int, ceiling: int = MAX_RESEARCH_CARD_OUTPUT_TOKENS) -> int:
+    """Presupuesto de la continuación automática o de Continue: al menos el doble, con techo."""
+    return min(ceiling, max(budget * 2, budget + 4_000))
+
+
+def research_card_output_budget(
+    request: CopilotResearchCardRequest,
+    context: CopilotContextBundle,
+    *,
+    configured_effort: str | None = None,
+) -> int:
+    """`max_output_tokens` de una tarjeta del Research Agent, dimensionado para la petición."""
+    profile = None
+    if request.model_resolution is not None:
+        profile = request.model_resolution.resolved_profile
+    if profile not in RESEARCH_CARD_OUTPUT_TOKENS_BY_PROFILE:
+        selected = str(request.selected_profile or "").strip().lower()
+        profile = selected if selected in RESEARCH_CARD_OUTPUT_TOKENS_BY_PROFILE else None
+    if profile is None:
+        effort = str(request.reasoning_effort or configured_effort or "").strip().lower()
+        profile = "quick" if effort in {"minimal", "low"} else "deep" if effort in {"high", "xhigh"} else "standard"
+    included_contexts = 1
+    if context.domain == "synthesis":
+        try:
+            included_contexts = max(1, int(context.summary_data.get("scope_size") or 1))
+        except (TypeError, ValueError):
+            included_contexts = 1
+    budget = (
+        RESEARCH_CARD_OUTPUT_TOKENS_BY_PROFILE[profile]
+        + (included_contexts - 1) * RESEARCH_CARD_OUTPUT_TOKENS_PER_EXTRA_CONTEXT
+        + (requested_section_count(request.prompt) - 1) * RESEARCH_CARD_OUTPUT_TOKENS_PER_EXTRA_SECTION
+    )
+    budget = min(MAX_RESEARCH_CARD_OUTPUT_TOKENS, budget)
+    if str(request.output_budget or "").strip().lower() == OUTPUT_BUDGET_EXPANDED:
+        budget = expanded_output_budget(budget)
+    return budget
+
+
+def salvage_partial_research_card(raw_text: str) -> ResearchCard | None:
+    """Recupera los campos completos de una tarjeta JSON cortada por max_output_tokens.
+
+    La guía de Structured Outputs avisa de que una respuesta incompleta puede no cumplir el
+    esquema; aquí se cierra el JSON truncado (cadena abierta, listas y objetos) y se conservan
+    solo los valores que llegaron. Nada se inventa: lo que falta queda vacío (GUA-20261021-6).
+    """
+    text = str(raw_text or "").strip()
+    start = text.find("{")
+    if start < 0:
+        return None
+    text = text[start:]
+    candidates: list[str] = []
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    boundaries: list[tuple[int, tuple[str, ...]]] = []
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if stack:
+                stack.pop()
+            boundaries.append((index + 1, tuple(stack)))
+        elif char == ",":
+            boundaries.append((index, tuple(stack)))
+    if in_string:
+        # Cortada dentro de una cadena: se cierra tal cual (un valor de texto a medias).
+        body = text[:-1] if escaped else text
+        candidates.append(body + '"' + "".join(reversed(stack)))
+    else:
+        candidates.append(text + "".join(reversed(stack)))
+    for position, open_stack in reversed(boundaries[-64:]):
+        candidates.append(text[:position] + "".join(reversed(open_stack)))
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate, strict=False)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        card = OpenAIResponsesCopilotProvider._card_from_payload(payload)
+        if any(
+            str(value or "").strip()
+            for value in (card.title, card.hypothesis, card.rationale, card.proposed_test)
+        ) or card.source_backed_claims or card.inferred_claims:
+            return card
+    return None
+
 
 @dataclass
 class OpenAIResponsesCopilotProvider(CopilotProvider):
@@ -236,6 +355,11 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
         usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
 
+        output_budget = research_card_output_budget(
+            request, context, configured_effort=self.reasoning_effort
+        )
+        budget_continued = False
+
         def with_usage(result: CopilotResearchCardResult) -> CopilotResearchCardResult:
             combined = self._merge_usage_records(usage, result.usage)
             return replace(
@@ -251,10 +375,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 reasoning_effort=reasoning_effort,
                 tool_specs=tool_specs,
                 tool_choice="auto",
-                max_output_tokens=1400,
+                max_output_tokens=output_budget,
                 prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2",
             )
-            if turn == 0 and request.previous_response_id and self._store_responses(request):
+            if (
+                (turn == 0 or (budget_continued and not tool_traces))
+                and request.previous_response_id
+                and self._store_responses(request)
+            ):
                 payload["previous_response_id"] = request.previous_response_id
 
             try:
@@ -279,6 +407,45 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 usage,
                 self._usage_from_response(response),
             )
+
+            if str(response.get("status") or "") == "incomplete":
+                # Misma política que la ruta con streaming (GUA-20261021-6).
+                reason = self._incomplete_reason(response)
+                if (
+                    reason == "max_output_tokens"
+                    and not budget_continued
+                    and output_budget < MAX_RESEARCH_CARD_OUTPUT_TOKENS
+                    and turn < 4
+                ):
+                    budget_continued = True
+                    previous_budget = output_budget
+                    output_budget = expanded_output_budget(output_budget)
+                    warnings.append(self._budget_continuation_notice(previous_budget, output_budget))
+                    input_items = [*input_items, self._build_budget_continuation_message()]
+                    continue
+                partial_card = (
+                    salvage_partial_research_card(self._response_output_text(response))
+                    if reason == "max_output_tokens"
+                    else None
+                )
+                return with_usage(CopilotResearchCardResult(
+                    domain=request.domain,
+                    current_tab=context.current_tab,
+                    status="incomplete",
+                    provider=self.provider_name,
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                    message=self._incomplete_message(
+                        reason,
+                        subject="response",
+                        output_budget=output_budget,
+                        partial=partial_card is not None,
+                    ),
+                    card=partial_card,
+                    sources=list(tool_sources.values()),
+                    tool_traces=tool_traces,
+                    warnings=warnings,
+                ))
 
             tool_calls = [item for item in response.get("output", []) if item.get("type") == "function_call"]
             if tool_calls:
@@ -327,6 +494,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                         tool_sources=tool_sources,
                         tool_traces=tool_traces,
                         warnings=warnings,
+                        output_budget=output_budget,
                     )
                     if retry_result is not None:
                         return with_usage(retry_result)
@@ -392,6 +560,10 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         warnings = list(context.warnings)
         reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
         usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
+        output_budget = research_card_output_budget(
+            request, context, configured_effort=self.reasoning_effort
+        )
+        budget_continued = False
 
         def build_result(
             *,
@@ -424,19 +596,32 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 reasoning_effort=reasoning_effort,
                 tool_specs=tool_specs,
                 tool_choice="auto",
-                max_output_tokens=1400,
+                max_output_tokens=output_budget,
                 prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2",
             )
             payload["stream"] = True
-            if turn == 0 and request.previous_response_id and self._store_responses(request):
+            # La continuación por presupuesto repite el primer intento, así que conserva la cadena.
+            if (
+                (turn == 0 or (budget_continued and not tool_traces))
+                and request.previous_response_id
+                and self._store_responses(request)
+            ):
                 payload["previous_response_id"] = request.previous_response_id
+
+            # Texto parcial de este intento: si OpenAI corta, se recupera lo que llegó.
+            streamed_text: list[str] = []
+
+            def emit_attempt(event_type: str, data: dict[str, Any]) -> None:
+                if event_type == "text.delta":
+                    streamed_text.append(str(data.get("delta") or ""))
+                emit(event_type, data)
 
             try:
                 usage = replace(
                     usage,
                     provider_calls=(usage.provider_calls or 0) + 1,
                 )
-                response, terminal = self._post_json_stream(payload, emit, should_cancel)
+                response, terminal = self._post_json_stream(payload, emit_attempt, should_cancel)
             except CopilotRunCancelled:
                 raise
             except RuntimeError as exc:
@@ -451,13 +636,48 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             )
 
             if terminal == "incomplete":
-                reason = str(
-                    (response.get("incomplete_details") or {}).get("reason") or "incomplete"
+                reason = self._incomplete_reason(response)
+                if (
+                    reason == "max_output_tokens"
+                    and not budget_continued
+                    and output_budget < MAX_RESEARCH_CARD_OUTPUT_TOKENS
+                    and turn < 4
+                ):
+                    # Continuación automática única (GUA-20261021-6): la salida JSON estricta no
+                    # se puede reanudar a medias, así que se repite la misma entrada con más tokens.
+                    budget_continued = True
+                    previous_budget = output_budget
+                    output_budget = expanded_output_budget(output_budget)
+                    notice = self._budget_continuation_notice(previous_budget, output_budget)
+                    warnings.append(notice)
+                    emit(
+                        "warning",
+                        {
+                            "message": notice,
+                            "continuation": "output_budget_expanded",
+                            "max_output_tokens": output_budget,
+                            "reset_provisional_text": True,
+                        },
+                    )
+                    input_items = [*input_items, self._build_budget_continuation_message()]
+                    continue
+                partial_card = (
+                    salvage_partial_research_card(
+                        self._response_output_text(response) or "".join(streamed_text)
+                    )
+                    if reason == "max_output_tokens"
+                    else None
                 )
                 emit("incomplete", {"reason": reason})
                 return build_result(
                     status="incomplete",
-                    message=f"OpenAI ended the response early: {reason}.",
+                    message=self._incomplete_message(
+                        reason,
+                        subject="response",
+                        output_budget=output_budget,
+                        partial=partial_card is not None,
+                    ),
+                    card=partial_card,
                     model=str(response.get("model") or self.model),
                     response_id=str(response.get("id") or "") or None,
                 )
@@ -519,6 +739,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                         tool_sources=tool_sources,
                         tool_traces=tool_traces,
                         warnings=warnings,
+                        output_budget=output_budget,
                     )
                     if retry_result is not None:
                         return replace(
@@ -652,6 +873,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 usage=replace(usage, tool_calls=len(tool_traces)),
             )
 
+        operator_output_budget = self._operator_max_output_tokens(plan)
+        operator_budget_continued = False
         for turn in range(max_model_turns):
             if should_cancel():
                 raise CopilotRunCancelled()
@@ -662,7 +885,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 reasoning_effort=reasoning_effort,
                 tool_specs=wire_specs,
                 tool_choice="auto",
-                max_output_tokens=self._operator_max_output_tokens(plan),
+                max_output_tokens=operator_output_budget,
                 prompt_cache_key="gamma-copilot:operator:closed-loop:v1",
                 instructions_override=instructions,
                 metadata_override={
@@ -698,14 +921,46 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             )
 
             if terminal == "incomplete":
-                reason = str(
-                    (response.get("incomplete_details") or {}).get("reason")
-                    or "incomplete"
+                reason = self._incomplete_reason(response)
+                if (
+                    reason == "max_output_tokens"
+                    and not operator_budget_continued
+                    and operator_output_budget < MAX_RESEARCH_CARD_OUTPUT_TOKENS
+                    and turn + 1 < max_model_turns
+                ):
+                    # Una continuación automática con más presupuesto (GUA-20261021-6); las
+                    # observaciones ya ejecutadas se reenvían tal cual y no se repite ninguna herramienta.
+                    operator_budget_continued = True
+                    previous_budget = operator_output_budget
+                    operator_output_budget = expanded_output_budget(operator_output_budget)
+                    notice = self._budget_continuation_notice(previous_budget, operator_output_budget)
+                    warnings.append(notice)
+                    emit(
+                        "warning",
+                        {
+                            "message": notice,
+                            "continuation": "output_budget_expanded",
+                            "max_output_tokens": operator_output_budget,
+                            "reset_provisional_text": True,
+                        },
+                    )
+                    input_items = [*input_items, self._build_budget_continuation_message()]
+                    continue
+                partial_card = (
+                    salvage_partial_research_card(self._response_output_text(response))
+                    if reason == "max_output_tokens"
+                    else None
                 )
                 emit("incomplete", {"reason": reason})
                 return build_result(
                     status="incomplete",
-                    message=f"OpenAI ended the Operator response early: {reason}.",
+                    message=self._incomplete_message(
+                        reason,
+                        subject="Operator response",
+                        output_budget=operator_output_budget,
+                        partial=partial_card is not None,
+                    ),
+                    card=partial_card,
                     model=str(response.get("model") or self.model),
                     response_id=str(response.get("id") or "") or None,
                 )
@@ -1237,6 +1492,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         tool_sources: dict[str, CopilotSourceRef],
         tool_traces: list[CopilotToolTrace],
         warnings: list[str],
+        output_budget: int = 1_200,
     ) -> CopilotResearchCardResult | None:
         retry_payload = self._build_response_payload(
             request=request,
@@ -1245,7 +1501,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             reasoning_effort=reasoning_effort,
             tool_specs=[],
             tool_choice=None,
-            max_output_tokens=1200,
+            # Mismo presupuesto que el intento original (GUA-20261021-6), no un techo menor.
+            max_output_tokens=output_budget,
             prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2:structured-retry",
         )
         try:
@@ -1326,6 +1583,31 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
     @staticmethod
     def _is_structured_card_parse_error(message: str) -> bool:
         return message in STRUCTURED_CARD_PARSE_ERRORS
+
+    @staticmethod
+    def _budget_continuation_notice(previous_budget: int, next_budget: int) -> str:
+        return (
+            f"OpenAI stopped at the {previous_budget:,}-token output budget (reasoning included); "
+            f"Gamma retried the same request once with {next_budget:,} tokens."
+        )
+
+    @staticmethod
+    def _build_budget_continuation_message() -> dict[str, Any]:
+        # Nota de Gamma, no del usuario: el intento anterior se agotó antes de cerrar la tarjeta.
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": (
+                        "Gamma note: the previous attempt ran out of output tokens before the research "
+                        "card was complete. Answer every requested part, keep each field concise, and "
+                        "prefer short items or compact Markdown tables. Use only the supplied Gamma "
+                        "context, source ids, tool outputs, and warnings."
+                    ),
+                }
+            ],
+        }
 
     @staticmethod
     def _build_structured_retry_message(parse_error: str) -> dict[str, Any]:
@@ -1627,24 +1909,73 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             payload = json.loads(raw_text)
         except json.JSONDecodeError as exc:
             raise RuntimeError("OpenAI returned a non-JSON research card payload.") from exc
+        return OpenAIResponsesCopilotProvider._card_from_payload(payload)
+
+    @staticmethod
+    def _card_from_payload(payload: dict[str, Any]) -> ResearchCard:
+        def text_list(key: str) -> list[str]:
+            items = payload.get(key)
+            return [str(item) for item in items if str(item or "").strip()] if isinstance(items, list) else []
+
+        claims = payload.get("source_backed_claims")
         return ResearchCard(
             title=str(payload.get("title") or ""),
             hypothesis=str(payload.get("hypothesis") or ""),
             rationale=str(payload.get("rationale") or ""),
-            required_data=[str(item) for item in payload.get("required_data", [])],
+            required_data=text_list("required_data"),
             proposed_test=str(payload.get("proposed_test") or ""),
-            confounders=[str(item) for item in payload.get("confounders", [])],
-            next_steps=[str(item) for item in payload.get("next_steps", [])],
-            caveats=[str(item) for item in payload.get("caveats", [])],
+            confounders=text_list("confounders"),
+            next_steps=text_list("next_steps"),
+            caveats=text_list("caveats"),
             source_backed_claims=[
                 ResearchClaim(
                     claim=str(item.get("claim") or ""),
-                    evidence_refs=[str(ref) for ref in item.get("evidence_refs", [])],
+                    evidence_refs=[
+                        str(ref)
+                        for ref in (item.get("evidence_refs") if isinstance(item.get("evidence_refs"), list) else [])
+                    ],
                 )
-                for item in payload.get("source_backed_claims", [])
-                if isinstance(item, dict)
+                for item in (claims if isinstance(claims, list) else [])
+                if isinstance(item, dict) and str(item.get("claim") or "").strip()
             ],
-            inferred_claims=[str(item) for item in payload.get("inferred_claims", [])],
+            inferred_claims=text_list("inferred_claims"),
+        )
+
+    @staticmethod
+    def _response_output_text(response: dict[str, Any]) -> str:
+        chunks: list[str] = []
+        for item in response.get("output", []) or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for content in item.get("content", []) or []:
+                if isinstance(content, dict) and content.get("type") == "output_text":
+                    chunks.append(str(content.get("text") or ""))
+        return "".join(chunks)
+
+    @staticmethod
+    def _incomplete_reason(response: dict[str, Any]) -> str:
+        return str((response.get("incomplete_details") or {}).get("reason") or "incomplete")
+
+    @staticmethod
+    def _incomplete_message(
+        reason: str,
+        *,
+        subject: str,
+        output_budget: int,
+        partial: bool,
+    ) -> str:
+        message = f"OpenAI ended the {subject} early: {reason}."
+        if reason != "max_output_tokens":
+            return message
+        budget_note = f" The output budget was {output_budget:,} tokens, reasoning included."
+        if partial:
+            return (
+                f"{message}{budget_note} The card shows the partial answer received before the cut-off; "
+                "later sections are missing. Continue reruns the same request with a larger budget."
+            )
+        return (
+            f"{message}{budget_note} No answer text arrived before the cut-off. "
+            "Continue reruns the same request with a larger budget."
         )
 
     @staticmethod

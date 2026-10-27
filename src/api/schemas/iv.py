@@ -291,6 +291,8 @@ class IVSurfaceResponseModel(BaseModel):
     expiry_analytics: list[IVExpiryAnalyticsModel] = Field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsModel | None = None
     underlying_historical_volatility: float | None = None
+    # GUA-20261021-10: "regular" / "closed" al tomar la foto; None si se desconoce (mock, capturas antiguas).
+    market_session: str | None = None
 
     @classmethod
     def from_service_result(cls, symbol: str, result: IVSurfaceResult) -> "IVSurfaceResponseModel":
@@ -310,6 +312,8 @@ class IVSurfaceResponseModel(BaseModel):
             )
         snapshot = result.snapshot
         surface_model = IVSurfaceModelMetadataModel.from_domain(snapshot.surface_model)
+        # GUA-20261021-10: los avisos de sesión y de paridad van primero y sin duplicados.
+        warnings = list(dict.fromkeys([*getattr(snapshot, "quote_warnings", []), *result.warnings]))
         return cls(
             symbol=snapshot.symbol,
             timestamp=snapshot.timestamp,
@@ -322,7 +326,7 @@ class IVSurfaceResponseModel(BaseModel):
             cell_sources=[[str(value) for value in row] for row in snapshot.cell_sources],
             delayed=bool(snapshot.delayed),
             points=int(snapshot.points),
-            warnings=list(result.warnings),
+            warnings=warnings,
             messages=list(result.messages),
             source_provider=snapshot.source_provider,
             origin=snapshot.origin,
@@ -340,6 +344,7 @@ class IVSurfaceResponseModel(BaseModel):
             expiry_analytics=[IVExpiryAnalyticsModel.from_domain(item) for item in snapshot.expiry_analytics],
             pricing_assumptions=IVPricingAssumptionsModel.from_domain(snapshot.pricing_assumptions),
             underlying_historical_volatility=snapshot.underlying_historical_volatility,
+            market_session=getattr(snapshot, "market_session", None),
         )
 
 

@@ -13,6 +13,9 @@ class ProviderUsageCall:
     duration_ms: float
     recorded_at: datetime
     message: str | None = None
+    # "provider": llamada en la frontera de un adaptador; "http": petición saliente
+    # registrada en la capa urllib (GUA-20260903-10).
+    kind: str = "provider"
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,8 @@ class ProviderUsageSummary:
     last_error: str | None = None
     last_called_at: datetime | None = None
     endpoints: list[str] = field(default_factory=list)
+    # Peticiones HTTP salientes incluidas en call_count (GUA-20260903-10).
+    http_request_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -62,8 +67,14 @@ class ProviderUsageSnapshot:
     health: list[ProviderUsageHealth] = field(default_factory=list)
     recent_calls: list[ProviderUsageCall] = field(default_factory=list)
     total_calls: int = 0
+    # total_calls es la ventana retenida (las filas suman exactamente eso); lifetime_calls
+    # cuenta todo lo registrado desde el arranque y retained_limit es el tamaño de la
+    # ventana (GUA-20260903-10).
+    lifetime_calls: int = 0
+    retained_limit: int = 0
     source_provider: str = "gamma"
     origin: str = "provider_usage_ledger.snapshot"
     transformation_note: str | None = (
-        "In-memory provider usage diagnostics collected from Gamma provider boundaries since backend startup."
+        "In-memory provider usage diagnostics collected from Gamma provider boundaries and outbound "
+        "urllib HTTP requests since backend startup. Provider rows sum to total_calls, the retained window."
     )

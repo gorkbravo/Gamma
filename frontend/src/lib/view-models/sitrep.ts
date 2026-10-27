@@ -1,4 +1,5 @@
-import type { CommodityMode, MacroMode, TabId } from "../api/types";
+import { parseApiInstant } from "../time";
+import type { CommodityMode, MacroMode, SitrepWorkspaceResponse, TabId } from "../api/types";
 
 export type SitrepMarketHandoffProfile =
   | "default"
@@ -111,11 +112,133 @@ export function resolveSitrepTapeHandoff(row: SitrepTapeHandoffRow): SitrepHando
   return row.handoff ?? null;
 }
 
-/** Aggregate metadata from the single /sitrep/workspace load (section list + degradation warnings). */
+/**
+ * Metadatos agregados de /sitrep/workspace (secciones + avisos de degradación). Desde
+ * GUA-20261021-12 cada sección es una petición concurrente y esto se combina sección a
+ * sección según responde cada proveedor.
+ */
 export interface SitrepWorkspaceMeta {
   retrieved_at: string;
+  /** Secciones que ya han respondido (con datos o con una degradación del backend). */
   sections: string[];
   section_warnings: string[];
+  /** Secciones aún en vuelo durante la carga progresiva (GUA-20261021-12). */
+  pending_sections?: string[];
+}
+
+/** Ids de sección del contrato, en el orden de SITREP_SECTIONS (src/application/sitrep_service.py). */
+export const SITREP_WORKSPACE_SECTIONS = [
+  "equities",
+  "indices",
+  "macro",
+  "commodities",
+  "prediction_markets",
+  "news",
+] as const;
+
+export type SitrepWorkspaceSection = (typeof SITREP_WORKSPACE_SECTIONS)[number];
+
+const SITREP_SECTION_FIELDS: Record<SitrepWorkspaceSection, keyof SitrepWorkspaceResponse> = {
+  equities: "equities_overview",
+  indices: "indices_overview",
+  macro: "macro_snapshot",
+  commodities: "commodities",
+  prediction_markets: "prediction_markets",
+  news: "news",
+};
+
+/** Secciones conocidas en orden de contrato; vacío o solo desconocidas equivale a todas. */
+export function normalizeSitrepWorkspaceSections(sections?: readonly string[] | null): SitrepWorkspaceSection[] {
+  const requested = new Set((sections ?? []).map((section) => section.trim().toLowerCase()));
+  const known = SITREP_WORKSPACE_SECTIONS.filter((section) => requested.has(section));
+  return known.length ? known : [...SITREP_WORKSPACE_SECTIONS];
+}
+
+/** Mismo texto que el aviso de degradación por sección del backend. */
+export function sitrepSectionFailureWarning(section: string, message: string): string {
+  return `SITREP section '${section}' failed to load: ${message}`;
+}
+
+function warningBelongsToSection(warning: string, section: string): boolean {
+  return warning.startsWith(`SITREP section '${section}'`);
+}
+
+/** True si la última carga de la sección falló (aviso del backend o error HTTP). */
+export function sitrepSectionFailed(meta: SitrepWorkspaceMeta | null | undefined, section: string): boolean {
+  return Boolean(meta?.section_warnings.some((warning) => warningBelongsToSection(warning, section)));
+}
+
+export interface SitrepSectionOutcome {
+  section: SitrepWorkspaceSection;
+  response?: SitrepWorkspaceResponse | null;
+  /** Fallo de transporte de esta sección; las demás no se ven afectadas. */
+  error?: string | null;
+}
+
+function latestTimestamp(left: string | null | undefined, right: string | null | undefined): string | null {
+  const leftMillis = parseApiInstant(left);
+  const rightMillis = parseApiInstant(right);
+  if (!Number.isFinite(rightMillis)) return Number.isFinite(leftMillis) ? left ?? null : right ?? left ?? null;
+  if (!Number.isFinite(leftMillis)) return right ?? null;
+  return rightMillis >= leftMillis ? right ?? null : left ?? null;
+}
+
+/**
+ * Incorpora la respuesta de una sección: sustituye sus avisos anteriores y conserva los de
+ * las demás, así un proveedor que falla queda aislado en su fila (GUA-20261021-12).
+ */
+export function mergeSitrepSectionMeta(
+  previous: SitrepWorkspaceMeta | null,
+  outcome: SitrepSectionOutcome,
+  pendingSections: readonly string[] = []
+): SitrepWorkspaceMeta {
+  const { section } = outcome;
+  const response = outcome.response ?? null;
+  const warnings = (previous?.section_warnings ?? []).filter((warning) => !warningBelongsToSection(warning, section));
+  if (response) {
+    warnings.push(...response.section_warnings.filter((warning) => warningBelongsToSection(warning, section)));
+  }
+  if (outcome.error) {
+    warnings.push(sitrepSectionFailureWarning(section, outcome.error));
+  }
+  const answered = new Set((previous?.sections ?? []).filter((item) => item !== section));
+  if (response) answered.add(section);
+  return {
+    retrieved_at:
+      latestTimestamp(previous?.retrieved_at, response?.retrieved_at) ?? previous?.retrieved_at ?? new Date().toISOString(),
+    sections: SITREP_WORKSPACE_SECTIONS.filter((item) => answered.has(item)),
+    section_warnings: warnings,
+    pending_sections: SITREP_WORKSPACE_SECTIONS.filter((item) => pendingSections.includes(item)),
+  };
+}
+
+/** Recompone el payload agregado a partir de las respuestas por sección (null si ninguna respondió). */
+export function composeSitrepWorkspace(
+  responses: Partial<Record<SitrepWorkspaceSection, SitrepWorkspaceResponse>>,
+  meta: SitrepWorkspaceMeta | null
+): SitrepWorkspaceResponse | null {
+  const answered = SITREP_WORKSPACE_SECTIONS.filter((section) => responses[section]);
+  if (!answered.length) return null;
+  const first = responses[answered[0]] as SitrepWorkspaceResponse;
+  const composed: SitrepWorkspaceResponse = {
+    equities_overview: null,
+    indices_overview: null,
+    macro_snapshot: null,
+    commodities: null,
+    prediction_markets: null,
+    news: null,
+    sections: [...answered],
+    section_warnings: meta?.section_warnings ?? answered.flatMap((section) => responses[section]?.section_warnings ?? []),
+    source_provider: first.source_provider,
+    retrieved_at: meta?.retrieved_at ?? first.retrieved_at,
+    origin: first.origin,
+    transformation_note: first.transformation_note,
+  };
+  for (const section of answered) {
+    const field = SITREP_SECTION_FIELDS[section];
+    (composed as unknown as Record<string, unknown>)[field] = responses[section]?.[field] ?? null;
+  }
+  return composed;
 }
 
 export type SitrepFollowUpStatus = "open" | "resolved";
@@ -271,7 +394,7 @@ export function oldestSitrepSection(sections: SitrepSectionClock[]): SitrepOldes
   let oldestMillis = Number.POSITIVE_INFINITY;
   for (const section of sections) {
     if (!section.retrievedAt) continue;
-    const millis = Date.parse(section.retrievedAt);
+    const millis = parseApiInstant(section.retrievedAt);
     if (!Number.isFinite(millis) || millis >= oldestMillis) continue;
     oldestMillis = millis;
     oldest = { id: section.id, label: section.label, retrievedAt: section.retrievedAt };
@@ -284,7 +407,7 @@ export function formatSitrepSectionAge(
   now: Date = new Date()
 ): string {
   if (!retrievedAt) return "N/A";
-  const millis = Date.parse(retrievedAt);
+  const millis = parseApiInstant(retrievedAt);
   if (!Number.isFinite(millis)) return "N/A";
   const minutes = Math.max(0, Math.floor((now.getTime() - millis) / 60_000));
   if (minutes < 1) return "<1m old";

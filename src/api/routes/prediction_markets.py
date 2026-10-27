@@ -289,10 +289,11 @@ def prediction_market_event_book(
 )
 def prediction_market_related(market_id: str, request: Request) -> RelatedMarketListResponseModel:
     runtime = request.app.state.runtime
-    rows = runtime.prediction_market_service.get_related_markets(market_id)
+    result = runtime.prediction_market_service.get_related_markets_result(market_id)
     return RelatedMarketListResponseModel(
         market_id=market_id,
-        related=[RelatedMarketModel.from_domain(row) for row in rows],
+        related=[RelatedMarketModel.from_domain(row) for row in result.rows],
+        warnings=list(result.warnings),
     )
 
 

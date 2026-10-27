@@ -4,6 +4,7 @@
   import { DEFAULT_WORKSPACE_TAB_ORDER, resolveNavigationPath, type NavigationRouteMatch } from "../lib/navigation";
   import type { TabBarItem } from "./TabBar.svelte";
   import SearchDropdown from "./SearchDropdown.svelte";
+  import ViewErrorBoundary from "./ViewErrorBoundary.svelte";
 
   type SharedEquitySelection = {
     symbol: string;
@@ -173,7 +174,11 @@
   </header>
 
   <main class="content">
-    <slot />
+    <!-- Red de seguridad: un fallo de render del espacio de trabajo no tumba el topbar
+         (búsqueda, Copilot, estado). La vista activa tiene su propio límite en App (GUA-20261021-1). -->
+    <ViewErrorBoundary resetKey={activeTab} label="This workspace">
+      <slot />
+    </ViewErrorBoundary>
   </main>
 </div>
 

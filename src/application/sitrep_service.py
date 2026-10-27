@@ -7,6 +7,12 @@ This service owns that composition server-side so the cross-domain payload has
 one contract: section defaults live here, sections load concurrently the same
 way the frontend's parallel requests did, and a failing section degrades into
 an explicit warning instead of failing the whole report.
+
+GUA-20261021-12: una única petición agregada hacía esperar la carga en frío al
+proveedor más lento (~77 s). La vista pide ahora cada sección con
+``sections=<id>`` en este mismo endpoint, en paralelo, y cada tablero se pinta al
+llegar; los valores por sección, las cachés de dominio y el formato de los avisos
+no cambian.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -120,16 +126,26 @@ class SitrepService:
         warnings: list[str] = []
         requested = [section for section in SITREP_SECTIONS if section in sections]
 
-        # Sections load concurrently; before this contract existed the frontend
-        # issued the same calls as parallel HTTP requests, so per-service
-        # concurrency characteristics are unchanged.
-        with ThreadPoolExecutor(max_workers=max(len(requested), 1)) as executor:
-            futures = {section: executor.submit(loaders[section]) for section in requested}
-            for section, future in futures.items():
-                try:
-                    results[section] = future.result()
-                except Exception as exc:  # noqa: BLE001 - a failing section must degrade, not 500
-                    warnings.append(f"SITREP section '{section}' failed to load: {exc}")
+        if len(requested) == 1:
+            # GUA-20261021-12: la vista pide cada sección en su propia petición concurrente
+            # (sections=<id>) para pintar según llega cada proveedor; una sola sección se carga
+            # en el hilo de la petición, sin crear un pool.
+            section = requested[0]
+            try:
+                results[section] = loaders[section]()
+            except Exception as exc:  # noqa: BLE001 - a failing section must degrade, not 500
+                warnings.append(f"SITREP section '{section}' failed to load: {exc}")
+        else:
+            # Sections load concurrently; before this contract existed the frontend
+            # issued the same calls as parallel HTTP requests, so per-service
+            # concurrency characteristics are unchanged.
+            with ThreadPoolExecutor(max_workers=max(len(requested), 1)) as executor:
+                futures = {section: executor.submit(loaders[section]) for section in requested}
+                for section, future in futures.items():
+                    try:
+                        results[section] = future.result()
+                    except Exception as exc:  # noqa: BLE001 - a failing section must degrade, not 500
+                        warnings.append(f"SITREP section '{section}' failed to load: {exc}")
 
         return SitrepWorkspaceResult(
             equities_overview=results["equities"],  # type: ignore[arg-type]

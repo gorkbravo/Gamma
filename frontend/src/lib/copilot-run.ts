@@ -140,6 +140,12 @@ export function reduceCopilotRunEvent(state: CopilotRunState, event: CopilotRunE
     case "warning": {
       const message = asString(data.message);
       next.warnings = message ? [...state.warnings, message] : state.warnings;
+      if (data.reset_provisional_text === true) {
+        // El servidor repite el intento con más presupuesto (GUA-20261021-6): el texto
+        // provisional del intento cortado no debe mezclarse con el nuevo.
+        next.provisionalText = "";
+        next.statusDetail = message;
+      }
       return next;
     }
     case "usage": {

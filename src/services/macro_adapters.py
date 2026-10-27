@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+import ssl
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Callable
-from urllib.parse import quote, urlencode
+from urllib.error import HTTPError
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
@@ -17,11 +19,19 @@ from src.services.cache import CacheService
 from src.services.fred import FredClient
 from src.services.market_data import MarketDataService
 from src.utils.time import now_utc
+from src.utils.tls import extended_trust_ssl_context, is_certificate_verification_error
 
 
 TextFetcher = Callable[[str], str]
 JsonFetcher = Callable[[str], Any]
 _US_EASTERN = ZoneInfo("America/New_York")
+_FRANKFURT = ZoneInfo("Europe/Berlin")
+# Hora a la que se publica cada decisión: comunicado del FOMC a las 14:00 de Nueva York del
+# último día de la reunión; decisión del BCE a las 14:15 de Fráncfort del día de la rueda de
+# prensa. Fechadas a las 00:00 del primer día, el filtro de "próximos" las descartaba el mismo
+# día en que empezaban, antes de conocerse la decisión (verificación en vivo 2026-10-27).
+_FOMC_DECISION_HOUR_MINUTE = (14, 0)
+_ECB_DECISION_HOUR_MINUTE = (14, 15)
 logger = logging.getLogger(__name__)
 
 
@@ -39,6 +49,40 @@ def default_text_fetcher(url: str) -> str:
         },
     )
     with urlopen(request, timeout=20) as response:
+        return response.read().decode("utf-8", "ignore")
+
+
+# Calendarios oficiales de USMacroEventsAdapter. Un User-Agent de navegador desde urllib es
+# justo lo que el filtro de bots de bls.gov (Akamai) rechaza con 403; Gamma se identifica tal
+# cual es y solo añade el contacto del usuario donde la fuente lo exige (bls.gov).
+MACRO_CALENDAR_USER_AGENT = "Gamma/0.1 read-only macro calendar"
+_MACRO_CALENDAR_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+_MACRO_CALENDAR_TTL = timedelta(hours=12)
+# Tras un fallo no se vuelve a pedir la fuente durante este intervalo (salvo force_refresh):
+# repetir peticiones rechazadas a un host con filtro de bots solo empeora el bloqueo.
+_MACRO_CALENDAR_FAILURE_BACKOFF = timedelta(minutes=15)
+# Los calendarios se publican con meses de antelación: una copia antigua sigue siendo útil.
+_MACRO_CALENDAR_STALE_LIMIT = timedelta(days=30)
+
+
+def _calendar_ssl_context() -> ssl.SSLContext:
+    """Raíces del sistema más las de certifi (ver `extended_trust_ssl_context`)."""
+
+    return extended_trust_ssl_context()
+
+
+def fetch_calendar_page(url: str, *, user_agent: str, extra_roots: bool = False) -> str:
+    request = Request(url, headers={"User-Agent": user_agent, "Accept": _MACRO_CALENDAR_ACCEPT})
+    try:
+        # Primero por el opener global: en la app es el registrador de uso, que ya confía en certifi.
+        with urlopen(request, timeout=20) as response:
+            return response.read().decode("utf-8", "ignore")
+    except Exception as exc:
+        if not (extra_roots and is_certificate_verification_error(exc)):
+            raise
+    # Sin registrador (scripts, tests) el opener por defecto no trae certifi: se reintenta con él.
+    # Pasar context= abre un opener propio, así que solo se hace tras un fallo de certificado.
+    with urlopen(request, timeout=20, context=_calendar_ssl_context()) as response:
         return response.read().decode("utf-8", "ignore")
 
 
@@ -90,6 +134,34 @@ class CensusTradePartnerResult:
     @property
     def trade_balance(self) -> float:
         return self.export_value - self.import_value
+
+
+@dataclass(frozen=True)
+class MacroEventsResult:
+    """Eventos del calendario y un aviso por cada fuente oficial que no aportó datos frescos.
+
+    ``status`` es "incomplete" cuando alguna fuente falta o se sirve desde una copia antigua,
+    para que el registro de uso de proveedores no lo cuente como una carga completa.
+    """
+
+    events: list[MacroEventRecord]
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def status(self) -> str:
+        return "incomplete" if self.warnings else "ready"
+
+
+@dataclass(frozen=True)
+class _CalendarSource:
+    source_id: str
+    label: str
+    url: str
+    parser: Callable[[str, datetime], list[MacroEventRecord]]
+    # bls.gov bloquea los robots sin datos de contacto del propietario.
+    needs_contact: bool = False
+    # www.ecb.europa.eu necesita raíces que el almacén de Windows puede no tener.
+    extra_roots: bool = False
 
 
 class FredMacroAdapter:
@@ -544,9 +616,19 @@ class USMacroEventsAdapter:
     BEA_SCHEDULE_URL = "https://www.bea.gov/news/schedule"
     ECB_CALENDAR_URL = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
 
-    def __init__(self, cache: CacheService, fetch_text: TextFetcher | None = None) -> None:
+    def __init__(
+        self,
+        cache: CacheService,
+        fetch_text: TextFetcher | None = None,
+        *,
+        contact_user_agent: Callable[[], str | None] | None = None,
+    ) -> None:
         self.cache = cache
-        self.fetch_text = fetch_text or default_text_fetcher
+        # Solo los tests inyectan fetch_text; en producción cada fuente fija sus cabeceras.
+        self.fetch_text = fetch_text
+        # Devuelve el contacto configurado ("Nombre email") o None; se consulta en cada carga
+        # para recoger cambios hechos en el asistente sin reiniciar.
+        self.contact_user_agent = contact_user_agent
 
     def list_events(
         self,
@@ -556,52 +638,52 @@ class USMacroEventsAdapter:
         force_refresh: bool = False,
         limit: int = 12,
     ) -> list[MacroEventRecord]:
+        return self.load_events(region=region, as_of=as_of, force_refresh=force_refresh, limit=limit).events
+
+    def load_events(
+        self,
+        *,
+        region: str,
+        as_of: datetime,
+        force_refresh: bool = False,
+        limit: int = 12,
+    ) -> MacroEventsResult:
         if region not in {"US", "EU", "Global"}:
-            return []
+            return MacroEventsResult(events=[])
         normalized_as_of = _as_utc_naive(as_of)
-        ttl = timedelta(hours=12)
         events: list[MacroEventRecord] = []
-        sources = (
-            [
-                ("ecb", self.ECB_CALENDAR_URL, self._parse_ecb_calendar),
-            ]
-            if region == "EU"
-            else [
-                ("fomc", self.FOMC_URL, self._parse_fomc_page),
-                ("cpi", self.CPI_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="CPI Release", category="inflation")),
-                ("ppi", self.PPI_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="PPI Release", category="inflation")),
-                (
-                    "employment",
-                    self.EMPSIT_URL,
-                    lambda html, ts: self._parse_bls_schedule(html, ts, title="Employment Situation", category="growth", importance="high"),
-                ),
-                ("jolts", self.JOLTS_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="JOLTS", category="growth")),
-                ("bea_schedule", self.BEA_SCHEDULE_URL, self._parse_bea_schedule),
-            ]
-        )
-        for source_name, url, parser in sources:
-            cache_key = self.cache.make_key("macro", "events", source_name)
-            cached: Any = None
-            if not force_refresh:
-                cached = self.cache.get_json(cache_key, max_age=ttl)
-            try:
-                if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
-                    payload = str(cached["payload"])
-                    source_retrieved_at = _parse_datetime(cached["retrieved_at"]) or now_utc()
-                else:
-                    payload = self.fetch_text(url)
-                    source_retrieved_at = now_utc()
-                    self.cache.set_json(
-                        cache_key,
-                        {
-                            "retrieved_at": source_retrieved_at.isoformat(),
-                            "payload": payload,
-                        },
-                    )
-                events.extend(parser(payload, source_retrieved_at))
-            except Exception as exc:
-                logger.debug("Macro events source unavailable: source=%s url=%s error=%s", source_name, url, exc)
+        warnings: list[str] = []
+        contact = self._contact()
+        skipped_for_contact: list[str] = []
+        for source in self._sources(region):
+            if source.needs_contact and contact is None:
+                # Sin contacto no se hace la petición: bls.gov la rechazaría con 403.
+                skipped_for_contact.append(source.label)
                 continue
+            payload, retrieved_at, warning = self._load_payload(source, contact=contact, force_refresh=force_refresh)
+            if warning:
+                warnings.append(warning)
+            if payload is None or retrieved_at is None:
+                continue
+            try:
+                parsed = source.parser(payload, retrieved_at)
+            except Exception as exc:
+                logger.info("Macro calendar source could not be parsed: source=%s error=%s", source.source_id, exc)
+                warnings.append(f"Macro calendar: {source.label} could not be parsed ({exc.__class__.__name__}).")
+                continue
+            if not parsed:
+                warnings.append(
+                    f"Macro calendar: {source.label} returned no recognizable events; the official page layout may have changed."
+                )
+            events.extend(parsed)
+        if skipped_for_contact:
+            warnings.insert(
+                0,
+                "Macro calendar: BLS release dates ("
+                + ", ".join(label.removeprefix("BLS ").removesuffix(" release schedule") for label in skipped_for_contact)
+                + ") were not requested because no contact name and email is configured; bls.gov blocks automated "
+                "requests that carry no contact details. Add your name and email in Setup (Settings > Run Setup) to load them.",
+            )
 
         unique: dict[str, MacroEventRecord] = {}
         for event in events:
@@ -620,16 +702,119 @@ class USMacroEventsAdapter:
                 )
             unique[normalized.event_id] = normalized
         rows = sorted(unique.values(), key=lambda row: row.scheduled_at)
-        return rows[:limit]
+        return MacroEventsResult(events=rows[:limit], warnings=warnings)
+
+    def _contact(self) -> str | None:
+        if self.contact_user_agent is None:
+            return None
+        try:
+            value = self.contact_user_agent()
+        except Exception:
+            return None
+        text = " ".join(str(value or "").split())
+        return text or None
+
+    def _sources(self, region: str) -> list[_CalendarSource]:
+        if region == "EU":
+            return [
+                _CalendarSource("ecb", "ECB Governing Council calendar", self.ECB_CALENDAR_URL, self._parse_ecb_calendar, extra_roots=True),
+            ]
+        return [
+            _CalendarSource("fomc", "Federal Reserve FOMC calendar", self.FOMC_URL, self._parse_fomc_page),
+            _CalendarSource(
+                "cpi",
+                "BLS CPI release schedule",
+                self.CPI_URL,
+                lambda html, ts: self._parse_bls_schedule(html, ts, title="CPI Release", category="inflation"),
+                needs_contact=True,
+            ),
+            _CalendarSource(
+                "ppi",
+                "BLS PPI release schedule",
+                self.PPI_URL,
+                lambda html, ts: self._parse_bls_schedule(html, ts, title="PPI Release", category="inflation"),
+                needs_contact=True,
+            ),
+            _CalendarSource(
+                "employment",
+                "BLS Employment Situation release schedule",
+                self.EMPSIT_URL,
+                lambda html, ts: self._parse_bls_schedule(html, ts, title="Employment Situation", category="growth", importance="high"),
+                needs_contact=True,
+            ),
+            _CalendarSource(
+                "jolts",
+                "BLS JOLTS release schedule",
+                self.JOLTS_URL,
+                lambda html, ts: self._parse_bls_schedule(html, ts, title="JOLTS", category="growth"),
+                needs_contact=True,
+            ),
+            _CalendarSource("bea_schedule", "BEA release schedule", self.BEA_SCHEDULE_URL, self._parse_bea_schedule),
+        ]
+
+    def _load_payload(
+        self,
+        source: _CalendarSource,
+        *,
+        contact: str | None,
+        force_refresh: bool,
+    ) -> tuple[str | None, datetime | None, str | None]:
+        """Devuelve (html, retrieved_at, aviso). Sin html, el aviso explica qué falló."""
+
+        cache_key = self.cache.make_key("macro", "events", source.source_id)
+        failure_key = self.cache.make_key("macro", "events", source.source_id, "failure")
+        if not force_refresh:
+            fresh = _cached_calendar_payload(self.cache.get_json(cache_key, max_age=_MACRO_CALENDAR_TTL))
+            if fresh is not None:
+                return fresh[0], fresh[1], None
+            recent_failure = self.cache.get_json(failure_key, max_age=_MACRO_CALENDAR_FAILURE_BACKOFF)
+            if isinstance(recent_failure, dict) and recent_failure.get("error"):
+                return self._stale_payload(source, cache_key, error=str(recent_failure["error"]))
+        try:
+            payload = self._fetch(source, contact=contact)
+        except Exception as exc:
+            error = _describe_calendar_error(exc, source)
+            logger.info("Macro calendar source unavailable: source=%s url=%s error=%s", source.source_id, source.url, error)
+            self.cache.set_json(failure_key, {"error": error})
+            return self._stale_payload(source, cache_key, error=error)
+        retrieved_at = now_utc()
+        self.cache.set_json(cache_key, {"retrieved_at": retrieved_at.isoformat(), "payload": payload})
+        return payload, retrieved_at, None
+
+    def _fetch(self, source: _CalendarSource, *, contact: str | None) -> str:
+        if self.fetch_text is not None:
+            return self.fetch_text(source.url)
+        # El contacto del usuario solo viaja a la fuente que lo exige.
+        user_agent = f"{MACRO_CALENDAR_USER_AGENT} ({contact})" if source.needs_contact and contact else MACRO_CALENDAR_USER_AGENT
+        return fetch_calendar_page(source.url, user_agent=user_agent, extra_roots=source.extra_roots)
+
+    def _stale_payload(
+        self,
+        source: _CalendarSource,
+        cache_key: str,
+        *,
+        error: str,
+    ) -> tuple[str | None, datetime | None, str]:
+        stale = _cached_calendar_payload(self.cache.get_json(cache_key, max_age=_MACRO_CALENDAR_STALE_LIMIT))
+        if stale is None:
+            return None, None, f"Macro calendar: {source.label} unavailable ({error})."
+        payload, retrieved_at = stale
+        return (
+            payload,
+            retrieved_at,
+            f"Macro calendar: {source.label} refresh failed ({error}); showing the copy retrieved {retrieved_at:%Y-%m-%d %H:%M} UTC.",
+        )
 
     def _parse_fomc_page(self, html: str, retrieved_at: datetime) -> list[MacroEventRecord]:
         section_pattern = re.compile(
             r'<h4><a id="[^"]+">(?P<year>\d{4}) FOMC Meetings</a></h4>(?P<body>.*?)(?=<div class="panel panel-default"><div class="panel-heading"><h4><a id="|$)',
             re.IGNORECASE | re.DOTALL,
         )
+        # Las reuniones alternas llevan "fomc-meeting--shaded" delante de la clase de mes:
+        # se busca la clase en cualquier posición o se pierde la mitad del calendario.
         row_pattern = re.compile(
-            r'<div class="fomc-meeting__month[^>]*><strong>(?P<month>[A-Za-z]+)</strong></div>\s*'
-            r'<div class="fomc-meeting__date[^>]*>(?P<date_text>[^<]+)</div>',
+            r'<div class="[^"]*\bfomc-meeting__month\b[^"]*"[^>]*>\s*<strong>(?P<month>[^<]+)</strong>\s*</div>\s*'
+            r'<div class="[^"]*\bfomc-meeting__date\b[^"]*"[^>]*>(?P<date_text>[^<]+)</div>',
             re.IGNORECASE | re.DOTALL,
         )
         rows: list[MacroEventRecord] = []
@@ -637,18 +822,26 @@ class USMacroEventsAdapter:
             year = int(section.group("year"))
             body = section.group("body")
             for match in row_pattern.finditer(body):
-                month = match.group("month")
+                month = _clean_html(match.group("month"))
                 date_text = _clean_html(match.group("date_text"))
+                # Una votación por escrito no es una reunión del calendario.
+                if "notation vote" in date_text.lower():
+                    continue
+                # "*" marca las reuniones con Summary of Economic Projections.
+                has_projections = "*" in date_text
+                date_text = date_text.replace("*", "").strip()
                 start_date = _parse_month_range(year, month, date_text)
-                if start_date is None:
+                decision_date = _parse_month_range_end(year, month, date_text)
+                if start_date is None or decision_date is None:
                     continue
                 rows.append(
                     MacroEventRecord(
+                        # El id conserva el primer día para no romper referencias guardadas.
                         event_id=f"fomc:{start_date.date().isoformat()}",
-                        title=f"FOMC Meeting ({month} {date_text})",
+                        title=f"FOMC Meeting ({month} {date_text}{', SEP' if has_projections else ''})",
                         category="policy",
                         region="US",
-                        scheduled_at=start_date,
+                        scheduled_at=_local_time_to_utc(decision_date, _FOMC_DECISION_HOUR_MINUTE, _US_EASTERN),
                         relative_label=None,
                         importance="high",
                         source_provider="federalreserve",
@@ -696,26 +889,34 @@ class USMacroEventsAdapter:
         return rows
 
     def _parse_bea_schedule(self, html: str, retrieved_at: datetime) -> list[MacroEventRecord]:
-        block_pattern = re.compile(
-            r'<div class="release-date">(?P<date>[^<]+)</div>(?P<body>.*?)(?=<div class="release-date">|$)',
+        # La agenda es una tabla: cabecera "Year 2026" y una fila por publicación, con el tipo
+        # en la clase de la fila (press = News Release; data, visual y article no son
+        # catalizadores macro). El año del título es el periodo de referencia, no el de la
+        # publicación ("..., 2024" se publica en 2026), así que manda el de la cabecera.
+        year_match = re.search(r"<th[^>]*>\s*Year\s+(?P<year>\d{4})\s*</th>", html, re.IGNORECASE)
+        year = int(year_match.group("year")) if year_match else retrieved_at.year
+        row_pattern = re.compile(
+            r'<tr[^>]*class="[^"]*\bscheduled-releases-type-(?P<kind>[a-z]+)\b[^"]*"[^>]*>(?P<body>.*?)</tr>',
             re.IGNORECASE | re.DOTALL,
         )
-        title_patterns = [
-            re.compile(r"<h3[^>]*>(?P<title>.*?)</h3>", re.IGNORECASE | re.DOTALL),
-            re.compile(r'<a[^>]*class="[^"]*news-title[^"]*"[^>]*>(?P<title>.*?)</a>', re.IGNORECASE | re.DOTALL),
-            re.compile(r'<a[^>]*href="[^"]*/news/[^"]*"[^>]*>(?P<title>.*?)</a>', re.IGNORECASE | re.DOTALL),
-        ]
+        date_pattern = re.compile(r'<div class="release-date">(?P<date>[^<]+)</div>', re.IGNORECASE)
         time_pattern = re.compile(r"<small[^>]*class=\"[^\"]*text-muted[^\"]*\"[^>]*>(?P<time>[^<]+)</small>", re.IGNORECASE)
+        title_pattern = re.compile(r'<td[^>]*class="[^"]*\brelease-title\b[^"]*"[^>]*>(?P<title>.*?)</td>', re.IGNORECASE | re.DOTALL)
         rows: list[MacroEventRecord] = []
-        for match in block_pattern.finditer(html):
-            date_text = _clean_html(match.group("date"))
+        for match in row_pattern.finditer(html):
+            if match.group("kind").lower() != "press":
+                continue
             body = match.group("body")
-            title = next((_clean_html(found.group("title")) for pattern in title_patterns for found in [pattern.search(body)] if found), "")
+            date_match = date_pattern.search(body)
+            title_match = title_pattern.search(body)
+            if date_match is None or title_match is None:
+                continue
+            title = " ".join(_clean_html(title_match.group("title")).split())
             if not title:
                 continue
             time_match = time_pattern.search(body)
             time_text = _clean_html(time_match.group("time")) if time_match else ""
-            scheduled_at = _parse_schedule_month_day(date_text, retrieved_at=retrieved_at, title_hint=title, time_text=time_text)
+            scheduled_at = _parse_schedule_month_day(_clean_html(date_match.group("date")), year=year, time_text=time_text)
             if scheduled_at is None:
                 continue
             category = _categorize_bea_title(title)
@@ -732,7 +933,7 @@ class USMacroEventsAdapter:
                     retrieved_at=retrieved_at,
                     origin="macro.events.bea_schedule",
                     transformation_note=(
-                        "BEA events are parsed from the official release schedule. Macro theme category and importance are inferred heuristically from the release title."
+                        "BEA events are parsed from the official release schedule (News Releases only). Macro theme category and importance are inferred heuristically from the release title."
                     ),
                 )
             )
@@ -740,17 +941,29 @@ class USMacroEventsAdapter:
 
     def _parse_ecb_calendar(self, html: str, retrieved_at: datetime) -> list[MacroEventRecord]:
         pair_pattern = re.compile(r"<dt[^>]*>(?P<date>.*?)</dt>\s*<dd[^>]*>(?P<title>.*?)</dd>", re.IGNORECASE | re.DOTALL)
-        rows: list[MacroEventRecord] = []
+        meetings: list[tuple[datetime, str]] = []
+        press_conferences: list[tuple[datetime, str]] = []
         for match in pair_pattern.finditer(html):
-            title = _clean_html(match.group("title"))
+            title = " ".join(_clean_html(match.group("title")).split())
             if not title:
                 continue
             lowered = title.lower()
-            if "monetary policy meeting" not in lowered and "press conference" not in lowered:
+            # "non-monetary policy meeting" contiene "monetary policy meeting" y no es una decisión.
+            is_policy_meeting = "monetary policy meeting" in lowered and "non-monetary" not in lowered
+            if not is_policy_meeting and "press conference" not in lowered:
                 continue
             scheduled_at = _parse_day_month_year(_clean_html(match.group("date")))
             if scheduled_at is None:
                 continue
+            (meetings if is_policy_meeting else press_conferences).append((scheduled_at, title))
+        # La rueda de prensa aparece también como entrada propia el día 2 de la reunión.
+        meeting_days = {scheduled_at.date() for scheduled_at, _ in meetings}
+        selected = meetings + [row for row in press_conferences if row[0].date() not in meeting_days]
+        rows: list[MacroEventRecord] = []
+        for scheduled_at, title in selected:
+            if "press conference" in title.lower():
+                # El día de la rueda de prensa es el de la decisión: se fecha a su hora.
+                scheduled_at = _local_time_to_utc(scheduled_at, _ECB_DECISION_HOUR_MINUTE, _FRANKFURT)
             rows.append(
                 MacroEventRecord(
                     event_id=f"ecb:{_slugify(title)}:{scheduled_at.date().isoformat()}",
@@ -880,10 +1093,35 @@ def _parse_month_range(year: int, month: str, date_text: str) -> datetime | None
     digits = re.findall(r"\d{1,2}", date_text)
     if not digits:
         return None
-    try:
-        return datetime.strptime(f"{month} {digits[0]} {year}", "%B %d %Y")
-    except ValueError:
+    # Las reuniones a caballo entre dos meses llegan como "Apr/May 30-1": empieza en el primero.
+    start_month = month.split("/")[0].strip().rstrip(".")
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(f"{start_month} {digits[0]} {year}", fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_month_range_end(year: int, month: str, date_text: str) -> datetime | None:
+    """Último día de una reunión "October 27-28" o "Apr/May 30-1" (el de la decisión)."""
+    digits = re.findall(r"\d{1,2}", date_text)
+    if not digits:
         return None
+    end_month = month.split("/")[-1].strip().rstrip(".")
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(f"{end_month} {digits[-1]} {year}", fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _local_time_to_utc(day: datetime, hour_minute: tuple[int, int], zone: ZoneInfo) -> datetime:
+    """Fecha naive UTC de una hora local fija (con su horario de verano) en ese día."""
+    hour, minute = hour_minute
+    localized = datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+    return localized.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _parse_bls_release_date(value: str) -> datetime | None:
@@ -924,16 +1162,13 @@ def _parse_bls_release_datetime(date_value: str, time_value: str) -> datetime | 
 def _parse_schedule_month_day(
     value: str,
     *,
-    retrieved_at: datetime,
-    title_hint: str | None = None,
+    year: int,
     time_text: str | None = None,
 ) -> datetime | None:
     cleaned = _clean_html(value).replace(".", "").strip()
-    title_year_match = re.search(r"\b(20\d{2})\b", title_hint or "")
-    candidate_year = int(title_year_match.group(1)) if title_year_match else retrieved_at.year
     for fmt in ("%B %d %Y", "%b %d %Y"):
         try:
-            parsed_date = datetime.strptime(f"{cleaned} {candidate_year}", fmt)
+            parsed_date = datetime.strptime(f"{cleaned} {year}", fmt)
             if time_text:
                 parsed_with_time = _parse_bls_release_datetime(parsed_date.strftime("%B %d, %Y"), time_text)
                 if parsed_with_time is not None:
@@ -946,12 +1181,36 @@ def _parse_schedule_month_day(
 
 def _parse_day_month_year(value: str) -> datetime | None:
     cleaned = _clean_html(value).replace(".", "").strip()
-    for fmt in ("%d %B %Y", "%d %b %Y"):
+    # El calendario del BCE publica "28/10/2026"; versiones anteriores, "16 April 2026".
+    for fmt in ("%d/%m/%Y", "%d %B %Y", "%d %b %Y"):
         try:
             return datetime.strptime(cleaned, fmt)
         except ValueError:
             continue
     return None
+
+
+def _cached_calendar_payload(cached: Any) -> tuple[str, datetime] | None:
+    if not isinstance(cached, dict) or "payload" not in cached or "retrieved_at" not in cached:
+        return None
+    retrieved_at = _parse_datetime(cached["retrieved_at"])
+    if retrieved_at is None:
+        return None
+    return str(cached["payload"]), retrieved_at
+
+
+def _describe_calendar_error(exc: Exception, source: _CalendarSource) -> str:
+    host = urlsplit(source.url).hostname or source.url
+    if isinstance(exc, HTTPError):
+        detail = f"HTTP {exc.code} from {host}"
+        if exc.code == 403 and source.needs_contact:
+            detail += "; bls.gov refused the automated request, check the contact name and email in Setup"
+        return detail
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, ssl.SSLCertVerificationError) or isinstance(exc, ssl.SSLCertVerificationError):
+        return f"TLS certificate for {host} could not be verified"
+    text = str(reason if reason is not None else exc).strip() or exc.__class__.__name__
+    return f"{exc.__class__.__name__}: {text[:200]} ({host})"
 
 
 def _categorize_bea_title(title: str) -> str:

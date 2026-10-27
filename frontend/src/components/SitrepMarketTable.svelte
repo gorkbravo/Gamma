@@ -62,6 +62,7 @@
             class:clickable={Boolean(onSelect)}
             tabindex={onSelect ? 0 : undefined}
             role={onSelect ? "button" : undefined}
+            aria-label={onSelect ? `Open ${row.label}` : undefined}
             on:click={() => onSelect?.(row)}
             on:keydown={(event) => handleRowKeydown(event, row)}
           >
