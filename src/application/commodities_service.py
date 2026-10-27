@@ -1714,19 +1714,19 @@ def _same_basis_histories(
     histories_by_id: dict[str, CommodityPriceHistory],
     reference_by_id: dict[str, CommodityPriceHistory],
 ) -> tuple[dict[str, CommodityPriceHistory | None], str | None]:
-    """Patas de un diferencial con la misma base (GUA-20261027-4).
+    """Patas de un diferencial con la misma base estable (GUA-20261027-4).
 
-    Un instrumento refrescado solo (el seleccionado) trae el histórico de su frontal IBKR,
-    mientras las demás patas siguen en EIA/FRED spot: el 2-1-1 de la misma fecha valía 54.4
-    o 64.5 según qué curva estuviera en caché. Si las patas mezclan futuros y spot, todas
-    vuelven a su referencia spot; si aún quedan mezcladas, se avisa.
+    Un instrumento refrescado trae el histórico de su frontal IBKR y uno en caché conserva el
+    EIA/FRED spot: el 2-1-1 valía 54.4 (spot, 2026-10-20), 64.5 (mezcla) o 69.0 (futuros,
+    2026-10-26) según el estado de la caché. La historia usa la referencia spot de cada pata
+    cuando existe para todas (el valor "Live" ya da los futuros del mismo snapshot); si no,
+    las patas tal cual cuando comparten base, y si quedan mezcladas se avisa.
     """
     legs = {leg: histories_by_id.get(leg) for leg in leg_ids}
-    if len({_history_basis_family(history) for history in legs.values() if history is not None}) <= 1:
-        return legs, None
     spot_legs = {leg: reference_by_id.get(leg, legs[leg]) for leg in leg_ids}
-    if len({_history_basis_family(history) for history in spot_legs.values() if history is not None}) <= 1:
-        return spot_legs, None
+    for candidate in (spot_legs, legs):
+        if len({_history_basis_family(history) for history in candidate.values() if history is not None}) <= 1:
+            return candidate, None
     return legs, "Spread legs mix front-futures and spot/proxy histories; the history is not on one price basis."
 
 

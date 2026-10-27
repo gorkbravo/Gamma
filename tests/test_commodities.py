@@ -1676,6 +1676,27 @@ def test_crack_history_keeps_one_price_basis_when_only_wti_was_refreshed():
     assert spreads["two-one-one-crack"].value == pytest.approx(((2.99 + 4.83) * 42 - 2 * 101.91) / 2, abs=1e-6)
     assert not any("mix front-futures" in warning for warning in spreads["gasoline-crack"].warnings)
 
+    # Con todas las patas recién cargadas (futuros) y sus referencias spot, la historia sigue en spot:
+    # el valor no salta entre 69.0 (futuros) y 54.4 (spot) según la caché.
+    ibkr_products = [
+        _daily_history(item.instrument_id, [value.value * 1.05 for value in item.points], end=end, unit=item.unit, provider="ibkr")
+        if item.instrument_id in {"gasoline", "heating_oil"}
+        else item
+        for item in mixed
+    ]
+    references = [fred_wti, *(item for item in base.histories if item.instrument_id in {"gasoline", "heating_oil"})]
+
+    class _AllFreshProvider(_FixtureCommoditiesProvider):
+        def get_snapshot(self, *, force_refresh=False, selected_instrument_id=None):
+            snapshot = super().get_snapshot(force_refresh=force_refresh, selected_instrument_id=selected_instrument_id)
+            return replace(snapshot, reference_price_histories=references)
+
+    all_fresh = {
+        spread.definition.spread_id: spread
+        for spread in CommoditiesService(provider=_AllFreshProvider(ibkr_products, base.curves), clock=lambda: _AUDIT_NOW).get_spreads()
+    }
+    assert all_fresh["two-one-one-crack"].value == pytest.approx(spreads["two-one-one-crack"].value, abs=1e-9)
+
     # Sin referencia spot, la mezcla se dice en lugar de pasar por un histórico homogéneo.
     unresolved = {
         spread.definition.spread_id: spread
