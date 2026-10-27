@@ -29,6 +29,15 @@ export type CopilotTranscriptBlock =
   | { kind: "operator-plan"; plan: CopilotOperatorPlan }
   | { kind: "operator-step"; event: CopilotOperatorProgressEvent; references: ResolvedTranscriptReferences }
   | {
+      /** Avisos seguidos del mismo tipo de paso, en un solo bloque plegado (GUA-20261021-13). */
+      kind: "operator-warnings";
+      title: string;
+      warnings: string[];
+      firstSequence: number;
+      lastSequence: number;
+    }
+  | { kind: "operator-progress"; count: number; firstSequence: number; lastSequence: number }
+  | {
       kind: "confirmation";
       title: string;
       message: string;
@@ -104,6 +113,28 @@ function operatorEventBlock(
   if (event.event_type === "artifact-created") return { kind: "artifact", event, references };
   if (event.event_type === "final-report") return { kind: "operator-report", event, references };
   return { kind: "operator-step", event, references };
+}
+
+/** Avisos consecutivos con el mismo título (el progreso del modelo intercalado no corta el grupo). */
+function warningRun(
+  events: CopilotOperatorProgressEvent[],
+  start: number
+): { run: CopilotOperatorProgressEvent[]; nextIndex: number } {
+  const title = events[start].title;
+  const run: CopilotOperatorProgressEvent[] = [];
+  let nextIndex = start;
+  for (let index = start; index < events.length; index += 1) {
+    const event = events[index];
+    if (event.event_type === "provider-progress") continue;
+    if (event.event_type !== "warning" || event.title !== title || event.source_ids.length) break;
+    run.push(event);
+    nextIndex = index + 1;
+  }
+  return { run, nextIndex };
+}
+
+function isText(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function mutationFromPayload(payload: Record<string, unknown>): CopilotDraftMutation | null {
@@ -187,7 +218,39 @@ export function buildCopilotTranscriptBlocks(
       });
     }
 
-    for (const event of operatorEvents) {
+    // Verificación en vivo 2026-10-27: una tarea de curva generó 41 pasos "Operator warning"
+    // (uno por caveat del workspace) y 842 filas "Operator model progress". Los avisos
+    // seguidos se agrupan en un bloque plegado y el progreso del modelo en una sola fila.
+    const progress = operatorEvents.filter((event) => event.event_type === "provider-progress");
+    if (progress.length) {
+      blocks.push({
+        kind: "operator-progress",
+        count: progress.length,
+        firstSequence: progress[0].sequence,
+        lastSequence: progress[progress.length - 1].sequence
+      });
+    }
+    let index = 0;
+    while (index < operatorEvents.length) {
+      const event = operatorEvents[index];
+      if (event.event_type === "provider-progress") {
+        index += 1;
+        continue;
+      }
+      if (event.event_type === "warning") {
+        const { run, nextIndex } = warningRun(operatorEvents, index);
+        if (run.length > 1) {
+          blocks.push({
+            kind: "operator-warnings",
+            title: event.title ?? "Operator warning",
+            warnings: [...new Set(run.flatMap((item) => [item.message, ...item.warnings]).filter(isText))],
+            firstSequence: run[0].sequence,
+            lastSequence: run[run.length - 1].sequence
+          });
+          index = nextIndex;
+          continue;
+        }
+      }
       const block = operatorEventBlock(event, sources);
       if (block.kind === "confirmation" && block.mutation) {
         blocks.push({
@@ -197,6 +260,7 @@ export function buildCopilotTranscriptBlocks(
         });
       }
       blocks.push(block);
+      index += 1;
     }
 
     if (sources.length || toolTraces.length || warnings.length) {

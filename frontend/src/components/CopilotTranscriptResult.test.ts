@@ -481,6 +481,36 @@ describe("CopilotTranscriptResult usability audit 2026-10-21", () => {
     expect(body).not.toContain("Hypothesis");
   });
 
+  it("collapses repeated operator warnings and model progress (live check 2026-10-27)", () => {
+    const value = result();
+    const base = {
+      run_id: "run_1", timestamp: "2026-10-27T13:09:11Z", step_id: null, tool_id: null, payload: {}, source_ids: []
+    };
+    value.operator_events = [
+      ...Array.from({ length: 40 }, (_, index) => ({
+        ...base, event_id: `progress_${index}`, sequence: index + 1, event_type: "provider-progress",
+        title: "Operator model progress", message: "Operator model emitted provider progress.", warnings: []
+      })),
+      ...["Using cached IBKR curve for WTI.", "Using cached IBKR curve for Brent.", "Stale commodity reference for WTI."].map(
+        (message, index) => ({
+          ...base, event_id: `warning_${index}`, sequence: 41 + index, event_type: "warning",
+          title: "Operator warning", message, warnings: [message]
+        })
+      ),
+      {
+        ...base, event_id: "lone", sequence: 50, event_type: "warning", title: "Plan warning",
+        message: "Plan note.", warnings: ["Plan note."]
+      }
+    ];
+    const { body } = render(CopilotTranscriptResult, { props: { result: value } });
+    expect(body.match(/Operator model emitted provider progress/g) ?? []).toHaveLength(0);
+    expect(body).toContain("40 provider progress updates (token usage), collapsed.");
+    expect(body).toContain("Operator warning · 3");
+    expect(body).toContain("Show 3 warnings");
+    // Un aviso que ya es el mensaje del paso no se pinta otra vez en la lista.
+    expect(body.match(/Plan note\./g) ?? []).toHaveLength(1);
+  });
+
   it("shows a partial card with a Continue action after an output-budget cut-off", () => {
     const partial = result();
     partial.status = "incomplete";

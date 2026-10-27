@@ -375,9 +375,31 @@
           {#if block.references.unresolvedEvidenceRefs.length}
             <small class="unresolved">Unresolved evidence: {block.references.unresolvedEvidenceRefs.join(" / ")}</small>
           {/if}
-          {#if block.event.warnings.length}
-            <ul class="warnings">{#each block.event.warnings as warning}<li>{warning}</li>{/each}</ul>
+          {#if block.event.warnings.some((warning) => warning !== block.event.message)}
+            <!-- El aviso que ya es el mensaje del paso no se repite en la lista (GUA-20261021-13). -->
+            <ul class="warnings">{#each block.event.warnings.filter((warning) => warning !== block.event.message) as warning}<li>{warning}</li>{/each}</ul>
           {/if}
+        </div>
+      </section>
+
+    {:else if block.kind === "operator-warnings"}
+      <section class="event-row warning" aria-label="Operator warnings">
+        <span class="sequence">{block.firstSequence}–{block.lastSequence}</span>
+        <div>
+          <strong>{block.title} · {block.warnings.length}</strong>
+          <!-- Avisos seguidos en un solo paso plegado (verificación en vivo 2026-10-27: 41 pasos). -->
+          <details class="raw-json"><summary>Show {block.warnings.length} warnings</summary>
+            <ul class="warnings">{#each block.warnings as warning}<li>{warning}</li>{/each}</ul>
+          </details>
+        </div>
+      </section>
+
+    {:else if block.kind === "operator-progress"}
+      <section class="event-row provider-progress" aria-label="Operator model progress">
+        <span class="sequence">{block.firstSequence}</span>
+        <div>
+          <strong>Operator model progress</strong>
+          <p>{block.count} provider progress update{block.count === 1 ? "" : "s"} (token usage), collapsed.</p>
         </div>
       </section>
 
