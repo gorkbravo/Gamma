@@ -19,7 +19,7 @@ from src.services.cache import CacheService
 from src.services.fred import FredClient
 from src.services.market_data import MarketDataService
 from src.utils.time import now_utc
-from src.utils.tls import extended_trust_ssl_context
+from src.utils.tls import extended_trust_ssl_context, is_certificate_verification_error
 
 
 TextFetcher = Callable[[str], str]
@@ -73,9 +73,16 @@ def _calendar_ssl_context() -> ssl.SSLContext:
 
 def fetch_calendar_page(url: str, *, user_agent: str, extra_roots: bool = False) -> str:
     request = Request(url, headers={"User-Agent": user_agent, "Accept": _MACRO_CALENDAR_ACCEPT})
-    # Pasar context= abre un opener propio, así que solo se hace donde hace falta.
-    options: dict[str, Any] = {"context": _calendar_ssl_context()} if extra_roots else {}
-    with urlopen(request, timeout=20, **options) as response:
+    try:
+        # Primero por el opener global: en la app es el registrador de uso, que ya confía en certifi.
+        with urlopen(request, timeout=20) as response:
+            return response.read().decode("utf-8", "ignore")
+    except Exception as exc:
+        if not (extra_roots and is_certificate_verification_error(exc)):
+            raise
+    # Sin registrador (scripts, tests) el opener por defecto no trae certifi: se reintenta con él.
+    # Pasar context= abre un opener propio, así que solo se hace tras un fallo de certificado.
+    with urlopen(request, timeout=20, context=_calendar_ssl_context()) as response:
         return response.read().decode("utf-8", "ignore")
 
 

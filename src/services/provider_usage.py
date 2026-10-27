@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from src.models.provider_usage import ProviderUsageCall, ProviderUsageHealth, ProviderUsageSnapshot, ProviderUsageSummary
 from src.utils.time import now_utc
+from src.utils.tls import extended_trust_ssl_context
 
 # Fila explícita para llamadas sin proveedor identificable: nunca desaparecen ni se
 # reparten en ids ambiguos como "unknown" (GUA-20260903-10).
@@ -270,7 +271,14 @@ def install_http_usage_recorder(ledger: ProviderUsageLedger) -> None:
         current = getattr(urllib.request, "_opener", None)
         if isinstance(current, _UsageRecordingOpener):
             return
-        base = current if isinstance(current, urllib.request.OpenerDirector) else urllib.request.build_opener()
+        # Sin opener previo, el HTTPS confía en las raíces del sistema más las de certifi: así una
+        # cadena como la del BCE (Sectigo E46, ausente del almacén de Windows) verifica en el primer
+        # intento por este opener y queda registrada, en vez de fallar y reintentarse fuera de él.
+        base = (
+            current
+            if isinstance(current, urllib.request.OpenerDirector)
+            else urllib.request.build_opener(urllib.request.HTTPSHandler(context=extended_trust_ssl_context()))
+        )
         urllib.request.install_opener(_UsageRecordingOpener(base))
 
 

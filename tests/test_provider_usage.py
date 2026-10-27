@@ -706,3 +706,23 @@ def test_provider_usage_api_exposes_window_and_http_counts(tmp_path):
         assert payload["recent_calls"][0]["kind"] == "http"
     finally:
         runtime.shutdown()
+
+
+def test_recording_opener_trusts_certifi_roots_so_calls_stay_recorded():
+    """Verificación en vivo 2026-10-27: el feed ecb_press fallaba con CERTIFICATE_VERIFY_FAILED en el
+    opener registrado y el reintento con certifi iba por un opener propio sin registrar."""
+    import ssl as _ssl
+
+    from src.utils.tls import extended_trust_ssl_context
+
+    saved_opener = urllib.request._opener
+    try:
+        urllib.request.install_opener(None)
+        install_http_usage_recorder(ProviderUsageLedger())
+        opener = urllib.request._opener
+        https = [handler for handler in opener.handlers if isinstance(handler, urllib.request.HTTPSHandler)]
+        assert https and isinstance(https[0]._context, _ssl.SSLContext)
+        assert https[0]._context is extended_trust_ssl_context()
+    finally:
+        uninstall_http_usage_recorder()
+        urllib.request.install_opener(saved_opener)

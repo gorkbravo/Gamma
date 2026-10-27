@@ -743,8 +743,12 @@ def test_us_macro_events_default_fetch_sends_contact_only_to_bls_and_extra_roots
     calls: list[tuple[str, str, bool]] = []
 
     def fake_urlopen(request, *args, **kwargs):
-        calls.append((request.full_url, request.get_header("User-agent"), isinstance(kwargs.get("context"), ssl.SSLContext)))
+        with_context = isinstance(kwargs.get("context"), ssl.SSLContext)
+        calls.append((request.full_url, request.get_header("User-agent"), with_context))
         assert request.get_header("Accept", "").startswith("text/html")
+        # Como en Windows sin la raíz Sectigo E46: el opener por defecto no verifica el BCE.
+        if "ecb.europa.eu" in request.full_url and not with_context:
+            raise URLError(ssl.SSLCertVerificationError(1, "certificate verify failed: unable to get local issuer certificate"))
         return _FakeCalendarResponse(macro_calendar_fixture(request.full_url))
 
     monkeypatch.setattr("src.services.macro_adapters.urlopen", fake_urlopen)
@@ -760,7 +764,10 @@ def test_us_macro_events_default_fetch_sends_contact_only_to_bls_and_extra_roots
     for url in (USMacroEventsAdapter.FOMC_URL, USMacroEventsAdapter.BEA_SCHEDULE_URL, USMacroEventsAdapter.ECB_CALENDAR_URL):
         assert agents[url] == MACRO_CALENDAR_USER_AGENT
     assert not any("Mozilla" in agent for agent in agents.values())
+    # Primer intento por el opener global (el registrador de uso en la app); solo el BCE, y solo tras
+    # el fallo de certificado, se reintenta con las raíces de certifi.
     assert [url for url, _, extra_roots in calls if extra_roots] == [USMacroEventsAdapter.ECB_CALENDAR_URL]
+    assert [extra_roots for url, _, extra_roots in calls if url == USMacroEventsAdapter.ECB_CALENDAR_URL] == [False, True]
 
 
 def test_us_macro_events_adapter_serves_stale_copy_backs_off_and_names_failed_sources(tmp_path, monkeypatch):
