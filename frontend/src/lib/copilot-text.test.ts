@@ -42,6 +42,31 @@ describe("parseCopilotRichText", () => {
     expect(parseCopilotRichText(null)).toEqual([]);
   });
 
+  it("renders a pipe table without separator row or outer pipes (live check 2026-10-27)", () => {
+    const rationale = [
+      "Prices are USD/bbl.",
+      "",
+      "Delivery | Brent | WTI | Brent−WTI",
+      "Dec-26 | 114.10 | 100.01 | 14.09",
+      "Jan-27 | 109.64 | NA | NA",
+      "",
+      "Brent | WTI spread widened."
+    ].join("\n");
+    expect(parseCopilotRichText(rationale)).toEqual([
+      { kind: "paragraph", text: "Prices are USD/bbl." },
+      {
+        kind: "table",
+        header: ["Delivery", "Brent", "WTI", "Brent−WTI"],
+        align: [null, null, null, null],
+        rows: [
+          ["Dec-26", "114.10", "100.01", "14.09"],
+          ["Jan-27", "109.64", "NA", "NA"]
+        ]
+      },
+      { kind: "paragraph", text: "Brent | WTI spread widened." }
+    ]);
+  });
+
   it("detects numeric cells and empty text", () => {
     expect(isNumericCell("111.05")).toBe(true);
     expect(isNumericCell("-2.3%")).toBe(true);

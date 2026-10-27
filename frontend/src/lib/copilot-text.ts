@@ -67,6 +67,20 @@ function isTableStart(lines: string[], index: number): boolean {
   return splitRow(header).length >= 2;
 }
 
+/**
+ * Tabla con barras pero sin fila separadora ni barras exteriores, como la que devolvió el
+ * Operator en la verificación en vivo del 2026-10-27 ("Delivery | Brent | WTI | Brent−WTI").
+ * Se exige cabecera y al menos dos filas con el mismo número (≥3) de celdas, para no tomar
+ * por tabla una frase con una barra suelta. Devuelve el número de líneas de la tabla o 0.
+ */
+function bareTableLength(lines: string[], index: number): number {
+  const width = lines[index]?.includes("|") ? splitRow(lines[index]).length : 0;
+  if (width < 3) return 0;
+  let end = index;
+  while (end < lines.length && lines[end].includes("|") && splitRow(lines[end]).length === width) end += 1;
+  return end - index >= 3 ? end - index : 0;
+}
+
 export function parseCopilotRichText(value: string | null | undefined): CopilotTextSegment[] {
   const lines = String(value ?? "").replace(/\r\n?/g, "\n").split("\n");
   const segments: CopilotTextSegment[] = [];
@@ -99,6 +113,15 @@ export function parseCopilotRichText(value: string | null | undefined): CopilotT
         index += 1;
       }
       segments.push({ kind: "table", header, align: header.map((_, column) => align[column] ?? null), rows });
+      continue;
+    }
+    const bareLength = bareTableLength(lines, index);
+    if (bareLength) {
+      flushParagraph();
+      const header = splitRow(line);
+      const rows = lines.slice(index + 1, index + bareLength).map(splitRow);
+      segments.push({ kind: "table", header, align: header.map(() => null), rows });
+      index += bareLength;
       continue;
     }
     const bullet = BULLET.exec(line);
