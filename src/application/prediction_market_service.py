@@ -39,6 +39,7 @@ from src.models.prediction_markets import (
     PredictionSpreadPoint,
     PredictionVenueStatus,
     RelatedMarketRecord,
+    RelatedMarketsResult,
     WalletSummary,
 )
 from src.services.prediction_market_adapters import PredictionMarketAdapter, build_settlement_convergence
@@ -675,6 +676,19 @@ class PredictionMarketService:
         sibling_limit: int = MAX_RELATED_EVENT_SIBLINGS,
         series_limit: int = MAX_RELATED_SERIES_SIBLINGS,
     ) -> list[RelatedMarketRecord]:
+        """Related contracts only; see `get_related_markets_result` for the warnings."""
+        return self.get_related_markets_result(
+            market_id, limit=limit, sibling_limit=sibling_limit, series_limit=series_limit
+        ).rows
+
+    def get_related_markets_result(
+        self,
+        market_id: str,
+        *,
+        limit: int = 8,
+        sibling_limit: int = MAX_RELATED_EVENT_SIBLINGS,
+        series_limit: int = MAX_RELATED_SERIES_SIBLINGS,
+    ) -> RelatedMarketsResult:
         """Related contracts: the ranked analog block, then venue siblings.
 
         The first `limit` rows are the existing analog ranking, unchanged. Event
@@ -684,10 +698,10 @@ class PredictionMarketService:
         """
         detail = self.get_market_detail(market_id)
         if detail is None:
-            return []
+            return RelatedMarketsResult(rows=[])
         adapter = self._resolve_adapter(market_id)
         if adapter is None:
-            return []
+            return RelatedMarketsResult(rows=[])
 
         related_rows: list[tuple[tuple[int, float, float, str], RelatedMarketRecord]] = []
         seen: set[str] = {detail.market_id}
@@ -765,7 +779,7 @@ class PredictionMarketService:
                     )
                 )
 
-        series_rows = self._series_sibling_rows(detail, adapter, seen, limit=series_limit)
+        series_rows, series_warning = self._series_sibling_rows(detail, adapter, seen, limit=series_limit)
 
         related_rows.sort(key=lambda item: item[0])
         ordered = [row for _, row in related_rows]
@@ -804,7 +818,10 @@ class PredictionMarketService:
             (tag_event_sibling(row) for row in strong if row.market_id in event_order and row.market_id not in head_ids),
             key=lambda row: row.sibling_order if row.sibling_order is not None else 0,
         )[: max(sibling_limit - in_head, 0)]
-        return [*head, *event_tail, *series_rows]
+        return RelatedMarketsResult(
+            rows=[*head, *event_tail, *series_rows],
+            warnings=[series_warning] if series_warning else [],
+        )
 
     def _series_sibling_rows(
         self,
@@ -813,20 +830,26 @@ class PredictionMarketService:
         seen: set[str],
         *,
         limit: int,
-    ) -> list[RelatedMarketRecord]:
+    ) -> tuple[list[RelatedMarketRecord], str | None]:
         """One contract per sibling event of the venue series (GUA-20261021-15).
 
         A dated ladder ("by Oct 31 / Nov 30 / Dec 31") lives in separate events
-        joined only by the series, which the event endpoint cannot see.
+        joined only by the series, which the event endpoint cannot see. Returns
+        the rows and, when the series lookup fails, a warning naming the series.
         """
         fetch_series = getattr(adapter, "list_series_markets", None)
         if not callable(fetch_series) or not detail.provider_series_id or limit <= 0:
-            return []
+            return [], None
         try:
             raw_rows = fetch_series(detail, limit=RELATED_SERIES_FETCH_LIMIT)
-        except Exception:
-            # La serie es contexto adicional: su fallo no debe vaciar RELATED.
-            return []
+        except Exception as exc:
+            # La serie es contexto adicional: su fallo no vacía RELATED, pero se avisa en lugar
+            # de omitir los hermanos en silencio (verificación en vivo 2026-10-27).
+            series_label = detail.series_title or detail.provider_series_id
+            return [], (
+                f"Same-series siblings from {detail.venue.title()} series '{series_label}' are missing: "
+                f"the series lookup failed ({exc.__class__.__name__}). Other related rows are unaffected."
+            )
 
         by_event: dict[str, list[PredictionMarketRecord]] = {}
         for raw in raw_rows:
@@ -894,7 +917,7 @@ class PredictionMarketService:
                     end_time=pick.end_time,
                 )
             )
-        return rows
+        return rows, None
 
     def get_cross_domain_handoffs(self, market_id: str) -> list[CrossTabHandoffEnvelope] | None:
         """Outward handoffs this contract can open with a resolvable target."""

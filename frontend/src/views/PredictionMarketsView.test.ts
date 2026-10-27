@@ -164,6 +164,18 @@ describe("Prediction Markets event grouping", () => {
     expect(body).toContain("cross_venue_analog | kalshi");
     expect(body).toMatch(/resolves Oct 31, 26/);
   });
+
+  it("says when the venue series lookup failed instead of hiding the siblings", () => {
+    const warning =
+      "Same-series siblings from Kalshi series 'Fed funds rate' are missing: the series lookup failed (TimeoutError).";
+    const { body } = render(PredictionMarketsView, { props: {
+      mode: "contract", detail: { ...bucket("dec", "December", 0.11), subtitle: null },
+      related: { market_id: "polymarket:dec", related: [], warnings: [warning] },
+      onLoadScreener: vi.fn(), onSelectMarket: vi.fn()
+    } });
+    expect(body).toContain("No linked markets.");
+    expect(body).toContain("the series lookup failed (TimeoutError)");
+  });
 });
 
 // Event Book: una escalera de plazos anidados no es un libro excluyente.

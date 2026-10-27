@@ -683,6 +683,8 @@ class RelatedMarketModel(BaseModel):
 class RelatedMarketListResponseModel(BaseModel):
     market_id: str
     related: list[RelatedMarketModel] = Field(default_factory=list)
+    # Lo que no se pudo cargar (p. ej. la consulta de series del venue), en lugar de omitirlo.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CalibrationBucketModel(BaseModel):

@@ -1761,6 +1761,14 @@
           {:else}
             <p class="empty-state">No linked markets.</p>
           {/if}
+          {#if related?.warnings?.length}
+            <!-- Lo que no se pudo cargar (p. ej. la serie del venue) se dice, no se omite. -->
+            <div class="panel-notes">
+              {#each related.warnings as warning}
+                <div class="note-row"><span class="note-tag">Warning</span><p>{warning}</p></div>
+              {/each}
+            </div>
+          {/if}
         </article>
       </aside>
     </div>

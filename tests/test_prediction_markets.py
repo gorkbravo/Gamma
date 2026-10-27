@@ -3570,6 +3570,31 @@ def test_related_survives_a_failed_series_lookup():
     assert len([row for row in related if row.sibling_scope == "same_event"]) == 5
     assert not any(row.sibling_scope == "same_series" for row in related)
 
+    # Verificación en vivo 2026-10-27: el fallo ya no se omite en silencio.
+    result = service.get_related_markets_result("polymarket:wk1-25")
+    assert [row.market_id for row in result.rows] == [row.market_id for row in related]
+    assert len(result.warnings) == 1
+    assert "series lookup failed (RuntimeError)" in result.warnings[0]
+    assert "Same-series siblings from Polymarket series" in result.warnings[0]
+
+
+def test_related_route_reports_a_failed_series_lookup(tmp_path):
+    adapter = _SiblingAdapter(_weekly_book(), series_error=RuntimeError("series endpoint down"))
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = PredictionMarketService(adapters={"polymarket": adapter})
+
+    with TestClient(create_app(runtime)) as client:
+        payload = client.get("/prediction-markets/markets/polymarket:wk1-25/related").json()
+
+    assert payload["related"]
+    assert len(payload["warnings"]) == 1
+    assert "series lookup failed" in payload["warnings"][0]
+
 
 def test_related_route_serializes_sibling_grouping(tmp_path):
     service = PredictionMarketService(adapters={"polymarket": _SiblingAdapter(_hormuz_ladder())})
@@ -3594,6 +3619,7 @@ def test_related_route_serializes_sibling_grouping(tmp_path):
         assert rows[0]["end_time"].startswith("2026-10-31")
         assert rows[0]["source_provider"] == "polymarket"
         assert rows[0]["retrieved_at"]
+        assert response.json()["warnings"] == []
 
 
 def _polymarket_series_raw_market(market_id: str, question: str, *, price: float, end_date: str) -> dict:

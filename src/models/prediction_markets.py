@@ -495,6 +495,14 @@ class RelatedMarketRecord:
 
 
 @dataclass(frozen=True)
+class RelatedMarketsResult:
+    """Filas de RELATED y avisos de lo que no se pudo cargar (p. ej. la serie del venue)."""
+
+    rows: list[RelatedMarketRecord]
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class PredictionVenueStatus:
     venue: str
     status: str

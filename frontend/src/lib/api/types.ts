@@ -1675,6 +1675,8 @@ export interface RelatedPredictionMarket {
 export interface RelatedPredictionMarketListResponse {
   market_id: string;
   related: RelatedPredictionMarket[];
+  /** Fuentes de RELATED que fallaron (p. ej. la consulta de series del venue). */
+  warnings?: string[];
 }
 
 export interface PredictionBookLevel {
