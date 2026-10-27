@@ -276,3 +276,12 @@ export function pendingCommodityInstrument(
   if (!loading || !requested) return null;
   return requested === (loadedInstrumentId ?? "").trim().toLowerCase() ? null : requested;
 }
+
+/**
+ * Avisos de respaldos FRED retirados para metales (GUA-20261021-8). El backend los emite en
+ * `workspace.warnings`, que la vista no pintaba: la verificación en vivo del 2026-10-27 solo
+ * los encontró en la API. Se muestran bajo la tabla de metales, donde se nota su ausencia.
+ */
+export function metalsFallbackNotes(warnings: readonly string[] | null | undefined): string[] {
+  return [...new Set((warnings ?? []).filter((warning) => /^No FRED fallback is configured for /.test(warning)))];
+}

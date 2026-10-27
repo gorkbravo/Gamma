@@ -146,6 +146,32 @@ describe("CommoditiesView", () => {
     expect(body).toContain("Substitution Spreads");
   });
 
+  it("names the retired FRED metals fallbacks under the metals snapshot (live check 2026-10-27)", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "metals";
+    workspace.selected_instrument_id = "gold";
+    workspace.warnings = [
+      ...workspace.warnings,
+      "No FRED fallback is configured for Gold, Silver, Platinum: GOLDAMGBD228NLBM, SLVPRUSD, PPLTUSDM failed with HTTPError in the 2026-10-21 audit and are treated as discontinued, so these markets rely on IBKR futures only."
+    ];
+
+    const metals = render(CommoditiesView, {
+      props: { workspace, loading: false, mode: "metals", onLoadWorkspace: vi.fn(), onLoadMacroSeries: vi.fn() }
+    });
+    const energy = render(CommoditiesView, {
+      props: {
+        workspace: { ...workspace, mode: "energy" },
+        loading: false,
+        mode: "energy",
+        onLoadWorkspace: vi.fn(),
+        onLoadMacroSeries: vi.fn()
+      }
+    });
+
+    expect(metals.body).toContain("No FRED fallback is configured for Gold, Silver, Platinum");
+    expect(energy.body).not.toContain("No FRED fallback is configured");
+  });
+
   it("keeps instruments without loaded curves selectable for on-demand curve pulls", () => {
     const workspace = makeWorkspace();
     workspace.mode = "curves_spreads";

@@ -3,6 +3,7 @@ import type { CommodityCrossDomainLink, CommodityPriceReconciliation, CommodityS
 import {
   buildCommodityCrossDomainHandoff,
   crossDomainLinkTargetTab,
+  metalsFallbackNotes,
   observationDateLabel,
   pendingCommodityInstrument,
   reconciliationReferenceRows,
@@ -279,5 +280,20 @@ describe("pending commodity instrument (wrong-market header, 2026-10-21)", () =>
     expect(pendingCommodityInstrument(true, "brent", "brent")).toBeNull();
     expect(pendingCommodityInstrument(false, "brent", "wti")).toBeNull();
     expect(pendingCommodityInstrument(true, null, "wti")).toBeNull();
+  });
+});
+
+describe("metals fallback notes (GUA-20261021-8, live check 2026-10-27)", () => {
+  it("keeps only the retired FRED fallback warnings, once each", () => {
+    const retired =
+      "No FRED fallback is configured for Gold, Silver, Platinum: GOLDAMGBD228NLBM, SLVPRUSD, PPLTUSDM failed with HTTPError in the 2026-10-21 audit and are treated as discontinued, so these markets rely on IBKR futures only.";
+    expect(
+      metalsFallbackNotes([
+        "Using cached IBKR curve for Gold from 2026-10-27T12:53:17; no fresh TWS request was made.",
+        retired,
+        retired
+      ])
+    ).toEqual([retired]);
+    expect(metalsFallbackNotes(null)).toEqual([]);
   });
 });

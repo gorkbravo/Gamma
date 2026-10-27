@@ -26,6 +26,7 @@
     RECONCILIATION_PANEL_STATUSES,
     buildCommodityCrossDomainHandoff,
     crossDomainLinkTargetTab,
+    metalsFallbackNotes,
     pendingCommodityInstrument,
     reconciliationReferenceRows,
     reconciliationStatusLabel,
@@ -79,6 +80,7 @@
   $: selectedInstrument = selectedSummary?.instrument ?? findSelectedInstrument(workspace, selectedInstrumentId);
   $: energySummaries = (workspace?.market_summaries ?? []).filter((summary) => summary.instrument.family === "energy");
   $: metalsSummaries = (workspace?.market_summaries ?? []).filter((summary) => summary.instrument.family === "metals");
+  $: metalsNotes = metalsFallbackNotes(workspace?.warnings);
   $: visibleSummaries = mode === "metals" ? metalsSummaries : mode === "energy" ? energySummaries : workspace?.market_summaries ?? [];
   $: visibleSpreads = filterSpreads(workspace?.spreads ?? [], mode, workspace?.market_summaries ?? []);
   $: selectedSpreads = filterSpreadsForInstrument(workspace?.spreads ?? [], selectedInstrumentId);
@@ -1978,6 +1980,10 @@
               </tbody>
             </table>
           </div>
+          {#if mode === "metals"}
+            <!-- GUA-20261021-8: un respaldo FRED retirado se dice donde falta, no solo en la API. -->
+            {#each metalsNotes as note}<p class="empty-hint">{note}</p>{/each}
+          {/if}
         </article>
       </section>
     {/if}
