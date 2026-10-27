@@ -274,7 +274,7 @@ The 2026-09-04 report used partly different categories; Δ is given where a cate
 
 Visual and density observations (raw markdown tables, JSON traces) belong to `gamma-ui`; chart internals were not assessed.
 
-## Fix Status (2026-10-22, uncommitted working tree)
+## Fix Status (2026-10-22, live-verified 2026-10-27)
 
 All friction findings above were fixed in one pass on top of `c69ebfc`: seven area agents worked in isolated worktrees and the integrator merged and wired their changes.
 
@@ -308,10 +308,37 @@ All friction findings above were fixed in one pass on top of `c69ebfc`: seven ar
 
 **New observations during verification:**
 - **App.svelte (pre-existing, fixed):** used `getTabLabel` without importing it since `17fbded`, so every cross-domain handoff threw after navigating.
-- **`us_macro_events` (open):** 23 of 31 requests fail. This was invisible before the provider-usage fix.
-- **SITREP Commodities section (open):** takes ~94 s when TWS is down; other sections are no longer blocked.
-- **Prediction Markets "Event Book" (open):** treats a cumulative date ladder ("Putin out by …?") as a complete book (Σ 11.5 %, overround −88.5 %). This panel predates this pass.
+- **`us_macro_events` (fixed on `claude/inspiring-yonath-627a70`, live-verified 2026-10-27):** 23 of 31 requests failed. This was invisible before the provider-usage fix.
+- **SITREP Commodities section (fixed 2026-10-27, `b21b2e8`):** took ~94 s with TWS down and 50.0 s cold with TWS; other sections were no longer blocked.
+- **Prediction Markets "Event Book" (fixed on `claude/brave-bhabha-485286`, live-verified 2026-10-27):** treated a cumulative date ladder ("Putin out by …?") as a complete book (Σ 11.5 %, overround −88.5 %).
 - **Gaps section:** not addressed (freight/Portwatch, inter-commodity spread curves, EU sovereigns, roll-adjusted futures). Route these through `roadmap.md`.
+
+### Live verification (2026-10-27)
+
+Retested with live IBKR and OpenAI on `claude/verify-2026-10-21-audit` (this branch + Event Book ladder + `us_macro_events`). Full Regression Delta and evidence: [`gamma_usability_findings_2026-10-27.md`](./gamma_usability_findings_2026-10-27.md). Nine follow-up fixes were needed; each is a separate commit with tests.
+
+| ID | Live result 2026-10-27 | Follow-up commit |
+| --- | --- | --- |
+| GUA-20261021-1 | Confirmed: forced render error showed the boundary panel with Retry; navigation stayed alive. | — |
+| GUA-20261021-2 | Confirmed: Obs "2026-10-20 STALE 7D OLD" and a same-snapshot "Live" value on every crack. | — |
+| GUA-20261021-3 | Confirmed: zone-labelled Commodities times, local Options times. | — |
+| GUA-20261021-4 | Confirmed (dates, units, `stale_reference`); `basis` not observable, every reference ≥7 days old. | — |
+| GUA-20261021-5 | Not retested. | — |
+| GUA-20261021-6 | Confirmed: five-context synthesis `ready`, 2,134 output tokens, Brent curve included; Retry reuses prompt and context. Retry stayed disabled for a cancelled turn in the live thread. | `226fa93` |
+| GUA-20261021-7 | Not retested. | — |
+| GUA-20261021-8 | Confirmed: active-month metals fronts, one Zinc Error 200 per session. The retired-FRED warning was API-only. | `19ee689` |
+| GUA-20261021-9 | Confirmed: dated series type in legs, stale-window warning, no yfinance caveat on a Brent–WTI book, commodity episodes match EIA (Brent spot 2020-03-05→04-21, 2022-02-23→03-08). | — |
+| GUA-20261021-10 | Confirmed closed (STALE/CLOSED, divergence warning) and in session (LIVE, ≥7D headline, 31-DTE templates); +0.453 theta came from stale pre-market quotes. | — |
+| GUA-20261021-11 | Confirmed: "Lookback 756 · analysed 241" with the reason. | — |
+| GUA-20261021-12 | Confirmed after a fix: commodities was still 50.0 s cold with TWS; forced load now 10.5 s (was 40.6 s); polling never blocked. | `b21b2e8` |
+| GUA-20261021-13 | Confirmed after fixes: SEC warning on the literal Operator prompt, 41 warning steps + 842 progress rows, duplicate Operator render, and a separator-less pipe table. Snapshots 2.55 MB. | `25ee22f`, `382feb5`, `226fa93`, `34015f3` |
+| GUA-20261021-14 | Auto-connect confirmed (one attempt, success and failure paths). Review/modal not retested. | — |
+| GUA-20261021-15 | Confirmed with Kalshi (`KXFEDFUNDSYEAR`, 5 same-series rows); a failed series lookup was silent. | `11efa61` |
+| GUA-20261021-16 | Mostly confirmed; the Options symbol input and Strategy Builder selects still lack names. | — |
+| GUA-20260903-10 | Confirmed after a fix: partial calls were also counted as failures. | `6b39648` |
+| Transient drill header | Confirmed: "LOADING Brent Crude Oil", then BZZ6, never WTI. | — |
+| `us_macro_events` | Confirmed; the FOMC of 27–28 Oct dropped out of "upcoming" on day 1 (GUA-20261027-1). | `e5f0ce2` |
+| Event Book | Confirmed: date ladder and threshold ladder, nested, not summed. | — |
 
 ## Coverage Ledger Update
 
