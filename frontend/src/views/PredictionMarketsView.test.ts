@@ -162,7 +162,7 @@ describe("Prediction Markets event grouping", () => {
     expect(body).toContain("Same series");
     expect(body).toContain("Hormuz Traffic Returns to Normal");
     expect(body).toContain("cross_venue_analog | kalshi");
-    expect(body).toMatch(/resolves Oct 31, 26/);
+    expect(body).toMatch(/resolves Oct 31, 2026/);
   });
 
   it("says when the venue series lookup failed instead of hiding the siblings", () => {

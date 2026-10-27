@@ -186,8 +186,9 @@
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
     apiInstantDate(value)?.toLocaleString("en-US") ?? "N/A";
+  // Año completo: "resolves Jan 8, 28" no decía si era 2028 (verificación 2026-10-27).
   const dayStamp = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }) : "N/A";
+    apiInstantDate(value)?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? "N/A";
   const compactId = (value: string | null | undefined) => {
     const text = String(value ?? "").trim();
     if (!text) return "N/A";
