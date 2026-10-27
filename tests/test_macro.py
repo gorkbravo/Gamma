@@ -621,12 +621,16 @@ def test_us_macro_events_adapter_parses_saved_official_calendars(tmp_path, monke
     by_id = {row.event_id: row for row in us.events}
 
     fomc = [row for row in us.events if row.source_provider == "federalreserve"]
+    # Cada reunión se fecha el día de la decisión (el último), no el primero.
     assert [row.scheduled_at.date().isoformat() for row in fomc] == [
-        "2026-10-27", "2026-12-08",
-        "2027-01-26", "2027-03-16", "2027-04-27", "2027-06-08", "2027-07-27", "2027-09-14", "2027-10-26", "2027-12-07",
+        "2026-10-28", "2026-12-09",
+        "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09", "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08",
     ]
     assert by_id["fomc:2026-12-08"].title == "FOMC Meeting (December 8-9, SEP)"
     assert by_id["fomc:2026-10-27"].title == "FOMC Meeting (October 27-28)"
+    # Comunicado a las 14:00 de Nueva York: 18:00 UTC con horario de verano (EDT), 19:00 en invierno (EST).
+    assert by_id["fomc:2026-10-27"].scheduled_at == datetime(2026, 10, 28, 18, 0)
+    assert by_id["fomc:2026-12-08"].scheduled_at == datetime(2026, 12, 9, 19, 0)
 
     assert by_id["bls:cpi_release:2026-11-10"].scheduled_at == datetime(2026, 11, 10, 13, 30)
     assert by_id["bls:cpi_release:2026-11-10"].relative_label == "October 2026"
@@ -654,6 +658,28 @@ def test_us_macro_events_adapter_parses_saved_official_calendars(tmp_path, monke
     ]
     assert not any("non-monetary" in title for _, title in ecb_titles)
     assert not any(title.startswith("Press conference following") for _, title in ecb_titles)
+    # El día de la rueda de prensa es el de la decisión: 14:15 en Fráncfort (CET = UTC+1 en
+    # octubre tras el cambio de hora). El día 1 sigue fechado sin hora.
+    decision_day = next(row for row in eu.events if row.title.endswith("followed by press conference"))
+    assert decision_day.scheduled_at == datetime(2026, 10, 29, 13, 15)
+    assert eu.events[0].scheduled_at == datetime(2026, 10, 28, 0, 0)
+
+
+def test_fomc_meeting_stays_upcoming_until_its_decision(tmp_path):
+    """Verificación en vivo 2026-10-27: el FOMC del 27-28 de octubre desaparecía de "próximos"
+    el día 27 porque se fechaba a las 00:00 del primer día, con la decisión aún pendiente."""
+    html = """
+    <h4><a id="fomc2026">2026 FOMC Meetings</a></h4>
+    <div class="fomc-meeting__month"><strong>October</strong></div>
+    <div class="fomc-meeting__date">27-28</div>
+    """
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"))
+
+    rows = adapter._parse_fomc_page(html, MACRO_CALENDAR_CAPTURED_AT)
+
+    assert [(row.event_id, row.scheduled_at) for row in rows] == [("fomc:2026-10-27", datetime(2026, 10, 28, 18, 0))]
+    first_day_afternoon = datetime(2026, 10, 27, 13, 0)
+    assert rows[0].scheduled_at > first_day_afternoon
 
 
 def test_fomc_parser_handles_two_month_meetings_and_skips_notation_votes(tmp_path):
@@ -669,6 +695,8 @@ def test_fomc_parser_handles_two_month_meetings_and_skips_notation_votes(tmp_pat
     rows = adapter._parse_fomc_page(html, MACRO_CALENDAR_CAPTURED_AT)
 
     assert [(row.event_id, row.title) for row in rows] == [("fomc:2024-04-30", "FOMC Meeting (Apr/May 30-1)")]
+    # La decisión cae el 1 de mayo, el último día de la reunión a caballo entre meses.
+    assert rows[0].scheduled_at == datetime(2024, 5, 1, 18, 0)
 
 
 def test_us_macro_events_adapter_skips_bls_without_contact_and_names_it(tmp_path, monkeypatch):

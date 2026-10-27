@@ -25,6 +25,13 @@ from src.utils.time import now_utc
 TextFetcher = Callable[[str], str]
 JsonFetcher = Callable[[str], Any]
 _US_EASTERN = ZoneInfo("America/New_York")
+_FRANKFURT = ZoneInfo("Europe/Berlin")
+# Hora a la que se publica cada decisión: comunicado del FOMC a las 14:00 de Nueva York del
+# último día de la reunión; decisión del BCE a las 14:15 de Fráncfort del día de la rueda de
+# prensa. Fechadas a las 00:00 del primer día, el filtro de "próximos" las descartaba el mismo
+# día en que empezaban, antes de conocerse la decisión (verificación en vivo 2026-10-27).
+_FOMC_DECISION_HOUR_MINUTE = (14, 0)
+_ECB_DECISION_HOUR_MINUTE = (14, 15)
 logger = logging.getLogger(__name__)
 
 
@@ -830,15 +837,17 @@ class USMacroEventsAdapter:
                 has_projections = "*" in date_text
                 date_text = date_text.replace("*", "").strip()
                 start_date = _parse_month_range(year, month, date_text)
-                if start_date is None:
+                decision_date = _parse_month_range_end(year, month, date_text)
+                if start_date is None or decision_date is None:
                     continue
                 rows.append(
                     MacroEventRecord(
+                        # El id conserva el primer día para no romper referencias guardadas.
                         event_id=f"fomc:{start_date.date().isoformat()}",
                         title=f"FOMC Meeting ({month} {date_text}{', SEP' if has_projections else ''})",
                         category="policy",
                         region="US",
-                        scheduled_at=start_date,
+                        scheduled_at=_local_time_to_utc(decision_date, _FOMC_DECISION_HOUR_MINUTE, _US_EASTERN),
                         relative_label=None,
                         importance="high",
                         source_provider="federalreserve",
@@ -958,6 +967,9 @@ class USMacroEventsAdapter:
         selected = meetings + [row for row in press_conferences if row[0].date() not in meeting_days]
         rows: list[MacroEventRecord] = []
         for scheduled_at, title in selected:
+            if "press conference" in title.lower():
+                # El día de la rueda de prensa es el de la decisión: se fecha a su hora.
+                scheduled_at = _local_time_to_utc(scheduled_at, _ECB_DECISION_HOUR_MINUTE, _FRANKFURT)
             rows.append(
                 MacroEventRecord(
                     event_id=f"ecb:{_slugify(title)}:{scheduled_at.date().isoformat()}",
@@ -1095,6 +1107,27 @@ def _parse_month_range(year: int, month: str, date_text: str) -> datetime | None
         except ValueError:
             continue
     return None
+
+
+def _parse_month_range_end(year: int, month: str, date_text: str) -> datetime | None:
+    """Último día de una reunión "October 27-28" o "Apr/May 30-1" (el de la decisión)."""
+    digits = re.findall(r"\d{1,2}", date_text)
+    if not digits:
+        return None
+    end_month = month.split("/")[-1].strip().rstrip(".")
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(f"{end_month} {digits[-1]} {year}", fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _local_time_to_utc(day: datetime, hour_minute: tuple[int, int], zone: ZoneInfo) -> datetime:
+    """Fecha naive UTC de una hora local fija (con su horario de verano) en ese día."""
+    hour, minute = hour_minute
+    localized = datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+    return localized.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _parse_bls_release_date(value: str) -> datetime | None:
