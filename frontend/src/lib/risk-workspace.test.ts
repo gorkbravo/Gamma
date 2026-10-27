@@ -479,6 +479,15 @@ describe("risk workspace view-model", () => {
     expect(model.selectedEpisode?.episodeId).toBe("covid_2020");
     expect(model.stressLegs.map((row) => row.symbol)).toEqual(["AAPL", "MSFT", "NEW"]);
     expect(model.stressEpisodes[0].coverage).toBe(0.8);
+    // Sin `contribution_basis` el reparto es del resultado neto; un libro compensado lo marca "gross".
+    expect(model.selectedEpisode?.contributionBasis).toBe("net");
+    const offsetting = buildRiskWorkspaceModel(snapshot, withRegimes, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+      stressReplay: { ...replay, episodes: [{ ...replay.episodes[0], contribution_basis: "gross" }] },
+    });
+    expect(offsetting.selectedEpisode?.contributionBasis).toBe("gross");
     expect(model.scenarioKpis.find((kpi) => kpi.label === "Episodes covered")?.value).toBe("2 / 3");
     expect(model.scenarioKpis.find((kpi) => kpi.label === "Worst episode")?.sublabel).toBe("COVID crash");
     expect(model.regimeRows.map((row) => row.cells[0])).toEqual(["Calm", "High vol"]);

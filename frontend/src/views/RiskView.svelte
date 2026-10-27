@@ -1143,7 +1143,8 @@
   <article class="panel table-panel">
     <header class="table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
     <table>
-      <thead><tr><th>Position</th><th>Weight</th><th>Episode return</th><th>P&L</th><th>Share of result</th><th>Status</th></tr></thead>
+      <!-- Con patas compensadas el reparto es del P&L bruto, no de un neto ≈ 0 (GUA-20261027-6). -->
+      <thead><tr><th>Position</th><th>Weight</th><th>Episode return</th><th>P&L</th><th title={selected?.contributionBasis === "gross" ? "Legs offset: share of the gross leg P&L (sum of absolute leg P&L), not of the near-zero net result." : "Share of the book result."}>{selected?.contributionBasis === "gross" ? "Share of gross P&L" : "Share of result"}</th><th>Status</th></tr></thead>
       <tbody>
         {#if rows.length}
           {#each rows as row}

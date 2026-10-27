@@ -135,6 +135,8 @@ export interface StressEpisodeRow {
   worstDayDate: string | null;
   coverage: number | null;
   note: string | null;
+  /** "gross" cuando las patas se compensan y el reparto es de Σ|P&L| (GUA-20261027-6). */
+  contributionBasis: "net" | "gross";
 }
 
 export interface StressLegRow {
@@ -713,6 +715,7 @@ function buildStressEpisodes(replay: RiskStressReplay | null): StressEpisodeRow[
     worstDayDate: episode.worst_day_date,
     coverage: episode.gross_weight > 0 ? episode.covered_gross_weight / episode.gross_weight : null,
     note: episode.note,
+    contributionBasis: episode.contribution_basis === "gross" ? "gross" : "net",
   }));
 }
 

@@ -1375,6 +1375,8 @@ export interface RiskStressEpisode {
   gross_weight: number;
   observation_count: number;
   legs: RiskStressLeg[];
+  /** "net": share of the book result; "gross": share of Σ|leg P&L| when legs offset. */
+  contribution_basis?: "net" | "gross" | string;
   note: string | null;
 }
 

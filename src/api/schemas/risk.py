@@ -116,6 +116,8 @@ class RiskStressEpisodeModel(BaseModel):
     observation_count: int = 0
     legs: list[RiskStressLegModel] = Field(default_factory=list)
     note: str | None = None
+    # "net": reparto del resultado del libro; "gross": de Σ|P&L de las patas| (patas compensadas).
+    contribution_basis: str = "net"
 
 
 class RiskStressReplayResponseModel(BaseModel):
@@ -177,6 +179,7 @@ class RiskStressReplayResponseModel(BaseModel):
                     observation_count=int(row.observation_count),
                     legs=legs,
                     note=row.note,
+                    contribution_basis=row.contribution_basis,
                 )
             )
         return cls(

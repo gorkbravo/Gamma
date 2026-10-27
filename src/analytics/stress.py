@@ -27,6 +27,10 @@ from src.analytics.var import historical_var_cvar
 COVERAGE_TOLERANCE_DAYS = 7
 # Cobertura mínima (peso bruto cubierto / peso bruto total) para publicar el rendimiento del libro.
 MIN_EPISODE_COVERAGE = 0.5
+# Si el resultado neto es menor que esta fracción del movimiento bruto de las patas, las patas se
+# compensan y el reparto se mide sobre el movimiento bruto: dividir por un neto ≈ 0 daba
+# −2106.9 % / 2206.9 % en un libro BNO/USO (verificación en vivo 2026-10-27).
+NET_SHARE_MIN_FRACTION_OF_GROSS = 0.25
 
 
 @dataclass(frozen=True)
@@ -138,6 +142,8 @@ class EpisodeReplayResult:
     observation_count: int
     legs: list[EpisodeLegResult] = field(default_factory=list)
     note: str | None = None
+    # Base de `contribution_share`: "net" (resultado del libro) o "gross" (Σ|P&L de las patas|).
+    contribution_basis: str = "net"
 
 
 def _price_on_or_before(series: pd.Series, when: pd.Timestamp) -> tuple[pd.Timestamp, float] | None:
@@ -262,13 +268,18 @@ def replay_episode(
     daily = nav.pct_change().dropna()
     worst_day_date = daily.idxmin() if not daily.empty else None
     book_return = float(sum(leg.weight * leg.episode_return for leg in legs if leg.status == "covered"))
+    gross_move = float(sum(abs(leg.weight * leg.episode_return) for leg in legs if leg.status == "covered"))
+    contribution_basis = (
+        "gross" if gross_move > 0 and abs(book_return) < NET_SHARE_MIN_FRACTION_OF_GROSS * gross_move else "net"
+    )
+    denominator = gross_move if contribution_basis == "gross" else book_return
     legs = [
         EpisodeLegResult(
             **{
                 **leg.__dict__,
                 "contribution_share": (
-                    float(leg.weight * leg.episode_return / book_return)
-                    if leg.status == "covered" and book_return != 0
+                    float(leg.weight * leg.episode_return / denominator)
+                    if leg.status == "covered" and denominator != 0
                     else None
                 ),
             }
@@ -295,6 +306,7 @@ def replay_episode(
             if status == "full"
             else f"{coverage:.0%} of gross exposure has history for this window; missing positions are treated as flat."
         ),
+        contribution_basis=contribution_basis,
     )
 
 

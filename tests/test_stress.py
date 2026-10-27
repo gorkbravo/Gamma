@@ -290,3 +290,28 @@ def test_stress_replay_endpoint_and_regimes_in_risk_compute(tmp_path):
         assert risk["regime_analysis"]["status"] in {"available", "unavailable"}
     finally:
         runtime.shutdown()
+
+
+def test_offsetting_legs_share_the_gross_move_instead_of_a_near_zero_net():
+    """Verificación en vivo 2026-10-27: BNO +25 % / USO −25 % en el episodio de aranceles daba
+    "SHARE OF RESULT −2106.9 % / 2206.9 %" al dividir cada pata por un resultado neto ≈ 0."""
+    prices = {
+        "BNO": _prices([100, 100, 95, 90, 85, 84, 82.6]),
+        "USO": _prices([100, 100, 95, 90, 84, 83, 81.8]),
+    }
+    result = replay_episode(prices, pd.Series({"BNO": 0.25, "USO": -0.25}), EPISODE, portfolio_value=100_000.0)
+
+    legs = {leg.key: leg for leg in result.legs}
+    gross = abs(legs["BNO"].weight * legs["BNO"].episode_return) + abs(legs["USO"].weight * legs["USO"].episode_return)
+    assert abs(result.book_return) < 0.25 * gross
+    assert result.contribution_basis == "gross"
+    assert legs["BNO"].contribution_share == pytest.approx(legs["BNO"].weight * legs["BNO"].episode_return / gross)
+    assert sum(abs(leg.contribution_share) for leg in result.legs) == pytest.approx(1.0)
+    assert all(abs(leg.contribution_share) <= 1.0 for leg in result.legs)
+
+
+def test_directional_books_keep_the_net_share():
+    prices = {"A": _prices([100, 100, 90, 85, 80, 82, 80]), "B": _prices([50, 50, 51, 53, 54, 55, 55])}
+    result = replay_episode(prices, pd.Series({"A": 0.6, "B": -0.4}), EPISODE, portfolio_value=1000.0)
+    assert result.contribution_basis == "net"
+    assert sum(leg.contribution_share for leg in result.legs) == pytest.approx(1.0)
