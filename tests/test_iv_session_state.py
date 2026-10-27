@@ -164,3 +164,47 @@ def test_idle_iv_service_reports_no_active_symbol():
     # GUA-20261021-10: sin sesión iniciada no se inventa "SPY".
     service = IVService(client=_IdleClient())  # type: ignore[arg-type]
     assert service.active_symbol() is None
+
+
+class _FailingEngine:
+    """Motor que, como con IBKR Error 200, termina al momento sin snapshot."""
+
+    def __init__(self, starts: list[str]):
+        self.starts = starts
+
+    def start(self, symbol: str) -> bool:
+        self.starts.append(symbol)
+        return True
+
+    def snapshot(self):
+        return None
+
+    def is_running(self) -> bool:
+        return False
+
+    def drain_messages(self) -> list[str]:
+        return ["Options surface failed: RuntimeError: Unable to qualify underlying contract for USOBNO"]
+
+    def stop(self) -> None:
+        return None
+
+
+def test_unknown_underlying_fails_at_once_and_names_the_cause(monkeypatch):
+    """Verificación en vivo 2026-10-27: "USOBNO" dejó la vista en LOADING ~40 s sin error porque
+    la espera seguía hasta el plazo (60 s) y reintentaba cinco profundidades."""
+    import time as _time
+
+    from src.application.iv_service import IVSurfaceRequest
+
+    starts: list[str] = []
+    service = IVService(client=_IdleClient())  # type: ignore[arg-type]
+    monkeypatch.setattr(service, "create_engine", lambda *args, **kwargs: _FailingEngine(starts))
+
+    started = _time.perf_counter()
+    result = service.get_surface(IVSurfaceRequest(symbol="USOBNO", wait_seconds=60, depth_preset="max"))
+    elapsed = _time.perf_counter() - started
+
+    assert elapsed < 2.0
+    assert starts == ["USOBNO"]
+    assert result.snapshot is None
+    assert result.warnings[0] == "Options surface failed: RuntimeError: Unable to qualify underlying contract for USOBNO"
