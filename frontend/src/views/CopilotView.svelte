@@ -25,6 +25,7 @@
   import type { CopilotRunState } from "../lib/copilot-run";
   import {
     describeCopilotSession,
+    findPersistedRetryTurn,
     resolveComposerDraft,
     resolveInFlightPrompt,
     summarizeCopilotStorageRecovery,
@@ -413,9 +414,16 @@
     !approvalContinuation && !runStreaming && !loading && lastTurn != null && !["ready", "awaiting_confirmation"].includes(lastTurn.result.status) && lastTurn.prompt
       ? lastTurn.prompt
       : null;
-  $: retryTurn = persistedTurns.find((turn) => turn.turn_id === lastTurn?.id || (
-    turn.result.response_id != null && turn.result.response_id === lastTurn?.result.response_id
-  ));
+  $: retryTurn = findPersistedRetryTurn(persistedTurns, lastTurn);
+  // El resultado de una ejecución del Operator ya terminada también es el último turno del hilo:
+  // no se vuelve a pintar como "OPERATOR RUN" (verificación en vivo 2026-10-27: dos copias).
+  $: operatorResultInThread =
+    operatorResult != null &&
+    chatTurns.some(
+      (turn) =>
+        turn.result === operatorResult ||
+        (operatorResult?.response_id != null && turn.result.response_id === operatorResult.response_id)
+    );
   // Re-scroll to the bottom whenever the transcript or in-flight state changes.
   $: if (chatTurns || loading || hasPlanMessage || activeRun) {
     shouldScroll = true;
@@ -748,7 +756,7 @@
               <div class="role-tag">OPERATOR PLAN</div>
               <div class="assistant-body">
                 <CopilotTranscriptResult
-                  result={operatorResult}
+                  result={operatorResultInThread ? null : operatorResult}
                   {operatorPlan}
                   {onOpenSource}
                   onConfirmMutation={roleMode === "operator" ? onConfirmMutation : null}
@@ -756,7 +764,7 @@
                 />
               </div>
             </div>
-          {:else if roleMode === "operator" && operatorResult}
+          {:else if roleMode === "operator" && operatorResult && !operatorResultInThread}
             <div class="msg assistant">
               <div class="role-tag">OPERATOR RUN</div>
               <div class="assistant-body">
