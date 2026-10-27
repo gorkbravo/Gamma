@@ -201,6 +201,7 @@
   let atmStrikeIndex = 0;
   let surfaceAlerts: string[] = [];
   let requestSymbol = "";
+  let symbolFocusPending = false;
   let displayedSymbol = "No surface";
   let historySymbol = "";
   let optionsHistoryMatches = false;
@@ -685,7 +686,21 @@
       <div class="header-actions">
         <label class="symbol-control">
           <span>Symbol</span>
-          <input bind:value={symbol} on:keydown={(event) => event.key === "Enter" && loadMaxSurface()} placeholder="SPY" />
+          <!-- Entrar en el campo selecciona el símbolo: escribir lo sustituye en vez de concatenar
+               ("USOBNO", 2026-10-27). Con ratón se selecciona en el clic que da el foco, porque el
+               mouseup deshace una selección hecha en focus. -->
+          <input
+            bind:value={symbol}
+            on:focus={(event) => event.currentTarget.select()}
+            on:pointerdown={(event) => (symbolFocusPending = document.activeElement !== event.currentTarget)}
+            on:click={(event) => {
+              if (symbolFocusPending) event.currentTarget.select();
+              symbolFocusPending = false;
+            }}
+            on:keydown={(event) => event.key === "Enter" && loadMaxSurface()}
+            placeholder="SPY"
+            aria-label="Options underlying symbol"
+          />
         </label>
         <button class="primary-action" type="button" on:click={loadMaxSurface} disabled={loading || sessionLoading || !requestSymbol}>
           {loading ? "LOADING..." : result ? "Reload Max Surface" : "Load Max Surface"}
@@ -758,7 +773,7 @@
         <article class="panel split-panel">
           <div class="panel-head">
             <h3>Expiry Chain</h3>
-            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value}>
+            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
               {#each result?.expiries ?? [] as expiry}
                 <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
               {/each}
@@ -903,7 +918,7 @@
       <article class="panel table-panel">
         <div class="table-header">
           <h3>Options Chain</h3>
-          <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value}>
+          <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
             {#each result?.expiries ?? [] as expiry}
               <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
             {/each}
@@ -1228,7 +1243,7 @@
                 </span>
               {/if}
             </h3>
-            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value}>
+            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
               {#each result?.expiries ?? [] as expiry}
                 <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
               {/each}
@@ -1286,11 +1301,11 @@
         <div class="panel-head">
           <h3>Strategy Builder</h3>
           <div class="builder-controls">
-            <select bind:value={selectedSide}>
+            <select bind:value={selectedSide} aria-label="Strategy leg side">
               <option value="long">Long</option>
               <option value="short">Short</option>
             </select>
-            <select bind:value={selectedOptionType}>
+            <select bind:value={selectedOptionType} aria-label="Strategy leg option type">
               <option value="call">Call</option>
               <option value="put">Put</option>
             </select>
