@@ -1516,3 +1516,134 @@ def test_cross_domain_links_declare_navigable_targets():
     assert targets["macro-inflation-energy"] == ("macro", "snapshot", {"theme": "inflation"})
     assert targets["macro-growth-copper-gold"] == ("macro", "snapshot", {"theme": "growth"})
     assert targets["prediction-geopolitical-energy"] == ("prediction_markets", "screener", {})
+
+
+# ── Verificación en vivo 2026-10-27: la sección Commodities del SITREP tardaba 50 s en frío ──
+
+
+def test_eia_reference_series_are_fetched_concurrently_and_read_in_config_order():
+    import threading
+    import time as _time
+
+    lock = threading.Lock()
+    in_flight = {"now": 0, "peak": 0}
+    failing_series = EIA_INVENTORY_SERIES[1].series_id
+
+    def fake_fetch_json(url: str, params: dict[str, object] | None):
+        del params
+        with lock:
+            in_flight["now"] += 1
+            in_flight["peak"] = max(in_flight["peak"], in_flight["now"])
+        try:
+            _time.sleep(0.02)
+            if failing_series in url:
+                raise TimeoutError("EIA timeout")
+            return {"response": {"data": [{"period": "2026-10-16", "value": 420000}]}}
+        finally:
+            with lock:
+                in_flight["now"] -= 1
+
+    provider = EiaCommoditiesDataProvider(
+        api_key="test-key",
+        reference_provider=SampleCommoditiesDataProvider(),
+        fetch_json=fake_fetch_json,
+        max_concurrent_requests=4,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert in_flight["peak"] > 1
+    # El fallo de una serie sigue siendo un aviso con el mismo texto, sin tumbar el resto.
+    assert f"EIA series {failing_series} failed: TimeoutError." in snapshot.warnings
+    eia_inventories = [series for series in snapshot.inventory_series if series.source_provider == "eia"]
+    expected = [
+        config.series_id
+        for config in EIA_INVENTORY_SERIES
+        if config.series_id and config.series_id != failing_series
+    ]
+    assert sorted(series.metadata.provider_series_id for series in eia_inventories) == sorted(expected)
+
+
+def test_ibkr_provider_requests_every_breadth_quote_in_one_batch(tmp_path, monkeypatch):
+    monkeypatch.delenv("IBKR_COMMODITIES_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_BREADTH_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_STARTUP_ENABLED", raising=False)
+    months = _forward_contract_months(3)
+    details = {
+        "CL": [_future_detail(4001, months[0]), _future_detail(4002, months[1]), _future_detail(4003, months[2])],
+        "GC": [
+            _future_detail(5001, months[0], symbol="GC", exchange="COMEX"),
+            _future_detail(5002, months[1], symbol="GC", exchange="COMEX"),
+            _future_detail(5003, months[2], symbol="GC", exchange="COMEX"),
+        ],
+    }
+
+    class _CountingMarketData(_FakeMarketData):
+        def __init__(self, prices):
+            super().__init__(prices)
+            self.batches: list[list[int]] = []
+
+        def fetch_snapshot_quotes_batch(self, contracts, timeout_seconds=None, *, batch_size=8):
+            self.batches.append([int(contract.conId) for contract in contracts])
+            return super().fetch_snapshot_quotes_batch(contracts, timeout_seconds, batch_size=batch_size)
+
+    market_data = _CountingMarketData({4001: 80.0, 4002: 79.0, 4003: 78.5, 5001: 2400.0, 5002: 2405.0, 5003: 2410.0})
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient(details),
+        market_data=market_data,
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        root_configs=(
+            IbkrFutureRootConfig("wti", "CL", "NYMEX", "USD", "USD/bbl", "WTI Crude Oil", trading_class="CL"),
+            IbkrFutureRootConfig("gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC"),
+        ),
+        contract_depth=3,
+        breadth_contract_depth=2,
+        history_days=0,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    # Una sola petición para las dos raíces (antes, una por raíz).
+    assert len(market_data.batches) == 1
+    assert sorted(market_data.batches[0]) == [4001, 4002, 4003, 5001, 5002]
+    wti_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "wti")
+    gold_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert [node.price for node in wti_curve.nodes] == [80.0, 79.0, 78.5]
+    assert [node.price for node in gold_curve.nodes] == [2400.0, 2405.0]
+
+
+def test_ibkr_provider_reports_a_failed_quote_batch_for_each_pending_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("IBKR_COMMODITIES_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_BREADTH_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_STARTUP_ENABLED", raising=False)
+    months = _forward_contract_months(2)
+    details = {
+        "CL": [_future_detail(4001, months[0]), _future_detail(4002, months[1])],
+        "GC": [
+            _future_detail(5001, months[0], symbol="GC", exchange="COMEX"),
+            _future_detail(5002, months[1], symbol="GC", exchange="COMEX"),
+        ],
+    }
+
+    class _FailingMarketData(_FakeMarketData):
+        def fetch_snapshot_quotes_batch(self, contracts, timeout_seconds=None, *, batch_size=8):
+            raise TimeoutError("TWS stalled")
+
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient(details),
+        market_data=_FailingMarketData({}),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        root_configs=(
+            IbkrFutureRootConfig("wti", "CL", "NYMEX", "USD", "USD/bbl", "WTI Crude Oil", trading_class="CL"),
+            IbkrFutureRootConfig("gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC"),
+        ),
+        breadth_contract_depth=2,
+        history_days=0,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert "IBKR quote fetch failed for WTI Crude Oil: TimeoutError." in snapshot.warnings
+    assert "IBKR quote fetch failed for Gold: TimeoutError." in snapshot.warnings

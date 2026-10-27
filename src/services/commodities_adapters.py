@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextvars
 import json
 import math
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -327,6 +329,34 @@ def _without_curve_unavailable_boilerplate(values: list[str]) -> list[str]:
 MONTH_CODES = "FGHJKMNQUVXZ"
 
 
+# Peticiones simultáneas a EIA/FRED al construir la referencia de Commodities.
+EIA_REFERENCE_MAX_CONCURRENT_REQUESTS = 6
+
+
+def _run_concurrently(
+    jobs: list[Callable[[], Any]],
+    *,
+    max_workers: int,
+) -> list[tuple[Any, Exception | None]]:
+    """Ejecuta trabajos de E/S en paralelo y devuelve `(resultado, error)` en su orden.
+
+    Cada trabajo corre en una copia del contexto actual, así el registro de uso HTTP sigue
+    atribuyendo la llamada al proveedor que la hizo. Con un solo hilo corre en serie.
+    """
+
+    def guarded(job: Callable[[], Any]) -> tuple[Any, Exception | None]:
+        try:
+            return job(), None
+        except Exception as exc:  # noqa: BLE001 - cada fallo se convierte en un aviso
+            return None, exc
+
+    if max_workers <= 1 or len(jobs) <= 1:
+        return [guarded(job) for job in jobs]
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(jobs)), thread_name_prefix="commodities-ref") as pool:
+        futures = [pool.submit(contextvars.copy_context().run, guarded, job) for job in jobs]
+        return [future.result() for future in futures]
+
+
 def default_eia_fetcher(url: str, params: dict[str, Any] | None = None) -> Any:
     cleaned = {
         key: value
@@ -422,6 +452,7 @@ class EiaCommoditiesDataProvider:
         fred_client: FredClient | None = None,
         fetch_json: JsonFetcher | None = None,
         cache_seconds: int = 21_600,
+        max_concurrent_requests: int = EIA_REFERENCE_MAX_CONCURRENT_REQUESTS,
     ) -> None:
         self.api_key = str(api_key or "").strip()
         self.cache = cache
@@ -429,6 +460,7 @@ class EiaCommoditiesDataProvider:
         self.fred_client = fred_client
         self.fetch_json = fetch_json or default_eia_fetcher
         self.cache_seconds = max(0, int(cache_seconds))
+        self.max_concurrent_requests = max(1, int(max_concurrent_requests))
 
     def get_snapshot(
         self,
@@ -451,15 +483,39 @@ class EiaCommoditiesDataProvider:
 
         retrieved_at = now_utc().replace(microsecond=0)
         warnings: list[str] = []
+        inventory_configs = [config for config in EIA_INVENTORY_SERIES if config.series_id]
+        price_configs = [config for config in EIA_PRICE_SERIES if config.series_id]
+        fred_configs: tuple[FredPriceConfig, ...] = ()
+        fred_absent_warnings: list[str] = []
+        if self.fred_client is not None:
+            fred_configs, fred_absent_warnings = _fred_price_series_configs()
+        # Cada serie es una petición HTTP independiente. En frío (caché de 6 h vencida) las ~25
+        # series tardaban ~22 s en serie y frenaban la sección Commodities del SITREP
+        # (verificación en vivo 2026-10-27); se piden en paralelo y se leen en el orden de antes.
+        jobs: list[Callable[[], Any]] = [
+            *(
+                (lambda config=config: self._fetch_eia_inventory_series(config, force_refresh=force_refresh))
+                for config in inventory_configs
+            ),
+            *(
+                (lambda config=config: self._fetch_eia_price_history(config, force_refresh=force_refresh))
+                for config in price_configs
+            ),
+            *(
+                (lambda config=config: self._fetch_fred_price_history(config, force_refresh=force_refresh))
+                for config in fred_configs
+            ),
+        ]
+        outcomes = _run_concurrently(jobs, max_workers=self.max_concurrent_requests)
+        inventory_outcomes = outcomes[: len(inventory_configs)]
+        price_outcomes = outcomes[len(inventory_configs) : len(inventory_configs) + len(price_configs)]
+        fred_outcomes = outcomes[len(inventory_configs) + len(price_configs) :]
+
         inventories = {series.metadata.series_id: series for series in reference.inventory_series}
         official_count = 0
-        for config in EIA_INVENTORY_SERIES:
-            if not config.series_id:
-                continue
-            try:
-                series = self._fetch_eia_inventory_series(config, force_refresh=force_refresh)
-            except Exception as exc:
-                warnings.append(f"EIA series {config.series_id} failed: {exc.__class__.__name__}.")
+        for config, (series, error) in zip(inventory_configs, inventory_outcomes):
+            if error is not None:
+                warnings.append(f"EIA series {config.series_id} failed: {error.__class__.__name__}.")
                 continue
             if series.points:
                 inventories[series.metadata.series_id] = series
@@ -467,13 +523,9 @@ class EiaCommoditiesDataProvider:
 
         price_histories = {history.instrument_id: history for history in reference.price_histories}
         eia_price_count = 0
-        for config in EIA_PRICE_SERIES:
-            if not config.series_id:
-                continue
-            try:
-                history = self._fetch_eia_price_history(config, force_refresh=force_refresh)
-            except Exception as exc:
-                warnings.append(f"EIA price series {config.series_id} failed: {exc.__class__.__name__}.")
+        for config, (history, error) in zip(price_configs, price_outcomes):
+            if error is not None:
+                warnings.append(f"EIA price series {config.series_id} failed: {error.__class__.__name__}.")
                 continue
             if history.points:
                 price_histories[history.instrument_id] = history
@@ -481,13 +533,10 @@ class EiaCommoditiesDataProvider:
 
         fred_count = 0
         if self.fred_client is not None:
-            fred_configs, fred_absent_warnings = _fred_price_series_configs()
             warnings.extend(fred_absent_warnings)
-            for config in fred_configs:
-                try:
-                    history = self._fetch_fred_price_history(config, force_refresh=force_refresh)
-                except Exception as exc:
-                    warnings.append(f"FRED series {config.series_id} failed: {exc.__class__.__name__}.")
+            for config, (history, error) in zip(fred_configs, fred_outcomes):
+                if error is not None:
+                    warnings.append(f"FRED series {config.series_id} failed: {error.__class__.__name__}.")
                     continue
                 if history.points:
                     price_histories[history.instrument_id] = history
@@ -860,6 +909,7 @@ class IbkrCommoditiesDataProvider:
         priced_nodes = 0
         selected = _slug(selected_instrument_id or (self.startup_instrument_ids[0] if self.startup_instrument_ids else ""))
         target_ids = self._target_instrument_ids(selected)
+        pending_curves: list[tuple[IbkrFutureRootConfig, list[tuple[Contract, Any]]]] = []
 
         for instrument in reference.instruments:
             if instrument.instrument_id not in self.enabled_instrument_ids:
@@ -903,16 +953,27 @@ class IbkrCommoditiesDataProvider:
                     f"No active IBKR futures contracts are available for {config.label} ({config.symbol} {config.exchange}); keeping fallback curve."
                 )
                 continue
+            pending_curves.append((config, contracts))
 
-            quote_contracts = [contract for contract, _detail in contracts]
+        # Todas las cotizaciones en un solo lote: pedirlas raíz a raíz costaba ~0,9 s por
+        # instrumento aunque cada uno tuviera dos contratos (~11 s para diez raíces en la
+        # verificación en vivo 2026-10-27); el lote las agrupa en bloques de quote_batch_size.
+        quotes: dict[str, QuoteSnapshot] = {}
+        quote_failure: str | None = None
+        if pending_curves:
             try:
-                quotes, quote_warnings = self._fetch_quotes(quote_contracts)
+                quotes, quote_warnings = self._fetch_quotes(
+                    [contract for _config, contracts in pending_curves for contract, _detail in contracts]
+                )
+                warnings.extend(quote_warnings)
             except Exception as exc:
-                warnings.append(f"IBKR quote fetch failed for {config.label}: {exc.__class__.__name__}.")
-                continue
-            warnings.extend(quote_warnings)
+                quote_failure = exc.__class__.__name__
             delayed_nodes += sum(1 for snapshot in quotes.values() if snapshot.delayed)
 
+        for config, contracts in pending_curves:
+            if quote_failure is not None:
+                warnings.append(f"IBKR quote fetch failed for {config.label}: {quote_failure}.")
+                continue
             curve = self._build_curve(config, contracts, quotes, retrieved_at)
             curve_priced_nodes = sum(1 for node in curve.nodes if node.price is not None)
             priced_nodes += curve_priced_nodes
