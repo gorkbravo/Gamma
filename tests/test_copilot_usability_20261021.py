@@ -500,6 +500,30 @@ def test_commodity_prompt_never_triggers_sec_company_lookup():
     assert should_attempt_equity_resolution("What is the fair value of Lockheed Martin?") is True
 
 
+def test_literal_operator_commodity_prompt_does_not_reach_sec_search():
+    """Verificación en vivo 2026-10-27: el prompt literal del Operator de la auditoría seguía
+    emitiendo "Gamma cannot resolve company names…" porque "Commodities" (pestaña) y "Then" /
+    "Read-only" (inicio de frase) pasaban por posibles nombres de empresa."""
+    prompt = (
+        "Load the Brent Crude Oil futures curve from Commodities and report, for each delivery month "
+        "from Dec-26 to Nov-27, the Brent price, the WTI price and the same-month Brent-WTI spread. "
+        "Then state whether the spread is concentrated in the first three months. Read-only research; "
+        "cite the curve objects and their quote timestamps."
+    )
+    calls: list[str] = []
+
+    def search(query, limit=12):
+        calls.append(query)
+        raise SecIdentityMissingError()
+
+    assert should_attempt_equity_resolution(prompt) is False
+    assert resolve_equity_entity(prompt=prompt, context_ticker=None, search_companies=search) is None
+    assert calls == []
+    # Un nombre propio en mitad de frase, o una sola palabra, siguen pasando por la búsqueda SEC.
+    assert should_attempt_equity_resolution("Compare the Brent curve with Exxon Mobil margins.") is True
+    assert should_attempt_equity_resolution("Microsoft") is True
+
+
 def test_sec_identity_warning_is_scoped_to_name_lookups():
     def search(query, limit=12):
         raise SecIdentityMissingError()

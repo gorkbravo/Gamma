@@ -75,7 +75,11 @@ _DOMAIN_NON_COMPANY_WORDS = {
     "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
     "january", "february", "march", "april", "june", "july", "august", "september",
     "october", "november", "december",
+    # Pestañas y venues de Gamma: "from Commodities" no nombra una empresa (verificación 2026-10-27).
+    "commodities", "copilot", "gamma", "kalshi", "operator", "polymarket", "sealanes", "sitrep",
 }
+# Fin de frase o de cláusula: la mayúscula que sigue es tipográfica, no un nombre propio.
+_SENTENCE_BREAK_CHARS = ".!?;:\n"
 _ENTITY_TRIGGER_TERMS = (
     "about ",
     "analyze",
@@ -201,12 +205,22 @@ def should_attempt_equity_resolution(prompt: str) -> bool:
         return False
     if any(term in lowered for term in _ENTITY_TRIGGER_TERMS):
         return True
-    words = re.findall(r"\b[A-Z][A-Za-z0-9&'-]{2,}\b", text)
+    matches = list(re.finditer(r"\b[A-Z][A-Za-z0-9&'-]{2,}\b", text))
+    # Solo cuentan las mayúsculas en mitad de frase: "Then state…" o "Read-only research" tras un
+    # punto no son nombres. Una sola palabra capitalizada ("Microsoft") se sigue considerando.
+    words = [match.group(0) for match in matches if not _starts_sentence(text, match.start())]
+    if not words and len(matches) == 1:
+        words = [matches[0].group(0)]
     return any(
         word.upper() not in _NON_TICKER_ACRONYMS
         and word.lower().split("-")[0] not in _DOMAIN_NON_COMPANY_WORDS
-        for word in words[1:] or words
+        for word in words
     )
+
+
+def _starts_sentence(text: str, index: int) -> bool:
+    preceding = text[:index].rstrip(" \t\"'(")
+    return not preceding or preceding[-1] in _SENTENCE_BREAK_CHARS
 
 
 def resolve_equity_entity(
