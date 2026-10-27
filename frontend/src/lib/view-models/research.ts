@@ -560,7 +560,10 @@ export function buildCommodityStrategyHandoff(
   if (workspace?.coverage.coverage_status && workspace.coverage.coverage_status !== "live") {
     warnings.push(`Commodity coverage is ${workspace.coverage.coverage_status}; review provider/source limitations.`);
   }
-  if (curve?.warnings.length) {
+  // Las caveats de la curva describen la cotización de futuros: solo aplican si el histórico del leg
+  // también es del frontal IBKR. Sobre un leg FRED/EIA spot confundían (verificación 2026-10-27).
+  const historyIsFuturesFront = String(history?.source_provider ?? "").startsWith("ibkr");
+  if (historyIsFuturesFront && curve?.warnings.length) {
     warnings.push(...curve.warnings.slice(0, 3));
   }
 

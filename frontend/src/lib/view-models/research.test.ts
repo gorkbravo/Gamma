@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CopilotWorkingAnalysis, IvSurface, ResearchResult } from "../api/types";
+import type { CommodityCurveSnapshot, CommodityInstrument, CopilotWorkingAnalysis, IvSurface, ResearchResult } from "../api/types";
 import {
   appendStrategyPortfolioDraftLeg,
   buildCommodityStrategyHandoff,
@@ -665,6 +665,32 @@ describe("research view model helpers", () => {
     expect(handoff.loaded_series?.unit).toBe("USD/bbl");
     expect(handoff.loaded_series?.source_provider).toBe("sample_data");
     expect(handoff.loaded_series?.contract_symbol).toBe("CL");
+  });
+
+  it("keeps futures-curve caveats off spot-proxy legs (live check 2026-10-27)", () => {
+    const instrument: CommodityInstrument = {
+      instrument_id: "brent", symbol: "BZ", name: "Brent Crude Oil", family: "energy", subgroup: "crude",
+      quote_unit: "USD/bbl", currency: "USD", exchange: "NYMEX", front_symbol: "BZZ6", provider_symbols: { ibkr: "BZ" },
+      aliases: ["brent"], description: "Brent futures", source_provider: "ibkr", retrieved_at: "2026-10-27T12:51:10",
+      origin: "ibkr", transformation_note: null
+    };
+    const point = (timestamp: string, value: number, source_provider: string) => ({
+      instrument_id: "brent", timestamp, value, unit: "USD/bbl", source_provider,
+      retrieved_at: "2026-10-27T12:51:10", origin: source_provider, transformation_note: null
+    });
+    const history = (source_provider: string) => ({
+      instrument_id: "brent", label: "Brent", unit: "USD/bbl",
+      points: Array.from({ length: 8 }, (_, index) => point(`2026-10-${String(10 + index).padStart(2, "0")}T00:00:00`, 110 + index, source_provider)),
+      warnings: [], source_provider, retrieved_at: "2026-10-27T12:51:10", origin: source_provider, transformation_note: null
+    });
+    const cachedCurveCaveat = "Cached IBKR curve snapshot with the original provider-backed quote and dated prior-close reference.";
+    const curve = { warnings: [cachedCurveCaveat] } as unknown as CommodityCurveSnapshot;
+
+    const spotLeg = buildCommodityStrategyHandoff({ instrument, history: history("fred"), curve });
+    const futuresLeg = buildCommodityStrategyHandoff({ instrument, history: history("ibkr"), curve });
+
+    expect(spotLeg.warnings).not.toContain(cachedCurveCaveat);
+    expect(futuresLeg.warnings).toContain(cachedCurveCaveat);
   });
 
   it("carries no series when the commodity has no loaded history", () => {
