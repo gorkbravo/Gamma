@@ -55,6 +55,9 @@
   }
 
   $: eventRows = events?.events ?? snapshot?.upcoming_events ?? [];
+  // Cada calendario oficial que falta (BLS, BEA, Fed, BCE) llega como aviso con su nombre.
+  $: calendarWarnings = events?.warnings
+    ?? (snapshot?.warnings ?? []).filter((warning) => warning.startsWith("Macro calendar:"));
   $: groupedEvents = groupEventsByMonth(eventRows);
   $: recentEventStudies = (snapshot?.event_studies ?? []).filter((study) => study.timing === "recent");
   $: upcomingEventStudies = (snapshot?.event_studies ?? []).filter((study) => study.timing === "upcoming");
@@ -215,6 +218,9 @@
         <h3>Scheduled catalysts</h3>
       </div>
     </div>
+    {#each calendarWarnings as warning}
+      <p class="source-warning">{warning.replace(/^Macro calendar:\s*/, "")}</p>
+    {/each}
     {#if groupedEvents.length}
       <div class="events-scroll">
         {#each groupedEvents as group}
@@ -443,6 +449,12 @@
     font-size: var(--text-sm);
     margin: 0;
     padding: var(--space-3) 0;
+  }
+
+  .source-warning {
+    color: var(--warning);
+    font-size: var(--text-sm);
+    margin: 0 0 var(--space-2);
   }
 
   /* ── Typography ── */

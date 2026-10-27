@@ -650,7 +650,15 @@ class MacroDivergenceListResponseModel(BaseModel):
 class MacroEventsResponseModel(BaseModel):
     region: str
     events: list[MacroEventModel] = Field(default_factory=list)
+    # Un aviso por cada calendario oficial que no aportó datos frescos (fuente nombrada).
+    warnings: list[str] = Field(default_factory=list)
 
     @classmethod
-    def from_domain(cls, *, region: str, rows: list[MacroEventRecord]) -> "MacroEventsResponseModel":
-        return cls(region=region, events=[MacroEventModel.from_domain(row) for row in rows])
+    def from_domain(
+        cls,
+        *,
+        region: str,
+        rows: list[MacroEventRecord],
+        warnings: list[str] | None = None,
+    ) -> "MacroEventsResponseModel":
+        return cls(region=region, events=[MacroEventModel.from_domain(row) for row in rows], warnings=list(warnings or []))

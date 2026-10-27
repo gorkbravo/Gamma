@@ -87,5 +87,5 @@ def macro_events(
     force_refresh: bool = Query(default=False),
 ) -> MacroEventsResponseModel:
     runtime = request.app.state.runtime
-    rows = runtime.macro_service.get_events(region=region, force_refresh=force_refresh)
-    return MacroEventsResponseModel.from_domain(region=region, rows=rows)
+    result = runtime.macro_service.get_events_result(region=region, force_refresh=force_refresh)
+    return MacroEventsResponseModel.from_domain(region=region, rows=result.events, warnings=result.warnings)

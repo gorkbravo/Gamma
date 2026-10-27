@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.error import HTTPError
 
 from src.models.prediction_markets import (
     CalibrationSummary,
@@ -187,6 +189,32 @@ class OfflineTreasuryCurveAdapter:
                 "30Y": round(4.55 + 0.10 * drift, 4),
             }
         return history, self.now
+
+
+# Extractos de los calendarios oficiales tal como se sirvieron el 2026-10-22 (ver la
+# cabecera de cada fichero). Cubren los formatos que rompieron los parsers: filas
+# sombreadas de la Fed, la tabla de BEA con cabecera "Year 2026" y las fechas DD/MM/AAAA
+# del BCE.
+MACRO_CALENDAR_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "macro_calendars"
+MACRO_CALENDAR_CAPTURED_AT = datetime(2026, 10, 22, 13, 0, 0)
+_MACRO_CALENDAR_FIXTURES = {
+    "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm": "fomccalendars.htm",
+    "https://www.bls.gov/schedule/news_release/cpi.htm": "cpi.htm",
+    "https://www.bls.gov/schedule/news_release/ppi.htm": "ppi.htm",
+    "https://www.bls.gov/schedule/news_release/empsit.htm": "empsit.htm",
+    "https://www.bls.gov/schedule/news_release/jolts.htm": "jolts.htm",
+    "https://www.bea.gov/news/schedule": "bea_schedule.html",
+    "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html": "ecb_calendar.html",
+}
+
+
+def macro_calendar_fixture(url: str) -> str:
+    """HTML guardado de un calendario oficial; una URL desconocida responde 404 como el sitio."""
+
+    name = _MACRO_CALENDAR_FIXTURES.get(url)
+    if name is None:
+        raise HTTPError(url, 404, "Not Found", hdrs=None, fp=None)
+    return (MACRO_CALENDAR_FIXTURES_DIR / name).read_text(encoding="utf-8")
 
 
 def offline_prediction_adapters(*, now: datetime | None = None) -> dict[str, OfflinePredictionVenueAdapter]:
