@@ -609,3 +609,44 @@ def test_related_markets_for_model_keeps_series_siblings_and_caps_rows():
         *[f"analog-{index}" for index in range(5)],
         *[f"sibling-{index}" for index in range(5)],
     ]
+
+
+def test_operator_curve_inspection_reads_full_depth_for_a_breadth_curve(tmp_path):
+    """Verificación en vivo 2026-10-27: con Gold seleccionado, el Operator leyó Brent con los 2
+    nodos de amplitud del workspace "despite requesting 12" y no pudo inspeccionar WTI
+    ("per-run request limit of 1"), así que 10 de 12 diferenciales salieron NA."""
+    runtime = _runtime(tmp_path)
+    try:
+        service = runtime.copilot_service
+        workspace = _workspace()
+        brent = next(row for row in workspace["curves"] if row["instrument_id"] == "brent")
+        brent["nodes"] = brent["nodes"][:2]
+        full_brent = runtime.commodities_service.get_curve("brent")
+        assert full_brent is not None and len(full_brent.nodes) > 2
+
+        bundle = CopilotContextBundle(
+            domain="commodities", current_tab="commodities", summary_data={}, tool_state={"workspace": workspace}
+        )
+        execution = service._execute_tool(
+            "inspect_commodity_curve_fundamentals",
+            {"instrument_id": "brent", "max_curve_nodes": 12, "max_inventory_points": 2},
+            bundle,
+        )
+
+        curve = execution.output["curve"]
+        assert len(curve["nodes"]) == min(12, len(full_brent.nodes))
+        assert any("held 2 breadth node(s) for brent" in warning for warning in curve["warnings"])
+        # El workspace del contexto no se modifica.
+        assert len(brent["nodes"]) == 2
+        # La curva seleccionada (o una curva real de más de 2 nodos) se respeta tal cual.
+        wti = service._execute_tool(
+            "inspect_commodity_curve_fundamentals",
+            {"instrument_id": "wti", "max_curve_nodes": 12, "max_inventory_points": 2},
+            bundle,
+        )
+        assert [node["price"] for node in wti.output["curve"]["nodes"]][:2] == [99.93, 98.05]
+        assert len(wti.output["curve"]["nodes"]) == 6
+        definition = next(item for item in service.list_research_action_definitions() if item.tool_id == "inspect_commodity_curve_fundamentals")
+        assert definition.request_limit == 2
+    finally:
+        runtime.shutdown()

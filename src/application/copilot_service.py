@@ -287,6 +287,10 @@ class _CopilotEntityPreflight:
     usage: CopilotUsageRecord = field(default_factory=CopilotUsageRecord)
 
 
+# Nodos que trae el workspace para los instrumentos no seleccionados (IBKR breadth depth).
+_COMMODITY_BREADTH_CURVE_NODES = 2
+
+
 class CopilotService:
     def __init__(
         self,
@@ -880,6 +884,9 @@ class CopilotService:
                         "required": ["status", "instrument_id", "curve", "inventories", "events", "source_ids", "warnings"],
                     },
                     timeout_seconds=10.0,
+                    # Un diferencial (Brent–WTI) necesita dos instrumentos; con una sola inspección por
+                    # ejecución el Operator dejaba la segunda curva sin leer (verificación 2026-10-27).
+                    request_limit=2,
                     provenance_behavior=(
                         "Uses the normalized CommoditiesService workspace and preserves contract ids, provider-native "
                         "series ids, price basis, retrieval timestamps, assumptions, transformation notes, and warnings."
@@ -12696,6 +12703,7 @@ class CopilotService:
             if isinstance(row, dict) and str(row.get("instrument_id") or "") == instrument_id
         ]
         curve = curves[0] if curves else None
+        curve, depth_note = self._deepen_commodity_curve(curve, instrument_id, workspace, max_curve_nodes)
         curve_output = None
         if curve is not None:
             curve_output = {
@@ -12731,7 +12739,7 @@ class CopilotService:
                 "retrieved_at": curve.get("retrieved_at"),
                 "origin": curve.get("origin"),
                 "transformation_note": curve.get("transformation_note"),
-                "warnings": list(curve.get("warnings") or []),
+                "warnings": [*list(curve.get("warnings") or []), *([depth_note] if depth_note else [])],
             }
         inventory_output = []
         for row in inventories[:6]:
@@ -17737,6 +17745,42 @@ class CopilotService:
             theme=str(context.summary_data.get("theme") or "all"),
             comparison_region=context.summary_data.get("comparison_region"),
         )
+
+    def _deepen_commodity_curve(
+        self,
+        curve: dict[str, Any] | None,
+        instrument_id: str,
+        workspace: dict[str, Any],
+        max_curve_nodes: int,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Curva completa de un instrumento no seleccionado (GUA-20261027-3).
+
+        El workspace de la vista solo trae los nodos de amplitud (dos) de los instrumentos que no
+        están seleccionados: el Operator leyó Brent con 2 nodos de 12 pedidos. Si faltan nodos, se
+        pide la curva de ese instrumento al CommoditiesService (solo lectura, con su caché).
+        """
+        loaded_nodes = len(list((curve or {}).get("nodes") or []))
+        selected = str(workspace.get("selected_instrument_id") or "").strip().lower()
+        # Solo se sustituye una curva de amplitud; una curva real del snapshot se respeta.
+        if (
+            self.commodities_service is None
+            or not selected
+            or instrument_id == selected
+            or loaded_nodes >= max_curve_nodes
+            or loaded_nodes > _COMMODITY_BREADTH_CURVE_NODES
+        ):
+            return curve, None
+        try:
+            deeper = self.commodities_service.get_curve(instrument_id)
+        except Exception:  # noqa: BLE001 - la curva cargada sigue siendo válida
+            return curve, None
+        if deeper is None or len(deeper.nodes) <= loaded_nodes:
+            return curve, None
+        note = (
+            f"The loaded Commodities workspace held {loaded_nodes} breadth node(s) for {instrument_id}; "
+            f"Gamma read {len(deeper.nodes)} node(s) from the read-only Commodities service for this inspection."
+        )
+        return asdict(deeper), note
 
     @staticmethod
     def _commodities_workspace_from_bundle(context: CopilotContextBundle) -> dict[str, Any]:
