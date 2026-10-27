@@ -555,6 +555,9 @@ class CommodityProviderSnapshot:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    # Historias spot/proxy que una historia del frontal IBKR sustituyó en `price_histories`;
+    # los diferenciales las usan para no mezclar futuros y spot (GUA-20261027-4).
+    reference_price_histories: list[CommodityPriceHistory] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

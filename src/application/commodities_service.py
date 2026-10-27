@@ -345,6 +345,7 @@ class CommoditiesService:
     ) -> list[CommoditySpreadSnapshot]:
         curves_by_id = {curve.instrument_id: curve for curve in curves}
         histories_by_id = {history.instrument_id: history for history in snapshot.price_histories}
+        reference_by_id = {history.instrument_id: history for history in snapshot.reference_price_histories}
         unit_by_id = {instrument.instrument_id: instrument.quote_unit for instrument in snapshot.instruments}
         # GUA-20261021-2: la frescura se mide contra hoy (las cotizaciones titulares nunca son posteriores).
         reference_date = _utc_date(self.clock())
@@ -397,8 +398,9 @@ class CommoditiesService:
             ("heating-oil-crack", "Distillate 1-1 Crack Proxy", "heating_oil", "wti", "crack"),
         ]
         for spread_id, label, left_id, right_id, kind in ratio_specs:
-            left = histories_by_id.get(left_id)
-            right = histories_by_id.get(right_id)
+            legs, basis_warning = _same_basis_histories([left_id, right_id], histories_by_id, reference_by_id)
+            left = legs[left_id]
+            right = legs[right_id]
             history = _relative_spread_history(spread_id, left, right, kind)
             if not history:
                 continue
@@ -418,7 +420,7 @@ class CommoditiesService:
                 transformation_note="Gamma-defined inter-commodity spread using aligned normalized price histories.",
             )
             spread = _with_spread_freshness(
-                _spread_snapshot(definition, value, history, history[-1].retrieved_at),
+                _with_basis_warning(_spread_snapshot(definition, value, history, history[-1].retrieved_at), basis_warning),
                 observed_at=history[-1].timestamp,
                 leg_observed_at=_leg_latest_observations({left_id: left, right_id: right}),
                 reference_date=reference_date,
@@ -438,7 +440,9 @@ class CommoditiesService:
             ("two-one-one-crack", "2-1-1 Crack Proxy", {"gasoline": 1.0, "heating_oil": 1.0}, 2.0),
             ("three-two-one-crack", "3-2-1 Crack Proxy", {"gasoline": 2.0, "heating_oil": 1.0}, 3.0),
         ]:
-            history = _composite_crack_history(spread_id, histories_by_id, product_weights, "wti", crude_barrels)
+            leg_ids = [*product_weights.keys(), "wti"]
+            legs, basis_warning = _same_basis_histories(leg_ids, histories_by_id, reference_by_id)
+            history = _composite_crack_history(spread_id, legs, product_weights, "wti", crude_barrels)
             if not history:
                 continue
             definition = CommoditySpreadDefinition(
@@ -455,11 +459,12 @@ class CommoditiesService:
                 origin="gamma.commodities.spread_definition",
                 transformation_note="Gamma-defined composite crack spread using aligned normalized product and crude price histories.",
             )
-            leg_ids = [*product_weights.keys(), "wti"]
             spread = _with_spread_freshness(
-                _spread_snapshot(definition, history[-1].value, history, history[-1].retrieved_at),
+                _with_basis_warning(
+                    _spread_snapshot(definition, history[-1].value, history, history[-1].retrieved_at), basis_warning
+                ),
                 observed_at=history[-1].timestamp,
-                leg_observed_at=_leg_latest_observations({leg: histories_by_id.get(leg) for leg in leg_ids}),
+                leg_observed_at=_leg_latest_observations(legs),
                 reference_date=reference_date,
             )
             leg_prices = _same_vintage_front_prices(leg_ids, curves_by_id, unit_by_id, histories_by_id, reference_date)
@@ -1696,6 +1701,37 @@ def _calendar_spread_history(
         )
     points[-1] = replace(points[-1], value=round(latest_value, 4), timestamp=curve.as_of)
     return points
+
+
+def _history_basis_family(history: CommodityPriceHistory | None) -> str | None:
+    if history is None:
+        return None
+    return "futures" if _history_basis_type(history) == "front_future" else "spot"
+
+
+def _same_basis_histories(
+    leg_ids: list[str],
+    histories_by_id: dict[str, CommodityPriceHistory],
+    reference_by_id: dict[str, CommodityPriceHistory],
+) -> tuple[dict[str, CommodityPriceHistory | None], str | None]:
+    """Patas de un diferencial con la misma base (GUA-20261027-4).
+
+    Un instrumento refrescado solo (el seleccionado) trae el histórico de su frontal IBKR,
+    mientras las demás patas siguen en EIA/FRED spot: el 2-1-1 de la misma fecha valía 54.4
+    o 64.5 según qué curva estuviera en caché. Si las patas mezclan futuros y spot, todas
+    vuelven a su referencia spot; si aún quedan mezcladas, se avisa.
+    """
+    legs = {leg: histories_by_id.get(leg) for leg in leg_ids}
+    if len({_history_basis_family(history) for history in legs.values() if history is not None}) <= 1:
+        return legs, None
+    spot_legs = {leg: reference_by_id.get(leg, legs[leg]) for leg in leg_ids}
+    if len({_history_basis_family(history) for history in spot_legs.values() if history is not None}) <= 1:
+        return spot_legs, None
+    return legs, "Spread legs mix front-futures and spot/proxy histories; the history is not on one price basis."
+
+
+def _with_basis_warning(spread: CommoditySpreadSnapshot, warning: str | None) -> CommoditySpreadSnapshot:
+    return replace(spread, warnings=[*spread.warnings, warning]) if warning else spread
 
 
 def _relative_spread_history(

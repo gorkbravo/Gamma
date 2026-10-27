@@ -910,6 +910,7 @@ class IbkrCommoditiesDataProvider:
         selected = _slug(selected_instrument_id or (self.startup_instrument_ids[0] if self.startup_instrument_ids else ""))
         target_ids = self._target_instrument_ids(selected)
         pending_curves: list[tuple[IbkrFutureRootConfig, list[tuple[Contract, Any]]]] = []
+        replaced_references: dict[str, CommodityPriceHistory] = {}
 
         for instrument in reference.instruments:
             if instrument.instrument_id not in self.enabled_instrument_ids:
@@ -982,6 +983,9 @@ class IbkrCommoditiesDataProvider:
                 if self.history_days > 0 and curve.nodes and contracts:
                     history = self._fetch_front_history(config, contracts[0][0], retrieved_at)
                     if history.points:
+                        previous = history_by_id.get(config.instrument_id)
+                        if previous is not None and previous.source_provider != "ibkr":
+                            replaced_references[config.instrument_id] = previous
                         history_by_id[config.instrument_id] = history
                 curve = self._attach_dated_prior_reference(curve, history)
                 curve_by_id[config.instrument_id] = curve
@@ -1053,6 +1057,7 @@ class IbkrCommoditiesDataProvider:
             curve_snapshots=list(curve_by_id.values()),
             inventory_series=reference.inventory_series,
             events=reference.events,
+            reference_price_histories=list(replaced_references.values()),
             warnings=_dedupe(
                 [
                     # Con curvas IBKR cargadas, el aviso de "curvas no disponibles" de la referencia ya no es cierto.

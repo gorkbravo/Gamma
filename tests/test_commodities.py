@@ -1647,3 +1647,61 @@ def test_ibkr_provider_reports_a_failed_quote_batch_for_each_pending_root(tmp_pa
 
     assert "IBKR quote fetch failed for WTI Crude Oil: TimeoutError." in snapshot.warnings
     assert "IBKR quote fetch failed for Gold: TimeoutError." in snapshot.warnings
+
+
+def test_crack_history_keeps_one_price_basis_when_only_wti_was_refreshed():
+    """Verificación en vivo 2026-10-27: el 2-1-1 del 2026-10-20 valía 54.419 o 64.489 según si la
+    curva de WTI venía de caché (pata FRED spot) o se acababa de cargar (histórico del frontal IBKR)."""
+    end = datetime(2026, 10, 14)
+    fred_wti = _daily_history("wti", [95.0 + index * 0.25 for index in range(27)] + [101.91], end=end, unit="USD/bbl")
+    ibkr_wti = _daily_history("wti", [92.0 + index * 0.2 for index in range(27)] + [97.50], end=end, unit="USD/bbl", provider="ibkr")
+    base = _audit_energy_provider()
+    mixed = [ibkr_wti if history.instrument_id == "wti" else history for history in base.histories]
+
+    class _RefreshedWtiProvider(_FixtureCommoditiesProvider):
+        def __init__(self, references):
+            super().__init__(mixed, base.curves)
+            self.references = references
+
+        def get_snapshot(self, *, force_refresh=False, selected_instrument_id=None):
+            snapshot = super().get_snapshot(force_refresh=force_refresh, selected_instrument_id=selected_instrument_id)
+            return replace(snapshot, reference_price_histories=self.references)
+
+    spreads = {
+        spread.definition.spread_id: spread
+        for spread in CommoditiesService(provider=_RefreshedWtiProvider([fred_wti]), clock=lambda: _AUDIT_NOW).get_spreads()
+    }
+    # Con la referencia spot de WTI disponible, todas las patas vuelven a spot: mismo valor que con caché.
+    assert spreads["gasoline-crack"].value == pytest.approx(2.99 * 42 - 101.91, abs=1e-6)
+    assert spreads["two-one-one-crack"].value == pytest.approx(((2.99 + 4.83) * 42 - 2 * 101.91) / 2, abs=1e-6)
+    assert not any("mix front-futures" in warning for warning in spreads["gasoline-crack"].warnings)
+
+    # Sin referencia spot, la mezcla se dice en lugar de pasar por un histórico homogéneo.
+    unresolved = {
+        spread.definition.spread_id: spread
+        for spread in CommoditiesService(provider=_RefreshedWtiProvider([]), clock=lambda: _AUDIT_NOW).get_spreads()
+    }
+    assert any("mix front-futures and spot/proxy" in warning for warning in unresolved["gasoline-crack"].warnings)
+
+
+def test_ibkr_provider_keeps_the_spot_reference_it_replaces(tmp_path, monkeypatch):
+    monkeypatch.delenv("IBKR_COMMODITIES_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_BREADTH_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_STARTUP_ENABLED", raising=False)
+    months = _forward_contract_months(2)
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient({"CL": [_future_detail(4001, months[0]), _future_detail(4002, months[1])]}),
+        market_data=_FakeMarketData({4001: 80.0, 4002: 79.0}),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        root_configs=(IbkrFutureRootConfig("wti", "CL", "NYMEX", "USD", "USD/bbl", "WTI Crude Oil", trading_class="CL"),),
+        breadth_contract_depth=2,
+        history_days=30,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    wti_history = next(history for history in snapshot.price_histories if history.instrument_id == "wti")
+    assert wti_history.source_provider == "ibkr"
+    assert [history.instrument_id for history in snapshot.reference_price_histories] == ["wti"]
+    assert snapshot.reference_price_histories[0].source_provider != "ibkr"
