@@ -547,3 +547,60 @@ def test_news_service_dedupes_identical_cross_feed_headlines():
     assert kept.normalized_id == "rss:feed_b:9"
     # Short/generic titles are not merged across feeds.
     assert titles.count("Update") == 2
+
+
+def test_rss_fetch_retries_with_extended_roots_after_a_certificate_failure(monkeypatch):
+    """Verificación en vivo 2026-10-27: el feed ecb_press fallaba con CERTIFICATE_VERIFY_FAILED
+    (raíz Sectigo E46 ausente del almacén de Windows), igual que el calendario del BCE."""
+    import ssl
+    from urllib.error import URLError
+
+    from src.services import news_adapters
+    from src.utils.tls import extended_trust_ssl_context
+
+    calls: list[object] = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, limit):
+            return b"<rss><channel></channel></rss>"
+
+    def fake_urlopen(request, timeout=None, context=None):
+        calls.append(context)
+        if context is None:
+            raise URLError(ssl.SSLCertVerificationError(1, "certificate verify failed: unable to get local issuer certificate"))
+        return _Response()
+
+    monkeypatch.setattr(news_adapters, "urlopen", fake_urlopen)
+    feed = RssFeedConfig(feed_id="ecb_press", source_name="ECB Press Releases", url="https://www.ecb.europa.eu/rss/press.html")
+
+    content = news_adapters._default_feed_fetcher(feed, 5.0, "Gamma test")
+
+    assert content.startswith(b"<rss")
+    assert calls == [None, extended_trust_ssl_context()]
+
+
+def test_rss_fetch_does_not_retry_other_failures(monkeypatch):
+    from urllib.error import URLError
+
+    import pytest as _pytest
+
+    from src.services import news_adapters
+
+    calls: list[object] = []
+
+    def fake_urlopen(request, timeout=None, context=None):
+        calls.append(context)
+        raise URLError("timed out")
+
+    monkeypatch.setattr(news_adapters, "urlopen", fake_urlopen)
+    feed = RssFeedConfig(feed_id="slow", source_name="Slow", url="https://example.com/slow.xml")
+
+    with _pytest.raises(URLError):
+        news_adapters._default_feed_fetcher(feed, 5.0, "Gamma test")
+    assert calls == [None]

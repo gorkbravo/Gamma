@@ -15,6 +15,7 @@ from xml.etree import ElementTree as ET
 from src.models.news import NewsEventEntity, NewsEventFeed, NewsEventItem, canonical_news_url
 from src.models.provenance import FreshnessLabel
 from src.utils.time import now_utc
+from src.utils.tls import extended_trust_ssl_context, is_certificate_verification_error
 
 
 class NewsEventProvider(Protocol):
@@ -437,8 +438,16 @@ def _default_feed_fetcher(feed: RssFeedConfig, timeout_seconds: float, user_agen
             "Accept": "application/rss+xml,application/atom+xml,application/xml;q=0.9,text/xml;q=0.8,*/*;q=0.5",
         },
     )
-    with urlopen(request, timeout=timeout_seconds) as response:
-        content = response.read(MAX_RSS_FEED_BYTES + 1)
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            content = response.read(MAX_RSS_FEED_BYTES + 1)
+    except Exception as exc:
+        if not is_certificate_verification_error(exc):
+            raise
+        # El feed de prensa del BCE encadena a una raíz que el almacén de Windows no trae
+        # (verificación en vivo 2026-10-27: CERTIFICATE_VERIFY_FAILED); se reintenta con certifi.
+        with urlopen(request, timeout=timeout_seconds, context=extended_trust_ssl_context()) as response:
+            content = response.read(MAX_RSS_FEED_BYTES + 1)
     if len(content) > MAX_RSS_FEED_BYTES:
         raise ValueError(f"feed response exceeded {MAX_RSS_FEED_BYTES} bytes")
     return content

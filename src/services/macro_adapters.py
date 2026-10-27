@@ -6,7 +6,6 @@ import re
 import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from html import unescape
 from typing import Any, Callable
 from urllib.error import HTTPError
@@ -20,6 +19,7 @@ from src.services.cache import CacheService
 from src.services.fred import FredClient
 from src.services.market_data import MarketDataService
 from src.utils.time import now_utc
+from src.utils.tls import extended_trust_ssl_context
 
 
 TextFetcher = Callable[[str], str]
@@ -65,23 +65,10 @@ _MACRO_CALENDAR_FAILURE_BACKOFF = timedelta(minutes=15)
 _MACRO_CALENDAR_STALE_LIMIT = timedelta(days=30)
 
 
-@lru_cache(maxsize=1)
 def _calendar_ssl_context() -> ssl.SSLContext:
-    """Raíces del sistema más las de certifi.
+    """Raíces del sistema más las de certifi (ver `extended_trust_ssl_context`)."""
 
-    En Windows el almacén local solo contiene las raíces que CryptoAPI ya descargó, y Python
-    no dispara esa descarga: www.ecb.europa.eu encadena a "Sectigo Public Server
-    Authentication Root E46" y falla con CERTIFICATE_VERIFY_FAILED aunque el navegador la
-    acepte. Añadir el paquete de certifi amplía las raíces de confianza sin desactivar nada.
-    """
-
-    context = ssl.create_default_context()
-    try:
-        import certifi
-    except ImportError:
-        return context
-    context.load_verify_locations(cafile=certifi.where())
-    return context
+    return extended_trust_ssl_context()
 
 
 def fetch_calendar_page(url: str, *, user_agent: str, extra_roots: bool = False) -> str:
