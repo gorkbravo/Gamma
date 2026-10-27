@@ -400,10 +400,11 @@ def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
                 call_count=call_count,
                 success_count=sum(1 for row in rows if row.status == "success"),
                 unavailable_count=sum(1 for row in rows if row.status == "unavailable"),
+                # Una respuesta parcial ("incomplete") no es un fallo: tiene su propio contador.
+                # Contarla en los dos inflaba "failed" (us_macro_events sin BLS, superficies IBKR
+                # con celdas ajustadas) y la salud decía "3 failed and 3 returned partial data".
                 error_count=sum(
-                    1
-                    for row in rows
-                    if row.status in {"error", "refused", "incomplete", "cancelled", "timeout"}
+                    1 for row in rows if row.status in {"error", "refused", "cancelled", "timeout"}
                 ),
                 incomplete_count=sum(1 for row in rows if row.status == "incomplete"),
                 cache_hit_count=sum(1 for row in rows if row.cache_status == "hit"),

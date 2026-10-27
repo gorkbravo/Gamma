@@ -63,6 +63,18 @@ describe("provider usage view (GUA-20260903-10)", () => {
     expect(providerUsageRowDetail(view.rows[0])).toBe("237 ok · 3 failed · 236 HTTP · 12 ms avg");
   });
 
+  it("shows partial calls apart from failures (live check 2026-10-27)", () => {
+    // us_macro_events sin contacto BLS: 2 HTTP correctas y 4 calendarios incompletos, 0 fallos.
+    const view = buildProviderUsageView(
+      usage([
+        summary("us_macro_events", 6, { success_count: 2, error_count: 0, incomplete_count: 4, http_request_count: 2 })
+      ])
+    );
+    expect(view.failed).toBe(0);
+    expect(view.rows[0].tone).toBe("neutral");
+    expect(providerUsageRowDetail(view.rows[0])).toBe("2 ok · 4 partial · 2 HTTP · 12 ms avg");
+  });
+
   it("never lets calls vanish: an unreconciled remainder becomes an unattributed row", () => {
     const view = buildProviderUsageView(usage([summary("ibkr", 98)], { total_calls: 132 }));
 

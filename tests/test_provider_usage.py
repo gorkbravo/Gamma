@@ -334,7 +334,9 @@ def test_openai_copilot_incomplete_terminal_is_typed_and_not_successful():
     summary = next(row for row in snapshot.providers if row.provider_id == "openai_copilot")
     health = next(row for row in snapshot.health if row.provider_id == "openai_copilot")
     assert summary.success_count == 0
-    assert summary.error_count == 1
+    # Un terminal incompleto no es un éxito, pero tampoco un error: cuenta como parcial.
+    assert summary.error_count == 0
+    assert summary.incomplete_count == 1
     assert summary.last_status == "incomplete"
     assert snapshot.recent_calls[0].status == "incomplete"
     assert health.health_status == "degraded"
@@ -438,6 +440,37 @@ def test_partial_surface_delivery_is_counted_separately_from_outright_errors():
     assert health.health_status == "degraded"
     assert health.incomplete_count == 1
     assert "71 of 104" in health.reason
+
+
+def test_partial_calls_are_not_also_counted_as_failures():
+    """Verificación en vivo 2026-10-27: us_macro_events mostraba "2 ok · 4 failed" cuando
+    las 4 llamadas eran calendarios sin BLS (incomplete), e IBKR "3 failed and 3 returned
+    partial data" para las mismas 3 superficies parciales."""
+    from src.services.provider_usage import ProviderUsageLedger
+
+    ledger = ProviderUsageLedger()
+    ledger.record(provider_id="us_macro_events", endpoint="http:www.bea.gov via macro.load_events", status="success")
+    for _ in range(2):
+        ledger.record(
+            provider_id="us_macro_events",
+            endpoint="macro.load_events",
+            status="incomplete",
+            message="Macro calendar: BLS release dates were not requested because no contact is configured.",
+        )
+    ledger.record(provider_id="ibkr", endpoint="iv.surface", status="incomplete", message="73 of 104 cells")
+    ledger.record(provider_id="ibkr", endpoint="iv.surface", status="error", message="timeout")
+    ledger.record(provider_id="ibkr", endpoint="iv.surface", status="success")
+
+    snapshot = ledger.snapshot()
+    summaries = {row.provider_id: row for row in snapshot.providers}
+    health = {row.provider_id: row for row in snapshot.health}
+
+    assert summaries["us_macro_events"].error_count == 0
+    assert summaries["us_macro_events"].incomplete_count == 2
+    assert health["us_macro_events"].error_count == 0
+    assert summaries["ibkr"].error_count == 1
+    assert summaries["ibkr"].incomplete_count == 1
+    assert "1 failed and 1 returned partial data" in health["ibkr"].reason
 
 
 def test_clean_provider_history_still_reads_healthy():

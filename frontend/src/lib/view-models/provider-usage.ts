@@ -15,6 +15,8 @@ export interface ProviderUsageRow {
   httpRequests: number;
   ok: number;
   failed: number;
+  /** Respuestas parciales ("incomplete"): ni éxito ni fallo, con su propio contador. */
+  partial: number;
   unavailable: number;
   averageMs: number;
   endpoints: string[];
@@ -58,6 +60,7 @@ export function buildProviderUsageView(usage: ProviderUsageResponse | null | und
       httpRequests: count(row.http_request_count),
       ok: count(row.success_count),
       failed,
+      partial: count(row.incomplete_count),
       unavailable: count(row.unavailable_count),
       averageMs: Number.isFinite(row.average_duration_ms) ? row.average_duration_ms : 0,
       endpoints: row.endpoints ?? [],
@@ -82,6 +85,7 @@ export function buildProviderUsageView(usage: ProviderUsageResponse | null | und
         httpRequests: 0,
         ok: 0,
         failed: 0,
+        partial: 0,
         unavailable: 0,
         averageMs: 0,
         endpoints: [],
@@ -119,6 +123,7 @@ export function buildProviderUsageView(usage: ProviderUsageResponse | null | und
 export function providerUsageRowDetail(row: ProviderUsageRow): string {
   const parts = [`${numberFormat.format(row.ok)} ok`];
   if (row.failed) parts.push(`${numberFormat.format(row.failed)} failed`);
+  if (row.partial) parts.push(`${numberFormat.format(row.partial)} partial`);
   if (row.unavailable) parts.push(`${numberFormat.format(row.unavailable)} unavailable`);
   if (row.httpRequests) parts.push(`${numberFormat.format(row.httpRequests)} HTTP`);
   if (row.averageMs > 0) parts.push(`${row.averageMs.toFixed(row.averageMs >= 10 ? 0 : 1)} ms avg`);
