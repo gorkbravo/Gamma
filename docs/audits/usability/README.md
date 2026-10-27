@@ -4,7 +4,7 @@ Live product workflow audits and research-thread evaluations.
 
 ## Audits
 
-- [`gamma_usability_findings_2026-10-27.md`](./gamma_usability_findings_2026-10-27.md) (current): verify-only live IBKR retest of the 2026-10-21 fixes plus the Event Book ladder and `us_macro_events`; every retested P0/P1 holds after nine follow-up fixes found live (Commodities SITREP 50 s → ~11 s, FOMC dropped on its first day, partial calls counted as failures, Operator SEC warning and transcript noise, Retry on cancelled turns).
+- [`gamma_usability_findings_2026-10-27.md`](./gamma_usability_findings_2026-10-27.md) (current): verify-only live IBKR retest of the 2026-10-21 fixes plus the Event Book ladder and `us_macro_events`; every retested P0/P1 holds after nine follow-up fixes found live (Commodities SITREP 50 s → ~11 s, FOMC dropped on its first day, partial calls counted as failures, Operator SEC warning and transcript noise, Retry on cancelled turns); the six findings it opened were closed the same evening (see its Closure section).
 
 - [`gamma_usability_findings_2026-10-21.md`](./gamma_usability_findings_2026-10-21.md): historical - live IBKR Brent–WTI / Strait of Hormuz trade-idea audit; Prediction Markets and the Commodities → Strategy Lab → Risk loop carried the thesis, the Operator tool-name, Options symbol-change and Strategy Lab → Risk defects are confirmed fixed, and two new P0s were found (Add Leg duplicate-key app wedge, crack spreads computed from week-old history but stamped current).
 

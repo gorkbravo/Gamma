@@ -74,15 +74,15 @@ Not applicable (verify-only). For the record, Copilot's Agent card on the same f
    - Run 5 got Brent with 2 nodes "despite requesting 12" and could not inspect WTI ("per-run request limit of 1"), so 10 of 12 spreads were NA.
    - `/commodities/overview?selected_instrument_id=brent` returned 12 priced nodes at the same time.
    - Run 2 (14:09) got 12 Brent nodes only because Brent had been viewed earlier.
-   - Status: Open.
-4. **P2 — GUA-20261027-4: crack history changes with cache state.** The 2-1-1 crack for the same observation date (2026-10-20) read 54.419 when WTI came from a cached curve (FRED spot leg) and 64.489 when WTI was freshly loaded (IBKR front-history leg). Spot and futures crude legs are mixed depending on which curve is cached. Status: Open.
+   - Status: Fixed (`6ebc045`), see Closure.
+4. **P2 — GUA-20261027-4: crack history changes with cache state.** The 2-1-1 crack for the same observation date (2026-10-20) read 54.419 when WTI came from a cached curve (FRED spot leg) and 64.489 when WTI was freshly loaded (IBKR front-history leg). Spot and futures crude legs are mixed depending on which curve is cached. Status: Fixed (`57a8341`, `e86a99f`), see Closure.
 5. **P2 — GUA-20261027-5: Options symbol edits.**
    - Typing into the filled symbol field produced "USOBNO" and a silent "LOADING…" for ~40 s, with no error.
    - After loading SPY from Strategies, switching to Overview showed "Enter an underlying symbol" until a reload.
-   - Status: Open.
-6. **P2 — GUA-20261027-6: Risk "SHARE OF RESULT" explodes on a near-neutral book.** It showed −2106.9% / 2206.9% because each leg is divided by a ~0 net P&L. Status: Open.
-7. **P3 — commodity handoff caveat mismatch.** FRED-spot Brent/WTI legs carry "Cached IBKR curve snapshot with the original provider-backed quote …". Status: Open.
-8. **P3 — two-digit years in RELATED.** Captions read "resolves Jan 8, 28" (asserted in a test). Status: Open.
+   - Status: Fixed (`4de627b`, `4a7e872`); the Strategies → Overview loss did not reproduce with real clicks. See Closure.
+6. **P2 — GUA-20261027-6: Risk "SHARE OF RESULT" explodes on a near-neutral book.** It showed −2106.9% / 2206.9% because each leg is divided by a ~0 net P&L. Status: Fixed (`5e41831`).
+7. **P3 — commodity handoff caveat mismatch.** FRED-spot Brent/WTI legs carry "Cached IBKR curve snapshot with the original provider-backed quote …". Status: Fixed (`2c5d5e0`).
+8. **P3 — two-digit years in RELATED.** Captions read "resolves Jan 8, 28" (asserted in a test). Status: Fixed (`ad8fa7f`).
 
 ### Gaps
 
@@ -94,7 +94,7 @@ Unchanged from 2026-10-21 and out of scope here: freight/Portwatch in Sealanes, 
 - Inconsistent:
   - Operator inspection vs Commodities selection (GUA-20261027-3).
   - Crack history vintage vs cache state (GUA-20261027-4).
-  - The RSS `ecb_press` feed still fails with `CERTIFICATE_VERIFY_FAILED` (same Sectigo E46 root that the ECB calendar fix solved with certifi).
+  - The RSS `ecb_press` feed failed with `CERTIFICATE_VERIFY_FAILED` (same Sectigo E46 root that the ECB calendar fix solved with certifi). Fixed in `1b43f49` and `a0c6c76`, see Closure.
 
 ### Copilot evaluation
 
@@ -134,15 +134,29 @@ Unchanged from 2026-10-21 and out of scope here: freight/Portwatch in Sealanes, 
 1. **GUA-20261027-1** — FOMC/ECB decision times. Status: Fixed (`e5f0ce2`).
 
 **P2**
-2. **GUA-20261027-3** — the Operator curve inspection should request the instrument's full depth (or allow one inspection per instrument) instead of reusing the breadth cache. Acceptance: Brent and WTI 12-node curves in one Operator run without prior viewing. Status: Open.
-3. **GUA-20261027-4** — compute crack history from one consistent crude basis (spot with spot, futures with futures) regardless of cache state. Acceptance: identical values for the same observation date across selections. Status: Open.
-4. **GUA-20261027-5** — the Options symbol field replaces rather than appends, an unknown symbol fails visibly, and mode switches keep the loaded surface. Status: Open.
-5. **GUA-20261027-6** — Risk share-of-result is bounded or replaced by gross-share for near-zero net P&L. Status: Open.
+2. **GUA-20261027-3** — the Operator curve inspection should request the instrument's full depth (or allow one inspection per instrument) instead of reusing the breadth cache. Acceptance: Brent and WTI 12-node curves in one Operator run without prior viewing. Status: Fixed (`6ebc045`); tool-level live check passed, no Copilot run left to replay end to end.
+3. **GUA-20261027-4** — compute crack history from one consistent crude basis (spot with spot, futures with futures) regardless of cache state. Acceptance: identical values for the same observation date across selections. Status: Fixed (`57a8341`, `e86a99f`).
+4. **GUA-20261027-5** — the Options symbol field replaces rather than appends, an unknown symbol fails visibly, and mode switches keep the loaded surface. Status: Fixed (`4de627b`, `4a7e872`).
+5. **GUA-20261027-6** — Risk share-of-result is bounded or replaced by gross-share for near-zero net P&L. Status: Fixed (`5e41831`).
 6. **GUA-20261027-2** — duplicate Operator render. Status: Fixed (`226fa93`).
-7. **GUA-20261021-16** — name the Options symbol input and the Strategy Builder selects. Status: Partially done.
-8. RSS `ecb_press` certificate chain (reuse the certifi context of the ECB calendar). Status: Open.
+7. **GUA-20261021-16** — name the Options symbol input and the Strategy Builder selects. Status: Fixed (`4a7e872`).
+8. RSS `ecb_press` certificate chain (reuse the certifi context of the ECB calendar). Status: Fixed (`1b43f49`, `a0c6c76`).
 
 **P3**
-9. Handoff caveat text for spot-proxy legs; four-digit years in RELATED captions. Status: Open.
+9. Handoff caveat text for spot-proxy legs; four-digit years in RELATED captions. Status: Fixed (`2c5d5e0`, `ad8fa7f`).
 
 Visual observations belong to `gamma-ui`; no chart internals were assessed.
+
+## Closure (2026-10-27, 21:30–21:50)
+
+Every finding left open above was fixed on `claude/verify-2026-10-21-audit`, one commit per area, with tests. Re-checked live with TWS connected after the US close (no OpenAI run left):
+
+| ID | Fix | Live check |
+| --- | --- | --- |
+| GUA-20261027-3 | `6ebc045`: a breadth-only curve (≤2 nodes) of a non-selected instrument is read from the read-only CommoditiesService, with a note; the tool may run twice per run. | Workspace with Gold selected held Brent with 2 nodes; the tool returned 12 with "held 2 breadth node(s) for brent; Gamma read 12 node(s)". WTI 12 nodes; `request_limit` 2. |
+| GUA-20261027-4 | `57a8341`, `e86a99f`: the provider keeps the spot reference it replaces. Spread history uses each leg's spot reference when every leg has one, otherwise one shared basis, otherwise a warning. | 2-1-1 54.419 (2026-10-20) with forced fresh IBKR histories and with cached spot histories; Live 65.803. Before: 54.419 / 64.489 / 68.981. |
+| GUA-20261027-5 | `4de627b`: the IV service stops waiting when the engine thread ends and skips depth retries for unknown underlyings, naming the cause. `4a7e872`: entering the symbol field selects its text. | "ZZQXW" failed in 3.6 s with "Unable to qualify underlying contract for ZZQXW". Click + type over it gave "SPY". Strategies → Overview kept the SPY surface (7D headline). |
+| GUA-20261027-6 | `5e41831`: offsetting legs share the gross leg move; the column reads "Share of gross P&L". | Unit-tested on the BNO/USO case; not replayed in the UI. |
+| GUA-20261021-16 | `4a7e872`: "Options underlying symbol", "Strategy leg side", "Strategy leg option type", "Expiry". | Accessibility tree shows "textbox Options underlying symbol". |
+| RSS `ecb_press` | `1b43f49`: shared certifi context, RSS retry on certificate failure. `a0c6c76`: the recording opener trusts certifi, so ECB calls verify on the first, recorded attempt (the ECB calendar no longer bypasses the recorder). | Provider Usage: "http:www.ecb.europa.eu via news.latest success" and "… via macro.load_events success". |
+| P3 caveat / years | `2c5d5e0`, `ad8fa7f`. | Prediction Markets shows "RESOLVES Jan 1, 2027". |
