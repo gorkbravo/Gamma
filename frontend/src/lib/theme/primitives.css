@@ -288,11 +288,13 @@
 }
 
 /* ── Data table ───────────────────────────────────────────────────────────
-   Opt in with class="data-table" on the <table>. A bare `th, td` rule here
-   would reach every table in the app, and about twenty views still set
-   their own cell padding, line height and header size, so it would restyle
-   them silently. Column headers take the display font from tokens.css
-   (`thead th`); cells stay mono with tabular figures. */
+   Opt in with class="data-table" on the <table>, plus the modifiers below
+   for the families that differ (sticky, relaxed, compact, grid, figures,
+   key/value). A bare `th, td` rule here would also reach the few tables that
+   are not data tables (the Setup grid, the Sitrep status table, the Options
+   payoff heat map), so the class stays opt-in. Column headers take the
+   display font from tokens.css (`thead th`); cells stay mono with tabular
+   figures. */
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -363,6 +365,12 @@
   color: var(--text-1);
 }
 
+/* A toned row (tr.positive, .negative, .warning) passes its colour to its
+   cells; a cell's own tone or .absent still wins. */
+.data-table tr:where(.positive, .negative, .warning) > td {
+  color: inherit;
+}
+
 /* The single full-width row a table shows when it has nothing to list. */
 .data-table .empty-row td {
   color: var(--text-2);
@@ -371,6 +379,104 @@
   text-transform: none;
   letter-spacing: 0;
   font-size: var(--text-xs);
+}
+
+/* Modifiers. Each names a genuine layout difference between table families;
+   cell metrics, header labels, rules and row states stay shared. Combine them
+   freely, e.g. class="data-table is-sticky is-relaxed". The :where() keeps
+   every modifier at the specificity of the base rules, so a view's scoped
+   cell class (.tick-col, .wrap-cell) still wins as it did before. */
+
+/* Every cell stays on one line and the panel scrolls sideways instead. */
+.data-table:where(.is-nowrap) th,
+.data-table:where(.is-nowrap) td {
+  white-space: nowrap;
+}
+
+/* Multi-line cells start at the top of their row. */
+.data-table:where(.is-top) th,
+.data-table:where(.is-top) td {
+  vertical-align: top;
+}
+
+/* The header stays in view while the table's panel scrolls. */
+.data-table:where(.is-sticky) thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-bg);
+}
+
+/* No rule under the last row where the panel edge already closes the table. */
+.data-table:where(.is-open-end) tbody tr:where(:last-child) > * {
+  border-bottom: 0;
+}
+
+/* Reading tables: roomier 8px rows. */
+.data-table:where(.is-relaxed) td {
+  padding: var(--space-4);
+}
+
+/* Cells at body size (13.5px) instead of the 12px data size, for tables a
+   view treats as its main reading surface (Sitrep markets, the Options
+   chain, the Prediction Markets screener). */
+.data-table:where(.is-body-text) td {
+  font-size: var(--text-base);
+}
+
+/* Dense tables inside cards, working panels and script results. */
+.data-table:where(.is-compact) th,
+.data-table:where(.is-compact) td {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* A full cell grid with a tinted header, for tables set inside prose. */
+.data-table:where(.is-grid) th,
+.data-table:where(.is-grid) td {
+  border: 1px solid var(--divider);
+}
+
+.data-table:where(.is-grid) th {
+  background: var(--surface-1);
+  letter-spacing: 0.06em;
+}
+
+/* Figure comparisons: the first column names the row, every other column is
+   a right-aligned number. */
+.data-table:where(.is-figures) th,
+.data-table:where(.is-figures) td {
+  padding: var(--space-4) var(--space-5);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table:where(.is-figures) th:where(:first-child),
+.data-table:where(.is-figures) td:where(:first-child) {
+  text-align: left;
+}
+
+/* Key/value list: a quiet label column on the left, the value on the right. */
+.data-table:where(.is-keyvalue) th,
+.data-table:where(.is-keyvalue) td {
+  padding: var(--space-3) var(--space-5);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
+.data-table:where(.is-keyvalue) th {
+  width: 40%;
+  color: var(--text-2);
+  font-family: var(--display-font);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: inherit;
+  white-space: normal;
+}
+
+.data-table:where(.is-keyvalue) td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Tag ──────────────────────────────────────────────────────────────────

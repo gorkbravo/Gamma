@@ -32,7 +32,7 @@
     </div>
     <TimeSeriesChart {series} height={300} showLegend={true} emptyMessage="Retained chart data unavailable." />
     <p class="meta">Cumulative return (%) · Benchmark overlap: {snapshot.coverage.benchmark_overlap_count} observations{snapshot.coverage.benchmark_available ? "" : " · Benchmark unavailable"}</p>
-    <div class="table-scroll"><table>
+    <div class="table-scroll"><table class="data-table is-figures">
       <thead><tr><th>Requested asset</th><th>Weight</th><th>Total return</th><th>Annual volatility</th></tr></thead>
       <tbody>{#each snapshot.positions as position}
         {@const constituent = snapshot.constituents.find(row => row.symbol === position.symbol)}
@@ -61,9 +61,6 @@
   .metrics span { font-size: var(--text-xs); color: var(--text-2); }
   .metrics strong { font-size: var(--text-md); }
   .table-scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-  th, td { padding: var(--space-4) var(--space-5); text-align: right; border-bottom: 1px solid var(--divider); }
-  th:first-child, td:first-child { text-align: left; }
-  th { font-size: var(--text-xs); color: var(--text-2); }
+  /* Cells come from .data-table.is-figures in primitives.css. */
   @media (max-width: 720px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

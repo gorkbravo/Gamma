@@ -780,7 +780,7 @@
             </select>
           </div>
           {#if chainRows.length}
-            <table class="chain-table">
+            <table class="data-table is-nowrap is-body-text chain-table">
               <thead>
                 <tr>
                   <th>C Δ</th><th>C IV</th><th>C Px</th><th class="strike-cell">Strike</th><th>P Px</th><th>P IV</th><th>P Δ</th><th>Move</th>
@@ -925,7 +925,7 @@
           </select>
         </div>
         {#if chainRows.length}
-          <table class="chain-table">
+          <table class="data-table is-nowrap is-body-text chain-table">
             <thead>
               <tr>
                 <th>C OI</th><th>C Δ</th><th>C IV</th><th>Call</th><th class="strike-cell">Strike</th><th>Mny</th><th>Put</th><th>P IV</th><th>P Δ</th><th>P OI</th><th>Strategy</th>
@@ -990,7 +990,7 @@
           </div>
           {#if chainGreekRows.length}
             <div class="compact-table">
-              <table>
+              <table class="data-table is-nowrap is-body-text">
                 <thead>
                   <tr><th>Strike</th><th>C {greekMetricLabel[selectedGreekMetric]}</th><th>P {greekMetricLabel[selectedGreekMetric]}</th><th>IV</th></tr>
                 </thead>
@@ -1056,7 +1056,7 @@
           {/if}
           {#if result?.expiries.length && result.strikes.length}
             <div class="surface-scroll">
-              <table class="surface-table" on:mouseleave={() => (hoveredSurface = null)}>
+              <table class="data-table is-nowrap is-body-text surface-table" on:mouseleave={() => (hoveredSurface = null)}>
                 <thead>
                   <tr>
                     <th>Expiry</th>
@@ -1142,7 +1142,7 @@
         <article class="panel">
           <h3>Skew By Expiry</h3>
           <div class="compact-table">
-            <table>
+            <table class="data-table is-nowrap is-body-text">
               <thead><tr><th>Expiry</th><th>Put</th><th>Call</th><th>Spread</th></tr></thead>
               <tbody>
                 {#each skewRows as row}
@@ -1172,7 +1172,7 @@
           </span>
         </div>
         {#if realizedRows.some((row) => row.realizedVol != null)}
-          <table>
+          <table class="data-table is-nowrap is-body-text">
             <thead><tr><th>Window</th><th>Realized Vol</th><th>Front ATM IV</th><th>Selected ATM IV</th><th>IV Premium</th><th>Obs</th></tr></thead>
             <tbody>
               {#each realizedRows as row}
@@ -1355,7 +1355,7 @@
 
         <div class="strategy-layout">
           <div class="compact-table chain-pick">
-            <table>
+            <table class="data-table is-nowrap is-body-text">
               <thead><tr><th>Strike</th><th>Call</th><th>Put</th><th>Add</th></tr></thead>
               <tbody>
                 {#each chainRows as row}
@@ -1618,7 +1618,10 @@
     color: var(--text-2);
   }
 
-  th {
+  /* The payoff heat map is a grid of figures, not a data table: its price
+     column keeps the label case and tracking that every table here used to
+     share. The data tables take theirs from .data-table. */
+  .payoff-heatmap th {
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1754,26 +1757,9 @@
     gap: var(--space-4);
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-  }
-
-  td {
-    color: var(--text-1);
-  }
-
-  tbody tr:hover td {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-  }
+  /* Chain, surface, greeks, skew, realized and strategy tables are
+     .data-table.is-nowrap.is-body-text in primitives.css (cells, header, row
+     hover). */
 
   tbody tr.handoff-row {
     cursor: context-menu;

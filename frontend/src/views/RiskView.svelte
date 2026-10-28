@@ -1014,7 +1014,7 @@
 {#snippet SimpleTable(title: string, headers: string[], rows: RiskTableRow[])}
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">{title}<span>{rows.length} rows</span></header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead><tr>{#each headers as header}<th>{header}</th>{/each}</tr></thead>
       <tbody>
         {#if rows.length}
@@ -1022,7 +1022,7 @@
             <tr class={toneClass(row.tone)}>{#each row.cells as cell}<td class:absent={cellValue(cell) === "N/A"}>{cellValue(cell)}</td>{/each}</tr>
           {/each}
         {:else}
-          <tr><td colspan={headers.length} class="empty">No rows available.</td></tr>
+          <tr class="empty-row"><td colspan={headers.length}>No rows available.</td></tr>
         {/if}
       </tbody>
     </table>
@@ -1032,7 +1032,7 @@
 {#snippet HoldingsTable(rows: HoldingRiskRow[])}
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">Holdings<span>{rows.length} rows</span></header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead><tr><th>Symbol</th><th>Name</th><th>Asset class</th><th>Weight</th><th>Market value</th><th>P&L</th><th>Vol</th><th>Beta</th><th>Risk contribution</th><th>Flag</th></tr></thead>
       <tbody>
         {#each rows as row}
@@ -1049,7 +1049,7 @@
       Contribution Detail
       <span>{rows.length} rows{tailDays ? ` · ES over ${tailDays} worst days` : ""}</span>
     </header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead>
         <tr>
           <th>Symbol</th>
@@ -1069,7 +1069,7 @@
 {#snippet ExposureTable(rows: ExposureBreakdownRow[])}
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead><tr><th>Sector/category</th><th>Weight</th><th>Vol contribution</th><th>Benchmark</th><th>Active</th><th>Label</th></tr></thead>
       <tbody>{#each rows as row}<tr><td>{row.category}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={pct(row.volatilityContribution) === "N/A"}>{pct(row.volatilityContribution)}</td><td class:absent={pct(row.benchmarkWeight) === "N/A"}>{pct(row.benchmarkWeight)}</td><td class:absent={pct(row.activeWeight) === "N/A"}>{pct(row.activeWeight)}</td><td>{row.label}</td></tr>{/each}</tbody>
     </table>
@@ -1079,7 +1079,7 @@
 {#snippet DrawdownTable(rows: DrawdownEpisode[])}
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead><tr><th>Start</th><th>Trough</th><th>Recovery</th><th>Depth</th><th>Duration</th><th>Benchmark DD</th><th>Main contributors</th></tr></thead>
       <tbody>{#each rows as row}<tr><td>{row.startDate}</td><td>{row.troughDate}</td><td>{row.recoveryDate}</td><td class="negative" class:absent={pct(row.depth) === "N/A"}>{pct(row.depth)}</td><td>{row.duration}</td><td class:absent={pct(row.benchmarkDrawdown) === "N/A"}>{pct(row.benchmarkDrawdown)}</td><td>{row.contributors}</td></tr>{/each}</tbody>
     </table>
@@ -1092,7 +1092,7 @@
       Historical Stress Replay
       <span>{state === "loading" ? "LOADING..." : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
     </header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead>
         <tr>
           <th>Episode</th>
@@ -1109,10 +1109,10 @@
       <tbody>
         {#if summary && state === "ready"}
           <!-- Una línea con la ventana del libro en vez de una fila "No history" por episodio. -->
-          <tr><td colspan="9" class="empty" data-testid="stress-coverage-summary">{summary}</td></tr>
+          <tr class="empty-row"><td colspan="9" data-testid="stress-coverage-summary">{summary}</td></tr>
         {:else if rows.length}
           {#each rows as row}
-            <tr class:selected-row={selected?.episodeId === row.episodeId} title={row.note ?? row.description}>
+            <tr class:selected={selected?.episodeId === row.episodeId} title={row.note ?? row.description}>
               <td>
                 <button
                   type="button"
@@ -1132,7 +1132,7 @@
             </tr>
           {/each}
         {:else}
-          <tr><td colspan="9" class="empty">{state === "loading" ? "LOADING..." : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
+          <tr class="empty-row"><td colspan="9">{state === "loading" ? "LOADING..." : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
         {/if}
       </tbody>
     </table>
@@ -1142,7 +1142,7 @@
 {#snippet StressLegTable(rows: StressLegRow[], selected: StressEpisodeRow | null)}
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
-    <table>
+    <table class="data-table is-nowrap">
       <!-- Con patas compensadas el reparto es del P&L bruto, no de un neto ≈ 0 (GUA-20261027-6). -->
       <thead><tr><th>Position</th><th>Weight</th><th>Episode return</th><th>P&L</th><th title={selected?.contributionBasis === "gross" ? "Legs offset: share of the gross leg P&L (sum of absolute leg P&L), not of the near-zero net result." : "Share of the book result."}>{selected?.contributionBasis === "gross" ? "Share of gross P&L" : "Share of result"}</th><th>Status</th></tr></thead>
       <tbody>
@@ -1158,7 +1158,7 @@
             </tr>
           {/each}
         {:else}
-          <tr><td colspan="6" class="empty">No position results for this episode.</td></tr>
+          <tr class="empty-row"><td colspan="6">No position results for this episode.</td></tr>
         {/if}
       </tbody>
     </table>
@@ -1168,7 +1168,7 @@
 {#snippet CandidateTable(rows: CandidateAllocationRow[])}
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
-    <table>
+    <table class="data-table is-nowrap">
       <thead><tr><th>Symbol</th><th>Current weight</th><th>Proposed weight</th><th>Delta</th><th>Current risk</th><th>Proposed risk</th><th>Constraint</th></tr></thead>
       <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.currentWeight) === "N/A"}>{pct(row.currentWeight)}</td><td class:absent={pct(row.proposedWeight) === "N/A"}>{pct(row.proposedWeight)}</td><td class={row.delta == null ? "" : row.delta >= 0 ? "positive" : "negative"}>{pct(row.delta)}</td><td class:absent={pct(row.currentRiskContribution) === "N/A"}>{pct(row.currentRiskContribution)}</td><td class:absent={pct(row.proposedRiskContribution) === "N/A"}>{pct(row.proposedRiskContribution)}</td><td>{row.constraintFlag}</td></tr>{/each}</tbody>
     </table>
@@ -1645,12 +1645,9 @@
   .table-panel { overflow: auto; }
   .chart-panel { gap: 0; }
 
-  /* ── Tables ── */
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--divider); text-align: left; white-space: nowrap; font-size: var(--text-sm); }
-  th { color: var(--text-2); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
-  td.empty { color: var(--text-2); text-align: center; padding: var(--space-5); }
-  tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  /* ── Tables ──
+     Cells, header, hover, the selected episode and empty rows come from
+     .data-table.is-nowrap in primitives.css. */
 
   /* ── Lists ── */
   .list-panel { padding: 0; }
@@ -2076,10 +2073,6 @@
   .row-select:focus-visible {
     outline: 1px solid var(--focus-ring);
     outline-offset: 2px;
-  }
-
-  tr.selected-row td {
-    background: var(--active-bg);
   }
 
   .regime-note {

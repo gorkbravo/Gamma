@@ -428,7 +428,7 @@
               </div>
 
               <div class="table-wrap overview-table-wrap">
-                <table>
+                <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
                   <thead>
                     <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
                   </thead>
@@ -487,7 +487,7 @@
               </div>
 
               <div class="table-wrap overview-table-wrap">
-                <table>
+                <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
                   <thead>
                     <tr>
                       <th>Token</th>
@@ -756,7 +756,7 @@
               </div>
 
               <div class="table-wrap compact-wrap">
-                <table>
+                <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
                   <thead>
                     <tr><th>Token</th><th>Weight</th><th>Turnover</th><th>Layer</th></tr>
                   </thead>
@@ -835,7 +835,7 @@
             </div>
 
             <div class="table-wrap">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
                 <thead>
                   <tr><th>Pool</th><th>DEX</th><th>Reserve</th><th>Vol 24H</th><th>Buys / Sells</th></tr>
                 </thead>
@@ -908,7 +908,7 @@
             </div>
 
             <div class="table-wrap compact-wrap">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
                 <thead>
                   <tr><th>Token</th><th>24H</th><th>Turnover</th><th>Narrative</th></tr>
                 </thead>
@@ -996,7 +996,7 @@
             </div>
 
             <div class="table-wrap compact-wrap">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
                 <thead>
                   <tr><th>Token</th><th>Input</th><th>Norm</th><th>Layer</th></tr>
                 </thead>
@@ -1054,7 +1054,7 @@
           </div>
 
           <div class="table-wrap">
-            <table>
+            <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end">
               <thead>
                 <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
               </thead>
@@ -1619,41 +1619,11 @@
     max-height: 21rem;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  thead th {
-    text-align: left;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-    padding: var(--space-4) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    position: sticky;
-    top: 0;
-    background: var(--bg-0);
-    z-index: 1;
-  }
-
-  tbody td {
-    padding: var(--space-4) var(--space-4);
-    border-top: 1px solid var(--divider);
-    vertical-align: top;
-  }
-
+  /* Cells, rules, hover and the selected row come from .data-table and its
+     is-sticky, is-relaxed, is-body-text, is-top and is-open-end modifiers in
+     primitives.css. */
   tbody tr {
     cursor: pointer;
-  }
-
-  tbody tr:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-  }
-
-  tbody tr.selected {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .field-grid {

@@ -127,7 +127,7 @@
       <p class="section-summary">{snapshot.rates_policy.meeting_path.summary}</p>
       <MacroMetricRow metrics={snapshot.rates_policy.meeting_path.metrics} compact />
       <div class="table-wrap">
-        <table>
+        <table class="data-table is-sticky is-relaxed is-body-text">
           <thead>
             <tr>
               <th>Meeting</th>
@@ -165,7 +165,7 @@
       </div>
     </div>
     <div class="table-wrap">
-      <table>
+      <table class="data-table is-sticky is-relaxed is-body-text">
         <thead>
           <tr><th>Tenor</th><th>Current</th><th>Prior</th><th>Delta</th></tr>
         </thead>
@@ -298,28 +298,8 @@
   /* ── Tables ── */
   .table-wrap { overflow: auto; }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th, td {
-    padding: var(--space-4) var(--space-4);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
-    text-align: left;
-  }
-
-  th {
-    color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    background: var(--surface-0);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
+  /* Cells and the sticky header come from .data-table.is-sticky.is-relaxed.is-body-text in
+     primitives.css; only this tab's fainter stripe stays local. */
   tbody tr:nth-child(even) { background: rgba(122, 166, 200, 0.02); }
 
   .positive { color: var(--positive); }

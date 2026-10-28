@@ -273,7 +273,7 @@
 
       {#if workspace.runComparison}
         <div class="comparison-table" aria-label="Retained run comparison">
-          <table>
+          <table class="data-table is-compact">
             <caption class="sr-only">Comparison between the selected Research Script runs</caption>
             <thead><tr><th>Check</th><th>Result / delta</th></tr></thead>
             <tbody>
@@ -334,7 +334,7 @@
                 </div>
               {:else if output.kind === "table"}
                 <div class="table-wrap">
-                  <table>
+                  <table class="data-table is-compact">
                     <caption class="sr-only">{output.filename ?? output.output_id}</caption>
                     <thead><tr>{#each output.columns as column}<th>{column}</th>{/each}</tr></thead>
                     <tbody>
@@ -957,11 +957,9 @@
   .metric-output span { color: var(--text-2); font-size: var(--text-sm); }
 
   .table-wrap { overflow: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
-  th,
-  td { border-bottom: 1px solid var(--divider); padding: var(--space-2) var(--space-3); text-align: left; }
-  th { color: var(--text-2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; }
-  td { color: var(--text-1); font-family: var(--app-font); }
+  /* Cells and header come from .data-table.is-compact in primitives.css;
+     script results keep 11px mono figures. */
+  .data-table td { font-size: var(--text-xs); font-family: var(--app-font); }
 
   .artifact-preview,
   .file-output {

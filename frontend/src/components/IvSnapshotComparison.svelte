@@ -86,7 +86,7 @@
     {#if new Date(before.captured_at) > new Date(after.captured_at)}<p>Comparison was captured before the baseline; changes follow the selected direction.</p>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users must be able to focus and scroll this wide evidence table.) -->
     <div class="table-scroll" tabindex="0" role="region" aria-label="IV and skew changes by expiry">
-      <table>
+      <table class="data-table is-figures is-nowrap">
         <thead><tr><th>Expiry</th><th>ATM reference strike</th><th>Baseline IV</th><th>Comparison IV</th><th>IV change</th><th>Put wing</th><th>Put skew: baseline → comparison (change)</th><th>Call wing</th><th>Call skew: baseline → comparison (change)</th></tr></thead>
         <tbody>{#each comparison.rows as row}<tr><td>{row.expiry}</td><td>{row.strike ?? "N/A"}</td><td>{percent(row.before)}</td><td>{percent(row.after)}</td><td>{change(row.change)}</td><td>{row.putStrike ?? "N/A"}</td><td>{percent(row.putSkewBefore)} → {percent(row.putSkewAfter)} ({change(row.putSkewChange)})</td><td>{row.callStrike ?? "N/A"}</td><td>{percent(row.callSkewBefore)} → {percent(row.callSkewAfter)} ({change(row.callSkewChange)})</td></tr>{/each}</tbody>
       </table>
@@ -120,10 +120,7 @@
   select { width: 100%; min-width: 0; font-family: var(--app-font), monospace; }
   p { margin: 0; padding: var(--space-3) var(--space-5); color: var(--text-1); font-size: var(--text-sm); overflow-wrap: anywhere; }
   .table-scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: var(--text-sm); }
-  th, td { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--divider); text-align: right; }
-  th { color: var(--text-2); font-size: var(--text-xs); }
-  th:first-child, td:first-child { text-align: left; }
+  /* Cells come from .data-table.is-figures.is-nowrap in primitives.css. */
   details { border-top: 1px solid var(--divider); padding: var(--space-5); }
   summary { cursor: pointer; font-family: var(--display-font); }
   .evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-4); }

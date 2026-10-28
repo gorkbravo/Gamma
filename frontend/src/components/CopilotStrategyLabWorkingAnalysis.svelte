@@ -50,7 +50,7 @@
     </div>
 
     <div class="table-wrap">
-      <table>
+      <table class="data-table is-compact is-nowrap">
         <thead><tr><th>Leg</th><th>Class</th><th>Identifier</th><th class="num">Signed weight</th></tr></thead>
         <tbody>
           {#each draft.legs as leg}
@@ -106,9 +106,7 @@
   strong { color: var(--text-0); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
   .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-  th, td { border-bottom: 1px solid var(--divider); padding: var(--space-2) var(--space-3); text-align: left; white-space: nowrap; }
-  th { color: var(--text-2); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.08em; }
+  /* Cells and header come from .data-table.is-compact.is-nowrap in primitives.css. */
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   .negative { color: var(--negative); }
 

@@ -44,7 +44,7 @@
 </script>
 
 <div class="table-wrap">
-  <table class={`profile-${profile}`}>
+  <table class={`data-table is-top is-body-text profile-${profile}`}>
     <thead>
       <tr>
         <th class="market-cell">Market</th>
@@ -94,31 +94,15 @@
     max-height: 20rem;
   }
 
+  /* Cells, header and row identifiers come from .data-table.is-top.is-body-text in
+     primitives.css; this table adds fixed proportional columns. */
   table {
-    width: 100%;
     min-width: 33rem;
     /* Columns here are proportional, so on a page-wide panel the percentages
        stretch and a value ends up half a panel from its row label. Cap the
        table at the width the proportions were drawn for. */
     max-width: 58rem;
-    border-collapse: collapse;
     table-layout: fixed;
-  }
-
-  th,
-  td {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    vertical-align: top;
-    line-height: 1.32;
-  }
-
-  th {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
   }
 
   td strong,

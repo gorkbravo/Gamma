@@ -130,7 +130,7 @@
     aria-label={isStrategyDraft ? `${symbol} temporary option-set draft` : `${symbol} temporary realized versus implied comparison`}
   >
     {#if isStrategyDraft}
-      <table>
+      <table class="data-table is-nowrap">
         <thead><tr><th>Side</th><th>Type</th><th>Expiry</th><th>Strike</th><th>Ratio</th><th>Premium</th><th>Price source</th></tr></thead>
         <tbody>
           {#each draftLegs as leg}
@@ -149,7 +149,7 @@
         </tbody>
       </table>
     {:else}
-      <table>
+      <table class="data-table is-nowrap">
         <thead>
           <tr>
             <th>Expiry</th>
@@ -236,8 +236,7 @@
   .temporary-label,
   .temporary-scope,
   .temporary-summary span,
-  .boundary-grid span,
-  th {
+  .boundary-grid span {
     color: var(--text-2);
     font-family: var(--display-font);
     font-size: var(--text-2xs);
@@ -284,24 +283,7 @@
     border-bottom: 1px solid var(--divider);
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-  }
-
-  td {
-    color: var(--text-1);
-    font-size: var(--text-sm);
-  }
-
+  /* Cells and header come from .data-table.is-nowrap in primitives.css. */
   td.empty {
     color: var(--text-2);
     text-align: center;

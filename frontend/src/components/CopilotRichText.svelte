@@ -21,7 +21,7 @@
     {/if}
   {:else if segment.kind === "table"}
     <div class="rich-table-wrap">
-      <table class="rich-table">
+      <table class="data-table is-grid is-top is-nowrap rich-table">
         <thead>
           <tr>
             {#each segment.header as cell, column}
@@ -80,33 +80,17 @@
     overflow-x: auto;
   }
 
+  /* Cells and the full grid come from .data-table.is-grid in primitives.css.
+     A table inside a chat answer keeps its content width and the tighter
+     2px rows it had as prose. */
   .rich-table {
     width: auto;
     min-width: 50%;
-    border-collapse: collapse;
-    font-size: var(--text-sm);
-    font-variant-numeric: tabular-nums;
   }
 
   .rich-table th,
   .rich-table td {
     padding: var(--space-1) var(--space-3);
-    border: 1px solid var(--divider);
-    text-align: left;
-    vertical-align: top;
-    white-space: nowrap;
-  }
-
-  .rich-table th {
-    color: var(--text-2);
-    background: var(--surface-1);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
-  }
-
-  .rich-table td {
-    color: var(--text-1);
   }
 
   .rich-table .num {

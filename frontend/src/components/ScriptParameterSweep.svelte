@@ -196,7 +196,7 @@
           <span>Common window <strong>{evaluation.common_window ? `${evaluation.common_window.start} → ${evaluation.common_window.end} · ${evaluation.common_window.observations} obs` : "—"}</strong></span>
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-compact is-nowrap">
             <caption class="sr-only">In-sample descriptive metrics per sweep point, in sweep order</caption>
             <thead><tr><th>#</th><th>Parameters</th><th>State</th><th class="num">Total</th><th class="num">Ann. vol</th><th class="num">Sharpe</th><th class="num">Max DD</th></tr></thead>
             <tbody>
@@ -253,7 +253,7 @@
         </p>
         {#if !walk.evaluation.timing.enforced_by_gamma}<p class="timing-note">{walk.evaluation.timing.note}</p>{/if}
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-compact is-nowrap">
             <caption class="sr-only">Walk-forward folds: training window, selected point and out-of-sample return</caption>
             <thead><tr><th>Fold</th><th>Train</th><th>Test (OOS)</th><th>Selected</th><th class="num">Train {metricLabel(walk.config.selection_metric)}</th><th class="num">OOS return</th></tr></thead>
             <tbody>
@@ -343,10 +343,10 @@
   .row-meta { display: flex; flex-wrap: wrap; gap: var(--space-5); font-size: var(--text-xs); color: var(--text-2); }
   .row-meta strong { color: var(--text-1); font-family: var(--app-font); font-weight: 500; }
   .table-wrap { overflow: auto; border: 1px solid var(--divider); }
-  table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); min-width: 36rem; }
-  th, td { border-bottom: 1px solid var(--divider); padding: var(--space-2) var(--space-3); text-align: left; white-space: nowrap; }
-  th { color: var(--text-2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--text-2xs); }
-  td { color: var(--text-1); font-family: var(--app-font); }
+  /* Cells and header come from .data-table.is-compact.is-nowrap in primitives.css;
+     script results keep 11px mono figures. */
+  table { min-width: 36rem; }
+  .data-table td { font-size: var(--text-xs); font-family: var(--app-font); }
   td.params { white-space: normal; overflow-wrap: anywhere; min-width: 10rem; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   .positive { color: var(--positive); }

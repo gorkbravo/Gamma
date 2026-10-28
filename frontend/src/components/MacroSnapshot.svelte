@@ -114,7 +114,7 @@
 {#if (snapshot?.snapshot_cards ?? []).length}
   <article class="panel snapshot-table-panel">
     <div class="table-wrap">
-      <table class="snapshot-table">
+      <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end snapshot-table">
         <thead>
           <tr>
             <th class="col-theme">Theme</th>
@@ -339,29 +339,15 @@
 
   .table-wrap { overflow: auto; }
 
+  /* Cells, rules and the sticky header come from .data-table and its
+     is-sticky, is-relaxed, is-body-text, is-top and is-open-end modifiers in
+     primitives.css. */
   .snapshot-table {
-    width: 100%;
-    border-collapse: collapse;
     /* Auto layout, not fixed: themes carry different numbers of metrics, and
        fixed layout padded every row out to the widest one and then split the
        width equally — so columns that were empty in most rows took the same
        89px as the ones carrying labels. */
     table-layout: auto;
-  }
-
-  .snapshot-table thead th {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.4);
-    color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    background: var(--surface-0);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    text-align: left;
-    font-weight: 500;
   }
 
   .snapshot-table .col-theme { width: 20%; min-width: 15rem; }
@@ -383,13 +369,6 @@
     outline-offset: -1px;
   }
 
-  .snapshot-row td {
-    padding: var(--space-4) var(--space-4);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.25);
-    vertical-align: top;
-  }
-
-  .snapshot-row:last-child td { border-bottom: 0; }
 
   .row-theme {
     display: block;
