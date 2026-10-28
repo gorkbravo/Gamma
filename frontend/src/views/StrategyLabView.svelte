@@ -825,12 +825,12 @@
             </div>
 
             <div class="kpi-grid compact-kpis">
-              <article class="metric"><span>Gross</span><strong>{fmt(portfolioDraftSummary.grossExposure, 2)}x</strong><small>{portfolioDraftSummary.legCount} active legs</small></article>
-              <article class="metric"><span>Net</span><strong class={signClass(portfolioDraftSummary.netExposure)}>{fmt(portfolioDraftSummary.netExposure, 2)}x</strong><small>{fmt(portfolioDraftSummary.longExposure, 2)} long / {fmt(portfolioDraftSummary.shortExposure, 2)} short</small></article>
-              <article class="metric"><span>Listed</span><strong>{portfolioDraftSummary.listedIdentifierLegs}</strong><small>provider-resolved</small></article>
-              <article class="metric"><span>Inline</span><strong>{portfolioDraftSummary.inlineHistoryLegs}</strong><small>dated histories</small></article>
-              <article class="metric"><span>Objects</span><strong>{portfolioDraftSummary.objectLegs}</strong><small>Gamma streams</small></article>
-              <article class="metric"><span>Context</span><strong>{acceptedStrategyLenses.length + acceptedStrategyOverlays.length}</strong><small>lenses / overlays</small></article>
+              <article class="stat"><span>Gross</span><strong>{fmt(portfolioDraftSummary.grossExposure, 2)}x</strong><small>{portfolioDraftSummary.legCount} active legs</small></article>
+              <article class="stat"><span>Net</span><strong class={signClass(portfolioDraftSummary.netExposure)}>{fmt(portfolioDraftSummary.netExposure, 2)}x</strong><small>{fmt(portfolioDraftSummary.longExposure, 2)} long / {fmt(portfolioDraftSummary.shortExposure, 2)} short</small></article>
+              <article class="stat"><span>Listed</span><strong>{portfolioDraftSummary.listedIdentifierLegs}</strong><small>provider-resolved</small></article>
+              <article class="stat"><span>Inline</span><strong>{portfolioDraftSummary.inlineHistoryLegs}</strong><small>dated histories</small></article>
+              <article class="stat"><span>Objects</span><strong>{portfolioDraftSummary.objectLegs}</strong><small>Gamma streams</small></article>
+              <article class="stat"><span>Context</span><strong>{acceptedStrategyLenses.length + acceptedStrategyOverlays.length}</strong><small>lenses / overlays</small></article>
             </div>
 
             {#if acceptedStrategyLenses.length || acceptedStrategyOverlays.length}
@@ -1150,11 +1150,11 @@
                 </div>
               {/if}
               <div class="kpi-grid">
-                <article class="metric"><span>Total Return</span><strong class={signClass(strategyComposition.metrics.total_return)} class:absent={pct(strategyComposition.metrics.total_return) === "N/A"}>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
-                <article class="metric"><span>Annual Vol</span><strong class:absent={pct(strategyComposition.metrics.annual_volatility) === "N/A"}>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
-                <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
-                <article class="metric"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
-                <article class="metric"><span>Lenses</span><strong>{strategyComposition.lenses.length}</strong><small>{strategyComposition.overlays.length} overlays</small></article>
+                <article class="stat"><span>Total Return</span><strong class={signClass(strategyComposition.metrics.total_return)} class:absent={pct(strategyComposition.metrics.total_return) === "N/A"}>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
+                <article class="stat"><span>Annual Vol</span><strong class:absent={pct(strategyComposition.metrics.annual_volatility) === "N/A"}>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
+                <article class="stat"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
+                <article class="stat"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
+                <article class="stat"><span>Lenses</span><strong>{strategyComposition.lenses.length}</strong><small>{strategyComposition.overlays.length} overlays</small></article>
               </div>
               {#if strategyComposition.lenses.length || strategyComposition.overlays.length}
                 <div class="attached-context-list">
@@ -1191,12 +1191,12 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric"><span>Total Return</span><strong class={signClass(activeStrategyResult?.metrics.total_return)} class:absent={pct(activeStrategyResult?.metrics.total_return) === "N/A"}>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
-            <article class="metric"><span>Annual Return</span><strong class={signClass(activeStrategyResult?.metrics.annual_return)} class:absent={pct(activeStrategyResult?.metrics.annual_return) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
-            <article class="metric"><span>Annual Vol</span><strong class:absent={pct(activeStrategyResult?.metrics.annual_volatility) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
-            <article class="metric"><span>Sharpe</span><strong class={signClass(activeStrategyResult?.metrics.sharpe_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sharpe_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
-            <article class="metric"><span>Sortino</span><strong class={signClass(activeStrategyResult?.metrics.sortino_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sortino_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
-            <article class="metric"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
+            <article class="stat"><span>Total Return</span><strong class={signClass(activeStrategyResult?.metrics.total_return)} class:absent={pct(activeStrategyResult?.metrics.total_return) === "N/A"}>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
+            <article class="stat"><span>Annual Return</span><strong class={signClass(activeStrategyResult?.metrics.annual_return)} class:absent={pct(activeStrategyResult?.metrics.annual_return) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
+            <article class="stat"><span>Annual Vol</span><strong class:absent={pct(activeStrategyResult?.metrics.annual_volatility) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
+            <article class="stat"><span>Sharpe</span><strong class={signClass(activeStrategyResult?.metrics.sharpe_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sharpe_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
+            <article class="stat"><span>Sortino</span><strong class={signClass(activeStrategyResult?.metrics.sortino_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sortino_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
+            <article class="stat"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
           </div>
 
           <TimeSeriesChart series={strategyChartSeries} height={320} emptyMessage="Import CSV returns to populate Strategy Lab." />
@@ -1582,41 +1582,7 @@
     padding-block: var(--space-1);
   }
 
-  .metric {
-    min-width: 0;
-    padding: var(--space-2) var(--space-5);
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    text-align: left;
-    display: grid;
-    gap: var(--space-1);
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .metric span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-1) 0 0.05rem;
-    font-size: var(--text-md);
-    line-height: 1.2;
-    color: var(--text-0);
-  }
-
-  .metric small {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-  }
+  /* Stat cells are .stat from primitives.css. */
 
   /* ── Typography ── */
   label > span {
@@ -2207,13 +2173,13 @@
       flex-wrap: wrap;
     }
 
-    .metric {
+    .stat {
       padding: var(--space-4) 0;
       border-left: 0;
       border-top: 1px solid var(--divider);
     }
 
-    .metric:first-child {
+    .stat:first-child {
       padding-top: 0;
       border-top: 0;
     }

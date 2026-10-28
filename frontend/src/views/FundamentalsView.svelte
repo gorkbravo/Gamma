@@ -891,7 +891,7 @@
 
           <div class="kpi-grid valuation-kpi-grid">
             {#each (marketContextMetrics.length ? marketContextMetrics : headlineMetrics.slice(0, 7)) as metric}
-              <div class="metric">
+              <div class="stat is-large">
                 <span>{metric.label}</span>
                 <strong class={metricTone(metric.metric_id, metric.value)} class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
               </div>
@@ -1306,9 +1306,9 @@
             <small>{currentAmendmentSummary.amendmentFilings} amended filings</small>
           </div>
           <div class="kpi-grid compact-kpi-grid">
-            <div class="metric"><span>Statement periods</span><strong>{currentAmendmentSummary.amendedPeriods}</strong></div>
-            <div class="metric"><span>Mapped cells</span><strong>{currentAmendmentSummary.amendedCells}</strong></div>
-            <div class="metric"><span>Latest amendment</span><strong class:absent={shortDate(currentAmendmentSummary.latestAmendmentDate) === "N/A"}>{shortDate(currentAmendmentSummary.latestAmendmentDate)}</strong></div>
+            <div class="stat is-large"><span>Statement periods</span><strong>{currentAmendmentSummary.amendedPeriods}</strong></div>
+            <div class="stat is-large"><span>Mapped cells</span><strong>{currentAmendmentSummary.amendedCells}</strong></div>
+            <div class="stat is-large"><span>Latest amendment</span><strong class:absent={shortDate(currentAmendmentSummary.latestAmendmentDate) === "N/A"}>{shortDate(currentAmendmentSummary.latestAmendmentDate)}</strong></div>
           </div>
           <p class="method-note">Amendment markers come from SEC filing forms and normalized period metadata. They flag source chronology; they do not claim every amended filing changed every mapped value.</p>
         </article>
@@ -1519,23 +1519,23 @@
         {/if}
 
         <div class="kpi-grid scenario-kpi-grid">
-          <article class="metric">
+          <article class="stat is-large">
             <span>Current Price</span>
             <strong class:absent={currency(activeScenarioSummary?.current_price, 2) === "N/A"}>{currency(activeScenarioSummary?.current_price, 2)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Enterprise Value</span>
             <strong>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.enterprise_value)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Equity Value</span>
             <strong>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.equity_value)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Implied / Share</span>
             <strong>{dcfDecisionGate.blocked ? "N/A" : currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Upside / Downside</span>
             <strong class={dcfDecisionGate.blocked ? "" : toneClass(activeScenarioSummary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(activeScenarioSummary?.upside_downside_pct)}</strong>
           </article>
@@ -1923,23 +1923,23 @@
         </div>
 
         <div class="kpi-grid scenario-kpi-grid">
-          <article class="metric">
+          <article class="stat is-large">
             <span>Current Price</span>
             <strong class:absent={currency(reverseValuation?.current_price, 2) === "N/A"}>{currency(reverseValuation?.current_price, 2)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Target Equity Value</span>
             <strong class:absent={compactCurrency(reverseValuation?.target_equity_value) === "N/A"}>{compactCurrency(reverseValuation?.target_equity_value)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Target EV</span>
             <strong class:absent={compactCurrency(reverseValuation?.target_enterprise_value) === "N/A"}>{compactCurrency(reverseValuation?.target_enterprise_value)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Base Value / Share</span>
             <strong>{dcfDecisionGate.blocked ? "N/A" : currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)}</strong>
           </article>
-          <article class="metric">
+          <article class="stat is-large">
             <span>Base Gap</span>
             <strong class={dcfDecisionGate.blocked ? "" : toneClass(reverseValuation?.base_case_summary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(reverseValuation?.base_case_summary?.upside_downside_pct)}</strong>
           </article>
@@ -2005,7 +2005,7 @@
           </div>
           <div class="kpi-grid valuation-kpi-grid">
             {#each reverseGapMetrics as metric}
-              <article class="metric">
+              <article class="stat is-large">
                 <span>{metric.label}</span>
                 <strong class={dcfDecisionGate.blocked ? "" : metricTone(metric.metric_id, metric.value)}>{dcfDecisionGate.blocked ? "N/A" : metric.display_value ?? "N/A"}</strong>
               </article>
@@ -3005,11 +3005,15 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .compact-kpi-grid .metric {
+  .compact-kpi-grid .stat {
     padding-inline: var(--space-4);
   }
 
-  .compact-kpi-grid .metric strong {
+  .compact-kpi-grid .stat:first-child {
+    padding-left: 0;
+  }
+
+  .compact-kpi-grid .stat strong {
     font-size: var(--text-base);
   }
 
@@ -3055,33 +3059,7 @@
     font-size: var(--text-xs);
   }
 
-  .metric {
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    padding: var(--space-2) var(--space-6);
-    display: grid;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .metric span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-2) 0;
-    font-size: var(--text-lg);
-  }
+  /* Stat cells are .stat.is-large from primitives.css. */
 
   .table-wrap {
     border: 1px solid var(--divider);

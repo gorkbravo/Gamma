@@ -553,53 +553,53 @@
 
           <div class="kpi-grid hero-stat-strip">
             {#if heroCanvas === "basket" && syntheticPortfolio}
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Basket Return</span>
                 <strong class:absent={pct(syntheticPortfolio.cumulative_return_pct) === "N/A"}>{pct(syntheticPortfolio.cumulative_return_pct)}</strong>
                 <small>{syntheticPortfolio.lookback_days}D window</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Vs {syntheticPortfolio.benchmark_label}</span>
                 <strong class={toneClass(syntheticPortfolio.relative_return_pct)} class:absent={pct(syntheticPortfolio.relative_return_pct) === "N/A"}>{pct(syntheticPortfolio.relative_return_pct)}</strong>
                 <small>{pct(syntheticPortfolio.benchmark_return_pct)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Volatility</span>
                 <strong class:absent={pct(syntheticPortfolio.annualized_volatility_pct) === "N/A"}>{pct(syntheticPortfolio.annualized_volatility_pct)}</strong>
                 <small>annualized</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Weighted Mcap</span>
                 <strong class:absent={compactMoney(syntheticPortfolio.weighted_market_cap) === "N/A"}>{compactMoney(syntheticPortfolio.weighted_market_cap)}</strong>
                 <small>Turnover {ratio(syntheticPortfolio.weighted_turnover_ratio_24h)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Positions</span>
                 <strong>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong>
                 <small>effective</small>
               </div>
             {:else}
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Price</span>
                 <strong class:absent={money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2) === "N/A"}>{money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2)}</strong>
                 <small class={toneClass(detail?.price_change_pct_24h)}>{pct(detail?.price_change_pct_24h)} 24H</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Market Cap</span>
                 <strong class:absent={compactMoney(detail?.market_cap) === "N/A"}>{compactMoney(detail?.market_cap)}</strong>
                 <small>FDV {compactMoney(detail?.fully_diluted_valuation)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>24H Volume</span>
                 <strong class:absent={compactMoney(detail?.total_volume) === "N/A"}>{compactMoney(detail?.total_volume)}</strong>
                 <small>Turnover {ratio(detail?.turnover_ratio_24h)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>7D</span>
                 <strong class={toneClass(detail?.price_change_pct_7d)} class:absent={pct(detail?.price_change_pct_7d) === "N/A"}>{pct(detail?.price_change_pct_7d)}</strong>
                 <small>30D {pct(detail?.price_change_pct_30d)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>24H Range</span>
                 <strong>{money(detail?.low_24h, 2)}–{money(detail?.high_24h, 2)}</strong>
                 <small>Rank #{detail?.market_cap_rank ?? "N/A"}</small>
@@ -793,22 +793,22 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric">
+            <article class="stat is-large">
               <span>DEX Share</span>
               <strong class:absent={pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null) === "N/A"}>{pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null)}</strong>
               <small>of spot volume</small>
             </article>
-            <article class="metric">
+            <article class="stat is-large">
               <span>Buy Pressure</span>
               <strong class={toneClass((flow?.buy_pressure_pct ?? 50) - 50)} class:absent={pct(flow?.buy_pressure_pct) === "N/A"}>{pct(flow?.buy_pressure_pct)}</strong>
               <small>{flow?.active_trader_proxy_24h?.toLocaleString("en-US") ?? "N/A"} trader proxy</small>
             </article>
-            <article class="metric">
+            <article class="stat is-large">
               <span>Reserve / Volume</span>
               <strong class:absent={ratio(flow?.reserve_volume_ratio_24h) === "N/A"}>{ratio(flow?.reserve_volume_ratio_24h)}</strong>
               <small>{flow?.slippage_proxy_label ?? "N/A"} depth</small>
             </article>
-            <article class="metric">
+            <article class="stat is-large">
               <span>Top Pool Share</span>
               <strong class:absent={pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null) === "N/A"}>{pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null)}</strong>
               <small>{flow?.pool_count ?? 0} matched pools</small>
@@ -1419,39 +1419,13 @@
     margin-top: 0.05rem;
   }
 
-  .metric {
-    padding: var(--space-2) var(--space-6);
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    display: grid;
-    gap: var(--space-1);
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .metric span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-xs);
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-2) 0;
-    font-size: var(--text-lg);
-    color: var(--text-0);
-  }
+  /* Stat cells are .stat.is-large from primitives.css. */
 
   .hero-stat small {
     line-height: 1.35;
   }
 
-  .metric small,
+  .stat small,
   .market-title small,
   .focus-row p,
   .meta-row span {
@@ -1459,19 +1433,19 @@
   }
 
   .headline-kpi-meta.positive,
-  .metric small.positive,
+  .stat small.positive,
   .hero-stat small.positive {
     color: var(--positive);
   }
 
   .headline-kpi-meta.negative,
-  .metric small.negative,
+  .stat small.negative,
   .hero-stat small.negative {
     color: var(--negative);
   }
 
   .headline-kpi-meta.warning,
-  .metric small.warning,
+  .stat small.warning,
   .hero-stat small.warning {
     color: var(--warning);
   }

@@ -1201,7 +1201,7 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Prob</span>
               <strong
                 class={marketTone(detail?.current_probability)}
@@ -1212,41 +1212,41 @@
               >
               <small>{history?.outcome_label ?? detail?.probability_label ?? "Primary outcome"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Window Δ</span>
               <strong class={toneOf(historyStats?.change)} class:absent={signedPct(historyStats?.change) === "N/A"}>{signedPct(historyStats?.change)}</strong>
               <small>{historyRange.toUpperCase()} range {pct(historyStats?.range_width)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Hi / Lo</span>
               <strong>{pct(historyStats?.high)} / {pct(historyStats?.low)}</strong>
               <small>now at {pct(historyStats?.percentile_of_range)} of range</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Daily Vol</span>
               <strong class={(historyStats?.daily_volatility ?? 0) >= 0.08 ? "elevated" : ""}
                 >{pct(historyStats?.daily_volatility)}</strong
               >
               <small>max move {signedPct(historyStats?.max_move)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>24H Vol</span>
               <strong use:flashOnChange={{ value: detail?.volume_24h, direction: "neutral" }}
                 >{fmt(detail?.volume_24h)}</strong
               >
               <small>total {fmt(detail?.volume)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Liquidity</span>
               <strong class:absent={fmt(detail?.liquidity) === "N/A"}>{fmt(detail?.liquidity)}</strong>
               <small>{(detail?.open_interest ?? 0) > 0 ? `OI ${fmt(detail?.open_interest)}` : "—"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Resolves</span>
               <strong>{daysLabel(daysToResolution)}</strong>
               <small>{dayStamp(detail?.end_time)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Spread</span>
               <strong class={(depth?.spread ?? detail?.spread ?? 0) >= 0.05 ? "elevated" : ""}
                 >{pct(depth?.spread ?? detail?.spread, 1)}</strong
@@ -1346,19 +1346,19 @@
             </div>
             {#if eventBookLadder}
               <div class="kpi-strip">
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Structure</span>
                   <strong>{eventBookLadder.label}</strong>
                   <small>nested | not summed</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Monotonicity</span>
                   <strong class={eventBookLadder.inversions > 0 ? "elevated" : ""}
                     >{eventBookLadder.inversions > 0 ? `${eventBookLadder.inversions} inverted` : "Holds"}</strong
                   >
                   <small>{eventBookLadder.rule}</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Span</span>
                   <strong class:absent={!eventBookLadder.first}
                     >{eventBookLadder.first ? `${pct(eventBookLadder.first.probability)} → ${pct(eventBookLadder.last?.probability)}` : "N/A"}</strong
@@ -1370,7 +1370,7 @@
                     )}</small
                   >
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Flagged</span>
                   <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
                   <small>resolution terms</small>
@@ -1378,24 +1378,24 @@
               </div>
             {:else}
               <div class="kpi-strip">
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Book Sum</span>
                   <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
                   <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
                   <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
                     >{signedPct(eventBook.implied_overround)}</strong
                   >
                   <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Favorite</span>
                   <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
                   <small>{pct(eventBookFavorite?.probability)}</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Flagged</span>
                   <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
                   <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
@@ -1475,21 +1475,21 @@
           </div>
           {#if hasWalletRows}
             <div class="kpi-strip">
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Trades</span>
                 <strong>{wallet?.total_trades ?? 0}</strong>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Notional</span>
                 <strong class:absent={fmt(wallet?.total_notional, 2) === "N/A"}>{fmt(wallet?.total_notional, 2)}</strong>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Top Share</span>
                 <strong class={(wallet?.top_participant_share ?? 0) >= 0.45 ? "elevated" : ""}
                   >{pct(wallet?.top_participant_share)}</strong
                 >
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>HHI</span>
                 <strong class={(wallet?.concentration_hhi ?? 0) >= 0.25 ? "elevated" : ""}
                   >{wallet?.concentration_hhi?.toFixed(2) ?? "N/A"}</strong
@@ -1645,22 +1645,22 @@
           </div>
           {#if depthLevels.length}
             <div class="kpi-strip">
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Bid Depth</span>
                 <strong class:absent={fmt(depth?.bid_notional_within_band, 0) === "N/A"}>{fmt(depth?.bid_notional_within_band, 0)}</strong>
                 <small>total {fmt(depth?.total_bid_notional, 0)}</small>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Ask Depth</span>
                 <strong class:absent={fmt(depth?.ask_notional_within_band, 0) === "N/A"}>{fmt(depth?.ask_notional_within_band, 0)}</strong>
                 <small>total {fmt(depth?.total_ask_notional, 0)}</small>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Imbalance</span>
                 <strong class={toneOf(depth?.depth_imbalance)} class:absent={signedPct(depth?.depth_imbalance, 0) === "N/A"}>{signedPct(depth?.depth_imbalance, 0)}</strong>
                 <small>bid vs ask</small>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>{fmt(depth?.reference_clip_notional, 0)} Cost</span>
                 <strong class={depth?.ask_slippage_reference == null ? "stale" : "elevated"}
                   >{depth?.ask_slippage_reference == null ? "N/A" : signedPct(depth.ask_slippage_reference, 2)}</strong
@@ -1939,24 +1939,24 @@
       {#if activeComparison?.basket}
         <article class="panel basket-panel">
           <div class="kpi-grid four">
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Legs</span>
               <strong>{activeComparison.basket.leg_count}</strong>
               <small>{activeComparison.basket.venues.join(" / ") || "—"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Prob Sum</span>
               <strong class:absent={pct(activeComparison.basket.probability_sum) === "N/A"}>{pct(activeComparison.basket.probability_sum)}</strong>
               <small>{activeComparison.basket.same_event ? "same venue event" : "cross-event"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Vs 100%</span>
               <strong class={toneOf(activeComparison.basket.implied_overround)}
                 >{signedPct(activeComparison.basket.implied_overround)}</strong
               >
               <small>descriptive only</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Widest Gap</span>
               <strong class={(rankedPairs[0]?.current_spread ?? 0) >= 0.05 ? "elevated" : ""}
                 >{signedPct(rankedPairs[0]?.current_spread)}</strong
@@ -2091,29 +2091,29 @@
           </div>
         </div>
         <div class="kpi-grid five">
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Venue</span>
             <strong class:absent={calibration?.venue == null}>{calibration?.venue ?? "N/A"}</strong>
             <small>{calibration?.markets_sampled ?? 0} of {calibration?.resolved_markets_considered ?? 0} resolved</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Observations</span>
             <strong>{calibration?.sample_size ?? 0}</strong>
             <small>min {calibration?.minimum_curve_sample ?? 0} per curve</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Sample Period</span>
             <strong>{dayStamp(calibration?.sample_period_start)} → {dayStamp(calibration?.sample_period_end)}</strong>
             <small>{calibration?.markets_without_history ?? 0} without history</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Research Share</span>
             <strong class={(calibration?.research_share ?? 1) < 0.5 ? "stale" : ""}
               >{pct(calibration?.research_share, 0)}</strong
             >
             <small>{calibrationComposition}</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Settlement Drift</span>
             <strong class="elevated" class:absent={pct(calibration?.convergence?.average_distance_to_outcome) === "N/A"}>{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
             <small>{pct(calibration?.convergence?.share_within_five_points, 0)} within 5pts of outcome</small>
@@ -2529,40 +2529,11 @@
     padding-block: var(--space-2);
   }
 
-  .metric {
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    padding: var(--space-2) var(--space-4);
-    min-width: 0;
-  }
-
-  .metric:first-child {
-    border-left: 0;
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-1) 0;
-    font-size: var(--text-base);
-    color: var(--text-0);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .metric small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  /* Stat cells are .stat.is-compact from primitives.css. */
 
   /* ── Typography ──────────────────────────────────────────── */
 
-  .group-label,
-  label > span,
-  .metric span {
+  .group-label, label > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;

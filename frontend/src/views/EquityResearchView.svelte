@@ -1511,37 +1511,37 @@
         </div>
 
         <div class="kpi-grid summary-kpis">
-          <article class="metric">
+          <article class="stat">
             <span>Lookback Return</span>
             <strong class:positive={(result?.summary.total_return ?? 0) > 0} class:negative={(result?.summary.total_return ?? 0) < 0}>{pct(result?.summary.total_return)}</strong>
             <small>{result?.observations_count ?? 0} obs / {lookbackDays}D</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Latest Day</span>
             <strong class:positive={(result?.latest_daily_return ?? 0) > 0} class:negative={(result?.latest_daily_return ?? 0) < 0}>{pct(result?.latest_daily_return)}</strong>
             <small>{latestDailySubLabel(result)}</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Annual Return</span>
             <strong class:absent={pct(result?.summary.annual_return) === "N/A"}>{pct(result?.summary.annual_return)}</strong>
             <small>{result?.benchmark_symbol ?? "N/A"} benchmark</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Annual Vol</span>
             <strong class:absent={pct(result?.summary.annual_vol) === "N/A"}>{pct(result?.summary.annual_vol)}</strong>
             <small>{fmt(structureMetrics.aligned_symbol_count, 0)} aligned names</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Max Drawdown</span>
             <strong class:negative={(result?.summary.max_drawdown ?? 0) < 0}>{pct(result?.summary.max_drawdown)}</strong>
             <small>{pct(structureMetrics.top_weight)} top weight</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Beta</span>
             <strong class:elevated={(result?.summary.beta ?? 0) > 1.2}>{fmt(result?.summary.beta, 3)}</strong>
             <small>{coverageMetrics.benchmark_overlap_count} overlap obs</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Correlation</span>
             <strong class:absent={fmt(result?.summary.correlation, 3) === "N/A"}>{fmt(result?.summary.correlation, 3)}</strong>
             <small>{pct(structureMetrics.top5_weight)} top-5 weight</small>
@@ -1928,12 +1928,12 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric"><span>Aligned Obs</span><strong>{compareResult?.aligned_observation_count ?? 0}</strong><small>Common return calendar</small></article>
-            <article class="metric"><span>Relative Return</span><strong class:absent={pct(compareResult?.relative_return) === "N/A"}>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
-            <article class="metric"><span>Vol Difference</span><strong class:absent={pct(compareResult?.volatility_difference) === "N/A"}>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
-            <article class="metric"><span>Drawdown Gap</span><strong class:absent={pct(compareResult?.max_drawdown_difference) === "N/A"}>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
-            <article class="metric"><span>Correlation</span><strong class:absent={fmt(compareResult?.correlation, 3) === "N/A"}>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
-            <article class="metric"><span>Beta</span><strong class:absent={fmt(compareResult?.beta, 3) === "N/A"}>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
+            <article class="stat"><span>Aligned Obs</span><strong>{compareResult?.aligned_observation_count ?? 0}</strong><small>Common return calendar</small></article>
+            <article class="stat"><span>Relative Return</span><strong class:absent={pct(compareResult?.relative_return) === "N/A"}>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
+            <article class="stat"><span>Vol Difference</span><strong class:absent={pct(compareResult?.volatility_difference) === "N/A"}>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
+            <article class="stat"><span>Drawdown Gap</span><strong class:absent={pct(compareResult?.max_drawdown_difference) === "N/A"}>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
+            <article class="stat"><span>Correlation</span><strong class:absent={fmt(compareResult?.correlation, 3) === "N/A"}>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
+            <article class="stat"><span>Beta</span><strong class:absent={fmt(compareResult?.beta, 3) === "N/A"}>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
           </div>
 
           <TimeSeriesChart series={compareChartSeries} height={380} emptyMessage="Select two loaded or saved return streams to compare." />
@@ -1955,10 +1955,10 @@
               </div>
             </div>
             <div class="kpi-grid">
-              <article class="metric"><span>Scope</span><strong>{formatScopeLabel(result?.scope_type)}</strong><small>{activePrimaryScopeLabel(result)}</small></article>
-              <article class="metric"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? benchmarkSymbol}</strong><small>{coverageMetrics.benchmark_overlap_count} overlap obs</small></article>
-              <article class="metric"><span>Available Names</span><strong>{coverageMetrics.available_symbols.length}</strong><small>{coverageMetrics.missing_symbols.length} missing</small></article>
-              <article class="metric"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
+              <article class="stat"><span>Scope</span><strong>{formatScopeLabel(result?.scope_type)}</strong><small>{activePrimaryScopeLabel(result)}</small></article>
+              <article class="stat"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? benchmarkSymbol}</strong><small>{coverageMetrics.benchmark_overlap_count} overlap obs</small></article>
+              <article class="stat"><span>Available Names</span><strong>{coverageMetrics.available_symbols.length}</strong><small>{coverageMetrics.missing_symbols.length} missing</small></article>
+              <article class="stat"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
             </div>
           </article>
         {/if}
@@ -2646,41 +2646,7 @@
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
-  .metric {
-    min-width: 0;
-    padding: var(--space-2) var(--space-5);
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    text-align: left;
-    display: grid;
-    gap: var(--space-1);
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .metric span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-1) 0 0.05rem;
-    font-size: var(--text-md);
-    line-height: 1.2;
-    color: var(--text-0);
-  }
-
-  .metric small {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-  }
+  /* Stat cells are .stat from primitives.css. */
 
   /* ── Typography ── */
   .group-label,
@@ -3002,13 +2968,13 @@
       justify-content: flex-start;
     }
 
-    .metric {
+    .stat {
       padding: var(--space-4) 0;
       border-left: 0;
       border-top: 1px solid var(--divider);
     }
 
-    .metric:first-child {
+    .stat:first-child {
       padding-top: 0;
       border-top: 0;
     }

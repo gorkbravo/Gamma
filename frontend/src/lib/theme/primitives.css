@@ -640,3 +640,78 @@ textarea.form-control {
   color: var(--text-2);
   cursor: not-allowed;
 }
+
+/* ── Inline stat ──────────────────────────────────────────────────────────
+   A labelled figure in a row of stats: the label is the cell's <span>, the
+   value its <strong> and an optional note its <small>. Cells are divided by
+   a left rule and the first sits flush. Opt in with class="stat";
+   .is-large is the 18px headline figure (Fundamentals, Crypto), .is-compact
+   the dense 13.5px one that truncates (Prediction Markets). The header KPI
+   strip keeps its own .header-kpi primitive above. Modifiers sit in :where()
+   so .stat:first-child keeps the first cell flush. */
+.stat {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2) var(--space-5);
+  border: 0;
+  border-left: 1px solid var(--divider);
+  background: none;
+  text-align: left;
+}
+
+.stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.stat span {
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--text-2xs);
+}
+
+/* Value spacing is padding, not margin: views reset `strong { margin: 0 }`
+   at the same specificity, and the tone classes (.positive, .absent) on a
+   value must still win over this rule. */
+.stat strong {
+  display: block;
+  padding: var(--space-1) 0 0.05rem;
+  color: var(--text-0);
+  font-size: var(--text-md);
+  line-height: 1.2;
+}
+
+.stat small {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.stat:where(.is-large) {
+  padding-inline: var(--space-6);
+}
+
+.stat:where(.is-large) strong {
+  padding: var(--space-2) 0;
+  font-size: var(--text-lg);
+}
+
+.stat:where(.is-compact) {
+  padding-inline: var(--space-4);
+}
+
+.stat:where(.is-compact) strong {
+  padding: var(--space-1) 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-base);
+}
+
+.stat:where(.is-compact) small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
