@@ -317,7 +317,7 @@
     width: min(100%, 680px);
     aspect-ratio: 1;
     display: block;
-    font-family: var(--app-font), monospace;
+    font-family: var(--font-num), monospace;
   }
 
   .rings circle {

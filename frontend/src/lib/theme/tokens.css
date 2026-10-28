@@ -2,9 +2,26 @@
 
 :root {
   color-scheme: dark;
-  --app-font: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
-  --display-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
-  font-family: var(--app-font), monospace;
+
+  /* ── Font roles ──
+     Every font-family in the app names one of four roles, so a restyle sets
+     one value per role instead of editing rules across views:
+       --font-ui     chrome, headings, buttons and prose
+       --font-label  the small labels above data: eyebrows, column headers,
+                     stat and field labels
+       --font-num    data figures, which must align in a column
+       --font-code   code, raw JSON and model output, the Script editor
+     Today ui and label are the sans and num and code the mono. The document
+     still defaults to --font-num, so data cells need no class. The Settings
+     font choice overrides --font-num and --font-code on the root element. */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
+  --font-label: var(--font-ui);
+  --font-num: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  --font-code: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  /* Aliases for the old names; new rules use the roles above. */
+  --app-font: var(--font-num);
+  --display-font: var(--font-ui);
+  font-family: var(--font-num), monospace;
 
   /* ── Radius scale (small, consistent — not consumer-app rounding) ──
      Applies to top-level surfaces and controls only. Anything nested
@@ -168,7 +185,7 @@ textarea {
 
 button {
   font: inherit;
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   border-radius: var(--radius-sm);
 }
 
@@ -205,9 +222,12 @@ h2,
 h3,
 h4,
 .brand,
-.panel-header,
+.panel-header {
+  font-family: var(--font-ui);
+}
+
 .eyebrow {
-  font-family: var(--display-font);
+  font-family: var(--font-label);
 }
 
 /* Headings land on the ramp even on surfaces that do not restyle them —
@@ -226,9 +246,9 @@ h4 {
   font-size: var(--text-base);
 }
 
-/* Column headers are labels (chrome), not data — sans over mono data */
+/* Column headers are labels (chrome), not data */
 thead th {
-  font-family: var(--display-font);
+  font-family: var(--font-label);
 }
 
 * {

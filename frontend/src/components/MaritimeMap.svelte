@@ -2202,7 +2202,7 @@
     border-radius: 0 !important;
     box-shadow: none !important;
     padding: 0 !important;
-    font-family: var(--app-font), monospace !important;
+    font-family: var(--font-num), monospace !important;
   }
 
   :global(.maplibregl-popup-tip) {

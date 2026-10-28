@@ -141,7 +141,7 @@
   .picker, label, .preview { display: grid; gap: var(--space-3); min-width: 0; }
   .picker { gap: var(--space-4); }
   label, p, summary { font-size: var(--text-xs); }
-  label, summary { font-family: var(--display-font); color: var(--text-2); }
+  label, summary { font-family: var(--font-ui); color: var(--text-2); }
   p { margin: 0; color: var(--text-2); overflow-wrap: anywhere; line-height: var(--leading-normal); }
   /* Fields are .form-control and buttons .btn.is-ghost from primitives.css;
      `font: inherit` is left for V2. */

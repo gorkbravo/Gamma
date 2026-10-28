@@ -115,13 +115,13 @@
   .controls, .selectors { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-5); }
   h3 { margin: 0; font-size: var(--text-md); margin-right: auto; }
   /* Controls are .btn and .form-control from primitives.css. */
-  label { display: grid; gap: var(--space-2); flex: 1 1 260px; min-width: 0; font-family: var(--display-font); font-size: var(--text-sm); }
-  select { width: 100%; min-width: 0; font-family: var(--app-font), monospace; }
+  label { display: grid; gap: var(--space-2); flex: 1 1 260px; min-width: 0; font-family: var(--font-label); font-size: var(--text-sm); }
+  select { width: 100%; min-width: 0; font-family: var(--font-num), monospace; }
   p { margin: 0; padding: var(--space-3) var(--space-5); color: var(--text-1); font-size: var(--text-sm); overflow-wrap: anywhere; }
   .table-scroll { overflow-x: auto; }
   /* Cells come from .data-table.is-figures.is-nowrap in primitives.css. */
   details { border-top: 1px solid var(--divider); padding: var(--space-5); }
-  summary { cursor: pointer; font-family: var(--display-font); }
+  summary { cursor: pointer; font-family: var(--font-ui); }
   .evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-4); }
   .evidence p { padding-left: 0; padding-right: 0; }
   h4 { margin: var(--space-4) 0; }

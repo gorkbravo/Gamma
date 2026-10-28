@@ -1102,7 +1102,7 @@
     background: transparent;
     color: var(--text-2);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1519,7 +1519,7 @@
     border: 1px dashed var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-1);
-    font-family: var(--app-font), monospace;
+    font-family: var(--font-code), monospace;
     font-size: var(--text-sm);
     white-space: pre-wrap;
     word-break: break-word;

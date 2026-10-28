@@ -238,7 +238,7 @@
   .temporary-summary span,
   .boundary-grid span {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-label);
     font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -295,7 +295,7 @@
     border: 1px solid var(--divider);
     border-radius: 999px;
     color: var(--text-1);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-2xs);
     text-transform: uppercase;
   }

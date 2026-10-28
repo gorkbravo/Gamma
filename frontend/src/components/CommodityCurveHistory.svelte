@@ -160,7 +160,7 @@
 </article>
 
 <style>
-  .history-panel { min-width: 0; font-family: var(--display-font); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); }
+  .history-panel { min-width: 0; font-family: var(--font-ui); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); }
   header, .controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); padding: var(--space-5); }
   header { align-items: center; border-bottom: 1px solid var(--divider); }
   h3 { font-size: var(--text-md); margin: 0 auto 0 0; } h4 { font-size: var(--text-sm); margin: 0; padding: var(--space-5); border-top: 1px solid var(--divider); }
@@ -172,7 +172,7 @@
   input, select { min-width: 0; width: 100%; box-sizing: border-box; }
   /* Cells come from .data-table.is-figures.is-nowrap in primitives.css; the
      last column here is a label (coverage, provider), so it reads left. */
-  .table-wrap { overflow-x: auto; } table { font-family: var(--app-font), monospace; }
+  .table-wrap { overflow-x: auto; } table { font-family: var(--font-num), monospace; }
   th:last-child, td:last-child { text-align: left; }
   small { display: block; color: var(--text-2); font-size: var(--text-xs); }
   details { padding: var(--space-4) var(--space-5); font-size: var(--text-sm); } summary { cursor: pointer; }

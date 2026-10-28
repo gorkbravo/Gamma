@@ -334,7 +334,7 @@
     color: var(--text-0);
     padding: var(--space-2) var(--space-4);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     cursor: pointer;
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
@@ -375,7 +375,7 @@
 
   .conn-label {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-label);
     font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;

@@ -2883,7 +2883,7 @@
 
   code {
     color: var(--text-1);
-    font-family: var(--app-font);
+    font-family: var(--font-code);
     font-size: var(--text-sm);
   }
 

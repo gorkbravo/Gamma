@@ -24,7 +24,7 @@
     },
     ".cm-content": {
       caretColor: "var(--accent)",
-      fontFamily: "var(--app-font), monospace",
+      fontFamily: "var(--font-code), monospace",
       padding: "var(--space-3) 0"
     },
     ".cm-scroller": { overflow: "auto" },

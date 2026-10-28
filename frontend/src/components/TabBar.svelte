@@ -256,7 +256,7 @@
     background: transparent;
     color: var(--text-1);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
   }
 
   .header-btn,
@@ -352,7 +352,7 @@
     cursor: pointer;
     text-align: left;
     font-size: var(--text-base);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     border-radius: var(--radius-sm);
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }

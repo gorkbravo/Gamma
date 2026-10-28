@@ -13,8 +13,8 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Eyebrow ──────────────────────────────────────────────────────────────
-   The category label above a panel title. Chrome, not data, so it takes the
-   display font from tokens.css. Never larger than --text-2xs. */
+   The category label above a panel title. Chrome, not data, so it takes
+   --font-label from tokens.css. Never larger than --text-2xs. */
 .eyebrow {
   margin: 0;
   color: var(--text-2);
@@ -75,7 +75,7 @@
   border-right: 1px solid var(--panel-strong);
   background: transparent;
   color: var(--text-1);
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: var(--leading-tight);
@@ -174,7 +174,7 @@
    full width is the slowest thing in the app to read. Bounded measure so
    lines stay scannable on a wide display. */
 .prose.prose {
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   line-height: var(--leading-normal);
   max-width: 68ch;
 }
@@ -199,7 +199,7 @@
 
 .header-top .title {
   color: var(--text-0);
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: 700;
   text-transform: uppercase;
@@ -240,7 +240,7 @@
 
 .header-kpi span {
   color: var(--text-2);
-  font-family: var(--display-font);
+  font-family: var(--font-label);
   font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -292,9 +292,9 @@
    for the families that differ (sticky, relaxed, compact, grid, figures,
    key/value). A bare `th, td` rule here would also reach the few tables that
    are not data tables (the Setup grid, the Sitrep status table, the Options
-   payoff heat map), so the class stays opt-in. Column headers take the
-   display font from tokens.css (`thead th`); cells stay mono with tabular
-   figures. */
+   payoff heat map), so the class stays opt-in. Column headers take
+   --font-label from tokens.css (`thead th`); cells stay on --font-num with
+   tabular figures. */
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -467,7 +467,7 @@
 .data-table:where(.is-keyvalue) th {
   width: 40%;
   color: var(--text-2);
-  font-family: var(--display-font);
+  font-family: var(--font-label);
   font-weight: 400;
   text-transform: none;
   letter-spacing: inherit;

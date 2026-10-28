@@ -1535,7 +1535,7 @@
   .analysis-window {
     margin: var(--space-2) 0 0;
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     letter-spacing: 0.02em;
   }
@@ -1543,7 +1543,7 @@
   .source-pending {
     margin: var(--space-2) 0 0;
     color: var(--warning);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     letter-spacing: 0.02em;
   }
@@ -2050,7 +2050,7 @@
     background: none;
     color: var(--text-0);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     text-align: left;
     cursor: pointer;
   }

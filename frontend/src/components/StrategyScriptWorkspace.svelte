@@ -813,16 +813,16 @@
   }
 
   .source-field { display: grid; gap: var(--space-2); }
-  .parameters-field textarea { font-family: var(--app-font); font-size: var(--text-xs); resize: vertical; }
+  .parameters-field textarea { font-family: var(--font-code); font-size: var(--text-xs); resize: vertical; }
   .parameters-field small { color: var(--text-2); font-size: var(--text-xs); line-height: 1.4; }
   .parameters-field small.invalid { color: var(--negative); }
-  .parameters-field code { font-family: var(--app-font); }
+  .parameters-field code { font-family: var(--font-code); }
 
   .editor-footer,
   .output-head small,
   .run-list small {
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
   }
 
@@ -910,7 +910,7 @@
     overflow: auto;
     white-space: pre-wrap;
     color: var(--text-1);
-    font-family: var(--app-font);
+    font-family: var(--font-code);
     font-size: var(--text-xs);
     line-height: 1.5;
   }
@@ -923,7 +923,7 @@
 
   .metric-output strong {
     color: var(--accent);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-xl);
   }
 
@@ -932,7 +932,7 @@
   .table-wrap { overflow: auto; }
   /* Cells and header come from .data-table.is-compact in primitives.css;
      script results keep 11px mono figures. */
-  .data-table td { font-size: var(--text-xs); font-family: var(--app-font); }
+  .data-table td { font-size: var(--text-xs); font-family: var(--font-num); }
 
   .artifact-preview,
   .file-output {
@@ -947,7 +947,7 @@
   .artifact-link {
     width: fit-content;
     color: var(--accent);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-xs);
   }
 
@@ -966,7 +966,7 @@
 
   .runtime-status {
     color: var(--warning);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-xs);
     text-transform: uppercase;
   }
@@ -975,7 +975,7 @@
   .row { padding: var(--space-3) 0; border-bottom: 1px solid var(--divider); font-size: var(--text-xs); }
   .row:last-child { border-bottom: 0; }
   .row span { color: var(--text-2); }
-  .row strong { color: var(--text-1); font-family: var(--app-font); font-weight: 500; text-align: right; }
+  .row strong { color: var(--text-1); font-family: var(--font-num); font-weight: 500; text-align: right; }
 
   .output-toolbar,
   .lifecycle-actions {
