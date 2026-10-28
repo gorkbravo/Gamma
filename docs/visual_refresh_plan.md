@@ -4,7 +4,7 @@ _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
 - Last reviewed: 2026-10-28
-- Implementation status: V1 in progress. Panel title, tags and the data table with its modifiers are done (merged into main on 2026-10-28); buttons, inputs, selects and inline stats remain. V2–V6 planned.
+- Implementation status: V1 complete pending merge. Panel title, tags and the data table are in main (2026-10-28); buttons, inputs, selects and inline stats are on branch `claude/musing-easley-b0d363` (e98fd26, dedc5d7), awaiting review. V2–V6 planned.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
 - Doctrine: [`design_principles.md`](./design_principles.md) stays authoritative for the current look until V5 rewrites it. Do not apply B′ values to views before V4.
@@ -85,7 +85,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 
 | Checkpoint | Scope | Acceptance gate | Status |
 |---|---|---|---|
-| V1 — Shared primitives under the current look | Extend `frontend/src/lib/theme/primitives.css` (panel, header, mode bar, KPIs and eyebrow already exist) with the data table, tag, 26px panel title, inline stats, buttons, inputs and selects. Migrate the ~20 scoped `th, td` copies and 9 `.tag` copies. Keep genuine local exceptions as scoped overrides and list them. | No visual change except the deliberate convergences listed under [V1 convergences and kept exceptions](#v1-convergences-and-kept-exceptions), each reviewed on before/after screenshots of every view in mock mode (1440×900, DPR 1). `npm run typecheck`, `npm test` and `npm run build` pass without warnings from the changed files. | In progress (2026-10-28): panel title, tags and the data table done; buttons, inputs, selects and inline stats open |
+| V1 — Shared primitives under the current look | Extend `frontend/src/lib/theme/primitives.css` (panel, header, mode bar, KPIs and eyebrow already exist) with the data table, tag, 26px panel title, inline stats, buttons, inputs and selects. Migrate the ~20 scoped `th, td` copies and 9 `.tag` copies. Keep genuine local exceptions as scoped overrides and list them. | No visual change except the deliberate convergences listed under [V1 convergences and kept exceptions](#v1-convergences-and-kept-exceptions), each reviewed on before/after screenshots of every view in mock mode (1440×900, DPR 1). `npm run typecheck`, `npm test` and `npm run build` pass without warnings from the changed files. | Done on branch, pending merge (2026-10-28): panel title, tags and the data table in main; buttons, inputs, selects and inline stats on `claude/musing-easley-b0d363` |
 | V2 — Token completeness and font roles | Replace the 71 raw `rgba(122, 166, 200, …)` values and 92 hex literals (18 files). Fix the ~62 `font: inherit` that pull chrome back to mono. Split `--app-font`/`--display-font` into `--font-ui`, `--font-num`, `--font-code` and `--font-label`. Add tint, soft semantic, scrim, `--panel-radius`, `--panel-border-width` and label-case tokens. Move `chart-colors.ts` and the flash keyframes onto tokens. | Values unchanged, so screenshot parity still holds. A grep gate shows no raw accent colors or hex literals in `.svelte` files outside a documented exception list. | Planned |
 | V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Planned |
 | V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Planned |
@@ -132,7 +132,36 @@ Kept exceptions:
 - Per-table specifics that stay scoped on top of `.data-table`: Sitrep market column proportions and fixed layout; Options chain strike, ITM and ATM shading and the surface's sticky row headers; the Fundamentals DCF sheet grid; the Strategy Lab composer's compact inputs; 11px mono cells in the Script tables; content width and 2px rows for tables inside Copilot answers; Prediction Markets group, section and tick columns; the partner code under each Trade Partners name; Macro Rates' fainter stripe and the Macro snapshot row hover (raw rgba, left for V2).
 - Tags: the warning outline at 0.3 in MacroLinkedMarketRow and MacroSnapshot, `flex-shrink: 0` in three Macro rows, and MacroCoherencePanel's wrapping chips. MacroCoherencePanel is not imported anywhere; deleting or reviving it is a follow-up.
 
-Still open in V1: buttons, inputs and selects (about 250 scoped element rules in 36 files, plus class-based buttons such as `.mode-btn` and `.ghost`) and the inline stats. Move them without fixing `font: inherit` or raw colours, which belong to V2.
+### Controls and inline stats
+
+Buttons opt into `.btn`, fields into `.form-control` and inline stat cells into `.stat`, all in `primitives.css`:
+
+| Primitive | Default | Modifiers | Used by |
+|---|---|---|---|
+| `.btn` | 28px, 4px × 8px, `--bg-1` on a `--panel-strong` edge | `is-small` (24px), `is-large` (32px), `is-ghost`, `is-primary`, `is-danger` | Equity Research, Strategy Lab, Options, Commodities, Crypto, Fundamentals, Risk, Portfolio, Prediction Markets, Macro, the curve, IV and run comparisons, Setup, the Script components, Diagnostics, the view error boundary, the Copilot run inspector |
+| `.form-control` | the same surface, 28px | `is-small` (24px), `is-large` (32px) | the same views, plus the Macro FX pickers |
+| `.stat` | label `span`, 15px value `strong`, note `small`, left rule, first cell flush | `is-large` (18px value), `is-compact` (13.5px value that truncates) | Equity Research and Strategy Lab; Fundamentals and Crypto (`is-large`); Prediction Markets (`is-compact`) |
+
+States and modifiers sit in `:where()` so a view's scoped class (`.tick`, `.market-button`, `.row-select`) still wins. `:disabled` and `:focus-visible` are two classes deep, so a disabled ghost button still reads as disabled and the global focus ring never wins the tie. Stat values space themselves with padding, because views reset `strong { margin: 0 }` at the same specificity.
+
+Deliberate convergences, reviewed on before/after screenshots (2026-10-28):
+
+- Buttons are 28px with 4px × 8px padding. Before: Crypto 6 × 12, Setup 0 × 12, the Script panels 6 × 12 at 30px. The handoff and refresh buttons are `.is-small`.
+- Fields have 4px × 8px padding. Before: Portfolio and Prediction Markets 2 × 6, Commodities 0 × 8; Setup and Script fields were 30px tall.
+- One hover (the edge turns 35% accent) and one disabled state (`--text-2` on a `--panel-border` edge) replace opacity 0.45, 0.5 and 0.6, background tints and accent text.
+- Secondary buttons are `.is-ghost` (transparent, `--text-1`). The load, run and next actions are `.is-primary` (accent text on a 10% tint).
+- Focus is a 1px accent outline inset by 1px.
+- Stat labels are 10px at 0.1em in every view (Crypto and Prediction Markets used 11px or 0.12em), and Prediction Markets' first stat cell sits flush.
+- Tone and `.absent` classes on stat values now take effect: N/A values dim and signed returns are coloured. Before, each view's `.metric strong { color }` rule overrode them.
+
+Kept exceptions:
+
+- Navigation chrome: the top bar, drawer, mode bars and mode-bar style toggles. The Fundamentals statement toggles and the Portfolio and Prediction Markets segmented pickers take `.btn` but keep their contextual rules.
+- Controls that are not buttons in the usual sense: Sitrep's tape controls (strip items, 20px reload buttons, pins, chips, the note editor), the landing view's choice cards, the Commodities market cards, the Crypto basket cards, the Risk row selectors and dependency zoom.
+- Copilot chat chrome: the composer, role tabs, session and storage actions, the artifact list and the transcript confirmations. Converge it with the Copilot shelf in V4.
+- Contextual sizes: the table and handoff action rows in Equity Research and Strategy Lab, the Fundamentals compact buttons, the Options payoff pickers.
+- Stats that follow a different pattern: the Options and Portfolio KPI cells (right rule, padded on both sides), the `MacroMetricRow` component and the Macro snapshot metrics, and the Copilot and Script result strips.
+- `font: inherit` stays wherever a view had it, with its explicit size; V2 resolves it.
 
 ## Doctrine rewrite map (V5)
 
@@ -176,3 +205,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-10-28: exploration extended to Sitrep, Options and Risk, plus the B′ variant and a drawer versus top-tabs comparison. The user chose B′ and kept the drawer. V1 started in a separate worktree session: commit 684312b adds the 26px panel title, an opt-in `.data-table`, `.tag` and the Macro `.tag.is-tinted`, with no visual change (18/18 screenshots and 7,486 computed-style checks identical). It was merged into main as 9151727 the same day.
 - 2026-10-28: with the user's approval, V1 continues with deliberate convergences. On branch `claude/musing-easley-b0d363`, a373294 moves every data table onto `.data-table` plus modifiers and 7616ea2 folds the four gold Macro tags into `.tag.is-tinted.context`. The convergences and kept exceptions are listed above. Buttons, inputs, selects and inline stats are still open.
 - 2026-10-28: the user reviewed the before/after screenshots, accepted the convergences, and merged the branch into main as 77d40e5 (not pushed).
+- 2026-10-28: the controls showed no copy family like the tables did (34 components with their own base button: 7 heights and 11 paddings), so the user chose to converge them as well. e98fd26 moves buttons, inputs and selects onto `.btn` and `.form-control`, and dedc5d7 moves the inline stats onto `.stat`, on branch `claude/musing-easley-b0d363`. The convergences and exceptions are listed under "Controls and inline stats" above.
