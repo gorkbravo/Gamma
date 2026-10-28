@@ -30,6 +30,10 @@
   --radius-sm: 2px;
   --radius-md: 4px;
 
+  /* ── Panel shape ── the bordered panel's corner and edge. */
+  --panel-radius: var(--radius-md);
+  --panel-border-width: 1px;
+
   /* ── Type scale (7 steps — every font-size in the app resolves here) ──
      Do not introduce sizes outside this ramp. Hierarchy is weight-first,
      size-second; these steps exist so unrelated views share one rhythm. */
@@ -75,6 +79,9 @@
   --surface-2: #141719;
   --surface-soft: rgba(10, 12, 14, 0.62);
   --panel-bg: var(--bg-0);
+  /* The quiet fill for fields and a tinted table header band; today the
+     control background. */
+  --tint: var(--bg-1);
 
   /* ── Borders & dividers ── */
   --panel-border: #2f3641;
@@ -94,6 +101,19 @@
   --positive: #4bb474;
   --negative: #d97a70;
   --warning: #c49a5a;
+  /* The red that soft negative fills, outlines and heat maps mix from, a
+     shade darker than --negative so a filled cell does not shout. */
+  --negative-muted: #c66b61;
+
+  /* ── Soft fills ──
+     A semantic colour mixed into transparent, for tag and chip fills, stale
+     and conflict cells and heat maps. The strengths are the tinted tag's;
+     a view that needs another strength mixes the base token inline, e.g.
+     color-mix(in srgb, var(--accent) 10%, transparent). */
+  --accent-soft: color-mix(in srgb, var(--accent) 6%, transparent);
+  --positive-soft: color-mix(in srgb, var(--positive) 6%, transparent);
+  --negative-soft: color-mix(in srgb, var(--negative-muted) 8%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 8%, transparent);
 
   /* ── Categorical (unordered classes: vessel types, sectors, venues) ──
      Intensity tokens encode magnitude; these encode identity. Kept in the
@@ -115,8 +135,15 @@
   --data-elevated: #d4a054;
   --data-extreme: #d66868;
 
-  /* ── Shadows ── */
+  /* ── Shadows and scrim ── */
   --shadow: rgba(0, 0, 0, 0.24);
+  /* Dims the workspace behind the navigation drawer. */
+  --scrim: color-mix(in srgb, var(--bg-0) 45%, transparent);
+
+  /* ── Label case ── the chrome labels in primitives.css (eyebrows, view and
+     panel titles, column headers, stat and KPI labels, tags) take their
+     case from here. Labels styled inside a view still set their own. */
+  --label-case: uppercase;
 
   /* ── Chart themes ── */
   --chart-primary: #7aa6c8;
@@ -200,7 +227,7 @@ small {
 }
 
 .panel {
-  border-radius: var(--radius-md);
+  border-radius: var(--panel-radius);
 }
 
 .mode-bar,
