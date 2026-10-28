@@ -110,7 +110,7 @@
   <div class="define-grid">
     <label class="axes-field">
       <span>Axes · one per line</span>
-      <textarea rows="3" aria-label="Sweep axes" value={state.axesDraft} disabled={disabled || busy} spellcheck="false"
+      <textarea class="form-control" rows="3" aria-label="Sweep axes" value={state.axesDraft} disabled={disabled || busy} spellcheck="false"
         aria-describedby="axes-help"
         on:input={(event) => updateSweepDraft({ axesDraft: (event.currentTarget as HTMLTextAreaElement).value })}></textarea>
       <small id="axes-help" class:invalid={!axes.ok}>
@@ -121,7 +121,7 @@
       <div class="row"><span>Revision</span><strong>{revisionNumber ? `Rev ${revisionNumber}` : short(revisionId)}</strong></div>
       <div class="row"><span>Input bundle</span><strong>{short(inputSnapshotId)}</strong></div>
       <div class="row"><span>Fixed parameters</span><strong>{params(fixedParameters)}</strong></div>
-      <button type="button" class="run-button" on:click={create}
+      <button type="button" class="run-button btn is-ghost is-primary" on:click={create}
         disabled={disabled || busy || !axes.ok || !scriptId || !revisionId || !inputSnapshotId}>
         {state.loading === "create" ? "Creating…" : "Create sweep"}
       </button>
@@ -132,7 +132,7 @@
   {#if state.sweeps.length}
     <label>
       <span>Sweep</span>
-      <select aria-label="Selected sweep" value={state.selectedSweepId ?? ""} disabled={busy}
+      <select class="form-control" aria-label="Selected sweep" value={state.selectedSweepId ?? ""} disabled={busy}
         on:change={(event) => selectScriptSweep((event.currentTarget as HTMLSelectElement).value)}>
         {#each state.sweeps as item}
           <option value={item.sweep_id}>{apiInstantDate(item.created_at)?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {item.points.length} pts · {axisValues(item)}</option>
@@ -146,12 +146,12 @@
       <span class="muted">{sweep.points.length - pending.length} / {sweep.points.length} points completed · definition {short(sweep.definition_sha256)}</span>
       <div class="buttons">
         {#if state.loading === "run"}
-          <button type="button" on:click={stopSweepRun} disabled={state.stopRequested}>{state.stopRequested ? "Stopping after this point…" : "Stop after current point"}</button>
+          <button type="button" class="btn is-ghost" on:click={stopSweepRun} disabled={state.stopRequested}>{state.stopRequested ? "Stopping after this point…" : "Stop after current point"}</button>
         {:else}
-          <button type="button" class="run-button" on:click={() => void runSweepPoints(pending)} disabled={disabled || busy || !pending.length}>
+          <button type="button" class="run-button btn is-ghost is-primary" on:click={() => void runSweepPoints(pending)} disabled={disabled || busy || !pending.length}>
             Run {pending.length === sweep.points.length ? "all" : "remaining"} {pending.length} point{pending.length === 1 ? "" : "s"}
           </button>
-          <button type="button" on:click={() => void runSweepPoints(sweep ? sweep.points.map((point) => point.index) : [])} disabled={disabled || busy || pending.length === sweep.points.length}>
+          <button type="button" class="btn is-ghost" on:click={() => void runSweepPoints(sweep ? sweep.points.map((point) => point.index) : [])} disabled={disabled || busy || pending.length === sweep.points.length}>
             Rerun all
           </button>
         {/if}
@@ -168,7 +168,7 @@
       <legend>Evaluate</legend>
       <label>
         <span>Return stream</span>
-        <select aria-label="Evaluation target" value={target.target}
+        <select class="form-control" aria-label="Evaluation target" value={target.target}
           on:change={(event) => setTarget({ target: (event.currentTarget as HTMLSelectElement).value as "weight_book" | "returns_result" })}>
           <option value="weight_book">Causal weight book (Gamma-enforced lag)</option>
           <option value="returns_result">Script returns result (author timing)</option>
@@ -176,14 +176,14 @@
       </label>
       {#if target.target === "returns_result"}
         <label><span>result_id</span>
-          <input aria-label="Returns result_id" value={target.result_id} placeholder="strategy" on:input={(event) => setTarget({ result_id: (event.currentTarget as HTMLInputElement).value })} /></label>
+          <input class="form-control" aria-label="Returns result_id" value={target.result_id} placeholder="strategy" on:input={(event) => setTarget({ result_id: (event.currentTarget as HTMLInputElement).value })} /></label>
       {:else}
         <label><span>Execution lag (periods)</span>
-          <input type="number" aria-label="Sweep execution lag in periods" min="1" max="5" step="1" value={target.execution_lag} on:change={(event) => setTarget({ execution_lag: numberFrom(event, 1) })} /></label>
+          <input class="form-control" type="number" aria-label="Sweep execution lag in periods" min="1" max="5" step="1" value={target.execution_lag} on:change={(event) => setTarget({ execution_lag: numberFrom(event, 1) })} /></label>
         <label><span>Cost (bps / turnover)</span>
-          <input type="number" aria-label="Sweep cost in basis points per unit turnover" min="0" max="1000" step="0.5" value={target.cost_bps} on:change={(event) => setTarget({ cost_bps: numberFrom(event, 0) })} /></label>
+          <input class="form-control" type="number" aria-label="Sweep cost in basis points per unit turnover" min="0" max="1000" step="0.5" value={target.cost_bps} on:change={(event) => setTarget({ cost_bps: numberFrom(event, 0) })} /></label>
       {/if}
-      <button type="button" on:click={() => void evaluateSelectedSweep()}>{state.loading === "evaluate" ? "Comparing…" : "Compare points"}</button>
+      <button type="button" class="btn is-ghost" on:click={() => void evaluateSelectedSweep()}>{state.loading === "evaluate" ? "Comparing…" : "Compare points"}</button>
     </fieldset>
 
     {#if evaluation}
@@ -221,18 +221,18 @@
     <fieldset class="evaluation" disabled={busy}>
       <legend>Walk-forward validation</legend>
       <label><span>Train obs</span>
-        <input type="number" aria-label="Training observations per fold" min="10" step="1" value={state.walkForwardConfig.train_observations} on:change={(event) => setWalk({ train_observations: numberFrom(event, 60) })} /></label>
+        <input class="form-control" type="number" aria-label="Training observations per fold" min="10" step="1" value={state.walkForwardConfig.train_observations} on:change={(event) => setWalk({ train_observations: numberFrom(event, 60) })} /></label>
       <label><span>Test obs</span>
-        <input type="number" aria-label="Test observations per fold" min="5" step="1" value={state.walkForwardConfig.test_observations} on:change={(event) => setWalk({ test_observations: numberFrom(event, 20) })} /></label>
+        <input class="form-control" type="number" aria-label="Test observations per fold" min="5" step="1" value={state.walkForwardConfig.test_observations} on:change={(event) => setWalk({ test_observations: numberFrom(event, 20) })} /></label>
       <label><span>Window</span>
-        <select aria-label="Walk-forward window" value={state.walkForwardConfig.window} on:change={(event) => setWalk({ window: (event.currentTarget as HTMLSelectElement).value as "anchored" | "rolling" })}>
+        <select class="form-control" aria-label="Walk-forward window" value={state.walkForwardConfig.window} on:change={(event) => setWalk({ window: (event.currentTarget as HTMLSelectElement).value as "anchored" | "rolling" })}>
           <option value="rolling">Rolling</option><option value="anchored">Anchored (expanding)</option>
         </select></label>
       <label><span>Select by</span>
-        <select aria-label="Selection metric" value={state.walkForwardConfig.selection_metric} on:change={(event) => setWalk({ selection_metric: (event.currentTarget as HTMLSelectElement).value as "sharpe" | "total_return" })}>
+        <select class="form-control" aria-label="Selection metric" value={state.walkForwardConfig.selection_metric} on:change={(event) => setWalk({ selection_metric: (event.currentTarget as HTMLSelectElement).value as "sharpe" | "total_return" })}>
           <option value="sharpe">Sharpe (train window)</option><option value="total_return">Total return (train window)</option>
         </select></label>
-      <button type="button" class="run-button" on:click={() => void runSelectedWalkForward()} disabled={pending.length > 0}>
+      <button type="button" class="run-button btn is-ghost is-primary" on:click={() => void runSelectedWalkForward()} disabled={pending.length > 0}>
         {state.loading === "walk" ? "Validating…" : "Run walk-forward"}
       </button>
     </fieldset>
@@ -278,7 +278,7 @@
         {#each walk.warnings as warning}<p class="warning">{warning}</p>{/each}
         <div class="action-row">
           <span class="muted">Report {short(walk.report_sha256)} · sweep {short(walk.definition_sha256)} · {walk.trials} trials · nothing saved</span>
-          <button type="button" class="artifact-link" on:click={exportWalkForward}>Export walk-forward JSON</button>
+          <button type="button" class="btn is-ghost artifact-link" on:click={exportWalkForward}>Export walk-forward JSON</button>
         </div>
       </section>
     {/if}
@@ -301,20 +301,14 @@
   label > span, legend {
     color: var(--text-2); font-size: var(--text-2xs); letter-spacing: 0.12em; text-transform: uppercase;
   }
+  /* Fields are .form-control and buttons .btn.is-ghost from primitives.css
+     (run actions add .is-primary); results keep 11px mono figures. */
   input, select, textarea {
-    width: 100%; min-width: 0; border: 1px solid var(--panel-strong); background: var(--bg-1); color: var(--text-0);
-    padding: var(--space-3); font-family: var(--app-font); font-size: var(--text-xs);
+    width: 100%; min-width: 0; font-family: var(--app-font); font-size: var(--text-xs);
   }
-  input, select { min-height: 30px; }
-  textarea { resize: vertical; }
-  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
   button {
-    border: 1px solid var(--panel-strong); background: transparent; color: var(--text-1); padding: var(--space-3) var(--space-5);
-    font-family: var(--display-font); font-size: var(--text-sm); cursor: pointer; min-height: 30px; white-space: nowrap;
+    font-family: var(--display-font); font-size: var(--text-sm); white-space: nowrap;
   }
-  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  button:disabled { cursor: not-allowed; opacity: 0.45; }
-  .run-button { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: var(--accent); color: var(--accent); }
   .artifact-link { border: 0; padding: 0; min-height: auto; color: var(--accent); font-family: var(--app-font); font-size: var(--text-xs); }
   .status {
     border: 1px solid var(--panel-strong); color: var(--text-1); padding: var(--space-2) var(--space-3);

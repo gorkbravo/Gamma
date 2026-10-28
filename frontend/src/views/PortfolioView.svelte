@@ -547,7 +547,7 @@
               <span>{notice.detail}</span>
             </div>
             {#if notice.action}
-              <button
+              <button class="btn"
                 type="button"
                 disabled={Boolean(actionInProgress) || diagnosticsActionLoading}
                 on:click={() => executeNoticeAction(notice.action!)}
@@ -587,7 +587,7 @@
           <div class="chart-controls">
             <label class="control-group benchmark-field">
               <span>Benchmark</span>
-              <input
+              <input class="form-control"
                 bind:value={benchmarkSymbol}
                 aria-label="Portfolio performance benchmark"
                 placeholder="SPY"
@@ -599,7 +599,7 @@
             </label>
             <label class="control-group">
               <span>Timeframe</span>
-              <select
+              <select class="form-control"
                 bind:value={selectedTimeframe}
                 aria-label="Portfolio performance timeframe"
                 disabled={performanceBusy}
@@ -614,7 +614,7 @@
               <span>View</span>
               <div class="segmented" role="group" aria-label="Portfolio chart view">
                 {#each ["growth", "value", "drawdown"] as mode}
-                  <button
+                  <button class="btn"
                     type="button"
                     class:active={chartMode === mode}
                     aria-pressed={chartMode === mode}
@@ -724,12 +724,12 @@
             </span>
           </h3>
           <div class="table-controls">
-            <input
+            <input class="form-control"
               bind:value={search}
               aria-label="Filter portfolio positions"
               placeholder="Filter symbol, type, currency"
             />
-            <select bind:value={sortKey} aria-label="Sort portfolio positions by">
+            <select class="form-control" bind:value={sortKey} aria-label="Sort portfolio positions by">
               <option value="base_market_value">Base Value</option>
               <option value="market_value">Market Value</option>
               <option value="unrealized_pnl">Unrealized P&amp;L</option>
@@ -810,7 +810,7 @@
                       <strong>{positionEmptyState.title}</strong>
                       <span>{positionEmptyState.detail}</span>
                       {#if positionEmptyState.canClearFilter}
-                        <button type="button" on:click={clearPositionFilter}>Clear filter</button>
+                        <button type="button" class="btn" on:click={clearPositionFilter}>Clear filter</button>
                       {/if}
                     </div>
                   </td>
@@ -824,7 +824,7 @@
       <article class="panel messages-panel">
         <div class="table-head">
           <h3>Important Warnings <span class="count">{primaryConsoleEntries.length}</span></h3>
-          <button class="ghost-button" type="button" on:click={onToggleDiagnostics}>
+          <button type="button" class="btn is-small is-ghost" on:click={onToggleDiagnostics}>
             {diagnosticsOpen ? "Hide Diagnostics" : "Open Diagnostics"}
           </button>
         </div>
@@ -878,7 +878,7 @@
           </div>
           <button
             type="button"
-            class="ghost-button"
+            class="btn is-small is-ghost"
             disabled={snapshotBusy || Boolean(actionInProgress)}
             on:click={() =>
               runAction("Snapshot refresh", onRefreshSnapshot, "Portfolio snapshot refresh completed.")}
@@ -1006,7 +1006,7 @@
         </div>
         <button
           type="button"
-          class="destructive-button"
+          class="btn is-ghost is-danger"
           aria-haspopup="dialog"
           disabled={diagnosticsActionLoading || Boolean(actionInProgress)}
           on:click={requestClearHistory}
@@ -1033,7 +1033,7 @@
           Gamma will archive the prior trail when one exists. Broker history and account state are not changed.
         </p>
         <div class="dialog-actions">
-          <button
+          <button class="btn"
             type="button"
             disabled={Boolean(actionInProgress)}
             on:click={cancelClearHistory}
@@ -1042,7 +1042,7 @@
           </button>
           <button
             type="button"
-            class="destructive-button"
+            class="btn is-ghost is-danger"
             disabled={Boolean(actionInProgress)}
             on:click={confirmClearHistory}
           >
@@ -1088,36 +1088,10 @@
     font-weight: 700;
   }
 
-  button,
-  input,
-  select {
-    min-height: 28px;
-  }
-
+  /* Buttons are .btn from primitives.css: secondary actions add
+     .is-small.is-ghost, the clear-history ones .is-ghost.is-danger. */
   button {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-1);
-    padding: var(--space-1) var(--space-4);
     font-size: var(--text-sm);
-    cursor: pointer;
-  }
-
-  button:hover:not(:disabled) {
-    background: var(--hover-bg);
-    color: var(--text-0);
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-  }
-
-  button:focus-visible,
-  input:focus-visible,
-  select:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
   }
 
   .count {
@@ -1240,12 +1214,9 @@
     text-transform: uppercase;
   }
 
+  /* Fields are .form-control from primitives.css; `font: inherit` stays for V2. */
   input,
   select {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-1) var(--space-3);
     font: inherit;
     font-size: var(--text-sm);
   }
@@ -1281,10 +1252,6 @@
     color: var(--accent);
   }
 
-  .ghost-button {
-    min-height: 24px;
-    background: transparent;
-  }
 
   .table-controls {
     align-items: center;
@@ -1547,11 +1514,6 @@
     line-height: var(--leading-snug);
   }
 
-  .destructive-button {
-    border-color: color-mix(in srgb, var(--negative) 55%, var(--panel-strong));
-    color: var(--negative);
-    background: transparent;
-  }
 
   .positive {
     color: var(--positive);

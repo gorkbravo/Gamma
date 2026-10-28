@@ -749,7 +749,7 @@
             SEC EDGAR needs your name and email before Gamma can search companies or load filings. They are sent
             only to sec.gov and kept on this computer.
           </p>
-          <button type="button" class="secondary" on:click={onOpenSecIdentitySetup}>Set SEC identity</button>
+          <button type="button" class="btn is-ghost" on:click={onOpenSecIdentitySetup}>Set SEC identity</button>
         </div>
       {/if}
       <div class="search-actions">
@@ -773,16 +773,16 @@
             on:select={(event) => chooseCompany(String(event.detail.id))}
           />
         </div>
-        <button type="button" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching..." : "Run Search"}</button>
-        <button type="button" class="secondary" on:click={() => runSearch(true)} disabled={loading || searchLoading}>Refresh Search</button>
+        <button type="button" class="btn" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching..." : "Run Search"}</button>
+        <button type="button" class="btn is-ghost" on:click={() => runSearch(true)} disabled={loading || searchLoading}>Refresh Search</button>
         {#if currentCompany}
-          <button type="button" class="secondary" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
+          <button type="button" class="btn is-ghost" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
             Refresh {currentCompany.ticker}
           </button>
-          <button type="button" class="secondary" on:click={sendCurrentCompanyToCopilot} disabled={loading}>
+          <button type="button" class="btn is-ghost" on:click={sendCurrentCompanyToCopilot} disabled={loading}>
             Send to Copilot
           </button>
-          <button type="button" class="secondary" on:click={sendCurrentCompanyToStrategyLab} disabled={loading}>
+          <button type="button" class="btn is-ghost" on:click={sendCurrentCompanyToStrategyLab} disabled={loading}>
             Strategy Lab
           </button>
         {/if}
@@ -792,9 +792,9 @@
         {@const handoffHint = `Preserves ${currentCompany.ticker}, the active Fundamentals mode, scenario context, and warnings.`}
         <div class="handoff-strip" aria-label="Open selected company in another research tab">
           <span class="focus-label">Continue in</span>
-          <button type="button" class="link-button" title={handoffHint} on:click={() => openRelatedTab("equity_research")}>Equity Research</button>
-          <button type="button" class="link-button" title={handoffHint} on:click={() => openRelatedTab("risk")}>Risk</button>
-          <button type="button" class="link-button" title={handoffHint} on:click={() => openRelatedTab("iv")}>Options</button>
+          <button type="button" class="btn link-button" title={handoffHint} on:click={() => openRelatedTab("equity_research")}>Equity Research</button>
+          <button type="button" class="btn link-button" title={handoffHint} on:click={() => openRelatedTab("risk")}>Risk</button>
+          <button type="button" class="btn link-button" title={handoffHint} on:click={() => openRelatedTab("iv")}>Options</button>
         </div>
       {/if}
 
@@ -957,7 +957,7 @@
 
           <div class="builder-actions">
             <div class="peer-manual-control">
-              <input
+              <input class="form-control"
                 type="text"
                 bind:value={manualPeerTickers}
                 on:keydown={handleManualPeerKeydown}
@@ -965,11 +965,11 @@
                 aria-label="Peer tickers"
                 disabled={!overview || saving}
               />
-              <button type="button" class="secondary compact-button" on:click={addManualPeers} disabled={!manualPeerTickers.trim() || !overview || saving}>
+              <button type="button" class="btn is-ghost compact-button" on:click={addManualPeers} disabled={!manualPeerTickers.trim() || !overview || saving}>
                 Add
               </button>
             </div>
-            <button type="button" class="secondary" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
+            <button type="button" class="btn is-ghost" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
               {saving ? "Saving..." : "Save Basket"}
             </button>
           </div>
@@ -1118,7 +1118,7 @@
           <div class="panel-actions">
             <small>{peers?.peer_basket.display_order.length ?? overview?.peer_basket?.display_order.length ?? 0} companies</small>
             <div class="peer-manual-control">
-              <input
+              <input class="form-control"
                 type="text"
                 bind:value={manualPeerTickers}
                 on:keydown={handleManualPeerKeydown}
@@ -1126,11 +1126,11 @@
                 aria-label="Peer tickers"
                 disabled={!overview || saving}
               />
-              <button type="button" class="secondary compact-button" on:click={addManualPeers} disabled={!manualPeerTickers.trim() || !overview || saving}>
+              <button type="button" class="btn is-ghost compact-button" on:click={addManualPeers} disabled={!manualPeerTickers.trim() || !overview || saving}>
                 Add
               </button>
             </div>
-            <button type="button" class="secondary" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
+            <button type="button" class="btn is-ghost" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
               {saving ? "Saving..." : "Save Basket"}
             </button>
           </div>
@@ -1323,12 +1323,12 @@
           <div class="panel-actions">
             <div class="mode-bar compact-bar">
               {#each basisOptions as option}
-                <button type="button" class:selected={option.id === statementBasis} on:click={() => (statementBasis = option.id)}>{option.label}</button>
+                <button type="button" class="btn" class:selected={option.id === statementBasis} on:click={() => (statementBasis = option.id)}>{option.label}</button>
               {/each}
             </div>
             <div class="mode-bar compact-bar statement-bar">
               {#each statementOptions as option}
-                <button type="button" class:selected={option.id === statementKind} on:click={() => (statementKind = option.id)}>{option.label}</button>
+                <button type="button" class="btn" class:selected={option.id === statementKind} on:click={() => (statementKind = option.id)}>{option.label}</button>
               {/each}
             </div>
           </div>
@@ -1488,13 +1488,13 @@
           </div>
           <div class="panel-actions">
             {#if dcfDirty}<span class="dirty-pill">Pending recalculation</span>{/if}
-            <button type="button" on:click={saveDcfDraft} disabled={!dcfDirty || saving || !dcfModel}>{saving ? "Saving..." : "Recalculate + Save"}</button>
+            <button type="button" class="btn" on:click={saveDcfDraft} disabled={!dcfDirty || saving || !dcfModel}>{saving ? "Saving..." : "Recalculate + Save"}</button>
           </div>
         </div>
 
         <div class="scenario-strip">
           {#each dcfModel?.scenarios ?? [] as scenario}
-            <button type="button" class:scenario-card={true} class:selected-scenario={scenario.scenario_id === dcfDraft.activeScenarioId} on:click={() => selectScenario(scenario.scenario_id)}>
+            <button type="button" class="btn" class:scenario-card={true} class:selected-scenario={scenario.scenario_id === dcfDraft.activeScenarioId} on:click={() => selectScenario(scenario.scenario_id)}>
               <span>{scenario.label}</span>
               <strong>{dcfDecisionGate.blocked ? "Gated" : currency(scenario.summary?.implied_value_per_share, 2)}</strong>
               <small class={dcfDecisionGate.blocked ? "" : toneClass(scenario.summary?.upside_downside_pct)}>
@@ -1686,8 +1686,8 @@
             <h3>DCF Snapshots</h3>
           </div>
           <div class="panel-actions snapshot-actions">
-            <input bind:value={snapshotName} placeholder="Snapshot name" aria-label="DCF snapshot name" />
-            <button type="button" class="secondary" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving..." : "Save Snapshot"}</button>
+            <input class="form-control" bind:value={snapshotName} placeholder="Snapshot name" aria-label="DCF snapshot name" />
+            <button type="button" class="btn is-ghost" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving..." : "Save Snapshot"}</button>
           </div>
         </div>
 
@@ -1705,7 +1705,7 @@
                     <td class:absent={shortDate(snapshot.created_at) === "N/A"}>{shortDate(snapshot.created_at)}</td>
                     <td>{snapshot.active_scenario_id}</td>
                     <td class:absent={currency(activeSummary?.implied_value_per_share, 2) === "N/A"}>{currency(activeSummary?.implied_value_per_share, 2)}</td>
-                    <td><button type="button" class="secondary compact-button" on:click={() => loadSnapshot(snapshot.snapshot_id)} disabled={saving}>Load</button></td>
+                    <td><button type="button" class="btn is-ghost compact-button" on:click={() => loadSnapshot(snapshot.snapshot_id)} disabled={saving}>Load</button></td>
                   </tr>
                 {/each}
               {:else}
@@ -1766,7 +1766,7 @@
           <label>
             <span>WACC %</span>
             <input
-              class="editable-input"
+              class="editable-input form-control"
               value={editableValue(scalarAssumptionValue(dcfDraft.activeScenarioId, "wacc_pct"), "percent")}
               aria-label={dcfScalarInputLabel("WACC")}
               title={`Editable DCF assumption: ${dcfScalarInputLabel("WACC")}`}
@@ -1777,7 +1777,7 @@
           <label>
             <span>Terminal Growth %</span>
             <input
-              class="editable-input"
+              class="editable-input form-control"
               value={editableValue(scalarAssumptionValue(dcfDraft.activeScenarioId, "terminal_growth_pct"), "percent")}
               aria-label={dcfScalarInputLabel("Terminal growth")}
               title={`Editable DCF assumption: ${dcfScalarInputLabel("Terminal growth")}`}
@@ -1805,7 +1805,7 @@
                     {#each dcfModel?.projection_years ?? [] as year, index}
                       <td class="sheet-cell sheet-cell-edit">
                         <input
-                          class="sheet-input"
+                          class="form-control sheet-input"
                           value={editableValue(assumptionSeriesValue(dcfDraft.activeScenarioId, row.line_key, index), row.unit)}
                           aria-label={dcfYearInputLabel(row.label, year)}
                           title={`Editable DCF assumption: ${dcfYearInputLabel(row.label, year)}`}
@@ -1852,7 +1852,7 @@
                       <td class="sheet-cell" class:sheet-cell-edit={row.editable} class:sheet-cell-fixed={!row.editable} class:overridden-cell={row.overridden[index]}>
                         {#if row.editable}
                           <input
-                            class="sheet-input"
+                            class="form-control sheet-input"
                             value={projectionEditableValue(activeScenario, row.line_key, index)}
                             aria-label={dcfProjectionInputLabel(row.label, year)}
                             title={`Editable DCF projection override: ${dcfProjectionInputLabel(row.label, year)}`}
@@ -2473,16 +2473,12 @@
     padding: var(--space-2) var(--space-4);
   }
 
-  button,
-  .scenario-card {
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
-    color: var(--text-0);
-    padding: var(--space-2) var(--space-4);
+  /* Buttons, scenario cards included, are .btn from primitives.css
+     (secondary actions add .is-ghost). They keep the view's 12px mono
+     figures: `font: inherit` is left for V2. */
+  button {
     font: inherit;
     font-size: var(--text-sm);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
   }
 
   .scenario-card.selected-scenario {
@@ -2490,20 +2486,6 @@
     color: var(--accent);
   }
 
-  button:hover,
-  .scenario-card:hover {
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-  }
-
-  button.secondary {
-    color: var(--text-1);
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-    border-color: var(--panel-border);
-  }
 
   .scenario-card {
     display: grid;
@@ -2606,15 +2588,10 @@
     white-space: nowrap;
   }
 
+  /* Fields are .form-control from primitives.css. */
   input {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-4);
     font: inherit;
     font-size: var(--text-sm);
-    min-height: 1.75rem;
-    border-radius: var(--radius-sm);
   }
 
   .search-strip {

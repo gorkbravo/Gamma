@@ -177,7 +177,7 @@
   <article class="panel fx-panel">
     <div class="fx-header">
       <small class="eyebrow">FX</small>
-      <select class="fx-select" bind:value={fxPair0}>
+      <select class="form-control fx-select" bind:value={fxPair0}>
         {#each fxPairOptions as pair}<option value={pair.id}>{pair.label}</option>{/each}
       </select>
       {#if fxLast0}<strong class="fx-last-price">{fxLast0}</strong>{/if}
@@ -187,7 +187,7 @@
   <article class="panel fx-panel">
     <div class="fx-header">
       <small class="eyebrow">FX</small>
-      <select class="fx-select" bind:value={fxPair1}>
+      <select class="form-control fx-select" bind:value={fxPair1}>
         {#each fxPairOptions as pair}<option value={pair.id}>{pair.label}</option>{/each}
       </select>
       {#if fxLast1}<strong class="fx-last-price">{fxLast1}</strong>{/if}
@@ -197,7 +197,7 @@
   <article class="panel fx-panel">
     <div class="fx-header">
       <small class="eyebrow">FX</small>
-      <select class="fx-select" bind:value={fxPair2}>
+      <select class="form-control fx-select" bind:value={fxPair2}>
         {#each fxPairOptions as pair}<option value={pair.id}>{pair.label}</option>{/each}
       </select>
       {#if fxLast2}<strong class="fx-last-price">{fxLast2}</strong>{/if}
@@ -489,19 +489,12 @@
     letter-spacing: 0.02em;
   }
 
+  /* The FX pair pickers are .form-control from primitives.css; they keep the
+     view's mono figures (`font: inherit`, left for V2). */
   .fx-select {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-2) var(--space-3);
     font: inherit;
     font-size: var(--text-base);
-    cursor: pointer;
-    transition: border-color 120ms ease;
   }
-
-  .fx-select:hover { border-color: rgba(122, 166, 200, 0.32); }
-  .fx-select:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
   /* ── Bottom grid ── */
   .detail-grid {

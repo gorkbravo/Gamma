@@ -114,7 +114,7 @@
       <span>Run inspector</span>
       <strong>{turn?.terminal_status ?? result?.status ?? "No run selected"}</strong>
     </div>
-    <button type="button" on:click={onClose} aria-label="Close Copilot run inspector">×</button>
+    <button type="button" class="btn is-small is-ghost" on:click={onClose} aria-label="Close Copilot run inspector">×</button>
   </header>
 
   <section>
@@ -162,12 +162,12 @@
             </p>
             <small>Session scoped. Opening does not save or alter durable Gamma state.</small>
             <div class="working-actions">
-              <button
+              <button class="btn is-small is-ghost"
                 type="button"
                 disabled={analysis.status !== "active"}
                 on:click={() => onOpenWorkingAnalysis(analysis)}
               >Open in {surfaceLabel(analysis.owning_tab)}</button>
-              <button
+              <button class="btn is-small is-ghost"
                 type="button"
                 disabled={analysis.status === "discarded"}
                 on:click={() => onDiscardWorkingAnalysis(analysis)}
@@ -203,7 +203,7 @@
       <p>{safeError.guidance}</p>
       <div class="diagnostic-id">
         <code>{safeError.diagnostic_id}</code>
-        <button
+        <button class="btn is-small is-ghost"
           type="button"
           on:click={copyDiagnosticId}
           aria-label={`Copy diagnostic ID ${safeError.diagnostic_id}`}
@@ -258,25 +258,12 @@
     text-transform: capitalize;
   }
 
+  /* Buttons are .btn.is-small.is-ghost from primitives.css; `font: inherit`
+     is left for V2 and resets the size, so 11px is repeated here. */
+
   button {
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-3);
     font: inherit;
     font-size: var(--text-xs);
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-strong));
-    color: var(--accent);
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
   }
 
   section {

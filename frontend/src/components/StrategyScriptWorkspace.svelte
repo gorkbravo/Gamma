@@ -207,7 +207,7 @@
 
       <label class="parameters-field">
         <span>Run parameters · JSON object, separate from the source</span>
-        <textarea
+        <textarea class="form-control"
           rows="3"
           spellcheck="false"
           value={workspace.parametersDraft}
@@ -228,7 +228,7 @@
       </label>
 
       <div class="action-row">
-        <button
+        <button class="btn is-ghost"
           type="button"
           on:click={() => void persistResearchScriptRevision()}
           disabled={!workspace.detail || workspace.detail.script.status === "archived" || !draftIsDirty || workspace.loading !== null}
@@ -237,7 +237,7 @@
         </button>
         <button
           type="button"
-          class="run-button"
+          class="run-button btn is-ghost is-primary"
           on:click={() => void runSelectedResearchScript()}
           disabled={!workspace.detail || workspace.detail.script.status === "archived" || !selectedRevision || selectedSourceIsDirty || workspace.loading !== null || !runtimeAvailable || !parsedParameters.ok}
         >
@@ -249,13 +249,13 @@
         <div class="output-toolbar" aria-label="Run result actions">
           <button
             type="button"
-            class="artifact-link"
+            class="btn is-ghost artifact-link"
             on:click={() => void downloadRunBundle()}
           >Export auditable run bundle</button>
           {#if workspace.runs.length > 1}
             <label class="inline-control">
               <span>Compare with</span>
-              <select
+              <select class="form-control"
                 aria-label="Compare selected run with"
                 bind:value={comparisonRunId}
                 on:change={() => void compareSelectedResearchScriptRun(comparisonRunId)}
@@ -345,7 +345,7 @@
                   </table>
                 </div>
                 {#if output.artifact_ref && workspace.selectedRun}
-                  <button type="button" class="artifact-link" on:click={() => void downloadOutput(output)}>
+                  <button type="button" class="btn is-ghost artifact-link" on:click={() => void downloadOutput(output)}>
                     Download retained {output.filename ?? "table"}
                   </button>
                 {/if}
@@ -363,7 +363,7 @@
                   <small>{output.alt_text ?? "Gamma-retained generated image"}</small>
                 </div>
                 {#if output.artifact_ref && workspace.selectedRun}
-                  <button type="button" class="artifact-link" on:click={() => void downloadOutput(output)}>
+                  <button type="button" class="btn is-ghost artifact-link" on:click={() => void downloadOutput(output)}>
                     Download retained {output.filename ?? "image"}
                   </button>
                 {/if}
@@ -371,7 +371,7 @@
                 <div class="file-output">
                   <span>FILE</span>
                   {#if output.artifact_ref && workspace.selectedRun}
-                    <button type="button" class="artifact-link" on:click={() => void downloadOutput(output)}>
+                    <button type="button" class="btn is-ghost artifact-link" on:click={() => void downloadOutput(output)}>
                       {output.filename ?? output.output_id}
                     </button>
                   {:else}
@@ -382,7 +382,7 @@
               {:else}
                 <pre>{output.text ?? "No text retained."}</pre>
                 {#if output.artifact_ref && workspace.selectedRun}
-                  <button type="button" class="artifact-link" on:click={() => void downloadOutput(output)}>
+                  <button type="button" class="btn is-ghost artifact-link" on:click={() => void downloadOutput(output)}>
                     Download full retained output
                   </button>
                 {/if}
@@ -423,7 +423,7 @@
       <div class="rail-header"><div><p class="eyebrow">Workspace</p><h3>Script controls</h3></div></div>
       <label>
         <span>Loaded script</span>
-        <select
+        <select class="form-control"
           aria-label="Loaded script"
           value={workspace.detail?.script.script_id ?? ""}
           on:change={(event) => void loadResearchScript((event.currentTarget as HTMLSelectElement).value)}
@@ -446,7 +446,7 @@
       </label>
       <label>
         <span>Selected revision</span>
-        <select
+        <select class="form-control"
           aria-label="Selected revision"
           value={workspace.selectedRevisionId ?? ""}
           on:change={(event) => selectResearchScriptRevision((event.currentTarget as HTMLSelectElement).value)}
@@ -459,27 +459,27 @@
         </select>
       </label>
       <div class="new-script">
-        <label><span>New script title</span><input bind:value={newScriptTitle} /></label>
+        <label><span>New script title</span><input class="form-control" bind:value={newScriptTitle} /></label>
         <button
           type="button"
-          class="ghost-button"
+          class="btn is-ghost ghost-button"
           on:click={() => void createWorkspaceResearchScript(newScriptTitle)}
           disabled={workspace.loading !== null}
         >{workspace.loading === "create" ? "Creating…" : "Create from editor"}</button>
       </div>
       {#if workspace.detail}
         <div class="lifecycle-actions" aria-label="Script lifecycle actions">
-          <button
+          <button class="btn is-ghost"
             type="button"
             on:click={() => void duplicateWorkspaceResearchScript()}
             disabled={workspace.loading !== null}
           >Duplicate</button>
-          <button
+          <button class="btn is-ghost"
             type="button"
             on:click={() => void setWorkspaceResearchScriptArchived(workspace.detail?.script.status !== "archived")}
             disabled={workspace.loading !== null}
           >{workspace.detail.script.status === "archived" ? "Restore" : "Archive"}</button>
-          <button
+          <button class="btn is-ghost"
             type="button"
             on:click={() => void refreshResearchScriptWorkspace()}
             disabled={workspace.loading !== null}
@@ -525,11 +525,11 @@
             <div class="candidate-actions">
               <button
                 type="button"
-                class="run-button"
+                class="run-button btn is-ghost is-primary"
                 on:click={() => void resolveStagedResearchScriptRevision(candidate.revision_id, "accept")}
                 disabled={workspace.loading !== null}
               >Accept candidate</button>
-              <button
+              <button class="btn is-ghost"
                 type="button"
                 on:click={() => void resolveStagedResearchScriptRevision(candidate.revision_id, "reject")}
                 disabled={workspace.loading !== null}
@@ -546,7 +546,7 @@
       {#if workspace.inputBundles.length}
         <label>
           <span>Retained input bundle</span>
-          <select aria-label="Retained input bundle" value={workspace.preparedInputSnapshot?.snapshot_id ?? ""}
+          <select class="form-control" aria-label="Retained input bundle" value={workspace.preparedInputSnapshot?.snapshot_id ?? ""}
             on:change={(event) => selectResearchScriptInputBundle((event.currentTarget as HTMLSelectElement).value)} disabled={workspace.loading !== null}>
             {#each workspace.inputBundles as bundle}
               <option value={bundle.snapshot_id}>{shortDate(bundle.created_at)} · {bundle.files.length} files · {shortHash(bundle.manifest_sha256)}</option>
@@ -567,13 +567,13 @@
       <p class="muted">UTF-8 files, up to 20 MiB each and 64 MiB per bundle. Filenames use letters, numbers, dots, underscores or hyphens.</p>
       <label>
         <span>Pasted input filename</span>
-        <input value={workspace.inputFilename} on:input={onInputFilename} placeholder="prices.csv" disabled={workspace.loading !== null} />
+        <input class="form-control" value={workspace.inputFilename} on:input={onInputFilename} placeholder="prices.csv" disabled={workspace.loading !== null} />
       </label>
       <label>
         <span>Text content</span>
-        <textarea value={workspace.inputContent} on:input={onInputContent} rows="5" placeholder="date,close" disabled={workspace.loading !== null}></textarea>
+        <textarea class="form-control" value={workspace.inputContent} on:input={onInputContent} rows="5" placeholder="date,close" disabled={workspace.loading !== null}></textarea>
       </label>
-      <button type="button" on:click={() => void addPastedResearchScriptInput()}
+      <button type="button" class="btn is-ghost" on:click={() => void addPastedResearchScriptInput()}
         disabled={!workspace.detail || workspace.detail.script.status === "archived" || !workspace.inputFilename.trim() || workspace.loading !== null}>Add pasted input</button>
       <div class="stack compact-stack">
         <div class="row"><span>Files</span><strong>{workspace.preparedInputSnapshot?.files.length ?? 0} / 20</strong></div>
@@ -590,9 +590,9 @@
               <div class="row"><strong>{file.logical_filename}</strong><span>{file.byte_size.toLocaleString()} B</span></div>
               <p class="muted">{file.source_kind === "user_upload" ? "User file" : file.provider_id ?? "Gamma dataset"}</p>
               <div class="bundle-actions">
-                <button type="button" on:click={() => void previewResearchScriptInput(file.logical_filename)}
+                <button type="button" class="btn is-ghost" on:click={() => void previewResearchScriptInput(file.logical_filename)}
                   disabled={workspace.loading !== null} aria-label={`Preview ${file.logical_filename}`}>Preview</button>
-                <button type="button" on:click={() => void removeResearchScriptInput(file.logical_filename)}
+                <button type="button" class="btn is-ghost" on:click={() => void removeResearchScriptInput(file.logical_filename)}
                   disabled={workspace.loading !== null || workspace.detail?.script.status === "archived"}
                   aria-label={`Remove ${file.logical_filename}`}>Remove</button>
               </div>
@@ -666,15 +666,15 @@
       {#if workspace.runs.length}
         {#if workspace.selectedRunInputSnapshot}
           <p class="muted">Selected run inputs: {workspace.selectedRunInputSnapshot.files.map((file) => file.logical_filename).join(", ") || "No input files"}</p>
-          <button type="button" on:click={useSelectedRunResearchScriptInputs} disabled={workspace.loading !== null}>Use selected run inputs</button>
+          <button type="button" class="btn is-ghost" on:click={useSelectedRunResearchScriptInputs} disabled={workspace.loading !== null}>Use selected run inputs</button>
         {/if}
         {#if workspace.selectedRun?.parameters}
           <p class="muted">Selected run parameters: {Object.entries(workspace.selectedRun.parameters).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(" · ")}</p>
-          <button type="button" on:click={useSelectedRunResearchScriptParameters} disabled={workspace.loading !== null}>Use selected run parameters</button>
+          <button type="button" class="btn is-ghost" on:click={useSelectedRunResearchScriptParameters} disabled={workspace.loading !== null}>Use selected run parameters</button>
         {/if}
         <div class="run-list">
           {#each workspace.runs as run}
-            <button
+            <button class="btn is-ghost"
               type="button"
               class:selected={workspace.selectedRun?.run_id === run.run_id}
               on:click={() => selectResearchScriptRun(run.run_id)}
@@ -698,7 +698,7 @@
         <div class="row"><span>Retained bytes</span><strong>{workspace.diagnostics?.retained_output_bytes?.toLocaleString() ?? "—"}</strong></div>
         <div class="row"><span>Missing / orphaned</span><strong>{workspace.diagnostics?.missing_output_count ?? "—"} / {workspace.diagnostics?.orphan_output_count ?? "—"}</strong></div>
       </div>
-      <button
+      <button class="btn is-ghost"
         type="button"
         on:click={() => void cleanupResearchScriptRetainedOutputs()}
         disabled={workspace.loading !== null}
@@ -802,33 +802,21 @@
   .input-preview { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   input[type="file"] { min-width: 0; font-size: var(--text-xs); }
 
+  /* Fields are .form-control and buttons .btn.is-ghost from primitives.css
+     (run actions add .is-primary); `font: inherit` is left for V2. */
+
   input,
   select,
   textarea {
     width: 100%;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-3);
     font: inherit;
   }
-
-  input,
-  select { min-height: 30px; }
 
   .source-field { display: grid; gap: var(--space-2); }
   .parameters-field textarea { font-family: var(--app-font); font-size: var(--text-xs); resize: vertical; }
   .parameters-field small { color: var(--text-2); font-size: var(--text-xs); line-height: 1.4; }
   .parameters-field small.invalid { color: var(--negative); }
   .parameters-field code { font-family: var(--app-font); }
-
-  input:focus-visible,
-  select:focus-visible,
-  textarea:focus-visible,
-  button:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: 1px;
-  }
 
   .editor-footer,
   .output-head small,
@@ -840,25 +828,10 @@
 
   button {
     width: auto;
-    border: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-1);
-    padding: var(--space-3) var(--space-5);
     font: inherit;
-    cursor: pointer;
-    min-height: 30px;
   }
 
-  button:hover:not(:disabled),
   button.selected {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  button:disabled { cursor: not-allowed; opacity: 0.45; }
-
-  .run-button {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
     border-color: var(--accent);
     color: var(--accent);
   }

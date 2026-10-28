@@ -348,17 +348,17 @@
               <h3>Layer Treemap</h3>
             </div>
             <div class="panel-actions">
-              <button type="button" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
-              <button type="button" class="secondary" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
+              <button type="button" class="btn" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
+              <button type="button" class="btn is-ghost" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
             </div>
           </div>
 
           <div class="screener-strip">
-            <label class="search-field filter-wide"><span>Search</span><input bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
-            <label><span>Narrative</span><select bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
-            <label><span>Sort</span><select bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
-            <label><span>Min Mcap</span><input bind:value={minMarketCap} placeholder="1B" /></label>
-            <label><span>Min Volume</span><input bind:value={minVolume} placeholder="25M" /></label>
+            <label class="search-field filter-wide"><span>Search</span><input class="form-control is-large" bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
+            <label><span>Narrative</span><select class="form-control is-large" bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
+            <label><span>Sort</span><select class="form-control is-large" bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
+            <label><span>Min Mcap</span><input class="form-control is-large" bind:value={minMarketCap} placeholder="1B" /></label>
+            <label><span>Min Volume</span><input class="form-control is-large" bind:value={minVolume} placeholder="25M" /></label>
           </div>
 
           <CryptoTreemapBoard
@@ -542,7 +542,7 @@
               </div>
               <label class="hero-control-field">
                 <span>Time</span>
-                <select bind:value={heroLookbackDays} on:change={handleHeroLookbackChange}>
+                <select class="form-control is-large" bind:value={heroLookbackDays} on:change={handleHeroLookbackChange}>
                   {#each heroLookbackOptions as option}
                     <option value={option.value}>{option.label}</option>
                   {/each}
@@ -948,13 +948,13 @@
             <div class="field-grid">
               <label>
                 <span>Preset</span>
-                <select bind:value={selectedBasketPreset} on:change={(event) => applyBasketPreset((event.currentTarget as HTMLSelectElement).value)}>
+                <select class="form-control is-large" bind:value={selectedBasketPreset} on:change={(event) => applyBasketPreset((event.currentTarget as HTMLSelectElement).value)}>
                   {#each basketPresets as preset}<option value={preset.id}>{preset.label}</option>{/each}
                 </select>
               </label>
               <label>
                 <span>Benchmark</span>
-                <select bind:value={syntheticBenchmarkTokenId}>
+                <select class="form-control is-large" bind:value={syntheticBenchmarkTokenId}>
                   <option value="bitcoin">Bitcoin</option>
                   {#if detail}<option value={detail.token_id}>{detail.symbol.toUpperCase()} (selected)</option>{/if}
                   {#each benchmarkCandidates as token}
@@ -968,7 +968,7 @@
 
             <label class="textarea-field">
               <span>Synthetic Portfolio</span>
-              <textarea bind:value={syntheticText} rows="7" placeholder="BTC 0.50&#10;ETH 0.30&#10;SOL 0.20"></textarea>
+              <textarea class="form-control" bind:value={syntheticText} rows="7" placeholder="BTC 0.50&#10;ETH 0.30&#10;SOL 0.20"></textarea>
             </label>
 
             {#if basketWarning}
@@ -990,9 +990,9 @@
             {/if}
 
             <div class="builder-actions">
-              <button type="button" on:click={normalizeSynthetic}>Normalize</button>
-              <button type="button" class="secondary" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
-              <button type="button" class="secondary" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
+              <button type="button" class="btn" on:click={normalizeSynthetic}>Normalize</button>
+              <button type="button" class="btn is-ghost" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
+              <button type="button" class="btn is-ghost" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
             </div>
 
             <div class="table-wrap compact-wrap">
@@ -1242,28 +1242,12 @@
     white-space: nowrap;
   }
 
+  /* Buttons are .btn from primitives.css (secondary actions add .is-ghost);
+     the basket cards below are plain buttons. All keep the view's 12px mono
+     figures: `font: inherit` is left for V2. */
   button {
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-5);
     font: inherit;
     font-size: var(--text-sm);
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-  }
-
-  button.secondary {
-    color: var(--text-1);
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-    border-color: var(--panel-border);
   }
 
   .loading-pill {
@@ -1283,27 +1267,16 @@
     background: color-mix(in srgb, var(--warning) 6%, transparent);
   }
 
+  /* Fields are .form-control.is-large from primitives.css. */
   input,
   select,
   textarea {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-4);
     font: inherit;
     font-size: var(--text-base);
-    min-height: 2rem;
   }
 
   textarea {
-    resize: vertical;
     min-height: 8rem;
-  }
-
-  input:hover,
-  select:hover,
-  textarea:hover {
-    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
   }
 
   label,
@@ -1580,10 +1553,16 @@
   .basket-card {
     border: 1px solid var(--divider);
     background: transparent;
+    color: var(--text-0);
+    cursor: pointer;
     padding: var(--space-4);
     display: grid;
     gap: var(--space-1);
     text-align: left;
+  }
+
+  .basket-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .tag-list {

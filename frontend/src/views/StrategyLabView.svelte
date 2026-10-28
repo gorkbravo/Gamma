@@ -717,16 +717,16 @@
                   </small>
                 </div>
                 <div class="builder-actions compact">
-                  <button type="button" class="ghost-button" on:click={() => showHandoffReview = !showHandoffReview}>
+                  <button type="button" class="btn is-large is-ghost" on:click={() => showHandoffReview = !showHandoffReview}>
                     {showHandoffReview ? "Hide" : "Review"}
                   </button>
-                  <button type="button" class="ghost-button" on:click={() => onResolveStrategyLabHandoffs?.()} disabled={handoffLoading}>
+                  <button type="button" class="btn is-large is-ghost" on:click={() => onResolveStrategyLabHandoffs?.()} disabled={handoffLoading}>
                     {handoffLoading ? "Resolving..." : "Resolve"}
                   </button>
-                  <button type="button" on:click={acceptResolvedStrategyHandoffs} disabled={handoffLoading}>
+                  <button type="button" class="btn is-large" on:click={acceptResolvedStrategyHandoffs} disabled={handoffLoading}>
                     Accept All
                   </button>
-                  <button type="button" class="ghost-button" on:click={() => onClearStrategyLabHandoffs?.()}>
+                  <button type="button" class="btn is-large is-ghost" on:click={() => onClearStrategyLabHandoffs?.()}>
                     Clear
                   </button>
                 </div>
@@ -745,10 +745,10 @@
                         </small>
                       </div>
                       <div class="handoff-actions">
-                        <button type="button" on:click={() => acceptStrategyHandoff(item)} disabled={item.resolved?.status !== "resolved"}>
+                        <button type="button" class="btn is-large" on:click={() => acceptStrategyHandoff(item)} disabled={item.resolved?.status !== "resolved"}>
                           Accept
                         </button>
-                        <button type="button" class="ghost-button" on:click={() => onDismissStrategyLabHandoff?.(item.id)}>
+                        <button type="button" class="btn is-large is-ghost" on:click={() => onDismissStrategyLabHandoff?.(item.id)}>
                           Dismiss
                         </button>
                       </div>
@@ -768,7 +768,7 @@
                         <strong>Earlier Sessions</strong>
                         <small>Expired handoffs are excluded from Resolve and Accept All. Revive one to re-resolve it with fresh data, or re-send it from the source tab.</small>
                       </div>
-                      <button type="button" class="ghost-button" on:click={() => onClearStaleStrategyLabHandoffs?.()}>
+                      <button type="button" class="btn is-large is-ghost" on:click={() => onClearStaleStrategyLabHandoffs?.()}>
                         Clear Earlier
                       </button>
                     </div>
@@ -781,10 +781,10 @@
                           </small>
                         </div>
                         <div class="handoff-actions">
-                          <button type="button" class="ghost-button" on:click={() => onReviveStrategyLabHandoff?.(item.id)}>
+                          <button type="button" class="btn is-large is-ghost" on:click={() => onReviveStrategyLabHandoff?.(item.id)}>
                             Revive
                           </button>
-                          <button type="button" class="ghost-button" on:click={() => onDismissStrategyLabHandoff?.(item.id)}>
+                          <button type="button" class="btn is-large is-ghost" on:click={() => onDismissStrategyLabHandoff?.(item.id)}>
                             Dismiss
                           </button>
                         </div>
@@ -804,11 +804,11 @@
             <div class="panel-header tight-head">
               <h3>Portfolio Composer</h3>
               <div class="builder-actions compact">
-                <button type="button" class="ghost-button" on:click={addPortfolioDraftLeg}>Add Leg</button>
-                <button type="button" class="ghost-button" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
+                <button type="button" class="btn is-large is-ghost" on:click={addPortfolioDraftLeg}>Add Leg</button>
+                <button type="button" class="btn is-large is-ghost" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
                   {bookValidationLoading ? "Validating..." : "Validate Book"}
                 </button>
-                <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || composePending}>
+                <button type="button" class="btn is-large" on:click={composePortfolioDraft} disabled={strategyLoading || composePending}>
                   {strategyLoading || composePending ? "Composing..." : "Compose Portfolio"}
                 </button>
               </div>
@@ -818,10 +818,10 @@
             {#if errorMessage}<p class="warning" role="alert">{errorMessage}</p>{/if}
 
             <div class="field-grid compact-fields">
-              <label><span>Name</span><input bind:value={portfolioName} /></label>
-              <label><span>Benchmark</span><input bind:value={portfolioBenchmarkSymbol} /></label>
-              <label title="Trailing daily return observations (sessions) each book analyses, not calendar days."><span>Lookback (trading days)</span><input type="number" min="20" step="20" bind:value={portfolioLookbackDays} /></label>
-              <label><span>Min Overlap</span><input type="number" min="2" step="1" bind:value={portfolioMinObservations} /></label>
+              <label><span>Name</span><input class="form-control is-large" bind:value={portfolioName} /></label>
+              <label><span>Benchmark</span><input class="form-control is-large" bind:value={portfolioBenchmarkSymbol} /></label>
+              <label title="Trailing daily return observations (sessions) each book analyses, not calendar days."><span>Lookback (trading days)</span><input class="form-control is-large" type="number" min="20" step="20" bind:value={portfolioLookbackDays} /></label>
+              <label><span>Min Overlap</span><input class="form-control is-large" type="number" min="2" step="1" bind:value={portfolioMinObservations} /></label>
             </div>
 
             <div class="kpi-grid compact-kpis">
@@ -867,9 +867,9 @@
                 <tbody>
                   {#each portfolioDraftLegs as leg, index (leg.id)}
                     <tr>
-                      <td><input class="compact-input wide" bind:value={leg.label} placeholder="Leg label" aria-label={`Label of ${draftLegName(leg, index)}`} /></td>
+                      <td><input class="form-control is-large compact-input wide" bind:value={leg.label} placeholder="Leg label" aria-label={`Label of ${draftLegName(leg, index)}`} /></td>
                       <td>
-                        <select class="compact-input class-select" bind:value={leg.assetClass} aria-label={`Asset class of ${draftLegName(leg, index)}`} on:change={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}>
+                        <select class="form-control is-large compact-input class-select" bind:value={leg.assetClass} aria-label={`Asset class of ${draftLegName(leg, index)}`} on:change={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}>
                           {#each portfolioAssetClasses as assetClass}
                             <option value={assetClass.id}>{assetClass.label}</option>
                           {/each}
@@ -883,7 +883,7 @@
                       </td>
                       <td>
                         <input
-                          class="compact-input wide"
+                          class="form-control is-large compact-input wide"
                           bind:value={leg.identifier}
                           placeholder="Ticker / contract id"
                           aria-label={`Ticker or contract id of ${draftLegName(leg, index)}`}
@@ -891,13 +891,13 @@
                         />
                       </td>
                       <td class="num-cell">
-                        <input class="compact-input" type="number" step="0.05" bind:value={leg.weight} aria-label={`Weight of ${draftLegName(leg, index)}`} />
+                        <input class="form-control is-large compact-input" type="number" step="0.05" bind:value={leg.weight} aria-label={`Weight of ${draftLegName(leg, index)}`} />
                       </td>
                       <td class="num-cell">
                         <div class="row-actions">
                           <button
                             type="button"
-                            class="ghost-button icon-button"
+                            class="btn is-large is-ghost icon-button"
                             aria-expanded={Boolean(expandedDraftLegs[leg.id])}
                             title="Object / inline history source"
                             aria-label={`Source details of ${draftLegName(leg, index)}`}
@@ -905,7 +905,7 @@
                           >{expandedDraftLegs[leg.id] ? "▾" : "▸"}</button>
                           <button
                             type="button"
-                            class="ghost-button icon-button"
+                            class="btn is-large is-ghost icon-button"
                             title="Remove leg"
                             aria-label={`Remove ${draftLegName(leg, index)}`}
                             on:click={() => removePortfolioDraftLeg(leg.id)}
@@ -920,7 +920,7 @@
                             <label>
                               <span>Gamma Object</span>
                               <select
-                                class="compact-input wide"
+                                class="form-control is-large compact-input wide"
                                 bind:value={leg.objectOptionId}
                                 on:change={() => normalizePortfolioDraftLegSource(leg.id, "object")}
                               >
@@ -932,7 +932,7 @@
                             </label>
                             <label>
                               <span>Value Kind</span>
-                              <select class="compact-input wide" bind:value={leg.valueKind}>
+                              <select class="form-control is-large compact-input wide" bind:value={leg.valueKind}>
                                 <option value="return">Returns</option>
                                 <option value="level">Level / probability</option>
                               </select>
@@ -940,13 +940,13 @@
                             <label class="history-field">
                               <span>Inline History (date,value)</span>
                               <textarea
-                                class="history-input"
+                                class="form-control history-input"
                                 bind:value={leg.historyText}
                                 placeholder="date,value rows for contracts, commodities, custom streams"
                                 on:input={() => normalizePortfolioDraftLegSource(leg.id, "history")}
                               ></textarea>
                             </label>
-                            <button type="button" class="ghost-button leg-reset" on:click={() => resetPortfolioDraftLeg(leg.id)}>Reset</button>
+                            <button type="button" class="btn is-large is-ghost leg-reset" on:click={() => resetPortfolioDraftLeg(leg.id)}>Reset</button>
                           </div>
                         </td>
                       </tr>
@@ -1065,9 +1065,9 @@
                         <td>{option.label}</td>
                         <td>{option.object.object_type}</td>
                         <td class="num-cell">
-                          <input class="compact-input" type="number" step="0.05" bind:value={composerWeights[option.id]} />
+                          <input class="form-control is-large compact-input" type="number" step="0.05" bind:value={composerWeights[option.id]} />
                         </td>
-                        <td class="num-cell"><button type="button" class="ghost-button" on:click={() => addComposerObjectToPortfolio(option.id)}>Add</button></td>
+                        <td class="num-cell"><button type="button" class="btn is-large is-ghost" on:click={() => addComposerObjectToPortfolio(option.id)}>Add</button></td>
                       </tr>
                     {/each}
                   {:else}
@@ -1077,7 +1077,7 @@
               </table>
             </div>
             <div class="builder-actions compact object-compose-actions">
-              <button type="button" class="ghost-button" on:click={composeSelectedObjects} disabled={strategyLoading || !selectedComposerLegs.length}>
+              <button type="button" class="btn is-large is-ghost" on:click={composeSelectedObjects} disabled={strategyLoading || !selectedComposerLegs.length}>
                 {strategyLoading ? "Composing..." : "Compose Selected Objects"}
               </button>
             </div>
@@ -1091,8 +1091,8 @@
                 </div>
                 <div class="builder-actions compact">
                   <small>{strategyComposition.returns_points.length} return points</small>
-                  <button type="button" class="ghost-button" on:click={saveStrategyRun} disabled={savedLoading || composePending}>Save Experiment</button>
-                  <button type="button" class="ghost-button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading}>
+                  <button type="button" class="btn is-large is-ghost" on:click={saveStrategyRun} disabled={savedLoading || composePending}>Save Experiment</button>
+                  <button type="button" class="btn is-large is-ghost" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading}>
                     {riskHandoffLoading ? "Opening..." : "Open In Risk"}
                   </button>
                 </div>
@@ -1185,8 +1185,8 @@
               <h2>{activeStrategyResult?.name ?? strategyModeTitle}</h2>
             </div>
             <div class="builder-actions compact">
-              {#if activeStrategyResult?.analytical_provenance}<button type="button" on:click={exportScriptAnalysis}>Export analysis JSON</button>{/if}
-              <button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
+              {#if activeStrategyResult?.analytical_provenance}<button type="button" class="btn is-large" on:click={exportScriptAnalysis}>Export analysis JSON</button>{/if}
+              <button type="button" class="btn is-large" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
             </div>
           </div>
 
@@ -1342,19 +1342,19 @@
             <strong>{parsedStrategyCsv.rows.length} rows</strong>
           </div>
 
-          <label><span>Name</span><input bind:value={strategyName} /></label>
-          <label><span>CSV Text</span><textarea bind:value={strategyCsvText} rows="10" spellcheck="false"></textarea></label>
+          <label><span>Name</span><input class="form-control is-large" bind:value={strategyName} /></label>
+          <label><span>CSV Text</span><textarea class="form-control" bind:value={strategyCsvText} rows="10" spellcheck="false"></textarea></label>
 
           <div class="field-grid">
-            <label><span>Date</span><select bind:value={strategyDateColumn}>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
-            <label><span>Value</span><select bind:value={strategyValueColumn}>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
-            <label><span>Kind</span><select bind:value={strategyValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
+            <label><span>Date</span><select class="form-control is-large" bind:value={strategyDateColumn}>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
+            <label><span>Value</span><select class="form-control is-large" bind:value={strategyValueColumn}>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
+            <label><span>Kind</span><select class="form-control is-large" bind:value={strategyValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
           </div>
 
           <div class="field-grid">
-            <label><span>Benchmark</span><select bind:value={strategyBenchmarkColumn}><option value="">None</option>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
-            <label><span>Bench Kind</span><select bind:value={strategyBenchmarkValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
-            <div class="builder-actions compact"><button type="button" on:click={analyzeStrategy} disabled={strategyLoading}>{strategyLoading ? "Analyzing..." : "Analyze"}</button></div>
+            <label><span>Benchmark</span><select class="form-control is-large" bind:value={strategyBenchmarkColumn}><option value="">None</option>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
+            <label><span>Bench Kind</span><select class="form-control is-large" bind:value={strategyBenchmarkValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
+            <div class="builder-actions compact"><button type="button" class="btn is-large" on:click={analyzeStrategy} disabled={strategyLoading}>{strategyLoading ? "Analyzing..." : "Analyze"}</button></div>
           </div>
 
           {#if strategyInputWarning || parsedStrategyCsv.warnings.length}
@@ -1405,7 +1405,7 @@
         <article class="panel table-panel">
           <div class="panel-header tight-head">
             <h3>Saved Strategy Runs</h3>
-            <button type="button" class="ghost-button inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
+            <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
           </div>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
@@ -1421,10 +1421,10 @@
                       <td>
                         <div class="table-actions">
                           {#if savedResearchCanReloadStrategy(item) && !savedStrategyExperiment(item)}
-                            <button type="button" class="ghost-button" on:click={() => loadSavedStrategy(item)}>Load Strategy</button>
+                            <button type="button" class="btn is-large is-ghost" on:click={() => loadSavedStrategy(item)}>Load Strategy</button>
                           {/if}
-                          {#if savedStrategyExperiment(item)}<button type="button" class="ghost-button" on:click={() => loadSavedStrategy(item)}>Reopen Experiment</button>{/if}
-                          <button type="button" class="ghost-button" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
+                          {#if savedStrategyExperiment(item)}<button type="button" class="btn is-large is-ghost" on:click={() => loadSavedStrategy(item)}>Reopen Experiment</button>{/if}
+                          <button type="button" class="btn is-large is-ghost" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
                         </div>
                       </td>
                     </tr>
@@ -1442,11 +1442,11 @@
       <aside class="support-column">
         <article class="panel control-panel">
           <div class="rail-header"><div><p class="eyebrow">Save Current</p><h3>Strategy Run</h3></div></div>
-          <label><span>Strategy Title</span><input bind:value={savedStrategyTitle} placeholder={activeStrategyResult?.name ?? "Experiment name"} /></label>
+          <label><span>Strategy Title</span><input class="form-control is-large" bind:value={savedStrategyTitle} placeholder={activeStrategyResult?.name ?? "Experiment name"} /></label>
           {#if runNotice}<p role="status">{runNotice}</p>{/if}
           {#if errorMessage}<p class="warning" role="alert">{errorMessage}</p>{/if}
-          <div class="builder-actions"><button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button></div>
-          <label><span>Notes</span><textarea bind:value={savedNotes} rows="5"></textarea></label>
+          <div class="builder-actions"><button type="button" class="btn is-large" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button></div>
+          <label><span>Notes</span><textarea class="form-control" bind:value={savedNotes} rows="5"></textarea></label>
         </article>
 
         <article class="panel rail-panel">
@@ -1701,66 +1701,22 @@
     min-width: 0;
   }
 
+  /* Controls are .btn.is-large and .form-control.is-large from primitives.css
+     (ghost buttons add .is-ghost). Here they fill their grid cell and keep
+     the view's mono figures: `font: inherit` is left for V2. */
   input,
   select,
   textarea,
   button {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-4);
-    font: inherit;
-    font-size: var(--text-base);
     display: block;
     width: 100%;
     box-sizing: border-box;
-    border-radius: var(--radius-sm);
+    font: inherit;
+    font-size: var(--text-base);
   }
 
   textarea {
     min-height: 7rem;
-    resize: vertical;
-  }
-
-  input,
-  select,
-  button {
-    min-height: 2rem;
-    line-height: 1.2;
-  }
-
-  input:hover,
-  select:hover,
-  textarea:hover {
-    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
-  }
-
-  input:focus-visible,
-  select:focus-visible,
-  textarea:focus-visible,
-  button:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-  }
-
-  button {
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-    border-color: var(--panel-border);
-    background: var(--bg-1);
-  }
-
-  .ghost-button {
-    background: transparent;
-    color: var(--text-1);
   }
 
   .builder-actions {

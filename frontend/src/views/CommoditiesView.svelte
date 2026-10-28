@@ -1389,13 +1389,13 @@
         <div class="handoff-actions" aria-label="Strategy Lab commodity handoff actions">
           <button
             type="button"
-            class="ghost-action"
+            class="btn is-small is-ghost"
             on:click={() => sendSelectedCommodityToStrategyLab(false)}
             disabled={loading || !onSendToStrategyLab}
           >
             + Strategy
           </button>
-          <button
+          <button class="btn is-small"
             type="button"
             on:click={() => sendSelectedCommodityToStrategyLab(true)}
             disabled={loading || !onSendToStrategyLab}
@@ -1404,7 +1404,7 @@
           </button>
         </div>
       {/if}
-      <button type="button" class="refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
+      <button type="button" class="btn is-small refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
         {loading ? "LOADING..." : "Refresh"}
       </button>
     </div>
@@ -1542,7 +1542,7 @@
           <header class="panel-title">
             <span>Term Structure Stack</span>
             <span class="header-meta">
-              <select class="inline-select" bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !curveInstrumentOptions.length}>
+              <select class="form-control inline-select" bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !curveInstrumentOptions.length}>
                 {#each curveInstrumentOptions as instrument}
                   <option value={instrument.instrument_id}>{instrument.name}</option>
                 {/each}
@@ -1802,7 +1802,7 @@
       <article class="panel controls-card">
         <div class="controls-bar">
           <label class="control"><span>Market</span>
-            <select bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !modeInstrumentOptions.length}>
+            <select class="form-control" bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !modeInstrumentOptions.length}>
               {#each modeInstrumentOptions as instrument}
                 <option value={instrument.instrument_id}>{instrument.name}</option>
               {/each}
@@ -2738,22 +2738,14 @@
     flex: 0 0 auto;
   }
 
+  /* Handoff and refresh buttons are .btn.is-small from primitives.css. */
   .handoff-actions button {
-    min-height: 25px;
-    padding: var(--space-2) var(--space-4);
-    font-size: var(--text-xs);
     white-space: nowrap;
   }
 
-  .handoff-actions .ghost-action {
-    background: transparent;
-  }
 
   .refresh-button {
     flex: 0 0 auto;
-    min-height: 25px;
-    padding: var(--space-2) var(--space-4);
-    font-size: var(--text-xs);
   }
 
   /* ── Mode bar (Risk pattern) ── */
@@ -2830,39 +2822,29 @@
   .ctx-kpi strong.negative { color: var(--negative); }
   .ctx-kpi strong.warning { color: var(--warning); }
 
-  /* ── Form controls (default) ── */
+  /* ── Form controls ──
+     Buttons and selects are .btn and .form-control from primitives.css; the
+     market cards are plain buttons styled below. Selects keep the view's
+     mono figures (`font: inherit`, left for V2). */
   select {
-    height: 28px;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: 0 var(--space-4);
     font: inherit;
     font-size: var(--text-sm);
   }
 
-  select:hover:not(:disabled) { border-color: var(--accent); }
-  select:disabled { color: var(--text-2); cursor: default; }
-
-  button {
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
-    color: var(--text-0);
-    cursor: pointer;
-  }
-
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { cursor: default; color: var(--text-2); }
-
+  /* The curve picker sits inline in a panel title, so it stays 22px and
+     keeps a hover edge of its own over its quieter border. */
   .inline-select {
+    min-height: 22px;
     height: 22px;
     padding: 0 var(--space-3);
     border-color: var(--divider);
     background: transparent;
     font-size: var(--text-xs);
     color: var(--text-1);
+  }
+
+  .inline-select:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
   }
 
   /* .panel-title and .tag come from primitives.css. */

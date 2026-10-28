@@ -74,14 +74,14 @@
     <summary>Python output convention · v1</summary>
     <p>Use top-level Python and the standard <code>json</code> module to write <code>gamma_analytics.json</code> in the working directory. No Gamma imports or helper are required.</p>
     <p>Contract: <code>gamma-script-analytics.v1</code>. Specify exact instruments, meaning, methodology, assumptions, limitations and explicit units. See <code>docs/script_analytical_results.md</code> for the inspectable contract and complete example.</p>
-    <button type="button" on:click={() => void inspectContract()}>Inspect exact v1 JSON schema</button>
+    <button type="button" class="btn" on:click={() => void inspectContract()}>Inspect exact v1 JSON schema</button>
     {#if contract}
       <p>Ordinary top-level Python example · adapt identities, meaning and calculations to your research.</p>
       <pre>{contract.example_source}</pre>
       <details><summary>Full JSON schema and limits</summary><pre>{JSON.stringify(contract, null, 2)}</pre></details>
     {/if}
   </details>
-  <button type="button" on:click={() => void inspect()} disabled={busy || !runId}>{busy ? "Validating…" : "Inspect analytical output"}</button>
+  <button type="button" class="btn" on:click={() => void inspect()} disabled={busy || !runId}>{busy ? "Validating…" : "Inspect analytical output"}</button>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if report}
     <p>Execution: {report.execution_status} · {report.executes_source ? "Python runtime" : "non-executing preview"}</p>
@@ -99,7 +99,7 @@
             <summary>Inspect exact result, mapping, coverage and assumptions</summary>
             <pre>{JSON.stringify({ result: item.result, mapping: item.mapping, provenance: artifact.provenance, instruments: artifact.instruments }, null, 2)}</pre>
           </details>
-          <button type="button" disabled={busy || !item.can_open || !onOpen} on:click={() => void open(artifact.output_id, item)}>Open temporary Strategy Lab analysis</button>
+          <button type="button" class="btn" disabled={busy || !item.can_open || !onOpen} on:click={() => void open(artifact.output_id, item)}>Open temporary Strategy Lab analysis</button>
         {/each}
         {#if artifact.weight_book}
           {@const book = artifact.weight_book}
@@ -108,10 +108,10 @@
             <p>Gamma turns the signed NAV weight schedules ({book.weight_result_ids.join(", ")}) and each instrument's daily simple returns ({book.return_result_ids.join(", ") || "none"}) into one return stream: decisions apply only from a later period, holdings drift between decisions, residual cash earns 0% and weights are never normalized.</p>
             <div class="book-options">
               <label><span>Execution lag (periods)</span>
-                <input type="number" aria-label="Book execution lag in periods" min="1" max="5" step="1" value={bookOptions.execution_lag} on:change={(event) => setOption("execution_lag", event)} disabled={busy} /></label>
+                <input class="form-control" type="number" aria-label="Book execution lag in periods" min="1" max="5" step="1" value={bookOptions.execution_lag} on:change={(event) => setOption("execution_lag", event)} disabled={busy} /></label>
               <label><span>Cost (bps per unit turnover)</span>
-                <input type="number" aria-label="Book cost in basis points per unit turnover" min="0" max="1000" step="0.5" value={bookOptions.cost_bps} on:change={(event) => setOption("cost_bps", event)} disabled={busy} /></label>
-              <button type="button" on:click={() => void inspect()} disabled={busy || !optionsDirty}>Apply</button>
+                <input class="form-control" type="number" aria-label="Book cost in basis points per unit turnover" min="0" max="1000" step="0.5" value={bookOptions.cost_bps} on:change={(event) => setOption("cost_bps", event)} disabled={busy} /></label>
+              <button type="button" class="btn" on:click={() => void inspect()} disabled={busy || !optionsDirty}>Apply</button>
             </div>
             {#if optionsDirty}<p role="status">Options changed: apply them to recompute the exact book before opening it.</p>{/if}
             {#if book.unsupported_reason}<p class="reason">{book.unsupported_reason}</p>{/if}
@@ -131,7 +131,7 @@
                 <pre>{JSON.stringify({ options: book.options, rebalances: details.rebalances.slice(0, 50), rows: book.mapping.rows }, null, 2)}</pre>
               </details>
             {/if}
-            <button type="button" disabled={busy || !book.can_open || !onOpen || optionsDirty} on:click={() => void openBook(artifact.output_id, book)}>Open causal book in Strategy Lab</button>
+            <button type="button" class="btn" disabled={busy || !book.can_open || !onOpen || optionsDirty} on:click={() => void openBook(artifact.output_id, book)}>Open causal book in Strategy Lab</button>
           </div>
         {/if}
       </section>
@@ -159,7 +159,7 @@
   dd { margin: 0; color: var(--text-1); font-family: var(--app-font); font-size: var(--text-xs); text-align: right; overflow-wrap: anywhere; }
   .reason { color: var(--warning); }
   ul { margin: var(--space-2) 0; padding-left: var(--space-5); font-size: var(--text-xs); color: var(--text-1); line-height: var(--leading-normal); }
-  button { min-height: 28px; white-space: normal; background: var(--bg-1); border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); color: var(--text-0); padding: var(--space-2) var(--space-4); font-size: var(--text-sm); cursor: pointer; }
-  button:disabled { color: var(--text-2); cursor: default; }
+  /* Buttons and fields are .btn and .form-control from primitives.css. */
+  button { white-space: normal; font-size: var(--text-sm); }
   :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 </style>
