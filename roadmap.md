@@ -509,6 +509,7 @@ It does not need to build every provider before tab work starts. It only needs e
 
 Current standalone ceiling note:
 - Workstream 1 is now close to its practical standalone ceiling before more provider and beta work begins. The remaining foundation work is mostly adoption work: wiring `CrossTabHandoffEnvelope` into actual UI actions, applying provenance/freshness consistently across all legacy and V2 payloads, making provider selection user-facing where needed, expanding domain-specific saved workflow models, broadening activation-condition coverage as more conditional providers are identified, and turning diagnostics/setup metadata into a beta-ready first-run experience.
+- Frontend platform layer and visual refresh (approved 2026-10-28): the target look is "B′ Tonal compact", with light and dark themes and the existing navigation drawer kept. Shared primitives (V1) and token completeness (V2) come first and do not change the look; theme infrastructure, B′ values and the `design_principles.md` rewrite follow. Plan, measurements and acceptance gates: [`docs/visual_refresh_plan.md`](./docs/visual_refresh_plan.md).
 
 ### Deliverable
 

@@ -7,6 +7,7 @@ This directory is split into active documentation, audits, and archived project 
 - [`../README.md`](../README.md): setup, run commands, validation commands, current product status, current roadmap direction, and provider stance
 - [`../roadmap.md`](../roadmap.md): single active source of truth for product direction, historical phase checkpoints, workstreams, provider strategy, beta readiness, and constraints
 - [`design_principles.md`](./design_principles.md): canonical frontend doctrine, token roles, component contracts, interaction/accessibility rules, review tests, and the §14 common-mistakes / §15 quick-reference lookup used as the post-edit check
+- [`visual_refresh_plan.md`](./visual_refresh_plan.md): approved "B′ Tonal compact" visual refresh, with target tokens, measured density, checkpoints V1-V6 (shared primitives first) and the `design_principles.md` rewrite map
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
 - [`research_script_workspace_plan.md`](./research_script_workspace_plan.md): Strategy Lab `Script` architecture and expansion checkpoints E1-E6, isolated-runtime boundary, data bundles, delivery evidence, tests, and maintenance rules
