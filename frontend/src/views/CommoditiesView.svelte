@@ -2825,7 +2825,7 @@
   /* ── Form controls ──
      Buttons and selects are .btn and .form-control from primitives.css; the
      market cards are plain buttons styled below. Selects keep the view's
-     mono figures (`font: inherit`, left for V2). */
+     font. */
   select {
     font: inherit;
     font-size: var(--text-sm);

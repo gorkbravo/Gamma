@@ -1214,7 +1214,7 @@
     text-transform: uppercase;
   }
 
-  /* Fields are .form-control from primitives.css; `font: inherit` stays for V2. */
+  /* Fields are .form-control from primitives.css and keep the view's font. */
   input,
   select {
     font: inherit;

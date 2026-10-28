@@ -2474,10 +2474,11 @@
   }
 
   /* Buttons, scenario cards included, are .btn from primitives.css
-     (secondary actions add .is-ghost). They keep the view's 12px mono
-     figures: `font: inherit` is left for V2. */
+     (secondary actions add .is-ghost) at the view's 12px in the interface
+     font. The scenario cards set --font-num again below. */
   button {
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
   }
 
@@ -2487,7 +2488,10 @@
   }
 
 
+  /* Scenario cards show the implied value and upside, so they keep the
+     figures font. */
   .scenario-card {
+    font-family: var(--font-num), monospace;
     display: grid;
     gap: var(--space-1);
     text-align: left;

@@ -143,9 +143,10 @@
   label, p, summary { font-size: var(--text-xs); }
   label, summary { font-family: var(--font-ui); color: var(--text-2); }
   p { margin: 0; color: var(--text-2); overflow-wrap: anywhere; line-height: var(--leading-normal); }
-  /* Fields are .form-control and buttons .btn.is-ghost from primitives.css;
-     `font: inherit` is left for V2. */
+  /* Fields are .form-control and buttons .btn.is-ghost from primitives.css.
+     Fields inherit their label's font; buttons take the interface font. */
   input, select, button { min-width: 0; max-width: 100%; font: inherit; }
+  button { font-family: var(--font-ui); }
   input, select { width: 100%; box-sizing: border-box; }
   summary { cursor: pointer; }
   summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }

@@ -1668,8 +1668,8 @@
   }
 
   /* Controls are .btn.is-large and .form-control.is-large from primitives.css
-     (ghost buttons add .is-ghost). Here they fill their grid cell and keep
-     the view's mono figures: `font: inherit` is left for V2. */
+     (ghost buttons add .is-ghost). Here they fill their grid cell at body
+     size; fields keep the view's font and buttons take the interface font. */
   input,
   select,
   textarea,
@@ -1679,6 +1679,10 @@
     box-sizing: border-box;
     font: inherit;
     font-size: var(--text-base);
+  }
+
+  button {
+    font-family: var(--font-ui);
   }
 
   textarea {

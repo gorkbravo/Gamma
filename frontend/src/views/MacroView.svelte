@@ -376,11 +376,11 @@
   }
 
   /* The Strategy Lab handoff buttons are .btn.is-small from primitives.css
-     (the first adds .is-ghost). They keep the view's mono figures: `font:
-     inherit` is left for V2, and it resets the size, so .is-small's 11px is
-     repeated here. */
+     (the first adds .is-ghost) in the interface font. `font: inherit` resets
+     the size, so .is-small's 11px is repeated here. */
   .handoff-actions button {
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
     white-space: nowrap;
   }
@@ -485,8 +485,8 @@
     font-weight: 500;
   }
 
-  /* Context pickers are .form-control.is-small from primitives.css; they keep
-     the view's mono figures (`font: inherit`, left for V2). */
+  /* Context pickers are .form-control.is-small from primitives.css and keep
+     the view's font. */
   .context-bar select {
     min-width: 5rem;
     font: inherit;

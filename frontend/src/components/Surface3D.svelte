@@ -753,6 +753,7 @@
     border: 1px solid var(--panel-strong);
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     padding: var(--space-2) var(--space-3);
     border-radius: 2px;

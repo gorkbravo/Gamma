@@ -1242,11 +1242,12 @@
     white-space: nowrap;
   }
 
-  /* Buttons are .btn from primitives.css (secondary actions add .is-ghost);
-     the basket cards below are plain buttons. All keep the view's 12px mono
-     figures: `font: inherit` is left for V2. */
+  /* Buttons are .btn from primitives.css (secondary actions add .is-ghost)
+     at the view's 12px in the interface font. The basket cards below are
+     plain buttons that show figures, so they set --font-num again. */
   button {
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
   }
 
@@ -1525,6 +1526,7 @@
   }
 
   .basket-card {
+    font-family: var(--font-num), monospace;
     border: 1px solid var(--divider);
     background: transparent;
     color: var(--text-0);

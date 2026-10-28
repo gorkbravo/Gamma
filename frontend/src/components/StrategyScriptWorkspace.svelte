@@ -803,7 +803,8 @@
   input[type="file"] { min-width: 0; font-size: var(--text-xs); }
 
   /* Fields are .form-control and buttons .btn.is-ghost from primitives.css
-     (run actions add .is-primary); `font: inherit` is left for V2. */
+     (run actions add .is-primary). Fields keep the view's font; buttons take
+     the interface font. */
 
   input,
   select,
@@ -829,6 +830,7 @@
   button {
     width: auto;
     font: inherit;
+    font-family: var(--font-ui);
   }
 
   button.selected {

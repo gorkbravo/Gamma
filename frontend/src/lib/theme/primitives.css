@@ -534,8 +534,9 @@
    --panel-strong edge); size and emphasis are modifiers. Navigation chrome
    (top bar, drawer, mode bars, tabs) keeps its own rules.
 
-   Font family is left to the view: several views set `font: inherit`,
-   which pulls buttons back to mono, and V2 resolves that across the app.
+   Buttons take --font-ui from the global button rule in tokens.css. A view
+   rule that resets `font: inherit` sets --font-ui again after it, or
+   --font-num on a button that shows figures (a card or a tile).
 
    States sit in :where() so they keep the specificity of .btn and a view's
    scoped class (.tick, .row-select) still wins; :disabled and

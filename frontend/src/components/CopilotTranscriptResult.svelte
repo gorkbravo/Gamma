@@ -999,6 +999,7 @@
     color: var(--text-1);
     cursor: pointer;
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
   }
 
@@ -1111,6 +1112,7 @@
     border: 1px solid var(--panel-border);
     background: transparent;
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
   }
 

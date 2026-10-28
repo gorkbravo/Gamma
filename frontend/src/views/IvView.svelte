@@ -1655,13 +1655,17 @@
   }
 
   /* Controls are .btn and .form-control from primitives.css (the load action
-     adds .is-primary). They keep the view's body-size mono figures:
-     `font: inherit` is left for V2. */
+     adds .is-primary) at body size; fields keep the view's font and buttons
+     take the interface font. */
   button,
   input,
   select {
     font: inherit;
     font-size: var(--text-base);
+  }
+
+  button {
+    font-family: var(--font-ui);
   }
 
   .symbol-control {

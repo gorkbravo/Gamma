@@ -489,8 +489,8 @@
     letter-spacing: 0.02em;
   }
 
-  /* The FX pair pickers are .form-control from primitives.css; they keep the
-     view's mono figures (`font: inherit`, left for V2). */
+  /* The FX pair pickers are .form-control from primitives.css and keep the
+     view's font. */
   .fx-select {
     font: inherit;
     font-size: var(--text-base);

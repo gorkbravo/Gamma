@@ -1796,6 +1796,7 @@
     border: 1px solid var(--panel-border);
     color: var(--text-2);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-2xs);
     padding: var(--space-2) var(--space-4);
     cursor: pointer;
@@ -1838,9 +1839,17 @@
   .vessel-filter,
   .replay-panel select {
     font: inherit;
+    font-family: var(--font-ui);
     border: 1px solid var(--panel-border);
     background: color-mix(in srgb, var(--bg-0) 93%, transparent);
     color: var(--text-1);
+  }
+
+  /* Flow and event rows carry figures and dates, and the replay picker is a
+     field, so they keep the map's figures font. */
+  .row-button,
+  .replay-panel select {
+    font-family: var(--font-num), monospace;
   }
 
   .settings-button {

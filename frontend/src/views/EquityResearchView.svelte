@@ -2311,7 +2311,9 @@
     inset: 1.55rem 0.12rem 0.12rem 0.12rem;
   }
 
+  /* Tiles carry tickers and figures, so they keep the figures font. */
   .treemap-tile {
+    font-family: var(--font-num), monospace;
     position: absolute;
     min-height: 0;
     min-width: 0;
@@ -2751,8 +2753,8 @@
   }
 
   /* Controls are .btn.is-large and .form-control.is-large from primitives.css
-     (ghost buttons add .is-ghost). Here they fill their grid cell and keep
-     the view's mono figures: `font: inherit` is left for V2. */
+     (ghost buttons add .is-ghost). Here they fill their grid cell at body
+     size; fields keep the view's font and buttons take the interface font. */
   input,
   select,
   textarea,
@@ -2762,6 +2764,10 @@
     box-sizing: border-box;
     font: inherit;
     font-size: var(--text-base);
+  }
+
+  button {
+    font-family: var(--font-ui);
   }
 
   textarea {

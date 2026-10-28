@@ -1598,9 +1598,9 @@
 
   /* ── Inputs / buttons ──
      Fields are .form-control and the action buttons .btn from primitives.css
-     (the main one adds .is-primary); they keep the view's 12px mono figures
-     (`font: inherit`, left for V2). The row selectors and dependency zoom
-     controls are plain buttons styled where they are used. */
+     (the main one adds .is-primary), both at the view's 12px; the buttons
+     take the interface font. The row selectors and dependency zoom controls
+     are plain buttons styled where they are used. */
   input,
   select,
   .action-btn {
@@ -1610,6 +1610,7 @@
 
   /* Risk's action buttons read as uppercase commands with an accent hover. */
   .action-btn {
+    font-family: var(--font-ui);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 600;

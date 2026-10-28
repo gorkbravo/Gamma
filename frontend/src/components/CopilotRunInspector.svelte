@@ -258,11 +258,12 @@
     text-transform: capitalize;
   }
 
-  /* Buttons are .btn.is-small.is-ghost from primitives.css; `font: inherit`
-     is left for V2 and resets the size, so 11px is repeated here. */
+  /* Buttons are .btn.is-small.is-ghost from primitives.css in the interface
+     font; `font: inherit` resets the size, so 11px is repeated here. */
 
   button {
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
   }
 

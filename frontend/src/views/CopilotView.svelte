@@ -963,6 +963,7 @@
     background: var(--bg-1);
     color: var(--text-0);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-base);
     cursor: pointer;
   }
@@ -1189,6 +1190,7 @@
     background: var(--bg-1);
     color: var(--text-0);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     cursor: pointer;
   }
@@ -1236,6 +1238,7 @@
     background: transparent;
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     text-align: left;
     cursor: pointer;
@@ -1320,6 +1323,7 @@
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     cursor: pointer;
   }
@@ -1355,6 +1359,7 @@
     color: var(--text-1);
     padding: var(--space-2) var(--space-5);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     cursor: pointer;
   }
@@ -1619,6 +1624,7 @@
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1687,6 +1693,7 @@
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
     padding: 0 var(--space-4);
   }
@@ -1750,6 +1757,7 @@
     background: var(--bg-1);
     color: var(--text-2);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1816,6 +1824,7 @@
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     cursor: pointer;
   }

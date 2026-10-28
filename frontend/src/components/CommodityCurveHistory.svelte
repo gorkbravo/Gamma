@@ -167,7 +167,7 @@
   p { padding: var(--space-3) var(--space-5); margin: 0; color: var(--text-1); font-size: var(--text-sm); overflow-wrap: anywhere; }
   [role=alert], .warning { color: var(--warning); }
   label { display: grid; gap: var(--space-2); min-width: 0; flex: 1 1 220px; font-size: var(--text-sm); }
-  /* Controls are .btn and .form-control from primitives.css; `font: inherit` stays for V2. */
+  /* Controls are .btn and .form-control from primitives.css; they inherit the panel's --font-ui. */
   button, input, select { font: inherit; }
   input, select { min-width: 0; width: 100%; box-sizing: border-box; }
   /* Cells come from .data-table.is-figures.is-nowrap in primitives.css; the

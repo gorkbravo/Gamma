@@ -391,6 +391,7 @@
   }
 
   button {
+    font-family: var(--font-ui);
     cursor: pointer;
   }
 
@@ -602,6 +603,7 @@
     margin: 0;
     color: var(--text-1);
     font: inherit;
+    font-family: var(--font-code), monospace;
     font-size: var(--text-sm);
     line-height: var(--leading-normal);
     white-space: pre-wrap;

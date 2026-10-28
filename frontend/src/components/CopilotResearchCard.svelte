@@ -543,6 +543,12 @@
     font: inherit;
   }
 
+  /* Fields keep the drawer's font; buttons take the interface font. */
+  button,
+  .close-btn {
+    font-family: var(--font-ui);
+  }
+
   textarea {
     resize: vertical;
     min-height: 3.2rem;
