@@ -60,7 +60,7 @@
                 {#if card.divergence_score !== null}
                   <span class="score-badge {card.agreement_label}">{card.divergence_score.toFixed(1)}</span>
                 {/if}
-                <span class="tag is-tinted tone-tag">{card.agreement_label}</span>
+                <span class="tag is-tinted context">{card.agreement_label}</span>
               </div>
             </div>
 
@@ -320,14 +320,8 @@
   }
 
   /* ── Tags ──
-     The chip is .tag.is-tinted from primitives.css; .tone-tag is this
-     card's gold variant. */
-  .tag.tone-tag {
-    border-color: rgba(196, 154, 90, 0.24);
-    background: rgba(196, 154, 90, 0.06);
-    color: var(--accent-2);
-  }
-
+     The chip, gold agreement label included, is .tag.is-tinted from
+     primitives.css. */
   .score-badge {
     display: inline-flex;
     align-items: center;

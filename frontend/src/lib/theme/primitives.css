@@ -523,3 +523,7 @@
 .tag.is-tinted.positive { border-color: rgba(75, 180, 116, 0.25); background: rgba(75, 180, 116, 0.06); color: var(--positive); }
 .tag.is-tinted.negative { border-color: rgba(198, 107, 97, 0.32); background: rgba(198, 107, 97, 0.08); color: var(--negative); }
 .tag.is-tinted.warning { border-color: rgba(196, 154, 90, 0.32); background: rgba(196, 154, 90, 0.08); color: var(--accent-2); }
+
+/* Context: a quieter gold chip that names where a reading sits (a region, a
+   meeting window, an agreement level) rather than flagging a signal. */
+.tag.is-tinted.context { border-color: rgba(196, 154, 90, 0.24); background: rgba(196, 154, 90, 0.06); color: var(--accent-2); }
