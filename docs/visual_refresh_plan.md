@@ -4,7 +4,7 @@ _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
 - Last reviewed: 2026-10-28
-- Implementation status: V1 in progress. Panel title, tags and the data table with its modifiers are done (tables converged on branch `claude/musing-easley-b0d363`, not yet merged); buttons, inputs, selects and inline stats remain. V2–V6 planned.
+- Implementation status: V1 in progress. Panel title, tags and the data table with its modifiers are done (merged into main on 2026-10-28); buttons, inputs, selects and inline stats remain. V2–V6 planned.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
 - Doctrine: [`design_principles.md`](./design_principles.md) stays authoritative for the current look until V5 rewrites it. Do not apply B′ values to views before V4.
@@ -174,4 +174,5 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 
 - 2026-10-27: exploration of directions A (Ruled), B (Tonal) and C (Grid) against today's look on Commodities and Copilot, with measured density.
 - 2026-10-28: exploration extended to Sitrep, Options and Risk, plus the B′ variant and a drawer versus top-tabs comparison. The user chose B′ and kept the drawer. V1 started in a separate worktree session: commit 684312b adds the 26px panel title, an opt-in `.data-table`, `.tag` and the Macro `.tag.is-tinted`, with no visual change (18/18 screenshots and 7,486 computed-style checks identical). It was merged into main as 9151727 the same day.
-- 2026-10-28: with the user's approval, V1 continues with deliberate convergences. On branch `claude/musing-easley-b0d363` (not merged), a373294 moves every data table onto `.data-table` plus modifiers and 7616ea2 folds the four gold Macro tags into `.tag.is-tinted.context`. The convergences and kept exceptions are listed above. Buttons, inputs, selects and inline stats are still open.
+- 2026-10-28: with the user's approval, V1 continues with deliberate convergences. On branch `claude/musing-easley-b0d363`, a373294 moves every data table onto `.data-table` plus modifiers and 7616ea2 folds the four gold Macro tags into `.tag.is-tinted.context`. The convergences and kept exceptions are listed above. Buttons, inputs, selects and inline stats are still open.
+- 2026-10-28: the user reviewed the before/after screenshots, accepted the convergences, and merged the branch into main as 77d40e5 (not pushed).
