@@ -909,7 +909,7 @@
           </div>
 
           <div class="table-wrap heatmap-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr>
                   <th>Family</th>
@@ -975,7 +975,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Use</th><th>Ticker</th><th>Reason</th><th>Exchange</th></tr>
               </thead>
@@ -1084,7 +1084,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Form</th><th>Report</th><th>Filed</th><th>Amend</th></tr>
               </thead>
@@ -1138,7 +1138,7 @@
 
         <div class="peer-layout">
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Use</th><th>Ticker</th><th>Reason</th><th>Market Cap</th><th>Revenue</th></tr>
               </thead>
@@ -1189,7 +1189,7 @@
         </div>
 
         <div class="table-wrap peer-comparison-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr>
                 <th>Ticker</th>
@@ -1230,7 +1230,7 @@
         </div>
 
         <div class="table-wrap heatmap-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr>
                 <th>Family</th>
@@ -1277,7 +1277,7 @@
             <small>{currentStatementTrends.length} comparable rows</small>
           </div>
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead><tr><th>Line</th><th>Latest</th><th>Prior</th><th>Change</th></tr></thead>
               <tbody>
                 {#if currentStatementTrends.length}
@@ -1335,7 +1335,7 @@
         </div>
 
         <div class="table-wrap statement-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr>
                 <th>Line Item</th>
@@ -1384,7 +1384,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr>
                   <th>Ratio</th>
@@ -1421,7 +1421,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Line</th><th>Period</th><th>Value</th><th>Concept</th><th>Filing</th><th>Note</th></tr>
               </thead>
@@ -1455,7 +1455,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Form</th><th>Report</th><th>Filed</th><th>Accession</th></tr>
               </thead>
@@ -1561,7 +1561,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Input</th><th>Value</th><th>Note</th></tr>
               </thead>
@@ -1592,7 +1592,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Driver</th><th>Value / Share</th><th>Read</th></tr>
               </thead>
@@ -1623,7 +1623,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Check</th><th>Severity</th><th>Value</th><th>Benchmark</th><th>Read</th></tr>
               </thead>
@@ -1656,7 +1656,7 @@
           </div>
 
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Driver</th><th>Market-Implied</th><th>Base</th><th>Gap</th></tr>
               </thead>
@@ -1692,7 +1692,7 @@
         </div>
 
         <div class="table-wrap compact-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr><th>Name</th><th>Created</th><th>Active</th><th>Value / Share</th><th>Load</th></tr>
             </thead>
@@ -1726,7 +1726,7 @@
         </div>
 
         <div class="table-wrap sheet-wrap">
-          <table class="sheet-table">
+          <table class="data-table is-sticky is-open-end sheet-table">
             <thead>
               <tr>
                 <th>Line</th>
@@ -1788,7 +1788,7 @@
         </div>
 
         <div class="table-wrap sheet-wrap">
-          <table class="sheet-table">
+          <table class="data-table is-sticky is-open-end sheet-table">
             <thead>
               <tr>
                 <th>Driver</th>
@@ -1834,7 +1834,7 @@
         </div>
 
         <div class="table-wrap sheet-wrap">
-          <table class="sheet-table">
+          <table class="data-table is-sticky is-open-end sheet-table">
             <thead>
               <tr>
                 <th>Line</th>
@@ -1884,7 +1884,7 @@
         </div>
 
         <div class="table-wrap compact-wrap sheet-wrap">
-          <table class="sheet-table sensitivity-table">
+          <table class="data-table is-sticky is-open-end sheet-table sensitivity-table">
             <thead>
               <tr>
                 <th>Terminal \\ WACC</th>
@@ -1969,7 +1969,7 @@
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr><th>Driver</th><th>Implied</th><th>Base</th><th>Gap</th><th>Solved EV</th><th>Status</th><th>Note</th></tr>
             </thead>
@@ -2024,7 +2024,7 @@
             <small>{reverseValuation?.sensitivity_matrix?.rows.length ?? 0} rows</small>
           </div>
           <div class="table-wrap compact-wrap sheet-wrap">
-            <table class="sheet-table sensitivity-table">
+            <table class="data-table is-sticky is-open-end sheet-table sensitivity-table">
               <thead>
                 <tr>
                   <th>Terminal \\ WACC</th>
@@ -2067,7 +2067,7 @@
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr><th>Form</th><th>Report Period</th><th>Filed</th><th>Accession</th><th>Amendment</th><th>Provider</th></tr>
             </thead>
@@ -2101,7 +2101,7 @@
             <small>{referenceInspection?.coverage.length ?? 0} rows</small>
           </div>
           <div class="table-wrap compact-wrap">
-            <table>
+            <table class="data-table is-sticky is-open-end">
               <thead>
                 <tr><th>Statement</th><th>Line</th><th>Concepts</th><th>Observed</th><th>Derived</th><th>Warning</th></tr>
               </thead>
@@ -2164,7 +2164,7 @@
           <small>{referenceInspection?.traces.length ?? 0} rows</small>
         </div>
         <div class="table-wrap statement-wrap">
-          <table>
+          <table class="data-table is-sticky is-open-end">
             <thead>
               <tr><th>Statement</th><th>Line</th><th>Period</th><th>Value</th><th>Concept</th><th>Filing</th><th>Derived Note</th></tr>
             </thead>
@@ -3135,32 +3135,8 @@
     max-height: 42rem;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  thead th {
-    text-align: left;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-    font-weight: 500;
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    position: sticky;
-    top: 0;
-    background: var(--bg-0);
-    z-index: 1;
-  }
-
-  tbody td {
-    padding: var(--space-3) var(--space-4);
-    border-top: 1px solid var(--divider);
-    vertical-align: middle;
-    font-size: var(--text-sm);
-  }
+  /* Cells, rules and the sticky header come from .data-table.is-sticky.is-open-end
+     in primitives.css. */
 
   tbody td small {
     display: block;

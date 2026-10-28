@@ -11,7 +11,7 @@
 {:else if entries.length === 0}<p>No retained rows.</p>
 {:else}
   {#if scalars.length}
-    <table><tbody>{#each scalars as [key, item]}<tr><th scope="row">{evidenceLabel(key)}</th><td>{evidenceValue(item, key)}</td></tr>{/each}</tbody></table>
+    <table class="data-table is-keyvalue"><tbody>{#each scalars as [key, item]}<tr><th scope="row">{evidenceLabel(key)}</th><td>{evidenceValue(item, key)}</td></tr>{/each}</tbody></table>
   {/if}
   {#each groups as [key, item]}
     <details open={depth === 0}><summary>{Array.isArray(value) ? `Observation ${Number(key) + 1}` : evidenceLabel(key)}</summary>
@@ -20,10 +20,7 @@
   {/each}
 {/if}
 <style>
-  table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
-  th, td { padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--divider); vertical-align: top; overflow-wrap: anywhere; }
-  th { text-align: left; color: var(--text-2); font-family: var(--display-font); font-weight: 400; width: 40%; }
-  td { text-align: right; font-variant-numeric: tabular-nums; }
+  /* The label/value rows are .data-table.is-keyvalue in primitives.css. */
   summary { padding: var(--space-3) var(--space-5); cursor: pointer; font-family: var(--display-font); font-size: var(--text-sm); }
   summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   p { padding: var(--space-3) var(--space-5); font-size: var(--text-xs); color: var(--text-2); }

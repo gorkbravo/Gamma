@@ -1632,7 +1632,7 @@
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
             <thead>
               <tr>
                 <th>Symbol</th>
@@ -1788,7 +1788,7 @@
           </div>
 
           <div class="table-wrap preview-table">
-            <table>
+            <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead>
                 <tr><th>Symbol</th><th>Input</th><th>Normalized</th></tr>
               </thead>
@@ -1983,7 +1983,7 @@
         <article class="panel table-panel">
           <div class="panel-header tight-head"><h3>Side-by-Side Metrics</h3></div>
           <div class="table-wrap">
-            <table>
+            <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead><tr><th>Metric</th><th>{compareResult?.left.label ?? "Left"}</th><th>{compareResult?.right.label ?? "Right"}</th></tr></thead>
               <tbody>
                 {#each compareMetricRows as row}
@@ -2008,7 +2008,7 @@
           <article class="panel table-panel">
             <div class="panel-header tight-head"><h3>Constituent Comparison</h3><small>{constituentRows.length} rows</small></div>
             <div class="table-wrap compact-table">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr><th>Symbol</th><th>Weight</th><th>Return</th><th>Vol</th></tr></thead>
                 <tbody>
                   {#if constituentRows.length}
@@ -2052,7 +2052,7 @@
             <button type="button" class="ghost-button inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
           </div>
           <div class="table-wrap">
-            <table>
+            <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
               <tbody>
                 {#if visibleSavedItems.length}
@@ -2898,37 +2898,9 @@
     background: transparent;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  thead th {
-    text-align: left;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    position: sticky;
-    top: 0;
-    background: var(--bg-0);
-    z-index: 1;
-    white-space: nowrap;
-  }
-
-  tbody td {
-    padding: var(--space-4) var(--space-4);
-    border-top: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-    font-size: var(--text-base);
-  }
-
-  tbody tr:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-  }
+  /* Cells, rules and hover come from .data-table and its is-sticky,
+     is-relaxed, is-body-text, is-nowrap and is-open-end modifiers in
+     primitives.css. */
 
   .table-actions {
     display: flex;

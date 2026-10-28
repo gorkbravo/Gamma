@@ -11,7 +11,7 @@
     <article class="panel table-panel">
       <div class="table-panel-header">Country Compare</div>
       {#if countryCompare?.rows?.length}
-        <table>
+        <table class="data-table is-top">
           <thead>
             <tr>
               <th>Metric</th>
@@ -86,33 +86,7 @@
     text-transform: uppercase;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    border-bottom: 1px solid var(--divider);
-    padding: var(--space-3) var(--space-4);
-    text-align: left;
-    vertical-align: top;
-  }
-
-  th {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  td {
-    color: var(--text-1);
-    font-size: var(--text-sm);
-  }
-
-  td strong,
+  /* Cells, header and row identifiers come from .data-table.is-top in primitives.css. */
   h3 {
     color: var(--text-0);
   }

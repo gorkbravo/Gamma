@@ -751,7 +751,7 @@
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-sticky is-nowrap">
             <thead>
               <tr>
                 <th>Symbol</th>
@@ -1366,41 +1366,8 @@
     overflow: auto;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-    line-height: var(--leading-tight);
-  }
-
-  th {
-    color: var(--text-2);
-    font-size: var(--text-2xs);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    background: var(--surface-0);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  td {
-    font-size: var(--text-sm);
-  }
-
-  th.num,
-  td.num {
-    text-align: right;
-  }
-
+  /* Cells, the sticky header and numeric columns come from
+     .data-table.is-sticky.is-nowrap in primitives.css. */
   td.symbol {
     color: var(--text-0);
     font-weight: 600;

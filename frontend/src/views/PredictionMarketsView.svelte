@@ -945,7 +945,7 @@
 
       <article class="panel table-panel">
         <div class="table-scroll tall fills-viewport">
-          <table class="screener-table">
+          <table class="data-table is-sticky is-nowrap is-compact is-body-text screener-table">
             <thead>
               <tr>
                 <th class="tick-col" title="Add to comparison">CMP</th>
@@ -1047,7 +1047,7 @@
             <small>{watchlist.length}/{savedResearch?.watchlist_limit ?? 0} saved{savedLoading ? " | SAVING..." : ""}</small>
           </div>
           {#if watchlist.length}
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Market</th>
@@ -1094,7 +1094,7 @@
             <span>Venue Status</span>
             <small>{screener?.warnings?.length ?? 0} notes</small>
           </div>
-          <table>
+          <table class="data-table is-sticky is-nowrap is-compact is-body-text">
             <thead>
               <tr>
                 <th>Venue</th>
@@ -1290,7 +1290,7 @@
               <span>Outcome Ladder</span>
               <small>{outcomeLadder.length} outcomes</small>
             </div>
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Outcome</th>
@@ -1407,7 +1407,7 @@
               </div>
             {/if}
             <div class="table-scroll tall fills-viewport">
-              <table>
+              <table class="data-table is-sticky is-nowrap is-compact is-body-text">
                 <thead>
                   <tr>
                     <th>Contract</th>
@@ -1500,7 +1500,7 @@
                 >
               </article>
             </div>
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Participant</th>
@@ -1571,7 +1571,7 @@
             <small>{crossDomainHandoffs.length} resolved targets</small>
           </div>
           {#if crossDomainHandoffs.length}
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Target</th>
@@ -1676,7 +1676,7 @@
                 >
               </article>
             </div>
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th class="num">Bid Size</th>
@@ -1714,7 +1714,7 @@
             <small>{related?.related.length ?? 0} links</small>
           </div>
           {#if relatedSections.length}
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Market</th>
@@ -1807,7 +1807,7 @@
           </div>
         </div>
         {#if compareRows.length}
-          <table>
+          <table class="data-table is-sticky is-nowrap is-compact is-body-text">
             <thead>
               <tr>
                 <th>Contract</th>
@@ -1873,7 +1873,7 @@
           >
         </div>
         {#if namedSets.length}
-          <table>
+          <table class="data-table is-sticky is-nowrap is-compact is-body-text">
             <thead>
               <tr>
                 <th>Set</th>
@@ -1983,7 +1983,7 @@
         </div>
         {#if rankedPairs.length}
           <div class="table-scroll">
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Pair</th>
@@ -2131,7 +2131,7 @@
           <small>{activeCurve?.label ?? "N/A"} | n={activeCurve?.sample_size ?? 0}</small>
         </div>
         {#if calibrationRows.length}
-          <table>
+          <table class="data-table is-sticky is-nowrap is-compact is-body-text">
             <thead>
               <tr>
                 <th>Bucket</th>
@@ -2188,7 +2188,7 @@
           <small>settlement price excluded</small>
         </div>
         {#if calibration?.curves?.length}
-          <table>
+          <table class="data-table is-sticky is-nowrap is-compact is-body-text">
             <thead>
               <tr>
                 <th>Lead</th>
@@ -2230,7 +2230,7 @@
         </div>
         {#if calibration?.observations?.length}
           <div class="table-scroll tall fills-viewport">
-            <table>
+            <table class="data-table is-sticky is-nowrap is-compact is-body-text">
               <thead>
                 <tr>
                   <th>Market</th>
@@ -2889,37 +2889,10 @@
     padding-top: var(--space-3);
   }
 
-  /* ── Tables ──────────────────────────────────────────────── */
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: var(--space-2) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-  }
-
-  th {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    background: var(--surface-0);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  th.num,
-  td.num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
+  /* ── Tables ──────────────────────────────────────────────────
+     Cells, the sticky header, numeric columns, hover and the selected row
+     come from .data-table.is-sticky.is-nowrap.is-compact.is-body-text in
+     primitives.css. */
 
   .tick-col {
     width: 2.2rem;
@@ -2969,13 +2942,6 @@
     cursor: pointer;
   }
 
-  tbody tr:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-  }
-
-  tbody tr.selected {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-  }
 
   .market-title {
     display: grid;

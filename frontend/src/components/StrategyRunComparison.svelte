@@ -51,7 +51,7 @@
   {#if error}<p role="alert">{error} Retry Compare Runs.</p>{/if}
   {#if result}
     <p>{result.aligned_observation_count} shared observations · {result.overlap_start?.slice(0, 10)} – {result.overlap_end?.slice(0, 10)}</p>
-    <table><thead><tr><th>Metric</th><th>Baseline</th><th>Comparison</th><th>Change</th></tr></thead><tbody>
+    <table class="data-table is-figures"><thead><tr><th>Metric</th><th>Baseline</th><th>Comparison</th><th>Change</th></tr></thead><tbody>
       {#each [{ label: "Total return", key: "total_return" }, { label: "Annual volatility", key: "annual_volatility" }, { label: "Max drawdown", key: "max_drawdown" }] as metric}
         {@const a = result.left.metrics[metric.key as "total_return" | "annual_volatility" | "max_drawdown"]}
         {@const b = result.right.metrics[metric.key as "total_return" | "annual_volatility" | "max_drawdown"]}
@@ -72,7 +72,5 @@
   select { width: 100%; min-width: 0; }
   button:disabled { opacity: 0.5; }
   p { margin: 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm); color: var(--text-1); overflow-wrap: anywhere; }
-  table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-  td, th { text-align: right; padding: var(--space-4); border-bottom: 1px solid var(--divider); }
-  th:first-child, td:first-child { text-align: left; }
+  /* Cells come from .data-table.is-figures in primitives.css. */
 </style>

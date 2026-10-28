@@ -118,7 +118,7 @@
   {#if comparison}
     <h4>Exact-contract changes · {comparison.unit} · {comparison.currency}</h4>
     <p>{date(comparison.baseline.payload.curve.as_of)} → {date(comparison.comparison.payload.curve.as_of)}</p>
-    <div class="table-wrap"><table><thead><tr><th>Contract / ID</th><th>Month</th><th>Baseline</th><th>Comparison</th><th>Change</th><th>Coverage</th></tr></thead><tbody>
+    <div class="table-wrap"><table class="data-table is-figures is-nowrap"><thead><tr><th>Contract / ID</th><th>Month</th><th>Baseline</th><th>Comparison</th><th>Change</th><th>Coverage</th></tr></thead><tbody>
       {#each comparison.rows as row}<tr><td>{row.contract.symbol}<small>{row.contract_id}</small></td><td>{row.contract.contract_month}</td>
         <td title={curveNodeQuality(row.baseline)}>{number(row.baseline?.price)}</td><td title={curveNodeQuality(row.comparison)}>{number(row.comparison?.price)}</td>
         <td>{number(row.change)}</td><td>{status(row.status)}</td></tr>{/each}
@@ -128,7 +128,7 @@
   {#if retained}
     <h4>Retained {retained.payload.instrument.symbol} curve · {retained.payload.instrument.quote_unit} · {retained.payload.instrument.currency}</h4>
     <p>Capture {retained.id.slice(0, 6)} · Observed {date(retained.payload.curve.as_of)} · Saved {date(retained.captured_at)} · {retained.payload.coverage.coverage_status} coverage</p>
-    <div class="table-wrap"><table><thead><tr><th>Contract / ID</th><th>Month / Expiry</th><th>Price</th><th>Provider / Quality</th></tr></thead><tbody>
+    <div class="table-wrap"><table class="data-table is-figures is-nowrap"><thead><tr><th>Contract / ID</th><th>Month / Expiry</th><th>Price</th><th>Provider / Quality</th></tr></thead><tbody>
       {#each retainedNodes as node}<tr><td>{node.contract.symbol}<small>{node.contract.contract_id}{node.contract.is_front_month ? " · captured front" : ""}</small></td>
         <td>{node.contract.contract_month}<small>{node.contract.expiry_date?.slice(0, 10) ?? "Expiry unavailable"}</small></td><td>{number(node.price)}</td><td>{curveNodeQuality(node)}</td></tr>{/each}
     </tbody></table></div>
@@ -152,7 +152,7 @@
   {#if history}
     <h4>{history.spread.payload.label} · Left − Right · {history.spread.payload.unit}</h4>
     <p>{history.spread.payload.left_contract.symbol} ({history.spread.payload.left_contract.contract_id}) − {history.spread.payload.right_contract.symbol} ({history.spread.payload.right_contract.contract_id})</p>
-    <div class="table-wrap"><table><thead><tr><th>Observed / Saved</th><th>Left</th><th>Right</th><th>Spread</th><th>Coverage</th></tr></thead><tbody>
+    <div class="table-wrap"><table class="data-table is-figures is-nowrap"><thead><tr><th>Observed / Saved</th><th>Left</th><th>Right</th><th>Spread</th><th>Coverage</th></tr></thead><tbody>
       {#each history.points as point}<tr><td>{date(point.as_of)}<small>{date(point.captured_at)}</small></td><td title={curveNodeQuality(point.left)}>{number(point.left?.price)}</td><td title={curveNodeQuality(point.right)}>{number(point.right?.price)}</td><td>{number(point.value)}</td><td title={spreadPointNote(point)}>{status(point.status)}{#if spreadPointNote(point)}<small>{spreadPointNote(point)}</small>{/if}</td></tr>{/each}
     </tbody></table></div>
     {#each history.warnings as warning}<p>{warning}</p>{/each}
@@ -169,10 +169,10 @@
   label { display: grid; gap: var(--space-2); min-width: 0; flex: 1 1 220px; font-size: var(--text-sm); }
   button, input, select { min-height: 28px; color: var(--text-0); background: var(--bg-1); border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-4); font: inherit; }
   input, select { min-width: 0; width: 100%; box-sizing: border-box; } button:disabled { opacity: 0.5; }
-  .table-wrap { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-family: var(--app-font), monospace; font-size: var(--text-sm); }
-  th, td { text-align: right; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--divider); white-space: nowrap; }
-  th { font-family: var(--display-font); }
-  th:first-child, td:first-child, th:last-child, td:last-child { text-align: left; }
+  /* Cells come from .data-table.is-figures.is-nowrap in primitives.css; the
+     last column here is a label (coverage, provider), so it reads left. */
+  .table-wrap { overflow-x: auto; } table { font-family: var(--app-font), monospace; }
+  th:last-child, td:last-child { text-align: left; }
   small { display: block; color: var(--text-2); font-size: var(--text-xs); }
   details { padding: var(--space-4) var(--space-5); font-size: var(--text-sm); } summary { cursor: pointer; }
 </style>

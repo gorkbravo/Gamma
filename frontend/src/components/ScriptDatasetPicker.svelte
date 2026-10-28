@@ -124,7 +124,7 @@
         <p>Cache: {preview.cache_status === "cached" ? "Cached" : "Not reported by owning service"}</p>
         <p>{preview.field_notes}</p>
         <p>SHA256: {preview.sha256}</p>
-        <div class="schema"><table><thead><tr><th>Field</th><th>Type / unit</th></tr></thead><tbody>
+        <div class="schema"><table class="data-table is-compact"><thead><tr><th>Field</th><th>Type / unit</th></tr></thead><tbody>
           {#each preview.fields as field}<tr><td>{field.name}</td><td>{field.type}{field.unit ? ` / ${field.unit}` : ""}</td></tr>{/each}
         </tbody></table></div>
       </details>
@@ -140,8 +140,8 @@
 <style>
   .picker, label, .preview { display: grid; gap: var(--space-3); min-width: 0; }
   .picker { gap: var(--space-4); }
-  label, p, summary, table { font-size: var(--text-xs); }
-  label, summary, th { font-family: var(--display-font); color: var(--text-2); }
+  label, p, summary { font-size: var(--text-xs); }
+  label, summary { font-family: var(--display-font); color: var(--text-2); }
   p { margin: 0; color: var(--text-2); overflow-wrap: anywhere; line-height: var(--leading-normal); }
   input, select, button { min-width: 0; max-width: 100%; min-height: 30px; border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); background: var(--bg-1); color: var(--text-1); padding: var(--space-3); font: inherit; }
   input, select { width: 100%; box-sizing: border-box; }
@@ -153,9 +153,8 @@
   .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: var(--space-3); }
   .preview { border-block: 1px solid var(--divider); padding-block: var(--space-4); }
   .schema { max-height: 18rem; overflow: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: var(--space-2); border-bottom: 1px solid var(--divider); overflow-wrap: anywhere; }
-  td { color: var(--text-1); }
+  /* Cells and header come from .data-table.is-compact in primitives.css. */
+  .data-table td { font-size: var(--text-xs); overflow-wrap: anywhere; }
   summary { color: var(--accent); }
   .warning { color: var(--warning); }
 </style>

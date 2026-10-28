@@ -285,7 +285,7 @@
         {/if}
         {#if block.plan.domain_plan.length}
           <div class="table-wrap">
-            <table>
+            <table class="data-table is-compact is-grid is-top">
               <thead><tr><th>Domain</th><th>Depth</th><th>Budget</th><th>Reason</th></tr></thead>
               <tbody>
                 {#each block.plan.domain_plan as item}
@@ -332,7 +332,7 @@
           <span>{block.plan.confirmation_checkpoints.length} checkpoints</span>
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="data-table is-compact is-grid is-top">
             <thead><tr><th>#</th><th>Step</th><th>Action</th><th>Policy</th><th>Artifacts</th></tr></thead>
             <tbody>
               {#each block.plan.steps as step}
@@ -470,7 +470,7 @@
         <p class="diff-scroll-hint">Scroll the comparison horizontally to inspect every before and after value.</p>
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus is needed to scroll the full comparison.) -->
         <div class="table-wrap" role="region" aria-label="DCF before-and-after comparison" tabindex="0">
-          <table>
+          <table class="data-table is-compact is-grid is-top">
             <thead><tr><th>Field</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
             <tbody>
               {#each block.mutation.diff as entry}
@@ -829,31 +829,8 @@
     overflow-x: auto;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--text-sm);
-  }
-
-  th,
-  td {
-    padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--divider);
-    text-align: left;
-    vertical-align: top;
-  }
-
-  th {
-    color: var(--text-2);
-    background: var(--surface-1);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
-  }
-
-  td {
-    color: var(--text-1);
-  }
+  /* Cells and the full grid come from .data-table.is-compact.is-grid.is-top
+     in primitives.css. */
 
   td strong,
   td small {

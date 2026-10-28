@@ -853,7 +853,7 @@
             {/if}
 
             <div class="table-wrap compact-table">
-              <table class="composer-table">
+              <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end composer-table">
                 <thead>
                   <tr>
                     <th>Label</th>
@@ -1002,7 +1002,7 @@
                 {/if}
                 {#if bookValidationLegs.length}
                   <div class="table-wrap compact-table">
-                    <table>
+                    <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                       <thead>
                         <tr><th>Leg</th><th>Source</th><th>Window</th><th class="num-cell" title="Trading days between the leg's last observation and today">Lag</th><th class="num-cell">Obs</th><th class="num-cell">Norm Wt</th></tr>
                       </thead>
@@ -1053,7 +1053,7 @@
           <article class="panel table-panel">
             <div class="table-panel-header">Reusable Gamma Objects</div>
             <div class="table-wrap compact-table">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead>
                   <tr><th>Use</th><th>Object</th><th>Type</th><th class="num-cell">Weight</th><th></th></tr>
                 </thead>
@@ -1130,7 +1130,7 @@
                     </div>
                   {/if}
                   <div class="table-wrap compact-table">
-                    <table>
+                    <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                       <thead>
                         <tr><th>Leg</th><th>Source</th><th>Window</th><th class="num-cell">Obs</th><th class="num-cell">Norm Wt</th></tr>
                       </thead>
@@ -1218,7 +1218,7 @@
               <small>{parsedStrategyCsv.rows.length} rows / {parsedStrategyCsv.columns.length} columns</small>
             </div>
             <div class="table-wrap compact-table">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr>{#each parsedStrategyCsv.columns.slice(0, 5) as column}<th>{column}</th>{/each}</tr></thead>
                 <tbody>
                   {#if parsedStrategyCsv.rows.length}
@@ -1245,7 +1245,7 @@
             <article class="panel table-panel">
               <div class="panel-header tight-head"><h3>Worst Drawdowns</h3><small>{stressDrawdownRows.length} points</small></div>
               <div class="table-wrap compact-table">
-                <table>
+                <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                   <thead><tr><th>Date</th><th class="num-cell">Drawdown</th></tr></thead>
                   <tbody>
                     {#if stressDrawdownRows.length}
@@ -1266,7 +1266,7 @@
                 <small>{rollingStressRows.length} windows &middot; {rollingWindowLabel(activeStrategyResult)}</small>
               </div>
               <div class="table-wrap compact-table">
-                <table>
+                <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                   <thead><tr>
                     <th>Date</th>
                     <th class="num-cell" title={rollingMetricTitle("Compounded return", activeStrategyResult)}>Roll Ret</th>
@@ -1298,7 +1298,7 @@
           <article class="panel table-panel">
             <div class="panel-header tight-head"><h3>Monthly Returns</h3><small>{activeStrategyResult?.monthly_returns.length ?? 0} periods</small></div>
             <div class="table-wrap compact-table">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr><th>Period</th><th class="num-cell">Return</th></tr></thead>
                 <tbody>
                   {#if activeStrategyResult?.monthly_returns.length}
@@ -1316,7 +1316,7 @@
           <article class="panel table-panel">
             <div class="panel-header tight-head"><h3>Annual Returns</h3><small>{activeStrategyResult?.annual_returns.length ?? 0} periods</small></div>
             <div class="table-wrap compact-table">
-              <table>
+              <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr><th>Period</th><th class="num-cell">Return</th></tr></thead>
                 <tbody>
                   {#if activeStrategyResult?.annual_returns.length}
@@ -1408,7 +1408,7 @@
             <button type="button" class="ghost-button inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
           </div>
           <div class="table-wrap">
-            <table>
+            <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
               <tbody>
                 {#if visibleSavedItems.length}
@@ -1821,33 +1821,9 @@
     padding: var(--space-2) var(--space-5) var(--space-3);
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  thead th {
-    text-align: left;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    position: sticky;
-    top: 0;
-    background: var(--bg-0);
-    z-index: 1;
-    white-space: nowrap;
-  }
-
-  tbody td {
-    padding: var(--space-4) var(--space-4);
-    border-top: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-    font-size: var(--text-base);
-  }
+  /* Cells, rules and hover come from .data-table and its is-sticky,
+     is-relaxed, is-body-text, is-nowrap and is-open-end modifiers in
+     primitives.css. */
 
   .num-cell {
     text-align: right;
@@ -2181,9 +2157,6 @@
     white-space: normal;
   }
 
-  tbody tr:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-  }
 
   .table-actions {
     display: flex;

@@ -112,7 +112,7 @@
   <div class="temporary-grid">
     <section class="temporary-section">
       <h3>Portfolio definition</h3>
-      <table>
+      <table class="data-table is-compact">
         <thead><tr><th>Symbol</th><th>Weight</th><th>Type</th></tr></thead>
         <tbody>
           {#each legs as leg}
@@ -189,8 +189,7 @@
   .temporary-label,
   .temporary-scope,
   h3,
-  dt,
-  th {
+  dt {
     color: var(--text-2);
     font-size: var(--text-2xs);
     text-transform: uppercase;
@@ -236,9 +235,7 @@
 
   .temporary-section { min-width: 0; }
   h3 { margin: 0 0 var(--space-3); font-weight: 600; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--divider); text-align: left; }
-  td { color: var(--text-1); font-size: var(--text-sm); }
+  /* Cells and header come from .data-table.is-compact in primitives.css. */
   td.empty { color: var(--text-2); text-align: center; }
 
   dl { margin: 0; display: grid; gap: var(--space-2); }
