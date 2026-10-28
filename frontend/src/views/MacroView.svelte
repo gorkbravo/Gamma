@@ -458,8 +458,8 @@
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--accent);
-    border: 1px solid rgba(122, 166, 200, 0.28);
-    background: rgba(122, 166, 200, 0.06);
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
     animation: pulse-opacity 1.6s ease-in-out infinite;

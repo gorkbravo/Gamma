@@ -64,6 +64,7 @@
     type ResearchTreemapTile
   } from "../lib/view-models/research";
   import { heroPricePointFromApiPoint, type HeroPricePoint } from "../lib/view-models/hero-price-chart";
+  import { mixToken } from "../lib/chart-colors";
 
   export let mode: EquityResearchMode = "overview";
   export let workingAnalysis: CopilotWorkingAnalysis | null = null;
@@ -566,25 +567,22 @@
   }
 
   function overviewTileColor(value: number | null, metricId: ResearchOverviewMetricId, maxAbs: number) {
-    // RGB values below match design tokens exactly:
-    //   --accent   #7aa6c8 = 122,166,200
-    //   --warning  #c49a5a = 196,154, 90
-    //   --positive #4bb474 =  75,180,116
-    //   --negative #c66b61 = 198,107, 97
-    //   --text-2   #8a919a = 138,145,154
+    // Each tile mixes a token into transparent, stronger as the value grows:
+    // gold or accent for volatility and beta, green and the muted red for
+    // signed metrics, --text-2 when there is no value.
     if (value == null || !Number.isFinite(value)) {
-      return "rgba(138, 145, 154, 0.14)";
+      return mixToken("--text-2", 0.14);
     }
     const intensity = Math.min(0.78, 0.22 + Math.abs(value) / Math.max(maxAbs, 1e-6) * 0.56);
     if (metricId === "volatility" || metricId === "beta") {
       return value >= 1 && metricId === "beta"
-        ? `rgba(196, 154, 90, ${intensity})`
-        : `rgba(122, 166, 200, ${Math.max(0.24, intensity - 0.08)})`;
+        ? mixToken("--warning", intensity)
+        : mixToken("--accent", Math.max(0.24, intensity - 0.08));
     }
     if (metricId === "drawdown") {
-      return value < 0 ? `rgba(198, 107, 97, ${intensity})` : `rgba(75, 180, 116, ${intensity})`;
+      return value < 0 ? mixToken("--negative-muted", intensity) : mixToken("--positive", intensity);
     }
-    return value >= 0 ? `rgba(75, 180, 116, ${intensity})` : `rgba(198, 107, 97, ${intensity})`;
+    return value >= 0 ? mixToken("--positive", intensity) : mixToken("--negative-muted", intensity);
   }
 
   function overviewTileStyle(tile: ResearchTreemapTile, metricId: ResearchOverviewMetricId, maxAbs: number) {
@@ -2442,8 +2440,8 @@
     border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     box-shadow:
       0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent) inset,
-      0 12px 28px rgba(0, 0, 0, 0.55),
-      0 2px 6px rgba(0, 0, 0, 0.4);
+      0 12px 28px color-mix(in srgb, var(--shadow-ink) 55%, transparent),
+      0 2px 6px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
     color: var(--text-0);
     z-index: 20;
     backdrop-filter: blur(6px);

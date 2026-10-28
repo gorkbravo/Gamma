@@ -28,6 +28,14 @@ function clampAlpha(alpha: number) {
   return Math.min(Math.max(alpha, 0), 1);
 }
 
+/* A token mixed into transparent, for colours built in script (heat-map
+   cells, cluster fills) that the browser still resolves against the active
+   tokens. mixToken("--accent", 0.2) paints like rgba(122, 166, 200, 0.2). */
+export function mixToken(token: string, alpha: number) {
+  const percent = Number((clampAlpha(alpha) * 100).toFixed(6));
+  return `color-mix(in srgb, var(${token}) ${percent}%, transparent)`;
+}
+
 function rgbaString(red: number, green: number, blue: number, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${clampAlpha(alpha)})`;
 }

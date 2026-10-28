@@ -135,8 +135,17 @@
   --data-elevated: #d4a054;
   --data-extreme: #d66868;
 
-  /* ── Shadows and scrim ── */
-  --shadow: rgba(0, 0, 0, 0.24);
+  /* ── Legacy values ──
+     Colours that views use but no role token carries yet. Each keeps the
+     exact value its rules had, so moving the rules onto tokens changed no
+     pixel. */
+  --rule-navy: #2e3c4a;   /* rules and outlines in the Macro and Copilot cards, chart axes */
+  --track: #273544;       /* the unfilled part of bar, gauge and band tracks */
+  --chart-halo: #070b10;  /* tooltip backing and dot outlines in the SVG charts */
+
+  /* ── Shadows and scrim ── every shadow mixes from --shadow-ink. */
+  --shadow-ink: #000;
+  --shadow: color-mix(in srgb, var(--shadow-ink) 24%, transparent);
   /* Dims the workspace behind the navigation drawer. */
   --scrim: color-mix(in srgb, var(--bg-0) 45%, transparent);
 
@@ -153,13 +162,18 @@
   /* ── Flash animation durations ── */
   --flash-duration: 800ms;
 
+  /* ── Canvas dot ── the accent at 7%, written out: a color-mix() stop in a
+     gradient interpolates in floating point and moves edge pixels by one
+     level, where a flat fill paints identically. */
+  --canvas-dot: rgba(122, 166, 200, 0.07);
+
   /* ── Table stripe ── */
-  --table-stripe: rgba(122, 166, 200, 0.018);
+  --table-stripe: color-mix(in srgb, var(--accent) 1.8%, transparent);
 
   /* ── Interaction states ── */
-  --hover-bg: rgba(122, 166, 200, 0.06);
-  --active-bg: rgba(122, 166, 200, 0.12);
-  --focus-ring: rgba(122, 166, 200, 0.55);
+  --hover-bg: color-mix(in srgb, var(--accent) 6%, transparent);
+  --active-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 /* ── Theme: Amber phosphor ── */
@@ -185,7 +199,7 @@ body,
   /* Canvas dot grid — the app's only texture. Panels are solid --bg-0, so
      dots show only in seams and empty canvas. Must stay dimmer than --text-2
      so it never competes with labels; 24px steps match --space-7. */
-  background-image: radial-gradient(circle, rgba(122, 166, 200, 0.07) 1px, transparent 1px);
+  background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1px);
   background-size: 24px 24px;
   color: var(--text-0);
 }
@@ -198,7 +212,7 @@ body {
 }
 
 ::selection {
-  background: rgba(122, 166, 200, 0.28);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--text-0);
 }
 
@@ -339,7 +353,7 @@ tbody tr:nth-child(even) {
 
 /* ── Table row hover (global, subtle) ── */
 tbody tr:hover {
-  background: rgba(122, 166, 200, 0.045);
+  background: color-mix(in srgb, var(--accent) 4.5%, transparent);
 }
 
 /* ── Reduced motion ──

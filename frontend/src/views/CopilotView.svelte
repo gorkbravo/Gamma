@@ -1222,7 +1222,7 @@
     min-width: 15rem;
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
   }
 
   .context-option {
@@ -1246,7 +1246,7 @@
   }
 
   .context-option:hover:not(:disabled) {
-    background: rgba(122, 166, 200, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
   .context-option:disabled {
@@ -1364,12 +1364,12 @@
   }
 
   .role-tabs button:hover {
-    background: rgba(122, 166, 200, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     color: var(--text-0);
   }
 
   .role-tabs button.active {
-    background: rgba(122, 166, 200, 0.12);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
   }
 
@@ -1440,9 +1440,9 @@
   .msg.user .bubble {
     max-width: 80%;
     padding: var(--space-4) var(--space-5);
-    border: 1px solid rgba(122, 166, 200, 0.34);
+    border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
     border-radius: 6px;
-    background: rgba(122, 166, 200, 0.1);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
     color: var(--text-0);
     font-size: var(--text-base);
     line-height: 1.5;
@@ -1632,7 +1632,7 @@
 
   .composer-buttons button.primary {
     color: var(--accent);
-    border-color: rgba(122, 166, 200, 0.34);
+    border-color: color-mix(in srgb, var(--accent) 34%, transparent);
   }
 
   .composer-buttons button.primary.stop {

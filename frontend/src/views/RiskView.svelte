@@ -35,6 +35,7 @@
   } from "../lib/risk-handoff";
   import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, RiskStressReplay, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
+  import { colorWithAlpha, mixToken } from "../lib/chart-colors";
 
   export let mode: WorkspaceMode | null = "portfolio";
   export let activeMode: RiskMode = "overview";
@@ -162,10 +163,10 @@
     const clamped = Math.max(-1, Math.min(1, value));
     if (clamped >= 0) {
       const a = 0.06 + clamped * clamped * 0.62;
-      return `rgba(198, 107, 97, ${a.toFixed(3)})`;
+      return mixToken("--negative-muted", Number(a.toFixed(3)));
     }
     const a = 0.06 + clamped * clamped * 0.45;
-    return `rgba(75, 180, 116, ${a.toFixed(3)})`;
+    return mixToken("--positive", Number(a.toFixed(3)));
   }
 
   function corrTextColor(value: number | null | undefined) {
@@ -173,19 +174,13 @@
     return Math.abs(value) > 0.55 ? "var(--text-0)" : "var(--text-1)";
   }
 
+  /* Cluster identity colours. The eighth has no token and stays a literal
+     (listed in the raw-colour exceptions). */
+  const CLUSTER_COLORS = ["--cat-1", "--cat-3", "--cat-2", "--negative-muted", "--data-cool", "--text-2", "--data-elevated", "rgb(87, 135, 176)"];
+
   function clusterColor(clusterId: number, alpha = 1) {
-    const colors = [
-      [122, 166, 200],
-      [196, 154, 90],
-      [75, 180, 116],
-      [198, 107, 97],
-      [107, 163, 196],
-      [138, 145, 154],
-      [212, 160, 84],
-      [87, 135, 176],
-    ];
-    const rgb = colors[Math.abs(clusterId) % colors.length];
-    return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+    const color = CLUSTER_COLORS[Math.abs(clusterId) % CLUSTER_COLORS.length];
+    return color.startsWith("--") ? mixToken(color, alpha) : colorWithAlpha(color, alpha);
   }
 
   const pct = (value: number | null | undefined, digits = 1) =>

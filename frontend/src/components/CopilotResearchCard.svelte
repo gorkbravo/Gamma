@@ -382,7 +382,7 @@
     position: fixed;
     inset: 0;
     z-index: 44;
-    background: rgba(0, 0, 0, 0.4);
+    background: color-mix(in srgb, var(--shadow-ink) 40%, transparent);
   }
 
   .drawer {
@@ -397,7 +397,7 @@
     grid-template-rows: auto minmax(0, 1fr) auto;
     background: var(--surface-0);
     border-right: 1px solid var(--panel-border);
-    box-shadow: 28px 0 72px rgba(0, 0, 0, 0.4);
+    box-shadow: 28px 0 72px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
     transform: translateX(-100%);
     opacity: 0;
     visibility: hidden;
@@ -422,11 +422,11 @@
     display: flex;
     justify-content: space-between;
     gap: var(--space-6);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
   }
 
   .composer {
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
     display: grid;
     gap: var(--space-4);
   }
@@ -462,7 +462,7 @@
   }
 
   .bubble {
-    border: 1px solid rgba(46, 60, 74, 0.52);
+    border: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
     background: var(--surface-soft);
     padding: var(--space-5) var(--space-5);
     display: grid;
@@ -472,8 +472,8 @@
 
   .user-bubble {
     justify-self: end;
-    background: rgba(122, 166, 200, 0.1);
-    border-color: rgba(122, 166, 200, 0.3);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
     border-top-right-radius: 2px;
   }
 
@@ -488,7 +488,7 @@
   }
 
   .message-card {
-    border: 1px solid rgba(122, 166, 200, 0.18);
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
     background: var(--surface-soft);
     padding: var(--space-5);
   }
@@ -499,7 +499,7 @@
   }
 
   .context-pill {
-    border: 1px solid rgba(46, 60, 74, 0.52);
+    border: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
     background: var(--surface-soft);
     color: var(--text-2);
     padding: var(--space-2) var(--space-4);
@@ -510,8 +510,8 @@
   }
 
   .context-pill.active {
-    border-color: rgba(122, 166, 200, 0.36);
-    background: rgba(122, 166, 200, 0.08);
+    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     color: var(--accent);
   }
 
@@ -567,7 +567,7 @@
 
   .close-btn:hover,
   button:hover:not(:disabled) {
-    border-color: rgba(122, 166, 200, 0.32);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
   }
 
   .composer-actions {
@@ -628,7 +628,7 @@
 
   .role-row button.active {
     color: var(--accent);
-    background: rgba(122, 166, 200, 0.1);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
   }
 
   .effort-select {
@@ -657,7 +657,7 @@
   }
 
   .effort-select select:hover:not(:disabled) {
-    border-color: rgba(122, 166, 200, 0.32);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
     color: var(--text-1);
   }
 
@@ -671,14 +671,14 @@
     font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    border-color: rgba(122, 166, 200, 0.28);
-    background: rgba(122, 166, 200, 0.08);
+    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     color: var(--accent);
   }
 
   .generate-btn:hover:not(:disabled) {
-    background: rgba(122, 166, 200, 0.14);
-    border-color: rgba(122, 166, 200, 0.42);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 42%, transparent);
   }
 
   .generate-btn:disabled {
@@ -743,7 +743,7 @@
     overflow-y: auto;
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
   }
 
   .context-option {

@@ -3024,7 +3024,7 @@
     font-size: var(--text-2xs);
     font-weight: 600;
     border-right: 1px solid var(--divider);
-    background: rgba(122, 166, 200, 0.03);
+    background: color-mix(in srgb, var(--accent) 3%, transparent);
   }
 
   /* Market button (used inside snapshot table) */
@@ -3255,7 +3255,7 @@
     position: relative;
     height: 0.55rem;
     border-left: 1px solid var(--divider);
-    background: rgba(39, 53, 68, 0.6);
+    background: color-mix(in srgb, var(--track) 60%, transparent);
     min-width: 0;
     overflow: hidden;
   }
@@ -3381,7 +3381,7 @@
   .gauge-track {
     position: relative;
     height: 0.6rem;
-    background: rgba(39, 53, 68, 0.6);
+    background: color-mix(in srgb, var(--track) 60%, transparent);
     border-left: 1px solid var(--divider);
     border-right: 1px solid var(--divider);
     overflow: hidden;
@@ -3430,7 +3430,7 @@
   .seasonality-band {
     position: relative;
     height: 1.3rem;
-    background: rgba(39, 53, 68, 0.35);
+    background: color-mix(in srgb, var(--track) 35%, transparent);
     border-left: 1px solid var(--divider);
     border-right: 1px solid var(--divider);
   }
@@ -3449,7 +3449,7 @@
     position: absolute;
     top: 22%;
     bottom: 22%;
-    background: rgba(122, 166, 200, 0.18);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
     border: 1px solid color-mix(in srgb, var(--chart-primary) 45%, var(--divider));
   }
 

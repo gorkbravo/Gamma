@@ -204,7 +204,7 @@
     height: 100vh;
     background: color-mix(in srgb, var(--bg-0) 98%, var(--accent) 2%);
     border-right: 1px solid var(--panel-strong);
-    box-shadow: 16px 0 48px rgba(0, 0, 0, 0.4);
+    box-shadow: 16px 0 48px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
     transform: translateX(-100%);
     transition: transform 180ms ease;
     display: flex;

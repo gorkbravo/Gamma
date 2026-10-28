@@ -64,6 +64,7 @@
 
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { colorWithAlpha } from "../lib/chart-colors";
 
   export let strikes: number[] = [];
   export let expiries: string[] = [];
@@ -111,12 +112,13 @@
   let vMin = 0;
   let vMax = 1;
 
+  /* Canvas colours, read from tokens.css when the surface mounts. */
   const theme = {
-    text: "#8a919a",
-    grid: "rgba(50,56,64,0.55)",
-    axis: "#2e353e",
-    panel: "#0b0d10",
-    accent: "#7aa6c8",
+    text: "",
+    grid: "",
+    axis: "",
+    panel: "",
+    accent: "",
     observation: "",
     canvas: "",
   };
@@ -176,14 +178,14 @@
 
   function readTheme() {
     const styles = getComputedStyle(document.documentElement);
-    const get = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
-    theme.text = get("--text-2", theme.text);
-    theme.grid = get("--divider", theme.grid);
-    theme.axis = get("--panel-strong", theme.axis);
-    theme.panel = get("--bg-1", theme.panel);
-    theme.accent = get("--accent", theme.accent);
-    theme.observation = get("--text-0", theme.observation || theme.text);
-    theme.canvas = get("--bg-0", theme.canvas || theme.panel);
+    const get = (name: string) => styles.getPropertyValue(name).trim();
+    theme.text = get("--text-2");
+    theme.grid = get("--divider");
+    theme.axis = get("--panel-strong");
+    theme.panel = get("--bg-1");
+    theme.accent = get("--accent");
+    theme.observation = get("--text-0");
+    theme.canvas = get("--bg-0");
   }
 
   function gx(j: number) {
@@ -318,7 +320,7 @@
       } else {
         ctx.fillStyle = color(q.t);
         ctx.fill();
-        ctx.strokeStyle = "rgba(7,8,9,0.35)";
+        ctx.strokeStyle = colorWithAlpha(theme.canvas, 0.35);
         ctx.lineWidth = 0.5;
         ctx.stroke();
       }
@@ -414,7 +416,7 @@
       ctx.fillStyle = hoverPick.source === "observed" ? theme.observation : theme.accent;
       ctx.fill();
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "rgba(240,242,245,0.85)";
+      ctx.strokeStyle = colorWithAlpha(theme.observation, 0.85);
       ctx.stroke();
     }
   }

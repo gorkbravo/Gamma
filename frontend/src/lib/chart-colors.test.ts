@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { colorWithAlpha, resolveChartColor } from "./chart-colors";
+import { colorWithAlpha, mixToken, resolveChartColor } from "./chart-colors";
 
 describe("resolveChartColor", () => {
   it("resolves css variable colors from theme tokens", () => {
@@ -30,5 +30,16 @@ describe("colorWithAlpha", () => {
 
   it("builds rgba strings from rgb colors", () => {
     expect(colorWithAlpha("rgb(198, 107, 97)", 0.08)).toBe("rgba(198, 107, 97, 0.08)");
+  });
+});
+
+describe("mixToken", () => {
+  it("mixes a token into transparent at the given strength", () => {
+    expect(mixToken("--accent", 0.2)).toBe("color-mix(in srgb, var(--accent) 20%, transparent)");
+  });
+
+  it("keeps fractional strengths and clamps the range", () => {
+    expect(mixToken("--positive", 0.123)).toBe("color-mix(in srgb, var(--positive) 12.3%, transparent)");
+    expect(mixToken("--negative-muted", 1.4)).toBe("color-mix(in srgb, var(--negative-muted) 100%, transparent)");
   });
 });

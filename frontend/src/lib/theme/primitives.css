@@ -502,16 +502,16 @@
 .tag.positive { border-color: color-mix(in srgb, var(--positive) 55%, var(--divider)); color: var(--positive); }
 .tag.negative { border-color: color-mix(in srgb, var(--negative) 55%, var(--divider)); color: var(--negative); }
 .tag.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--divider)); color: var(--warning); }
-.tag.neutral { border-color: var(--divider); color: var(--text-2); background: rgba(122, 166, 200, 0.05); }
+.tag.neutral { border-color: var(--divider); color: var(--text-2); background: color-mix(in srgb, var(--accent) 5%, transparent); }
 
 /* Tinted: the Macro tab's signal and coherence chips, which seven Macro
    components each defined for themselves. Filled rather than outlined and
    accent by default. They sit in card headers and wrapping rows rather than
-   table cells, so they never truncate. The raw rgba values are the ones
-   those copies carried. */
+   table cells, so they never truncate. Fills come from the soft tokens and
+   edges mix the same colour at the strengths those copies carried. */
 .tag.is-tinted {
   max-width: none;
-  border-color: rgba(122, 166, 200, 0.24);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
   padding: var(--space-1) var(--space-3);
   overflow: visible;
   text-overflow: clip;
@@ -520,13 +520,13 @@
   color: var(--accent);
 }
 
-.tag.is-tinted.positive { border-color: rgba(75, 180, 116, 0.25); background: var(--positive-soft); color: var(--positive); }
-.tag.is-tinted.negative { border-color: rgba(198, 107, 97, 0.32); background: var(--negative-soft); color: var(--negative); }
-.tag.is-tinted.warning { border-color: rgba(196, 154, 90, 0.32); background: var(--warning-soft); color: var(--accent-2); }
+.tag.is-tinted.positive { border-color: color-mix(in srgb, var(--positive) 25%, transparent); background: var(--positive-soft); color: var(--positive); }
+.tag.is-tinted.negative { border-color: color-mix(in srgb, var(--negative-muted) 32%, transparent); background: var(--negative-soft); color: var(--negative); }
+.tag.is-tinted.warning { border-color: color-mix(in srgb, var(--warning) 32%, transparent); background: var(--warning-soft); color: var(--accent-2); }
 
 /* Context: a quieter gold chip that names where a reading sits (a region, a
    meeting window, an agreement level) rather than flagging a signal. */
-.tag.is-tinted.context { border-color: rgba(196, 154, 90, 0.24); background: rgba(196, 154, 90, 0.06); color: var(--accent-2); }
+.tag.is-tinted.context { border-color: color-mix(in srgb, var(--accent-2) 24%, transparent); background: color-mix(in srgb, var(--accent-2) 6%, transparent); color: var(--accent-2); }
 
 /* ── Button ───────────────────────────────────────────────────────────────
    Opt in with class="btn" on a <button>. The default is the 28px data

@@ -84,7 +84,7 @@
     background: var(--surface-0);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
     padding: var(--space-1);
     display: grid;
     gap: var(--space-1);

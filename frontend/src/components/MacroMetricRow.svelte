@@ -42,7 +42,7 @@
 
   .metric {
     padding: var(--space-3) var(--space-4);
-    border-left: 1px solid rgba(46, 60, 74, 0.42);
+    border-left: 1px solid color-mix(in srgb, var(--rule-navy) 42%, transparent);
     min-width: 0;
     flex: 1 1 5.75rem;
   }

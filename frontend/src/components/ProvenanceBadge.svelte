@@ -126,17 +126,17 @@
 
   .state.positive {
     color: var(--positive);
-    border-color: rgba(75, 180, 116, 0.45);
+    border-color: color-mix(in srgb, var(--positive) 45%, transparent);
   }
 
   .state.warning {
     color: var(--warning);
-    border-color: rgba(196, 154, 90, 0.45);
+    border-color: color-mix(in srgb, var(--warning) 45%, transparent);
   }
 
   .state.negative {
     color: var(--negative);
-    border-color: rgba(198, 107, 97, 0.45);
+    border-color: color-mix(in srgb, var(--negative-muted) 45%, transparent);
   }
 
   .provider {

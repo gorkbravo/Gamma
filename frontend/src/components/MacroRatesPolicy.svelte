@@ -248,7 +248,7 @@
   .research-focus {
     margin: 0;
     padding: var(--space-1) 0 var(--space-1) var(--space-4);
-    border-left: 2px solid rgba(46, 60, 74, 0.35);
+    border-left: 2px solid color-mix(in srgb, var(--rule-navy) 35%, transparent);
     color: var(--text-2);
     font-size: var(--text-sm);
     line-height: 1.4;
@@ -259,7 +259,7 @@
     display: grid;
     gap: var(--space-3);
     padding-top: var(--space-3);
-    border-top: 1px solid rgba(46, 60, 74, 0.26);
+    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 26%, transparent);
   }
 
   .subsection-head {
@@ -289,7 +289,7 @@
 
   /* Cells and the sticky header come from .data-table.is-sticky.is-relaxed.is-body-text in
      primitives.css; only this tab's fainter stripe stays local. */
-  tbody tr:nth-child(even) { background: rgba(122, 166, 200, 0.02); }
+  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--accent) 2%, transparent); }
 
   .positive { color: var(--positive); }
   .negative { color: var(--negative); }
@@ -299,14 +299,14 @@
     max-height: 24rem;
     overflow-y: auto;
     scrollbar-width: thin;
-    scrollbar-color: rgba(122, 166, 200, 0.18) transparent;
+    scrollbar-color: color-mix(in srgb, var(--accent) 18%, transparent) transparent;
   }
 
   .list-row {
     display: grid;
     gap: var(--space-1);
     padding: var(--space-4) var(--space-5);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
+    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 30%, transparent);
   }
 
   .list-row:first-child { padding-top: 0; }
@@ -338,7 +338,7 @@
     letter-spacing: 0.12em;
     padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.2);
+    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 20%, transparent);
     position: sticky;
     top: 0;
     z-index: 1;
