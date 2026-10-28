@@ -159,7 +159,13 @@
   --chart-secondary: #c49a5a;
   --chart-negative: #cc6f64;
 
-  /* ── Flash animation durations ── */
+  /* ── Value flash ── the colour a ticking value flashes before it fades.
+     Written out rather than mixed from --positive, --negative and
+     --accent-2: an animated colour interpolates in floating point, so a
+     mixed start colour would land one level off. */
+  --flash-up: rgba(75, 180, 116, 0.22);
+  --flash-down: rgba(217, 122, 112, 0.22);
+  --flash-neutral: rgba(196, 154, 90, 0.18);
   --flash-duration: 800ms;
 
   /* ── Canvas dot ── the accent at 7%, written out: a color-mix() stop in a
@@ -320,17 +326,17 @@ thead th {
 
 /* ── Bloomberg-style value flash ── */
 @keyframes flash-up {
-  0%   { background-color: rgba(75, 180, 116, 0.22); }
+  0%   { background-color: var(--flash-up); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-down {
-  0%   { background-color: rgba(217, 122, 112, 0.22); }
+  0%   { background-color: var(--flash-down); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-neutral {
-  0%   { background-color: rgba(196, 154, 90, 0.18); }
+  0%   { background-color: var(--flash-neutral); }
   100% { background-color: transparent; }
 }
 

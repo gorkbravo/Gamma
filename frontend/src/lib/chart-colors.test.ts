@@ -12,14 +12,24 @@ describe("resolveChartColor", () => {
     expect(resolveChartColor("var(--chart-primary)", tokens)).toBe("#7aa6c8");
   });
 
-  it("maps default chart colors back to the active theme tokens", () => {
-    const tokens = {
+  it("follows the active chart theme", () => {
+    const amber = {
       getPropertyValue(name: string) {
-        return name === "--chart-secondary" ? "#c49a5a" : "";
+        return name === "--chart-primary" ? "#d4a054" : "";
       }
     };
 
-    expect(resolveChartColor("#c49a5a", tokens)).toBe("#c49a5a");
+    expect(resolveChartColor("var(--chart-primary)", amber)).toBe("#d4a054");
+  });
+
+  it("passes literal colors through without a token lookup", () => {
+    const tokens = {
+      getPropertyValue() {
+        throw new Error("no lookup expected");
+      }
+    };
+
+    expect(resolveChartColor(" #c49a5a ", tokens)).toBe("#c49a5a");
   });
 });
 

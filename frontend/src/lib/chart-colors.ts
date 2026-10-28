@@ -1,24 +1,15 @@
-const THEME_COLOR_TOKENS = new Map<string, string>([
-  ["#7aa6c8", "--chart-primary"],
-  ["#c49a5a", "--chart-secondary"],
-  ["#b65d54", "--chart-negative"],
-  ["#d1645d", "--chart-negative"]
-]);
-
 export interface ColorTokenReader {
   getPropertyValue(name: string): string;
 }
 
+/* Canvas charts need literal colours, so a series colour named as
+   var(--token) is read from the document's computed tokens when the chart
+   draws, and follows the chart theme. Any other colour passes through. */
 export function resolveChartColor(rawColor: string, tokens: ColorTokenReader) {
   const trimmed = rawColor.trim();
   const variableMatch = trimmed.match(/^var\((--[^),\s]+)/i);
   if (variableMatch) {
     const resolved = tokens.getPropertyValue(variableMatch[1]).trim();
-    return resolved || trimmed;
-  }
-  const themeToken = THEME_COLOR_TOKENS.get(trimmed.toLowerCase());
-  if (themeToken) {
-    const resolved = tokens.getPropertyValue(themeToken).trim();
     return resolved || trimmed;
   }
   return trimmed;
