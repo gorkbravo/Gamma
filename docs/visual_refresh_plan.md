@@ -4,7 +4,7 @@ _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
 - Last reviewed: 2026-10-28
-- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2–V6 planned.
+- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete on branch `claude/v2-token-completeness` (2b3ee01…bb26c40), pending the user's review; not merged. V3–V6 planned.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
 - Doctrine: [`design_principles.md`](./design_principles.md) stays authoritative for the current look until V5 rewrites it. Do not apply B′ values to views before V4.
@@ -86,7 +86,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 | Checkpoint | Scope | Acceptance gate | Status |
 |---|---|---|---|
 | V1 — Shared primitives under the current look | Extend `frontend/src/lib/theme/primitives.css` (panel, header, mode bar, KPIs and eyebrow already exist) with the data table, tag, 26px panel title, inline stats, buttons, inputs and selects. Migrate the ~20 scoped `th, td` copies and 9 `.tag` copies. Keep genuine local exceptions as scoped overrides and list them. | No visual change except the deliberate convergences listed under [V1 convergences and kept exceptions](#v1-convergences-and-kept-exceptions), each reviewed on before/after screenshots of every view in mock mode (1440×900, DPR 1). `npm run typecheck`, `npm test` and `npm run build` pass without warnings from the changed files. | Done (2026-10-28), merged into main as 77d40e5 and 7867445 |
-| V2 — Token completeness and font roles | Replace the 71 raw `rgba(122, 166, 200, …)` values and 92 hex literals (18 files). Fix the ~62 `font: inherit` that pull chrome back to mono. Split `--app-font`/`--display-font` into `--font-ui`, `--font-num`, `--font-code` and `--font-label`. Add tint, soft semantic, scrim, `--panel-radius`, `--panel-border-width` and label-case tokens. Move `chart-colors.ts` and the flash keyframes onto tokens. | Values unchanged, so screenshot parity still holds. A grep gate shows no raw accent colors or hex literals in `.svelte` files outside a documented exception list. | Planned |
+| V2 — Token completeness and font roles | Replace the 71 raw `rgba(122, 166, 200, …)` values and 92 hex literals (18 files). Fix the ~62 `font: inherit` that pull chrome back to mono. Split `--app-font`/`--display-font` into `--font-ui`, `--font-num`, `--font-code` and `--font-label`. Add tint, soft semantic, scrim, `--panel-radius`, `--panel-border-width` and label-case tokens. Move `chart-colors.ts` and the flash keyframes onto tokens. | Values unchanged, so screenshot parity still holds. A grep gate shows no raw accent colors or hex literals in `.svelte` files outside a documented exception list. | Done on branch `claude/v2-token-completeness` (2026-10-28), pending review; see [V2 token completeness and font roles](#v2-token-completeness-and-font-roles) |
 | V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Planned |
 | V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Planned |
 | V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Planned |
@@ -129,7 +129,7 @@ Deliberate convergences, reviewed on before/after screenshots (2026-10-28):
 Kept exceptions:
 
 - Not data tables, left out of `.data-table`: the Setup grid (`SetupWizard` `.grid`), the Sitrep status table and the Options payoff heat map.
-- Per-table specifics that stay scoped on top of `.data-table`: Sitrep market column proportions and fixed layout; Options chain strike, ITM and ATM shading and the surface's sticky row headers; the Fundamentals DCF sheet grid; the Strategy Lab composer's compact inputs; 11px mono cells in the Script tables; content width and 2px rows for tables inside Copilot answers; Prediction Markets group, section and tick columns; the partner code under each Trade Partners name; Macro Rates' fainter stripe and the Macro snapshot row hover (raw rgba, left for V2).
+- Per-table specifics that stay scoped on top of `.data-table`: Sitrep market column proportions and fixed layout; Options chain strike, ITM and ATM shading and the surface's sticky row headers; the Fundamentals DCF sheet grid; the Strategy Lab composer's compact inputs; 11px mono cells in the Script tables; content width and 2px rows for tables inside Copilot answers; Prediction Markets group, section and tick columns; the partner code under each Trade Partners name; Macro Rates' fainter stripe and the Macro snapshot row hover (raw rgba in V1, accent mixes since V2).
 - Tags: the warning outline at 0.3 in MacroLinkedMarketRow and MacroSnapshot, `flex-shrink: 0` in three Macro rows, and MacroCoherencePanel's wrapping chips. MacroCoherencePanel is not imported anywhere; deleting or reviving it is a follow-up.
 
 ### Controls and inline stats
@@ -161,7 +161,89 @@ Kept exceptions:
 - Copilot chat chrome: the composer, role tabs, session and storage actions, the artifact list and the transcript confirmations. Converge it with the Copilot shelf in V4.
 - Contextual sizes: the table and handoff action rows in Equity Research and Strategy Lab, the Fundamentals compact buttons, the Options payoff pickers.
 - Stats that follow a different pattern: the Options and Portfolio KPI cells (right rule, padded on both sides), the `MacroMetricRow` component and the Macro snapshot metrics, and the Copilot and Script result strips.
-- `font: inherit` stays wherever a view had it, with its explicit size; V2 resolves it.
+- `font: inherit` stays wherever a view had it, with its explicit size; V2 resolved it (see below).
+
+## V2 token completeness and font roles
+
+V2 ran on branch `claude/v2-token-completeness` from local main 9412498, one commit per step: 2b3ee01 font roles, 5be065d new tokens, 600d961 raw colours, 1b5ed86 chart colours and flashes, 32362a3 `font: inherit`, bb26c40 the raw-colour gate. Steps 2–5 matched main on every mock-mode screen, the Setup dialog, the landing page and four e2e harnesses (1440×900, DPR 1) apart from the known noise; step 7 left the production build byte-identical. Step 6 is the one deliberate visual change.
+
+### Inventory (2026-10-28, before V2)
+
+V1 moved code, so the planning numbers above were recounted in `frontend/src`:
+
+- 62 raw `rgba(122, 166, 200, …)`: 52 in 14 `.svelte` files, 10 in `tokens.css` and `primitives.css`.
+- 188 `rgb()`/`rgba()` literals in all, 163 of them in 25 `.svelte` files. Besides the accent they mixed `--positive`, `--warning` and `--text-2`, plus colours no token carried: a pre-neutral navy `#2e3c4a` in Macro, Copilot and chart rules, `#273544` bar tracks, the muted red `#c66b61` of soft negative fills and heat maps, `#070b10` chart halos and black shadows.
+- 136 hex literals: 92 in 3 `.svelte` files (83 in `MaritimeMap`, almost all stale `var()` fallbacks, several no longer matching their token; 5 in an Equity Research comment; 4 `Surface3D` fallbacks), 40 token definitions and 4 in the `chart-colors.ts` map.
+- 63 `font: inherit` rules in 30 files; 44 `--app-font` and 42 `--display-font` usages.
+
+### Font roles
+
+| Token | Today | Used for |
+|---|---|---|
+| `--font-ui` | the sans (`Segoe UI Variable Text` stack) | chrome, headings, buttons, prose |
+| `--font-label` | `var(--font-ui)` | eyebrows, column headers, stat, KPI and field labels |
+| `--font-num` | the mono (`Cascadia Mono` stack) | data figures; the document default |
+| `--font-code` | the same mono | code, raw JSON, model output, the Script editor |
+
+`--app-font` and `--display-font` remain as aliases of `--font-num` and `--font-ui`. The Settings font choice now overrides `--font-num` and `--font-code`, which together cover what it changed before. V3 turns it into the "Data figures" choice that changes `--font-num` only.
+
+### New tokens
+
+| Token | Value today | Used by |
+|---|---|---|
+| `--tint` | `var(--bg-1)` | `.form-control`, the `.data-table.is-grid` header |
+| `--accent-soft`, `--positive-soft`, `--negative-soft`, `--warning-soft` | the semantic colour at 6%, 6%, 8% and 8% (the tinted tag's fills) | `.tag.is-tinted` |
+| `--negative-muted` | `#c66b61` | soft negative fills, outlines and heat maps (Macro, provenance badge, Risk correlation, Equity Research treemap) |
+| `--scrim` | `--bg-0` at 45% | the navigation drawer's backdrop |
+| `--panel-radius`, `--panel-border-width` | `var(--radius-md)`, `1px` | `.panel` |
+| `--label-case` | `uppercase` | the chrome labels in `primitives.css` |
+| `--rule-navy`, `--track`, `--chart-halo` | `#2e3c4a`, `#273544`, `#070b10` | legacy values views used without a token |
+| `--shadow-ink` | `#000` | every shadow; `--shadow` mixes from it |
+| `--canvas-dot`, `--flash-up`, `--flash-down`, `--flash-neutral` | the literal rgba values | the canvas dot grid and the value-flash keyframes |
+
+`--table-stripe`, `--hover-bg`, `--active-bg` and `--focus-ring` are now mixed from `--accent`. Tokens that script reads (`--divider`, `--accent`, the chart, semantic, text and surface colours) stay literal, because `colorWithAlpha()` parses only hex and `rgb()`.
+
+### How raw colours became tokens
+
+- A literal whose colour is a token became that token mixed into transparent at the same strength: `rgba(122, 166, 200, 0.06)` is `color-mix(in srgb, var(--accent) 6%, transparent)`. A probe painted 165 cases (accent, navy, muted red, green and black at every strength used, on three backgrounds) with no pixel difference for fills, borders and blurred shadows.
+- Gradients and animations are the exception. A mixed colour in a gradient stop or a keyframe, written inline or through a token, interpolates in floating point and moves pixels by one level (the canvas dot grid, the FanChart bands, the first frame of the green flash). Those keep literal values: as tokens (`--canvas-dot`, `--flash-*`) or as listed exceptions (the FanChart stops).
+- Colours built in script use `mixToken()` from `chart-colors.ts` (Risk correlation and cluster fills, the Equity Research treemap) or read tokens at runtime (`Surface3D` and `MaritimeMap`, which also lost their stale fallbacks).
+- `chart-colors.ts` lost its hex-to-token map; every series already names `var(--token)`.
+- Views keep their own strengths as inline mixes (`color-mix(in srgb, var(--positive) 8%, transparent)`). V4 converges them onto the soft tokens when it changes the strengths anyway.
+
+### Raw-colour gate and kept exceptions
+
+`frontend/src/lib/theme/raw-colors.test.ts` runs with `npm test`. It fails on any hex or `rgb()`/`rgba()` literal with numeric channels in a `.svelte` file or in `primitives.css` that is not on its exception list, and on any listed exception that no longer exists. The list:
+
+| File | Literal | Why it stays |
+|---|---|---|
+| `FanChart.svelte` | seven `rgba(122, 166, 200, …)` gradient stops | a mixed stop colour moves pixels by one level |
+| `FanChart.svelte` | `rgba(42, 56, 70, 0.26)`, `rgba(244, 247, 251, 0.94)` and `0.12`, `rgba(106, 168, 255, 0.32)` | one-off grid, history line, halo and tooltip colours with no token |
+| `StatusRail.svelte` | `rgba(8, 13, 18, 0.98)` | settings popover background, a one-off |
+| `MaritimeMap.svelte` | `rgba(2, 6, 12, 0.7)` | vessel chevron outline drawn on canvas |
+| `MacroCoherencePanel.svelte` | `rgba(255, 255, 255, 0.015)` | the component is not imported anywhere |
+| `RiskView.svelte` | `rgb(87, 135, 176)` | eighth cluster colour, no token |
+| `RiskView.svelte` | `rgb(253,231,37)` | end of the viridis colormap, which encodes data |
+
+The gate cannot see colour channels kept as numbers in script: the viridis stops in `RiskView` and the `Surface3D` colormaps. They encode data rather than theme and stay as they are. FanChart, StatusRail and MaritimeMap are V3's to resolve when the light theme needs them.
+
+### `font: inherit` (step 6, the deliberate change)
+
+A scoped `font: inherit` beat the global `button { font-family }` rule and pulled chrome buttons back to mono. Each rule now sets the family after it:
+
+- To `--font-ui`: action buttons in Equity Research, Strategy Lab, Options, Prediction Markets, Fundamentals, Crypto, Risk, the Macro handoffs, the Script workspace and dataset picker, Diagnostics, the Copilot run inspector and scope analysis; Copilot chat chrome (new chat, context picker and options, artifacts and storage triggers, role tabs, plan and send, session confirmations, storage actions); the Copilot drawer's role tabs, context picker, generate and close buttons; transcript confirmations and evidence toggles; Sitrep's follow-up pins and note buttons; Sealanes map controls and shelf actions; the Surface3D reset; icon buttons (☆ ▸ ✕ ◻ →).
+- Unchanged, by the user's decision: every input, select and textarea keeps `font: inherit` and the font of its context. Most are mono; the ones inside headers and labels that already use `--font-ui` stay sans.
+- Unchanged, because they show figures: the Crypto basket cards, the Equity Research treemap tiles, the Fundamentals scenario cards, and the Sealanes flow and event rows and replay picker set `--font-num` again where a new view rule would have reached them. Sitrep's tape rows, market strip and ticker chips, the Macro focus cards and rows, and the Copilot transcript chips keep `font: inherit`, which is mono there.
+- Already sans before V2, untouched: the landing choices, the top bar, the drawer, the status rail, Risk row selectors and Copilot session actions. The tooltip trigger keeps `font: inherit` on purpose, so it takes the font of whatever it wraps.
+
+Side effects reviewed on the before/after pairs: sans labels are narrower, so button rows and auto-margined groups shift a few pixels. Buttons without a fixed height take the sans line height and grow by 2–5px: the Prediction Markets venue picker (+5px), the Sealanes overlay list and MODES and 3D controls, and the Copilot drawer tabs and generate button. Every element whose family changed went from mono to sans and is a button or its content; no field or figure changed. A first attempt that also pinned fields to `--font-num` turned the top-bar tab search and several header pickers from sans to mono, so fields were left as they were.
+
+### Not done in V2, for later checkpoints
+
+- Field and view labels (`<label>` text, many scoped `.label` spans) are mono because the document defaults to `--font-num`. V4 switches the document default to `--font-ui` and marks data surfaces explicitly.
+- 192 scoped `text-transform: uppercase` in 51 `.svelte` files do not use `--label-case` yet. V4 decides each one, because some are identifiers rather than labels.
+- The Copilot card backdrop (black at 40%) and the Setup dialog backdrop (`--bg-0` at 78%) keep their own values; V4 converges them on `--scrim`.
+- `--text-3` is referenced in `AuthenticatedResearchScriptImage.svelte` and the Script editor theme but defined nowhere, so those colours fall back to inheritance. Found during the inventory; not changed.
 
 ## Doctrine rewrite map (V5)
 
@@ -207,3 +289,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-10-28: the user reviewed the before/after screenshots, accepted the convergences, and merged the branch into main as 77d40e5 (not pushed).
 - 2026-10-28: the controls showed no copy family like the tables did (34 components with their own base button: 7 heights and 11 paddings), so the user chose to converge them as well. e98fd26 moves buttons, inputs and selects onto `.btn` and `.form-control`, and dedc5d7 moves the inline stats onto `.stat`, on branch `claude/musing-easley-b0d363`. The convergences and exceptions are listed under "Controls and inline stats" above.
 - 2026-10-28: the user reviewed the controls and stats screenshots, accepted the convergences and merged the branch into main as 7867445 (not pushed). V1 is complete; the kept exceptions carry over to V2 (`font: inherit`, raw colours) and V4 (Copilot chat chrome).
+- 2026-10-28: V2 on branch `claude/v2-token-completeness` from local main 9412498: 2b3ee01 font roles, 5be065d new tokens, 600d961 raw colours onto tokens, 1b5ed86 chart colours and flashes, 32362a3 `font: inherit` on chrome buttons, bb26c40 the raw-colour gate. For step 6 the user chose to keep every input, select and textarea as it was. Steps 2–5 and 7 changed no pixel in mock mode; step 6 before/after pairs are with the V2 handover note. Decisions and kept exceptions are under [V2 token completeness and font roles](#v2-token-completeness-and-font-roles). Not merged; the user decides after reviewing the pairs.
