@@ -63,7 +63,7 @@
         <p class="eyebrow">Rates & Policy</p>
         <h3>{snapshot?.rates_policy?.headline ?? "Rates context loading"}</h3>
       </div>
-      <span class="tag region-tag">{ratesPolicyTag}</span>
+      <span class="tag is-tinted region-tag">{ratesPolicyTag}</span>
     </div>
     <p class="section-summary">{snapshot?.rates_policy?.summary}</p>
 
@@ -87,7 +87,7 @@
         <h3>{snapshot?.rates_policy?.path_headline ?? "Front-end path proxy loading"}</h3>
       </div>
       {#if snapshot?.rates_policy?.market_alignment_label}
-        <span class="tag info-tag">{snapshot.rates_policy.market_alignment_label}</span>
+        <span class="tag is-tinted info-tag">{snapshot.rates_policy.market_alignment_label}</span>
       {/if}
     </div>
     {#if snapshot?.rates_policy?.path_summary}
@@ -103,7 +103,7 @@
         <div class="subsection-head">
           <span class="eyebrow">Expectation Overlay</span>
           {#if snapshot?.rates_policy?.market_alignment_label}
-            <span class="tag {signalBadgeTone(snapshot.rates_policy.market_alignment_label)}">{snapshot.rates_policy.market_alignment_label}</span>
+            <span class="tag is-tinted {signalBadgeTone(snapshot.rates_policy.market_alignment_label)}">{snapshot.rates_policy.market_alignment_label}</span>
           {/if}
         </div>
         {#if snapshot?.rates_policy?.expectation_summary}
@@ -122,7 +122,7 @@
           <p class="eyebrow">Meeting Ladder</p>
           <h3>{snapshot.rates_policy.meeting_path.headline}</h3>
         </div>
-        <span class="tag info-tag">{snapshot.rates_policy.meeting_path.window_label}</span>
+        <span class="tag is-tinted info-tag">{snapshot.rates_policy.meeting_path.window_label}</span>
       </div>
       <p class="section-summary">{snapshot.rates_policy.meeting_path.summary}</p>
       <MacroMetricRow metrics={snapshot.rates_policy.meeting_path.metrics} compact />
@@ -276,45 +276,20 @@
     gap: 0;
   }
 
-  /* ── Tags ── */
+  /* ── Tags ──
+     The chip is .tag.is-tinted from primitives.css; here it keeps its width
+     in its flex row, and .region-tag / .info-tag are gold variants. */
   .tag {
-    display: inline-block;
-    border: 1px solid rgba(122, 166, 200, 0.24);
-    background: rgba(122, 166, 200, 0.06);
-    color: var(--accent);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
     flex-shrink: 0;
   }
 
-  .tag.positive {
-    border-color: rgba(75, 180, 116, 0.25);
-    background: rgba(75, 180, 116, 0.06);
-    color: var(--positive);
-  }
-
-  .tag.negative {
-    border-color: rgba(198, 107, 97, 0.32);
-    background: rgba(198, 107, 97, 0.08);
-    color: var(--negative);
-  }
-
-  .tag.warning {
-    border-color: rgba(196, 154, 90, 0.32);
-    background: rgba(196, 154, 90, 0.08);
-    color: var(--accent-2);
-  }
-
-  .region-tag {
+  .tag.region-tag {
     border-color: rgba(196, 154, 90, 0.24);
     background: rgba(196, 154, 90, 0.06);
     color: var(--accent-2);
   }
 
-  .info-tag {
+  .tag.info-tag {
     border-color: rgba(196, 154, 90, 0.24);
     background: rgba(196, 154, 90, 0.06);
     color: var(--accent-2);

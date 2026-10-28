@@ -60,7 +60,7 @@
                 {#if card.divergence_score !== null}
                   <span class="score-badge {card.agreement_label}">{card.divergence_score.toFixed(1)}</span>
                 {/if}
-                <span class="tag tone-tag">{card.agreement_label}</span>
+                <span class="tag is-tinted tone-tag">{card.agreement_label}</span>
               </div>
             </div>
 
@@ -68,7 +68,7 @@
 
             {#if card.coherence}
               <div class="coherence-inline">
-                <span class="tag {coherenceTone(card.coherence.coherence_label)}">{card.coherence.coherence_label}</span>
+                <span class="tag is-tinted {coherenceTone(card.coherence.coherence_label)}">{card.coherence.coherence_label}</span>
                 <span class="coherence-stat">{card.coherence.supporting_signals} confirm · {card.coherence.opposing_signals} oppose</span>
                 {#if card.coherence.lag_span_display}
                   <span class="coherence-stat">· {card.coherence.lag_span_display} spread</span>
@@ -319,38 +319,10 @@
     gap: var(--space-3);
   }
 
-  /* ── Tags ── */
-  .tag {
-    display: inline-block;
-    border: 1px solid rgba(122, 166, 200, 0.24);
-    background: rgba(122, 166, 200, 0.06);
-    color: var(--accent);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-  }
-
-  .tag.positive {
-    border-color: rgba(75, 180, 116, 0.25);
-    background: rgba(75, 180, 116, 0.06);
-    color: var(--positive);
-  }
-
-  .tag.negative {
-    border-color: rgba(198, 107, 97, 0.32);
-    background: rgba(198, 107, 97, 0.08);
-    color: var(--negative);
-  }
-
-  .tag.warning {
-    border-color: rgba(196, 154, 90, 0.32);
-    background: rgba(196, 154, 90, 0.08);
-    color: var(--accent-2);
-  }
-
-  .tone-tag {
+  /* ── Tags ──
+     The chip is .tag.is-tinted from primitives.css; .tone-tag is this
+     card's gold variant. */
+  .tag.tone-tag {
     border-color: rgba(196, 154, 90, 0.24);
     background: rgba(196, 154, 90, 0.06);
     color: var(--accent-2);

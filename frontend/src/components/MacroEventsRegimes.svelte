@@ -108,7 +108,7 @@
             <article class="study-row">
               <div class="study-head">
                 <strong>{study.event.title}</strong>
-                <span class="tag {coherenceTone(study.coherence?.coherence_label)}">{themeLabels[study.theme] ?? study.theme}</span>
+                <span class="tag is-tinted {coherenceTone(study.coherence?.coherence_label)}">{themeLabels[study.theme] ?? study.theme}</span>
               </div>
               <span class="study-meta">
                 <span class="event-date" class:absent={shortDate(study.event.scheduled_at) === "N/A"}>{shortDate(study.event.scheduled_at)}</span>
@@ -119,7 +119,7 @@
 
               {#if study.coherence}
                 <div class="coherence-inline">
-                  <span class="tag sm {coherenceTone(study.coherence.coherence_label)}">{study.coherence.coherence_label}</span>
+                  <span class="tag is-tinted sm {coherenceTone(study.coherence.coherence_label)}">{study.coherence.coherence_label}</span>
                   <span class="coherence-stat">{study.coherence.supporting_signals} confirm · {study.coherence.opposing_signals} oppose</span>
                 </div>
               {/if}
@@ -161,7 +161,7 @@
             <article class="study-row">
               <div class="study-head">
                 <strong>{study.event.title}</strong>
-                <span class="tag">{themeLabels[study.theme] ?? study.theme}</span>
+                <span class="tag is-tinted">{themeLabels[study.theme] ?? study.theme}</span>
               </div>
               <span class="study-meta">
                 <span class="event-date" class:absent={shortDate(study.event.scheduled_at) === "N/A"}>{shortDate(study.event.scheduled_at)}</span>
@@ -172,7 +172,7 @@
 
               {#if study.coherence}
                 <div class="coherence-inline">
-                  <span class="tag sm {coherenceTone(study.coherence.coherence_label)}">{study.coherence.coherence_label}</span>
+                  <span class="tag is-tinted sm {coherenceTone(study.coherence.coherence_label)}">{study.coherence.coherence_label}</span>
                   <span class="coherence-stat">{study.coherence.supporting_signals} confirm · {study.coherence.opposing_signals} oppose</span>
                 </div>
               {/if}
@@ -366,39 +366,14 @@
     padding-top: var(--space-1);
   }
 
-  /* ── Tags ── */
+  /* ── Tags ──
+     The chip is .tag.is-tinted from primitives.css; here it keeps its width
+     beside the study title. */
   .tag {
-    display: inline-block;
-    border: 1px solid rgba(122, 166, 200, 0.24);
-    background: rgba(122, 166, 200, 0.06);
-    color: var(--accent);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
     flex-shrink: 0;
   }
 
   .tag.sm { font-size: var(--text-2xs); padding: var(--space-1) var(--space-2); }
-
-  .tag.positive {
-    border-color: rgba(75, 180, 116, 0.25);
-    background: rgba(75, 180, 116, 0.06);
-    color: var(--positive);
-  }
-
-  .tag.negative {
-    border-color: rgba(198, 107, 97, 0.32);
-    background: rgba(198, 107, 97, 0.08);
-    color: var(--negative);
-  }
-
-  .tag.warning {
-    border-color: rgba(196, 154, 90, 0.32);
-    background: rgba(196, 154, 90, 0.08);
-    color: var(--accent-2);
-  }
 
   /* ── Lists & Events ── */
   .events-scroll {

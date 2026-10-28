@@ -21,7 +21,7 @@
   <div class:compact class="coherence-panel">
     <div class="coherence-head">
       <div class="coherence-tags">
-        <span class="tag {toneClass(coherence.coherence_label)}">{coherence.coherence_label}</span>
+        <span class="tag is-tinted {toneClass(coherence.coherence_label)}">{coherence.coherence_label}</span>
         <span class="coherence-counts">{coherence.supporting_signals} confirm</span>
         <span class="coherence-counts">{coherence.opposing_signals} oppose</span>
         {#if coherence.lag_span_display}
@@ -97,35 +97,15 @@
     align-items: center;
   }
 
+  /* The chip is .tag.is-tinted from primitives.css; this panel's copy wraps,
+     sits on a tighter line and has slightly stronger tone outlines. */
   .tag {
-    display: inline-block;
-    border: 1px solid rgba(122, 166, 200, 0.24);
-    background: rgba(122, 166, 200, 0.06);
-    color: var(--accent);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     line-height: 1.2;
+    white-space: normal;
   }
 
-  .tag.positive {
-    border-color: rgba(75, 180, 116, 0.28);
-    background: rgba(75, 180, 116, 0.06);
-    color: var(--positive);
-  }
-
-  .tag.negative {
-    border-color: rgba(198, 107, 97, 0.35);
-    background: rgba(198, 107, 97, 0.08);
-    color: var(--negative);
-  }
-
-  .tag.warning {
-    border-color: rgba(196, 154, 90, 0.32);
-    background: rgba(196, 154, 90, 0.08);
-    color: var(--accent-2);
-  }
+  .tag.is-tinted.positive { border-color: rgba(75, 180, 116, 0.28); }
+  .tag.is-tinted.negative { border-color: rgba(198, 107, 97, 0.35); }
 
   .coherence-counts {
     color: var(--text-2);

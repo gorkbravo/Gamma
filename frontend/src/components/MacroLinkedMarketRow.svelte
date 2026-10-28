@@ -28,9 +28,9 @@
   <div class="market-main">
     <strong class="market-title">{market.title}</strong>
     <div class="market-meta">
-      <span class="tag">{market.venue}</span>
+      <span class="tag is-tinted">{market.venue}</span>
       {#if stanceLabel(market.macro_stance)}
-        <span class="tag {badgeTone(market.macro_alignment)}">{stanceLabel(market.macro_stance)}</span>
+        <span class="tag is-tinted {badgeTone(market.macro_alignment)}">{stanceLabel(market.macro_stance)}</span>
       {/if}
       {#if market.probability_label}
         <span class="meta-stat">{market.probability_label}</span>
@@ -83,33 +83,7 @@
   .meta-stat.positive { color: var(--positive); }
   .meta-stat.negative { color: var(--negative); }
 
-  .tag {
-    display: inline-block;
-    border: 1px solid rgba(122, 166, 200, 0.24);
-    background: rgba(122, 166, 200, 0.06);
-    color: var(--accent);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-  }
-
-  .tag.positive {
-    border-color: rgba(75, 180, 116, 0.25);
-    background: rgba(75, 180, 116, 0.06);
-    color: var(--positive);
-  }
-
-  .tag.negative {
-    border-color: rgba(198, 107, 97, 0.32);
-    background: rgba(198, 107, 97, 0.08);
-    color: var(--negative);
-  }
-
-  .tag.warning {
-    border-color: rgba(196, 154, 90, 0.3);
-    background: rgba(196, 154, 90, 0.08);
-    color: var(--accent-2);
-  }
+  /* The chip is .tag.is-tinted from primitives.css; this row's warning
+     outline is a shade lighter. */
+  .tag.is-tinted.warning { border-color: rgba(196, 154, 90, 0.3); }
 </style>
