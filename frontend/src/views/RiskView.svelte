@@ -1013,7 +1013,7 @@
 
 {#snippet SimpleTable(title: string, headers: string[], rows: RiskTableRow[])}
   <article class="panel table-panel">
-    <header class="table-panel-header">{title}<span>{rows.length} rows</span></header>
+    <header class="panel-title table-panel-header">{title}<span>{rows.length} rows</span></header>
     <table>
       <thead><tr>{#each headers as header}<th>{header}</th>{/each}</tr></thead>
       <tbody>
@@ -1031,7 +1031,7 @@
 
 {#snippet HoldingsTable(rows: HoldingRiskRow[])}
   <article class="panel table-panel">
-    <header class="table-panel-header">Holdings<span>{rows.length} rows</span></header>
+    <header class="panel-title table-panel-header">Holdings<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Symbol</th><th>Name</th><th>Asset class</th><th>Weight</th><th>Market value</th><th>P&L</th><th>Vol</th><th>Beta</th><th>Risk contribution</th><th>Flag</th></tr></thead>
       <tbody>
@@ -1045,7 +1045,7 @@
 
 {#snippet RiskContributorsTable(rows: RiskContributionRow[], tailDays: number | null)}
   <article class="panel table-panel">
-    <header class="table-panel-header">
+    <header class="panel-title table-panel-header">
       Contribution Detail
       <span>{rows.length} rows{tailDays ? ` · ES over ${tailDays} worst days` : ""}</span>
     </header>
@@ -1068,7 +1068,7 @@
 
 {#snippet ExposureTable(rows: ExposureBreakdownRow[])}
   <article class="panel table-panel">
-    <header class="table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
+    <header class="panel-title table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Sector/category</th><th>Weight</th><th>Vol contribution</th><th>Benchmark</th><th>Active</th><th>Label</th></tr></thead>
       <tbody>{#each rows as row}<tr><td>{row.category}</td><td class:absent={pct(row.weight) === "N/A"}>{pct(row.weight)}</td><td class:absent={pct(row.volatilityContribution) === "N/A"}>{pct(row.volatilityContribution)}</td><td class:absent={pct(row.benchmarkWeight) === "N/A"}>{pct(row.benchmarkWeight)}</td><td class:absent={pct(row.activeWeight) === "N/A"}>{pct(row.activeWeight)}</td><td>{row.label}</td></tr>{/each}</tbody>
@@ -1078,7 +1078,7 @@
 
 {#snippet DrawdownTable(rows: DrawdownEpisode[])}
   <article class="panel table-panel">
-    <header class="table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
+    <header class="panel-title table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Start</th><th>Trough</th><th>Recovery</th><th>Depth</th><th>Duration</th><th>Benchmark DD</th><th>Main contributors</th></tr></thead>
       <tbody>{#each rows as row}<tr><td>{row.startDate}</td><td>{row.troughDate}</td><td>{row.recoveryDate}</td><td class="negative" class:absent={pct(row.depth) === "N/A"}>{pct(row.depth)}</td><td>{row.duration}</td><td class:absent={pct(row.benchmarkDrawdown) === "N/A"}>{pct(row.benchmarkDrawdown)}</td><td>{row.contributors}</td></tr>{/each}</tbody>
@@ -1088,7 +1088,7 @@
 
 {#snippet StressEpisodeTable(rows: StressEpisodeRow[], selected: StressEpisodeRow | null, state: "idle" | "loading" | "ready", summary: string | null)}
   <article class="panel table-panel">
-    <header class="table-panel-header">
+    <header class="panel-title table-panel-header">
       Historical Stress Replay
       <span>{state === "loading" ? "LOADING..." : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
     </header>
@@ -1141,7 +1141,7 @@
 
 {#snippet StressLegTable(rows: StressLegRow[], selected: StressEpisodeRow | null)}
   <article class="panel table-panel">
-    <header class="table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
+    <header class="panel-title table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
     <table>
       <!-- Con patas compensadas el reparto es del P&L bruto, no de un neto ≈ 0 (GUA-20261027-6). -->
       <thead><tr><th>Position</th><th>Weight</th><th>Episode return</th><th>P&L</th><th title={selected?.contributionBasis === "gross" ? "Legs offset: share of the gross leg P&L (sum of absolute leg P&L), not of the near-zero net result." : "Share of the book result."}>{selected?.contributionBasis === "gross" ? "Share of gross P&L" : "Share of result"}</th><th>Status</th></tr></thead>
@@ -1167,7 +1167,7 @@
 
 {#snippet CandidateTable(rows: CandidateAllocationRow[])}
   <article class="panel table-panel">
-    <header class="table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
+    <header class="panel-title table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
     <table>
       <thead><tr><th>Symbol</th><th>Current weight</th><th>Proposed weight</th><th>Delta</th><th>Current risk</th><th>Proposed risk</th><th>Constraint</th></tr></thead>
       <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td class:absent={pct(row.currentWeight) === "N/A"}>{pct(row.currentWeight)}</td><td class:absent={pct(row.proposedWeight) === "N/A"}>{pct(row.proposedWeight)}</td><td class={row.delta == null ? "" : row.delta >= 0 ? "positive" : "negative"}>{pct(row.delta)}</td><td class:absent={pct(row.currentRiskContribution) === "N/A"}>{pct(row.currentRiskContribution)}</td><td class:absent={pct(row.proposedRiskContribution) === "N/A"}>{pct(row.proposedRiskContribution)}</td><td>{row.constraintFlag}</td></tr>{/each}</tbody>
@@ -1633,23 +1633,9 @@
   }
   .action-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
-  /* ── Panel headers ── */
-  .panel-title,
-  .table-panel-header {
-    min-height: 26px;
-    padding: var(--space-2) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
-    color: var(--text-1);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-xs);
-    font-weight: 600;
-  }
-
+  /* ── Panel headers ──
+     The 26px row is .panel-title from primitives.css. Table panels keep their
+     row count in a plain span that stays uppercase, unlike .header-meta. */
   .table-panel-header span { color: var(--text-2); font-weight: 400; font-size: var(--text-2xs); }
 
   /* Chart, heatmap, table panels: edge-to-edge content under a 26px header */

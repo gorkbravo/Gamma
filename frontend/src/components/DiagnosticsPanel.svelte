@@ -69,14 +69,14 @@
     {#if entries.length || log.length}
       {#each entries as entry}
         <div class:warning={entry.tone === "warning"} class:error={entry.tone === "error"} class:action={entry.tone === "action"} class="line">
-          <span class="tag">{entry.label}</span>
+          <span class="line-label">{entry.label}</span>
           <p>{entry.message}</p>
         </div>
       {/each}
 
       {#each log as line}
         <div class="line action">
-          <span class="tag">Operator</span>
+          <span class="line-label">Operator</span>
           <p>{line}</p>
         </div>
       {/each}
@@ -163,24 +163,24 @@
     border-bottom: 1px solid var(--divider);
   }
 
-  .tag {
+  .line-label {
     color: var(--text-1);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: var(--text-2xs);
   }
 
-  .warning .tag,
+  .warning .line-label,
   .warning p {
     color: var(--warning);
   }
 
-  .error .tag,
+  .error .line-label,
   .error p {
     color: var(--negative);
   }
 
-  .action .tag,
+  .action .line-label,
   .action p {
     color: var(--accent);
   }

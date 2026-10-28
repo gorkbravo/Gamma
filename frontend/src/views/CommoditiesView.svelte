@@ -1481,7 +1481,7 @@
             <span class="header-meta">{overviewRows.length} markets · click row to drill</span>
           </header>
           <div class="table-wrap">
-            <table class="matrix-table">
+            <table class="data-table matrix-table">
               <colgroup>
                 <col class="sector-col" />
                 <col class="market-col" />
@@ -1728,7 +1728,7 @@
             <span class="header-meta">{workspace.events.length} events</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table event-table">
+            <table class="data-table compact-table event-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -1759,7 +1759,7 @@
             <span class="header-meta">{workspace.cross_domain_links.length} links</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Target</th>
@@ -1870,7 +1870,7 @@
         </div>
         {#if selectedReferenceRows.length}
           <div class="table-wrap">
-            <table class="compact-table reference-table">
+            <table class="data-table compact-table reference-table">
               <thead>
                 <tr>
                   <th>Reference</th>
@@ -1936,7 +1936,7 @@
             <span class="header-meta">{visibleSummaries.length} markets</span>
           </header>
           <div class="table-wrap snapshot-wrap">
-            <table class="compact-table market-table">
+            <table class="data-table compact-table market-table">
               <thead>
                 <tr>
                   <th>Market</th>
@@ -2019,7 +2019,7 @@
             <span class="header-meta">{selectedCurve?.nodes.length ?? 0} contracts</span>
           </header>
           <div class="table-wrap curve-nodes-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Contract</th>
@@ -2059,7 +2059,7 @@
             <span class="header-meta">{crackMatrixRows.length} rows</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Spread</th>
@@ -2123,7 +2123,7 @@
           <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
         </header>
         <div class="table-wrap">
-          <table class="compact-table">
+          <table class="data-table compact-table">
             <thead>
               <tr>
                 <th>Target</th>
@@ -2175,7 +2175,7 @@
             <span class="header-meta">{substitutionSpreadRows.length} rows</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Spread</th>
@@ -2269,7 +2269,7 @@
           <span class="header-meta">{selectedSpreads.length} linked</span>
         </header>
         <div class="table-wrap">
-          <table class="compact-table spread-table">
+          <table class="data-table compact-table spread-table">
             <thead>
               <tr>
                 <th>Spread</th>
@@ -2318,7 +2318,7 @@
             <span class="header-meta">{metalsCorrelationRows.length} pairs</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Metal</th>
@@ -2388,7 +2388,7 @@
             <span class="header-meta">{fundamentalTapeRows.length} series</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Series</th>
@@ -2435,7 +2435,7 @@
           <span class="header-meta">{fundamentalTapeRows.length} series</span>
         </header>
         <div class="table-wrap">
-          <table class="compact-table fundamental-table wide">
+          <table class="data-table compact-table fundamental-table wide">
             <thead>
               <tr>
                 <th>Series</th>
@@ -2519,7 +2519,7 @@
           <span class="header-meta">{visibleInventories.length} series</span>
         </header>
         <div class="table-wrap">
-          <table class="compact-table inventory-table">
+          <table class="data-table compact-table inventory-table">
             <thead>
               <tr>
                 <th>Series</th>
@@ -2567,7 +2567,7 @@
             <span class="header-meta">{eventRows.length} events</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -2600,7 +2600,7 @@
             <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
           </header>
           <div class="table-wrap">
-            <table class="compact-table">
+            <table class="data-table compact-table">
               <thead>
                 <tr>
                   <th>Target</th>
@@ -2865,29 +2865,7 @@
     color: var(--text-1);
   }
 
-  /* ── Panel title (single 26px header, Risk pattern) ── */
-  .panel-title {
-    min-height: 26px;
-    padding: var(--space-2) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
-    color: var(--text-1);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-xs);
-    font-weight: 600;
-  }
-
-  .panel-title .header-meta {
-    color: var(--text-2);
-    font-weight: 400;
-    font-size: var(--text-2xs);
-    text-transform: none;
-    letter-spacing: 0;
-  }
+  /* .panel-title and .tag come from primitives.css. */
 
   /* Edge-to-edge panels */
   .table-panel,
@@ -3039,11 +3017,8 @@
     overflow-y: auto;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
+  /* Cell metrics, header style, row hover/selection, stale and empty rows come
+     from .data-table in primitives.css; only per-table widths live here. */
   .compact-table { min-width: 100%; }
   .matrix-table { min-width: 42rem; table-layout: fixed; }
   .market-table { table-layout: fixed; }
@@ -3051,36 +3026,6 @@
   .fundamental-table { min-width: 36rem; }
   .inventory-table { min-width: 38rem; }
   .event-table { min-width: 100%; }
-
-  th, td {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    vertical-align: middle;
-    line-height: 1.3;
-    font-size: var(--text-sm);
-    color: var(--text-1);
-  }
-
-  th {
-    color: var(--text-2);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-    white-space: nowrap;
-  }
-
-  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.mono { font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
-
-  td strong { color: var(--text-0); font-weight: 600; }
-  td .meta { display: block; color: var(--text-2); font-size: var(--text-2xs); line-height: 1.25; margin-top: 1px; }
-
-  tbody tr:hover { background: rgba(122, 166, 200, 0.06); }
-  tr.selected { background: rgba(122, 166, 200, 0.12); }
-
-  .empty-row td { color: var(--text-2); text-align: center; padding: var(--space-5); text-transform: none; letter-spacing: 0; font-size: var(--text-xs); }
 
   /* Matrix-specific column hints */
   .matrix-table .sector-col { width: 9%; }
@@ -3123,26 +3068,6 @@
   .negative { color: var(--negative); }
   .warning { color: var(--warning); }
 
-  /* ── Tag chip ── */
-  .tag {
-    display: inline-block;
-    max-width: 100%;
-    border: 1px solid var(--divider);
-    padding: 0.04rem var(--space-3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
-    color: var(--text-1);
-  }
-
-  .tag.positive { border-color: color-mix(in srgb, var(--positive) 55%, var(--divider)); color: var(--positive); }
-  .tag.negative { border-color: color-mix(in srgb, var(--negative) 55%, var(--divider)); color: var(--negative); }
-  .tag.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--divider)); color: var(--warning); }
-  .tag.neutral { border-color: var(--divider); color: var(--text-2); background: rgba(122, 166, 200, 0.05); }
-
   .reconciliation-panel {
     display: grid;
     gap: var(--space-3);
@@ -3172,9 +3097,8 @@
   .reference-table { min-width: 40rem; }
   .reference-table td .meta { white-space: normal; }
 
-  /* GUA-20261021-2: fecha de observación y estado caducado por fila. */
-  .stale-row td:not(:last-child) strong,
-  .stale-row td.num { color: var(--text-1); }
+  /* GUA-20261021-2: fecha de observación y estado caducado por fila
+     (el color de .stale-row lo aporta .data-table en primitives.css). */
   .stale-tag { margin-left: var(--space-2); }
   .live-value { color: var(--accent); }
   .obs-inline {
