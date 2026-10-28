@@ -1655,13 +1655,17 @@
   }
 
   /* Controls are .btn and .form-control from primitives.css (the load action
-     adds .is-primary). They keep the view's body-size mono figures:
-     `font: inherit` is left for V2. */
+     adds .is-primary) at body size; fields keep the view's font and buttons
+     take the interface font. */
   button,
   input,
   select {
     font: inherit;
     font-size: var(--text-base);
+  }
+
+  button {
+    font-family: var(--font-ui);
   }
 
   .symbol-control {
@@ -1811,7 +1815,7 @@
   .surface-readout em {
     margin-left: var(--space-2);
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     font-style: normal;
     font-weight: 500;
@@ -1834,7 +1838,7 @@
     align-items: center;
     gap: var(--space-2);
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1847,7 +1851,7 @@
   .sizing-basis {
     margin: 0 0 var(--space-2);
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1857,7 +1861,7 @@
     margin: var(--space-3) 0 0;
     padding-left: var(--space-4);
     color: var(--warning);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     line-height: 1.5;
   }
@@ -1865,7 +1869,7 @@
   .sizing-note {
     margin: var(--space-2) 0 0;
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
   }
 
@@ -1879,7 +1883,7 @@
     border-top: 1px solid var(--divider);
     list-style: none;
     color: var(--warning);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     line-height: 1.5;
   }
@@ -2212,7 +2216,7 @@
     gap: var(--space-2);
     margin-left: var(--space-3);
     color: var(--text-2);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     font-weight: 500;
     text-transform: uppercase;

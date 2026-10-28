@@ -206,7 +206,7 @@
     background: var(--surface-0);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
     color: var(--text-1);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);

@@ -2269,6 +2269,7 @@
     border-left: 1px solid var(--divider);
     color: var(--text-2);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     width: 2rem;
     flex-shrink: 0;
@@ -2340,6 +2341,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-2);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;

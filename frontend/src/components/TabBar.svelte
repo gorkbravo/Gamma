@@ -191,7 +191,7 @@
     position: fixed;
     inset: 0;
     z-index: 40;
-    background: color-mix(in srgb, var(--bg-0) 45%, transparent);
+    background: var(--scrim);
     backdrop-filter: blur(1.5px);
   }
 
@@ -204,7 +204,7 @@
     height: 100vh;
     background: color-mix(in srgb, var(--bg-0) 98%, var(--accent) 2%);
     border-right: 1px solid var(--panel-strong);
-    box-shadow: 16px 0 48px rgba(0, 0, 0, 0.4);
+    box-shadow: 16px 0 48px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
     transform: translateX(-100%);
     transition: transform 180ms ease;
     display: flex;
@@ -256,7 +256,7 @@
     background: transparent;
     color: var(--text-1);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
   }
 
   .header-btn,
@@ -352,7 +352,7 @@
     cursor: pointer;
     text-align: left;
     font-size: var(--text-base);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     border-radius: var(--radius-sm);
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }

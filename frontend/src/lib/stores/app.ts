@@ -871,7 +871,9 @@ export const fontFamily = writable<FontFamily>("Consolas");
 export function setFontFamily(family: FontFamily) {
   fontFamily.set(family);
   if (typeof document !== "undefined") {
-    document.documentElement.style.setProperty("--app-font", `"${family}"`);
+    // Both monospace roles follow the choice, as the single --app-font did.
+    document.documentElement.style.setProperty("--font-num", `"${family}"`);
+    document.documentElement.style.setProperty("--font-code", `"${family}"`);
   }
 }
 

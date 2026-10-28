@@ -45,26 +45,24 @@
     | null;
 
   /* MapLibre paint properties need literal colours, so the tokens are read
-     once from the document rather than copied into this file by hand. The
-     fallbacks only apply outside a browser (SSR, unit tests). */
-  function token(name: string, fallback: string) {
-    if (typeof document === "undefined") return fallback;
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback;
+     once from the document rather than copied into this file by hand. */
+  function token(name: string) {
+    if (typeof document === "undefined") return "";
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  const BG0 = token("--bg-0", "#070809");
-  const TEXT2 = token("--text-2", "#8a919a");
-  const WATER = token("--bg-0", "#070809");
+  const BG0 = token("--bg-0");
+  const TEXT2 = token("--text-2");
+  const WATER = token("--bg-0");
   /* Land is the surface, water is the void. --panel-strong separates them a
      little more than the old navy did (1.62 vs 1.32) while staying neutral. */
-  const LAND = token("--panel-strong", "#2e353e");
-  const BORDER_COUNTRY = token("--accent", "#7aa6c8");
-  const BORDER_INNER = token("--text-2", "#8a919a");
-  const LANE = token("--accent", "#7aa6c8");
-  const ACCENT = token("--accent", "#7aa6c8");
-  const TEXT0 = token("--text-0", "#f0f2f5");
-  const TEXT1 = token("--text-1", "#c2c8d0");
+  const LAND = token("--panel-strong");
+  const BORDER_COUNTRY = token("--accent");
+  const BORDER_INNER = token("--text-2");
+  const LANE = token("--accent");
+  const ACCENT = token("--accent");
+  const TEXT0 = token("--text-0");
+  const TEXT1 = token("--text-1");
   const AIS_ZOOM_THRESHOLD = 4;
   const VIEWPORT_DEBOUNCE_MS = 1500;
   const MAX_LIVE_POSITIONS = 600;
@@ -74,15 +72,15 @@
      ramp. Cargo and container both used to be --positive green, which made
      the two largest classes on the map indistinguishable. */
   const VESSEL_COLORS: Record<string, string> = {
-    tanker: token("--cat-4", "#d97a70"),
-    lng_carrier: token("--cat-1", "#7aa6c8"),
-    cargo: token("--cat-2", "#4bb474"),
-    container: token("--cat-5", "#5fa89c"),
-    dry_bulk: token("--cat-3", "#c49a5a"),
-    passenger: token("--cat-7", "#8595a8"),
-    fishing: token("--cat-8", "#9aae7a"),
-    special: token("--cat-6", "#9a8ac4"),
-    unknown: token("--text-2", "#8a919a"),
+    tanker: token("--cat-4"),
+    lng_carrier: token("--cat-1"),
+    cargo: token("--cat-2"),
+    container: token("--cat-5"),
+    dry_bulk: token("--cat-3"),
+    passenger: token("--cat-7"),
+    fishing: token("--cat-8"),
+    special: token("--cat-6"),
+    unknown: token("--text-2"),
   };
 
   let container: HTMLDivElement;
@@ -798,9 +796,9 @@
   function stressColorExpression() {
     return [
       "match", ["get", "tone"],
-      "high", token("--negative", "#d97a70"),
-      "active", token("--warning", "#c49a5a"),
-      token("--accent", "#7aa6c8"),
+      "high", token("--negative"),
+      "active", token("--warning"),
+      token("--accent"),
     ];
   }
 
@@ -1673,8 +1671,8 @@
     top: 0.6rem;
     right: 0.6rem;
     z-index: 10;
-    background: color-mix(in srgb, var(--bg-0, #070809) 88%, transparent);
-    border: 1px solid var(--panel-border, #1e2228);
+    background: color-mix(in srgb, var(--bg-0) 88%, transparent);
+    border: 1px solid var(--panel-border);
     padding: var(--space-3) var(--space-5);
     display: flex;
     flex-direction: column;
@@ -1692,11 +1690,11 @@
   }
 
   .hud-label {
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
   }
 
   .hud-value {
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     font-weight: 600;
     margin-left: auto;
     padding-left: var(--space-5);
@@ -1711,12 +1709,12 @@
   }
 
   .conn-dot.active {
-    background: var(--positive, #4bb474);
+    background: var(--positive);
   }
 
   .hud-note {
     max-width: 14rem;
-    color: var(--warning, #c49a5a);
+    color: var(--warning);
     font-size: var(--text-xs);
     line-height: 1.35;
   }
@@ -1724,7 +1722,7 @@
   .coverage-chip {
     color: inherit;
     text-decoration: none;
-    border-top: 1px dashed color-mix(in srgb, var(--warning, #c49a5a) 35%, transparent);
+    border-top: 1px dashed color-mix(in srgb, var(--warning) 35%, transparent);
     padding-top: var(--space-2);
     margin-top: 0.05rem;
     cursor: pointer;
@@ -1732,11 +1730,11 @@
 
   .coverage-chip:hover .coverage-chip-value,
   .coverage-chip:focus-visible .coverage-chip-value {
-    color: var(--warning, #c49a5a);
+    color: var(--warning);
   }
 
   .coverage-chip-value {
-    color: color-mix(in srgb, var(--warning, #c49a5a) 80%, var(--text-0, #f0f2f5));
+    color: color-mix(in srgb, var(--warning) 80%, var(--text-0));
   }
 
   /* ── Bottom-left: legend + 3D toggle ─────────────────────── */
@@ -1753,8 +1751,8 @@
   .map-legend {
     display: flex;
     gap: var(--space-6);
-    background: color-mix(in srgb, var(--bg-0, #070809) 90%, transparent);
-    border: 1px solid var(--panel-border, #1e2228);
+    background: color-mix(in srgb, var(--bg-0) 90%, transparent);
+    border: 1px solid var(--panel-border);
     padding: var(--space-2) var(--space-5);
   }
 
@@ -1762,7 +1760,7 @@
     font-size: var(--text-2xs);
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     display: flex;
     align-items: center;
     gap: var(--space-3);
@@ -1778,9 +1776,9 @@
   }
 
   .legend-item.tanker::before { background: var(--cat-4); }
-  .legend-item.lng::before    { background: #7aa6c8; }
-  .legend-item.cargo::before  { background: #4bb474; }
-  .legend-item.bulk::before   { background: #c49a5a; }
+  .legend-item.lng::before    { background: var(--cat-1); }
+  .legend-item.cargo::before  { background: var(--cat-2); }
+  .legend-item.bulk::before   { background: var(--cat-3); }
   .legend-item.lane::before {
     width: 18px;
     height: 5px;
@@ -1790,14 +1788,15 @@
       0 0 4px color-mix(in srgb, var(--accent) 72%, transparent),
       0 0 10px color-mix(in srgb, var(--accent) 42%, transparent);
   }
-  .legend-item.port::before   { background: var(--text-2, #8a919a); }
-  .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2, #8a919a); }
+  .legend-item.port::before   { background: var(--text-2); }
+  .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2); }
 
   .map-ctrl-btn {
-    background: color-mix(in srgb, var(--bg-0, #070809) 90%, transparent);
-    border: 1px solid var(--panel-border, #1e2228);
-    color: var(--text-2, #8a919a);
+    background: color-mix(in srgb, var(--bg-0) 90%, transparent);
+    border: 1px solid var(--panel-border);
+    color: var(--text-2);
     font: inherit;
+    font-family: var(--font-ui);
     font-size: var(--text-2xs);
     padding: var(--space-2) var(--space-4);
     cursor: pointer;
@@ -1807,8 +1806,8 @@
 
   .map-ctrl-btn:hover,
   .map-ctrl-btn.active {
-    color: var(--accent, #7aa6c8);
-    border-color: color-mix(in srgb, var(--accent, #7aa6c8) 40%, var(--panel-border, #1e2228));
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border));
   }
 
   .settings-zone {
@@ -1840,9 +1839,17 @@
   .vessel-filter,
   .replay-panel select {
     font: inherit;
-    border: 1px solid var(--panel-border, #1e2228);
-    background: color-mix(in srgb, var(--bg-0, #070809) 93%, transparent);
-    color: var(--text-1, #c2c8d0);
+    font-family: var(--font-ui);
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--bg-0) 93%, transparent);
+    color: var(--text-1);
+  }
+
+  /* Flow and event rows carry figures and dates, and the replay picker is a
+     field, so they keep the map's figures font. */
+  .row-button,
+  .replay-panel select {
+    font-family: var(--font-num), monospace;
   }
 
   .settings-button {
@@ -1887,15 +1894,15 @@
   .overlay-list button.enabled,
   .vessel-filter:hover,
   .vessel-filter.enabled {
-    color: var(--accent, #7aa6c8);
-    border-color: color-mix(in srgb, var(--accent, #7aa6c8) 42%, var(--panel-border, #1e2228));
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-border));
   }
 
   .settings-shelf,
   .detail-drawer,
   .replay-panel {
-    background: color-mix(in srgb, var(--bg-0, #070809) 94%, transparent);
-    border: 1px solid var(--panel-border, #1e2228);
+    background: color-mix(in srgb, var(--bg-0) 94%, transparent);
+    border: 1px solid var(--panel-border);
     pointer-events: auto;
   }
 
@@ -1906,13 +1913,13 @@
     align-items: flex-start;
     gap: var(--space-4);
     padding: var(--space-4) var(--space-5);
-    background: color-mix(in srgb, var(--bg-0, #070809) 94%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent, #7aa6c8) 42%, var(--panel-border, #1e2228));
+    background: color-mix(in srgb, var(--bg-0) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
     pointer-events: auto;
   }
 
   .focus-notice.unresolved {
-    border-color: color-mix(in srgb, var(--warning, #c49a5a) 50%, var(--panel-border, #1e2228));
+    border-color: color-mix(in srgb, var(--warning) 50%, var(--panel-border));
   }
 
   .focus-copy {
@@ -1922,18 +1929,18 @@
   }
 
   .focus-copy strong {
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     font-size: var(--text-sm);
   }
 
   .focus-copy small {
-    color: var(--text-1, #c2c8d0);
+    color: var(--text-1);
     font-size: var(--text-xs);
     line-height: 1.35;
   }
 
   .focus-notice.unresolved .focus-copy small {
-    color: var(--warning, #c49a5a);
+    color: var(--warning);
   }
 
   .settings-shelf {
@@ -1960,7 +1967,7 @@
 
   .shelf-label {
     margin: 0;
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     font-size: var(--text-2xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -1984,15 +1991,15 @@
   }
 
   .shelf-action:disabled {
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     cursor: not-allowed;
   }
 
   .coverage-mini {
-    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-top: 1px solid var(--divider);
+    border-bottom: 1px solid var(--divider);
     padding: var(--space-3) 0;
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -2000,7 +2007,7 @@
 
   .shelf-note {
     margin: 0;
-    color: var(--warning, #c49a5a);
+    color: var(--warning);
     font-size: var(--text-xs);
     line-height: 1.35;
   }
@@ -2017,19 +2024,19 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: var(--space-4);
-    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-top: 1px solid var(--divider);
     padding-top: var(--space-4);
   }
 
   .settings-toggle-row strong {
     display: block;
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     font-size: var(--text-sm);
   }
 
   .settings-toggle-row small {
     display: block;
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     font-size: var(--text-xs);
     line-height: 1.35;
     margin-top: var(--space-1);
@@ -2051,7 +2058,7 @@
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     font-size: var(--text-xs);
     cursor: pointer;
     text-align: left;
@@ -2085,7 +2092,7 @@
   .static-row strong,
   .drawer-header strong,
   .replay-copy strong {
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     font-size: var(--text-sm);
   }
 
@@ -2094,7 +2101,7 @@
   .static-row small,
   .drawer-section p,
   .replay-copy small {
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     font-size: var(--text-xs);
     line-height: 1.35;
   }
@@ -2102,7 +2109,7 @@
   .static-row {
     display: grid;
     gap: var(--space-1);
-    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-top: 1px solid var(--divider);
     padding-top: var(--space-3);
   }
 
@@ -2122,13 +2129,13 @@
   .drawer-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    border: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border: 1px solid var(--divider);
   }
 
   .drawer-grid div {
     padding: var(--space-4) var(--space-4);
-    border-right: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-right: 1px solid var(--divider);
+    border-bottom: 1px solid var(--divider);
     display: grid;
     gap: var(--space-1);
   }
@@ -2143,27 +2150,27 @@
 
   .drawer-grid span,
   .drawer-section span {
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     font-size: var(--text-2xs);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
   .drawer-grid strong {
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     font-size: var(--text-sm);
   }
 
   .drawer-section {
     display: grid;
     gap: var(--space-1);
-    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-top: 1px solid var(--divider);
     padding-top: var(--space-4);
   }
 
   .drawer-section p {
     margin: 0;
-    color: var(--text-1, #c2c8d0);
+    color: var(--text-1);
   }
 
   .replay-panel {
@@ -2192,17 +2199,17 @@
   .replay-panel input[type="range"] {
     flex: 1;
     min-width: 8rem;
-    accent-color: var(--accent, #7aa6c8);
+    accent-color: var(--accent);
   }
 
   /* ── MapLibre GL popup overrides ── */
   :global(.maplibregl-popup-content) {
-    background: var(--bg-1, #0b0d10) !important;
-    border: 1px solid var(--panel-border, #1e2228) !important;
+    background: var(--bg-1) !important;
+    border: 1px solid var(--panel-border) !important;
     border-radius: 0 !important;
     box-shadow: none !important;
     padding: 0 !important;
-    font-family: var(--app-font), monospace !important;
+    font-family: var(--font-num), monospace !important;
   }
 
   :global(.maplibregl-popup-tip) {
@@ -2216,11 +2223,11 @@
 
   :global(.mp-name) {
     display: block;
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     font-size: var(--text-base);
     margin-bottom: var(--space-3);
     padding-bottom: var(--space-3);
-    border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-bottom: 1px solid var(--divider);
   }
 
   :global(.mp-row) {
@@ -2232,34 +2239,34 @@
   }
 
   :global(.mp-row span:first-child) {
-    color: var(--text-2, #8a919a);
+    color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.07em;
     flex-shrink: 0;
   }
 
   :global(.mp-row span:last-child) {
-    color: var(--text-0, #f0f2f5);
+    color: var(--text-0);
     text-align: right;
   }
 
   :global(.mp-note) {
     margin-top: var(--space-3);
     padding-top: var(--space-3);
-    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    color: var(--text-2, #8a919a);
+    border-top: 1px solid var(--divider);
+    color: var(--text-2);
     font-size: var(--text-xs);
     line-height: 1.35;
   }
 
   /* Keep MapLibre attribution minimal */
   :global(.maplibregl-ctrl-attrib) {
-    background: color-mix(in srgb, #070809 88%, transparent) !important;
+    background: color-mix(in srgb, var(--bg-0) 88%, transparent) !important;
     font-size: var(--text-2xs) !important;
   }
 
   :global(.maplibregl-ctrl-attrib a) {
-    color: var(--text-2, #8a919a) !important;
+    color: var(--text-2) !important;
   }
 
   @media (max-width: 760px) {

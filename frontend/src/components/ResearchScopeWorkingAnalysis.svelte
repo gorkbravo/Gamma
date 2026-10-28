@@ -51,7 +51,7 @@
   .scope-header { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-5); align-items: center; flex-wrap: wrap; }
   h2, p { margin: 0; }
   h2 { font-size: var(--text-lg); }
-  .btn { min-height: 28px; padding: var(--space-2) var(--space-4); background: var(--bg-1); color: var(--text-1); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+  .btn { min-height: 28px; padding: var(--space-2) var(--space-4); background: var(--bg-1); color: var(--text-1); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); font: inherit; font-family: var(--font-ui); font-size: var(--text-xs); cursor: pointer; }
   .btn:hover { border-color: var(--panel-strong); }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .meta, .note { padding: var(--space-3) var(--space-5); font-size: var(--text-xs); overflow-wrap: anywhere; }

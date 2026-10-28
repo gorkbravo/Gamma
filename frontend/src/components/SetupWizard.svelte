@@ -606,7 +606,7 @@
   th[scope="col"],
   caption {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-label);
     font-size: var(--text-2xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -615,7 +615,7 @@
   h2 {
     margin: 0;
     color: var(--text-0);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-lg);
     line-height: var(--leading-tight);
     outline: none;
@@ -629,7 +629,7 @@
     padding: var(--space-4) var(--space-6);
     list-style: none;
     border-bottom: 1px solid var(--panel-border);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
   }
 
@@ -641,7 +641,7 @@
   }
 
   .progress .index {
-    font-family: var(--app-font);
+    font-family: var(--font-num);
   }
 
   .progress li.done {
@@ -664,7 +664,7 @@
     padding: var(--space-6);
     overflow: auto;
     color: var(--text-1);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-base);
     line-height: var(--leading-normal);
   }
@@ -703,7 +703,7 @@
   }
 
   .mono {
-    font-family: var(--app-font);
+    font-family: var(--font-num);
   }
 
   .path {
@@ -808,7 +808,7 @@
   dd {
     margin: 0;
     color: var(--text-0);
-    font-family: var(--app-font);
+    font-family: var(--font-num);
   }
 
   .steps {
@@ -845,7 +845,7 @@
   select,
   input[type="text"],
   input[type="email"] {
-    font-family: var(--app-font);
+    font-family: var(--font-num);
     font-size: var(--text-sm);
   }
 
@@ -932,7 +932,7 @@
   }
 
   button {
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     font-weight: 500;
     transition: border-color var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);

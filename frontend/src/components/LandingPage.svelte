@@ -152,7 +152,7 @@
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--accent) 12%, var(--surface-0));
     color: var(--accent);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-xl);
     font-weight: 700;
     line-height: 1;
@@ -176,7 +176,7 @@
 
   .descriptor {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     letter-spacing: 0.04em;
   }
@@ -190,7 +190,7 @@
 
   .conn strong {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
@@ -231,7 +231,7 @@
 
   dt {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-label);
     font-size: var(--text-2xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -253,7 +253,7 @@
 
   .status-note {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     line-height: var(--leading-normal);
   }
@@ -276,7 +276,7 @@
     color: var(--text-0);
     padding: var(--space-5) var(--space-6);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-weight: 500;
     cursor: pointer;
     transition: border-color var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);
@@ -312,7 +312,7 @@
     justify-content: space-between;
     gap: var(--space-5);
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-xs);
     padding-top: var(--space-5);
     border-top: 1px solid var(--panel-border);

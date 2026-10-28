@@ -162,12 +162,12 @@
   }
 
   .axis {
-    stroke: rgba(46, 60, 74, 0.6);
+    stroke: color-mix(in srgb, var(--rule-navy) 60%, transparent);
     stroke-width: 1;
   }
 
   .bar {
-    fill: rgba(122, 166, 200, 0.76);
+    fill: color-mix(in srgb, var(--accent) 76%, transparent);
   }
 
   .marker {
@@ -193,8 +193,8 @@
   }
 
   .tooltip rect {
-    fill: rgba(7, 11, 16, 0.96);
-    stroke: rgba(122, 166, 200, 0.28);
+    fill: color-mix(in srgb, var(--chart-halo) 96%, transparent);
+    stroke: color-mix(in srgb, var(--accent) 28%, transparent);
   }
 
   .tooltip text {

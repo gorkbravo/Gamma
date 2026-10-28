@@ -2579,13 +2579,17 @@
   }
 
   /* Fields are .form-control and buttons .btn.is-ghost from primitives.css.
-     Here they fill their cell and keep the view's mono figures (`font:
-     inherit`, left for V2); toggles and pickers below set their own shape. */
+     Here they fill their cell; fields keep the view's font and buttons take
+     the interface font. Toggles and pickers below set their own shape. */
   input,
   select,
   button {
     font: inherit;
     width: 100%;
+  }
+
+  button {
+    font-family: var(--font-ui);
   }
 
   button.auto,
@@ -2883,7 +2887,7 @@
 
   code {
     color: var(--text-1);
-    font-family: var(--app-font);
+    font-family: var(--font-code);
     font-size: var(--text-sm);
   }
 

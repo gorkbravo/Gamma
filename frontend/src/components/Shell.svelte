@@ -211,7 +211,7 @@
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-0));
     color: var(--accent);
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     font-weight: 700;
     line-height: 1;

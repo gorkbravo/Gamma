@@ -250,7 +250,7 @@
 
   .axis,
   .baseline {
-    stroke: rgba(46, 60, 74, 0.58);
+    stroke: color-mix(in srgb, var(--rule-navy) 58%, transparent);
     stroke-width: 1;
   }
 
@@ -259,7 +259,7 @@
   }
 
   .split {
-    stroke: rgba(122, 166, 200, 0.28);
+    stroke: color-mix(in srgb, var(--accent) 28%, transparent);
     stroke-dasharray: 3 4;
   }
 
@@ -294,13 +294,13 @@
 
   .sample-path {
     fill: none;
-    stroke: rgba(138, 145, 154, 0.06);
+    stroke: color-mix(in srgb, var(--text-2) 6%, transparent);
     stroke-width: 0.72;
   }
 
   .median-halo {
     fill: none;
-    stroke: rgba(122, 166, 200, 0.22);
+    stroke: color-mix(in srgb, var(--accent) 22%, transparent);
     stroke-width: 4.5;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -316,18 +316,18 @@
 
   .current-dot {
     fill: var(--text-0);
-    stroke: rgba(7, 11, 16, 0.92);
+    stroke: color-mix(in srgb, var(--chart-halo) 92%, transparent);
     stroke-width: 1.4;
   }
 
   .hover-line {
-    stroke: rgba(122, 166, 200, 0.24);
+    stroke: color-mix(in srgb, var(--accent) 24%, transparent);
     stroke-dasharray: 4 4;
   }
 
   .hover-dot {
     fill: var(--accent);
-    stroke: rgba(7, 11, 16, 0.92);
+    stroke: color-mix(in srgb, var(--chart-halo) 92%, transparent);
     stroke-width: 1.3;
   }
 
@@ -348,7 +348,7 @@
   }
 
   .tooltip rect {
-    fill: rgba(7, 11, 16, 0.96);
+    fill: color-mix(in srgb, var(--chart-halo) 96%, transparent);
     stroke: rgba(106, 168, 255, 0.32);
   }
 

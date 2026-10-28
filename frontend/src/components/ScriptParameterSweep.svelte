@@ -296,7 +296,7 @@
   .muted, small { color: var(--text-2); font-size: var(--text-xs); line-height: var(--leading-normal); }
   small.invalid, .error { color: var(--negative); }
   .error { font-size: var(--text-xs); }
-  code { font-family: var(--app-font); font-size: var(--text-xs); }
+  code { font-family: var(--font-code); font-size: var(--text-xs); }
   label { display: grid; gap: var(--space-2); min-width: 0; }
   label > span, legend {
     color: var(--text-2); font-size: var(--text-2xs); letter-spacing: 0.12em; text-transform: uppercase;
@@ -304,12 +304,12 @@
   /* Fields are .form-control and buttons .btn.is-ghost from primitives.css
      (run actions add .is-primary); results keep 11px mono figures. */
   input, select, textarea {
-    width: 100%; min-width: 0; font-family: var(--app-font); font-size: var(--text-xs);
+    width: 100%; min-width: 0; font-family: var(--font-num); font-size: var(--text-xs);
   }
   button {
-    font-family: var(--display-font); font-size: var(--text-sm); white-space: nowrap;
+    font-family: var(--font-ui); font-size: var(--text-sm); white-space: nowrap;
   }
-  .artifact-link { border: 0; padding: 0; min-height: auto; color: var(--accent); font-family: var(--app-font); font-size: var(--text-xs); }
+  .artifact-link { border: 0; padding: 0; min-height: auto; color: var(--accent); font-family: var(--font-num); font-size: var(--text-xs); }
   .status {
     border: 1px solid var(--panel-strong); color: var(--text-1); padding: var(--space-2) var(--space-3);
     font-size: var(--text-2xs); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap;
@@ -319,7 +319,7 @@
   .binding button { margin-top: var(--space-3); justify-self: start; }
   .row { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid var(--divider); font-size: var(--text-xs); }
   .row span { color: var(--text-2); }
-  .row strong { color: var(--text-1); font-family: var(--app-font); font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+  .row strong { color: var(--text-1); font-family: var(--font-num); font-weight: 500; text-align: right; overflow-wrap: anywhere; }
   .action-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
   .buttons { display: flex; gap: var(--space-2); flex-wrap: wrap; }
   .progress { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-xs); color: var(--text-1); }
@@ -335,12 +335,12 @@
   .label-note { color: var(--text-1); border-left: 2px solid var(--panel-strong); }
   .timing-note, .warning { color: var(--warning); border-left: 2px solid var(--warning); }
   .row-meta { display: flex; flex-wrap: wrap; gap: var(--space-5); font-size: var(--text-xs); color: var(--text-2); }
-  .row-meta strong { color: var(--text-1); font-family: var(--app-font); font-weight: 500; }
+  .row-meta strong { color: var(--text-1); font-family: var(--font-num); font-weight: 500; }
   .table-wrap { overflow: auto; border: 1px solid var(--divider); }
   /* Cells and header come from .data-table.is-compact.is-nowrap in primitives.css;
      script results keep 11px mono figures. */
   table { min-width: 36rem; }
-  .data-table td { font-size: var(--text-xs); font-family: var(--app-font); }
+  .data-table td { font-size: var(--text-xs); font-family: var(--font-num); }
   td.params { white-space: normal; overflow-wrap: anywhere; min-width: 10rem; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   .positive { color: var(--positive); }
@@ -349,7 +349,7 @@
   .kpis { display: flex; flex-wrap: wrap; border-left: 1px solid var(--divider); }
   .kpi { display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-5); border-right: 1px solid var(--divider); min-width: 7rem; }
   .kpi span { color: var(--text-2); font-size: var(--text-2xs); letter-spacing: 0.1em; text-transform: uppercase; }
-  .kpi strong { color: var(--text-0); font-family: var(--app-font); font-size: var(--text-md); font-weight: 600; }
+  .kpi strong { color: var(--text-0); font-family: var(--font-num); font-size: var(--text-md); font-weight: 600; }
   .kpi.primary strong { font-size: var(--text-lg); }
   .kpi strong.positive { color: var(--positive); }
   .kpi strong.negative { color: var(--negative); }

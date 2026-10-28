@@ -142,7 +142,7 @@
 
 <style>
   .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); padding: var(--space-5); min-width: 0; display: grid; gap: var(--space-4); }
-  h3, h4, summary, button { font-family: var(--display-font); }
+  h3, h4, summary, button { font-family: var(--font-ui); }
   h3, h4, p { margin: 0; }
   h3 { font-size: var(--text-md); } h4 { font-size: var(--text-sm); }
   p { font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--text-1); overflow-wrap: anywhere; }
@@ -153,10 +153,10 @@
   .book-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: var(--space-3); align-items: end; }
   .book-options label { display: grid; gap: var(--space-2); min-width: 0; }
   .book-options span, dt { color: var(--text-2); font-size: var(--text-2xs); letter-spacing: 0.1em; text-transform: uppercase; }
-  .book-options input { width: 100%; min-height: 28px; border: 1px solid var(--panel-strong); background: var(--bg-1); color: var(--text-0); padding: var(--space-2); font-family: var(--app-font); font-size: var(--text-xs); }
+  .book-options input { width: 100%; min-height: 28px; border: 1px solid var(--panel-strong); background: var(--bg-1); color: var(--text-0); padding: var(--space-2); font-family: var(--font-num); font-size: var(--text-xs); }
   .book-summary { display: grid; gap: 0; margin: 0; }
   .book-summary div { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--divider); }
-  dd { margin: 0; color: var(--text-1); font-family: var(--app-font); font-size: var(--text-xs); text-align: right; overflow-wrap: anywhere; }
+  dd { margin: 0; color: var(--text-1); font-family: var(--font-num); font-size: var(--text-xs); text-align: right; overflow-wrap: anywhere; }
   .reason { color: var(--warning); }
   ul { margin: var(--space-2) 0; padding-left: var(--space-5); font-size: var(--text-xs); color: var(--text-1); line-height: var(--leading-normal); }
   /* Buttons and fields are .btn and .form-control from primitives.css. */

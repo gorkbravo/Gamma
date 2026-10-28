@@ -2,9 +2,26 @@
 
 :root {
   color-scheme: dark;
-  --app-font: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
-  --display-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
-  font-family: var(--app-font), monospace;
+
+  /* ── Font roles ──
+     Every font-family in the app names one of four roles, so a restyle sets
+     one value per role instead of editing rules across views:
+       --font-ui     chrome, headings, buttons and prose
+       --font-label  the small labels above data: eyebrows, column headers,
+                     stat and field labels
+       --font-num    data figures, which must align in a column
+       --font-code   code, raw JSON and model output, the Script editor
+     Today ui and label are the sans and num and code the mono. The document
+     still defaults to --font-num, so data cells need no class. The Settings
+     font choice overrides --font-num and --font-code on the root element. */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
+  --font-label: var(--font-ui);
+  --font-num: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  --font-code: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  /* Aliases for the old names; new rules use the roles above. */
+  --app-font: var(--font-num);
+  --display-font: var(--font-ui);
+  font-family: var(--font-num), monospace;
 
   /* ── Radius scale (small, consistent — not consumer-app rounding) ──
      Applies to top-level surfaces and controls only. Anything nested
@@ -12,6 +29,10 @@
      is square — radius belongs to the outer edge, not the inside. */
   --radius-sm: 2px;
   --radius-md: 4px;
+
+  /* ── Panel shape ── the bordered panel's corner and edge. */
+  --panel-radius: var(--radius-md);
+  --panel-border-width: 1px;
 
   /* ── Type scale (7 steps — every font-size in the app resolves here) ──
      Do not introduce sizes outside this ramp. Hierarchy is weight-first,
@@ -58,6 +79,9 @@
   --surface-2: #141719;
   --surface-soft: rgba(10, 12, 14, 0.62);
   --panel-bg: var(--bg-0);
+  /* The quiet fill for fields and a tinted table header band; today the
+     control background. */
+  --tint: var(--bg-1);
 
   /* ── Borders & dividers ── */
   --panel-border: #2f3641;
@@ -77,6 +101,19 @@
   --positive: #4bb474;
   --negative: #d97a70;
   --warning: #c49a5a;
+  /* The red that soft negative fills, outlines and heat maps mix from, a
+     shade darker than --negative so a filled cell does not shout. */
+  --negative-muted: #c66b61;
+
+  /* ── Soft fills ──
+     A semantic colour mixed into transparent, for tag and chip fills, stale
+     and conflict cells and heat maps. The strengths are the tinted tag's;
+     a view that needs another strength mixes the base token inline, e.g.
+     color-mix(in srgb, var(--accent) 10%, transparent). */
+  --accent-soft: color-mix(in srgb, var(--accent) 6%, transparent);
+  --positive-soft: color-mix(in srgb, var(--positive) 6%, transparent);
+  --negative-soft: color-mix(in srgb, var(--negative-muted) 8%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 8%, transparent);
 
   /* ── Categorical (unordered classes: vessel types, sectors, venues) ──
      Intensity tokens encode magnitude; these encode identity. Kept in the
@@ -98,24 +135,51 @@
   --data-elevated: #d4a054;
   --data-extreme: #d66868;
 
-  /* ── Shadows ── */
-  --shadow: rgba(0, 0, 0, 0.24);
+  /* ── Legacy values ──
+     Colours that views use but no role token carries yet. Each keeps the
+     exact value its rules had, so moving the rules onto tokens changed no
+     pixel. */
+  --rule-navy: #2e3c4a;   /* rules and outlines in the Macro and Copilot cards, chart axes */
+  --track: #273544;       /* the unfilled part of bar, gauge and band tracks */
+  --chart-halo: #070b10;  /* tooltip backing and dot outlines in the SVG charts */
+
+  /* ── Shadows and scrim ── every shadow mixes from --shadow-ink. */
+  --shadow-ink: #000;
+  --shadow: color-mix(in srgb, var(--shadow-ink) 24%, transparent);
+  /* Dims the workspace behind the navigation drawer. */
+  --scrim: color-mix(in srgb, var(--bg-0) 45%, transparent);
+
+  /* ── Label case ── the chrome labels in primitives.css (eyebrows, view and
+     panel titles, column headers, stat and KPI labels, tags) take their
+     case from here. Labels styled inside a view still set their own. */
+  --label-case: uppercase;
 
   /* ── Chart themes ── */
   --chart-primary: #7aa6c8;
   --chart-secondary: #c49a5a;
   --chart-negative: #cc6f64;
 
-  /* ── Flash animation durations ── */
+  /* ── Value flash ── the colour a ticking value flashes before it fades.
+     Written out rather than mixed from --positive, --negative and
+     --accent-2: an animated colour interpolates in floating point, so a
+     mixed start colour would land one level off. */
+  --flash-up: rgba(75, 180, 116, 0.22);
+  --flash-down: rgba(217, 122, 112, 0.22);
+  --flash-neutral: rgba(196, 154, 90, 0.18);
   --flash-duration: 800ms;
 
+  /* ── Canvas dot ── the accent at 7%, written out: a color-mix() stop in a
+     gradient interpolates in floating point and moves edge pixels by one
+     level, where a flat fill paints identically. */
+  --canvas-dot: rgba(122, 166, 200, 0.07);
+
   /* ── Table stripe ── */
-  --table-stripe: rgba(122, 166, 200, 0.018);
+  --table-stripe: color-mix(in srgb, var(--accent) 1.8%, transparent);
 
   /* ── Interaction states ── */
-  --hover-bg: rgba(122, 166, 200, 0.06);
-  --active-bg: rgba(122, 166, 200, 0.12);
-  --focus-ring: rgba(122, 166, 200, 0.55);
+  --hover-bg: color-mix(in srgb, var(--accent) 6%, transparent);
+  --active-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 /* ── Theme: Amber phosphor ── */
@@ -141,7 +205,7 @@ body,
   /* Canvas dot grid — the app's only texture. Panels are solid --bg-0, so
      dots show only in seams and empty canvas. Must stay dimmer than --text-2
      so it never competes with labels; 24px steps match --space-7. */
-  background-image: radial-gradient(circle, rgba(122, 166, 200, 0.07) 1px, transparent 1px);
+  background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1px);
   background-size: 24px 24px;
   color: var(--text-0);
 }
@@ -154,7 +218,7 @@ body {
 }
 
 ::selection {
-  background: rgba(122, 166, 200, 0.28);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--text-0);
 }
 
@@ -168,7 +232,7 @@ textarea {
 
 button {
   font: inherit;
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   border-radius: var(--radius-sm);
 }
 
@@ -183,7 +247,7 @@ small {
 }
 
 .panel {
-  border-radius: var(--radius-md);
+  border-radius: var(--panel-radius);
 }
 
 .mode-bar,
@@ -205,9 +269,12 @@ h2,
 h3,
 h4,
 .brand,
-.panel-header,
+.panel-header {
+  font-family: var(--font-ui);
+}
+
 .eyebrow {
-  font-family: var(--display-font);
+  font-family: var(--font-label);
 }
 
 /* Headings land on the ramp even on surfaces that do not restyle them —
@@ -226,9 +293,9 @@ h4 {
   font-size: var(--text-base);
 }
 
-/* Column headers are labels (chrome), not data — sans over mono data */
+/* Column headers are labels (chrome), not data */
 thead th {
-  font-family: var(--display-font);
+  font-family: var(--font-label);
 }
 
 * {
@@ -259,17 +326,17 @@ thead th {
 
 /* ── Bloomberg-style value flash ── */
 @keyframes flash-up {
-  0%   { background-color: rgba(75, 180, 116, 0.22); }
+  0%   { background-color: var(--flash-up); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-down {
-  0%   { background-color: rgba(217, 122, 112, 0.22); }
+  0%   { background-color: var(--flash-down); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-neutral {
-  0%   { background-color: rgba(196, 154, 90, 0.18); }
+  0%   { background-color: var(--flash-neutral); }
   100% { background-color: transparent; }
 }
 
@@ -292,7 +359,7 @@ tbody tr:nth-child(even) {
 
 /* ── Table row hover (global, subtle) ── */
 tbody tr:hover {
-  background: rgba(122, 166, 200, 0.045);
+  background: color-mix(in srgb, var(--accent) 4.5%, transparent);
 }
 
 /* ── Reduced motion ──

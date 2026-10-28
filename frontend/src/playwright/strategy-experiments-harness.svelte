@@ -38,4 +38,4 @@
     onSaveResearch={saveResearchItem} onLoadSaved={loadSavedResearch} onDeleteSaved={deleteSavedResearchItem}
     onRestoreComposition={restoreStrategyLabComposition} onRestoreStrategy={restoreStrategyLabResult} onOpenRisk={openRisk} />
 {/if}
-<style>:global(body) { margin: 0; background: var(--bg-0); color: var(--text-0); font-family: var(--display-font); } :global(#app) { padding: 12px; }</style>
+<style>:global(body) { margin: 0; background: var(--bg-0); color: var(--text-0); font-family: var(--font-ui); } :global(#app) { padding: 12px; }</style>

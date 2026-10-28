@@ -67,7 +67,7 @@
   .comparison-panel { min-width: 0; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); }
   .header, .selectors { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-5); }
   h3 { margin: 0; margin-right: auto; font-size: var(--text-md); }
-  label { display: grid; gap: var(--space-2); flex: 1 1 220px; min-width: 0; font-family: var(--display-font); }
+  label { display: grid; gap: var(--space-2); flex: 1 1 220px; min-width: 0; font-family: var(--font-label); }
   /* Controls are .btn and .form-control from primitives.css. */
   select { width: 100%; min-width: 0; }
   p { margin: 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm); color: var(--text-1); overflow-wrap: anywhere; }

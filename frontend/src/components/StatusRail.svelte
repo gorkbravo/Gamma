@@ -334,7 +334,7 @@
     color: var(--text-0);
     padding: var(--space-2) var(--space-4);
     font: inherit;
-    font-family: var(--display-font);
+    font-family: var(--font-ui);
     font-size: var(--text-sm);
     cursor: pointer;
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
@@ -375,7 +375,7 @@
 
   .conn-label {
     color: var(--text-2);
-    font-family: var(--display-font);
+    font-family: var(--font-label);
     font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
@@ -396,7 +396,7 @@
   }
 
   .accent {
-    border-color: rgba(122, 166, 200, 0.5);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
     color: var(--accent);
   }
 
@@ -405,7 +405,7 @@
   }
 
   .settings-toggle.open {
-    border-color: rgba(122, 166, 200, 0.5);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
     color: var(--accent);
   }
 
@@ -434,7 +434,7 @@
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
     background: rgba(8, 13, 18, 0.98);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 18px 40px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
   }
 
   .settings-section {
@@ -443,7 +443,7 @@
   }
 
   .settings-section + .settings-section {
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
     padding-top: var(--space-5);
   }
 
@@ -477,7 +477,7 @@
     gap: var(--space-2) var(--space-4);
     align-items: baseline;
     padding: var(--space-3) 0;
-    border-top: 1px solid rgba(46, 60, 74, 0.36);
+    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 36%, transparent);
   }
 
   .usage-row:first-child {
@@ -519,7 +519,7 @@
     display: grid;
     gap: var(--space-3);
     padding-top: var(--space-3);
-    border-top: 1px dashed rgba(46, 60, 74, 0.42);
+    border-top: 1px dashed color-mix(in srgb, var(--rule-navy) 42%, transparent);
   }
 
   .health-row {

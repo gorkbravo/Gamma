@@ -195,10 +195,11 @@
     font-size: var(--text-sm);
   }
 
-  /* Buttons are .btn from primitives.css; `font: inherit` is left for V2. */
+  /* Buttons are .btn from primitives.css in the interface font. */
 
   button {
     font: inherit;
+    font-family: var(--font-ui);
   }
 
   @media (max-width: 1080px) {

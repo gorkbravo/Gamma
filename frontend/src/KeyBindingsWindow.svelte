@@ -161,7 +161,7 @@
 <style>
   :global(body) {
     margin: 0;
-    font-family: var(--app-font), monospace;
+    font-family: var(--font-num), monospace;
     background: var(--bg-0);
     color: var(--text-0);
   }

@@ -21,7 +21,7 @@
 {/if}
 <style>
   /* The label/value rows are .data-table.is-keyvalue in primitives.css. */
-  summary { padding: var(--space-3) var(--space-5); cursor: pointer; font-family: var(--display-font); font-size: var(--text-sm); }
+  summary { padding: var(--space-3) var(--space-5); cursor: pointer; font-family: var(--font-ui); font-size: var(--text-sm); }
   summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   p { padding: var(--space-3) var(--space-5); font-size: var(--text-xs); color: var(--text-2); }
 </style>

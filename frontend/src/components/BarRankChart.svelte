@@ -59,13 +59,13 @@ function barWidth(value: number, maxAbs: number) {
 
   .track {
     height: 0.55rem;
-    background: rgba(39, 53, 68, 0.8);
+    background: color-mix(in srgb, var(--track) 80%, transparent);
     overflow: hidden;
   }
 
   .fill {
     height: 100%;
-    background: rgba(122, 166, 200, 0.76);
+    background: color-mix(in srgb, var(--accent) 76%, transparent);
   }
 
   .fill.positive {

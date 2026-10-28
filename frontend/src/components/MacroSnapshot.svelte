@@ -278,7 +278,7 @@
   }
 
   .focus-card {
-    border: 1px solid rgba(46, 60, 74, 0.35);
+    border: 1px solid color-mix(in srgb, var(--rule-navy) 35%, transparent);
     background: var(--surface-soft);
     color: inherit;
     font: inherit;
@@ -291,8 +291,8 @@
   }
 
   .focus-card:hover {
-    background: rgba(122, 166, 200, 0.05);
-    border-color: rgba(122, 166, 200, 0.28);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
   }
 
   .focus-card:focus-visible {
@@ -362,7 +362,7 @@
     transition: background 120ms ease;
   }
 
-  .snapshot-row:hover { background: rgba(122, 166, 200, 0.05); }
+  .snapshot-row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
 
   .snapshot-row:focus-visible {
     outline: 1px solid var(--accent);
@@ -489,8 +489,8 @@
     letter-spacing: 0.02em;
   }
 
-  /* The FX pair pickers are .form-control from primitives.css; they keep the
-     view's mono figures (`font: inherit`, left for V2). */
+  /* The FX pair pickers are .form-control from primitives.css and keep the
+     view's font. */
   .fx-select {
     font: inherit;
     font-size: var(--text-base);
@@ -510,7 +510,7 @@
     max-height: 24rem;
     overflow-y: auto;
     scrollbar-width: thin;
-    scrollbar-color: rgba(122, 166, 200, 0.18) transparent;
+    scrollbar-color: color-mix(in srgb, var(--accent) 18%, transparent) transparent;
   }
 
   .list-row {
@@ -518,7 +518,7 @@
     gap: var(--space-1);
     text-align: left;
     padding: var(--space-4) var(--space-5);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
+    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 30%, transparent);
     cursor: default;
   }
 
@@ -528,7 +528,7 @@
   .list-row.interactive {
     cursor: pointer;
     border: 0;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
+    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 30%, transparent);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -536,7 +536,7 @@
     padding: var(--space-3) 0;
   }
 
-  .list-row.interactive:hover { background: rgba(122, 166, 200, 0.04); }
+  .list-row.interactive:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
   .list-row.interactive:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .list-row.interactive:last-child { border-bottom: 0; }
 
@@ -566,7 +566,7 @@
     letter-spacing: 0.12em;
     padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.2);
+    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 20%, transparent);
     position: sticky;
     top: 0;
     z-index: 1;
@@ -579,7 +579,7 @@
     flex-shrink: 0;
   }
 
-  .tag.is-tinted.warning { border-color: rgba(196, 154, 90, 0.3); }
+  .tag.is-tinted.warning { border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
 
   /* ── Empty states ── */
   .empty-state {

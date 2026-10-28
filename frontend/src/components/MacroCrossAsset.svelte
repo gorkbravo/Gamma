@@ -257,22 +257,22 @@
     min-width: 2.6rem;
     padding: var(--space-1) var(--space-2);
     border-radius: 999px;
-    border: 1px solid rgba(46, 60, 74, 0.42);
-    background: rgba(122, 166, 200, 0.06);
+    border: 1px solid color-mix(in srgb, var(--rule-navy) 42%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     color: var(--text-1);
     font-size: var(--text-2xs);
     font-weight: 600;
   }
 
   .signal-score.positive {
-    border-color: rgba(75, 180, 116, 0.25);
-    background: rgba(75, 180, 116, 0.08);
+    border-color: color-mix(in srgb, var(--positive) 25%, transparent);
+    background: color-mix(in srgb, var(--positive) 8%, transparent);
     color: var(--positive);
   }
 
   .signal-score.negative {
-    border-color: rgba(198, 107, 97, 0.3);
-    background: rgba(198, 107, 97, 0.1);
+    border-color: color-mix(in srgb, var(--negative-muted) 30%, transparent);
+    background: color-mix(in srgb, var(--negative-muted) 10%, transparent);
     color: var(--negative);
   }
 
@@ -295,7 +295,7 @@
   .research-focus {
     margin: 0;
     padding: var(--space-1) 0 var(--space-1) var(--space-4);
-    border-left: 2px solid rgba(46, 60, 74, 0.35);
+    border-left: 2px solid color-mix(in srgb, var(--rule-navy) 35%, transparent);
     color: var(--text-2);
     font-size: var(--text-sm);
     line-height: 1.4;
@@ -309,7 +309,7 @@
   .linked-markets-section {
     display: grid;
     gap: 0;
-    border-top: 1px solid rgba(46, 60, 74, 0.2);
+    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 20%, transparent);
     padding-top: var(--space-1);
   }
 
@@ -331,26 +331,26 @@
     font-size: var(--text-2xs);
     font-weight: 600;
     border-radius: 2px;
-    border: 1px solid rgba(122, 166, 200, 0.2);
-    background: rgba(122, 166, 200, 0.06);
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     color: var(--text-1);
   }
 
   .score-badge.high {
-    border-color: rgba(198, 107, 97, 0.35);
-    background: rgba(198, 107, 97, 0.1);
+    border-color: color-mix(in srgb, var(--negative-muted) 35%, transparent);
+    background: color-mix(in srgb, var(--negative-muted) 10%, transparent);
     color: var(--negative);
   }
 
   .score-badge.moderate {
-    border-color: rgba(196, 154, 90, 0.3);
-    background: rgba(196, 154, 90, 0.08);
+    border-color: color-mix(in srgb, var(--accent-2) 30%, transparent);
+    background: color-mix(in srgb, var(--accent-2) 8%, transparent);
     color: var(--accent-2);
   }
 
   .score-badge.low {
-    border-color: rgba(75, 180, 116, 0.25);
-    background: rgba(75, 180, 116, 0.06);
+    border-color: color-mix(in srgb, var(--positive) 25%, transparent);
+    background: color-mix(in srgb, var(--positive) 6%, transparent);
     color: var(--positive);
   }
 

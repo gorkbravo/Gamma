@@ -45,7 +45,7 @@
 <style>
   .market-row {
     padding: var(--space-2) 0;
-    border-top: 1px solid rgba(46, 60, 74, 0.18);
+    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 18%, transparent);
   }
 
   .market-row:first-child {
@@ -85,5 +85,5 @@
 
   /* The chip is .tag.is-tinted from primitives.css; this row's warning
      outline is a shade lighter. */
-  .tag.is-tinted.warning { border-color: rgba(196, 154, 90, 0.3); }
+  .tag.is-tinted.warning { border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
 </style>

@@ -13,14 +13,14 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Eyebrow ──────────────────────────────────────────────────────────────
-   The category label above a panel title. Chrome, not data, so it takes the
-   display font from tokens.css. Never larger than --text-2xs. */
+   The category label above a panel title. Chrome, not data, so it takes
+   --font-label from tokens.css. Never larger than --text-2xs. */
 .eyebrow {
   margin: 0;
   color: var(--text-2);
   font-size: var(--text-2xs);
   letter-spacing: 0.12em;
-  text-transform: uppercase;
+  text-transform: var(--label-case);
 }
 
 /* ── Panel header ─────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@
   gap: var(--space-4);
   min-width: 0;
   padding: var(--space-5);
-  border: 1px solid var(--panel-border);
+  border: var(--panel-border-width) solid var(--panel-border);
   background: var(--panel-bg);
 }
 
@@ -75,7 +75,7 @@
   border-right: 1px solid var(--panel-strong);
   background: transparent;
   color: var(--text-1);
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: var(--leading-tight);
@@ -174,7 +174,7 @@
    full width is the slowest thing in the app to read. Bounded measure so
    lines stay scannable on a wide display. */
 .prose.prose {
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   line-height: var(--leading-normal);
   max-width: 68ch;
 }
@@ -199,10 +199,10 @@
 
 .header-top .title {
   color: var(--text-0);
-  font-family: var(--display-font);
+  font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: var(--label-case);
   letter-spacing: 0.1em;
 }
 
@@ -240,9 +240,9 @@
 
 .header-kpi span {
   color: var(--text-2);
-  font-family: var(--display-font);
+  font-family: var(--font-label);
   font-size: var(--text-2xs);
-  text-transform: uppercase;
+  text-transform: var(--label-case);
   letter-spacing: 0.1em;
   line-height: 1.1;
 }
@@ -273,7 +273,7 @@
   justify-content: space-between;
   gap: var(--space-4);
   color: var(--text-1);
-  text-transform: uppercase;
+  text-transform: var(--label-case);
   letter-spacing: 0.08em;
   font-size: var(--text-xs);
   font-weight: 600;
@@ -292,9 +292,9 @@
    for the families that differ (sticky, relaxed, compact, grid, figures,
    key/value). A bare `th, td` rule here would also reach the few tables that
    are not data tables (the Setup grid, the Sitrep status table, the Options
-   payoff heat map), so the class stays opt-in. Column headers take the
-   display font from tokens.css (`thead th`); cells stay mono with tabular
-   figures. */
+   payoff heat map), so the class stays opt-in. Column headers take
+   --font-label from tokens.css (`thead th`); cells stay on --font-num with
+   tabular figures. */
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -314,7 +314,7 @@
 .data-table th {
   color: var(--text-2);
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: var(--label-case);
   letter-spacing: 0.08em;
   font-size: var(--text-2xs);
   white-space: nowrap;
@@ -437,7 +437,7 @@
 }
 
 .data-table:where(.is-grid) th {
-  background: var(--surface-1);
+  background: var(--tint);
   letter-spacing: 0.06em;
 }
 
@@ -467,7 +467,7 @@
 .data-table:where(.is-keyvalue) th {
   width: 40%;
   color: var(--text-2);
-  font-family: var(--display-font);
+  font-family: var(--font-label);
   font-weight: 400;
   text-transform: none;
   letter-spacing: inherit;
@@ -493,7 +493,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-transform: uppercase;
+  text-transform: var(--label-case);
   letter-spacing: 0.06em;
   font-size: var(--text-2xs);
   color: var(--text-1);
@@ -502,31 +502,31 @@
 .tag.positive { border-color: color-mix(in srgb, var(--positive) 55%, var(--divider)); color: var(--positive); }
 .tag.negative { border-color: color-mix(in srgb, var(--negative) 55%, var(--divider)); color: var(--negative); }
 .tag.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--divider)); color: var(--warning); }
-.tag.neutral { border-color: var(--divider); color: var(--text-2); background: rgba(122, 166, 200, 0.05); }
+.tag.neutral { border-color: var(--divider); color: var(--text-2); background: color-mix(in srgb, var(--accent) 5%, transparent); }
 
 /* Tinted: the Macro tab's signal and coherence chips, which seven Macro
    components each defined for themselves. Filled rather than outlined and
    accent by default. They sit in card headers and wrapping rows rather than
-   table cells, so they never truncate. The raw rgba values are the ones
-   those copies carried. */
+   table cells, so they never truncate. Fills come from the soft tokens and
+   edges mix the same colour at the strengths those copies carried. */
 .tag.is-tinted {
   max-width: none;
-  border-color: rgba(122, 166, 200, 0.24);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
   padding: var(--space-1) var(--space-3);
   overflow: visible;
   text-overflow: clip;
   letter-spacing: 0.08em;
-  background: rgba(122, 166, 200, 0.06);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
-.tag.is-tinted.positive { border-color: rgba(75, 180, 116, 0.25); background: rgba(75, 180, 116, 0.06); color: var(--positive); }
-.tag.is-tinted.negative { border-color: rgba(198, 107, 97, 0.32); background: rgba(198, 107, 97, 0.08); color: var(--negative); }
-.tag.is-tinted.warning { border-color: rgba(196, 154, 90, 0.32); background: rgba(196, 154, 90, 0.08); color: var(--accent-2); }
+.tag.is-tinted.positive { border-color: color-mix(in srgb, var(--positive) 25%, transparent); background: var(--positive-soft); color: var(--positive); }
+.tag.is-tinted.negative { border-color: color-mix(in srgb, var(--negative-muted) 32%, transparent); background: var(--negative-soft); color: var(--negative); }
+.tag.is-tinted.warning { border-color: color-mix(in srgb, var(--warning) 32%, transparent); background: var(--warning-soft); color: var(--accent-2); }
 
 /* Context: a quieter gold chip that names where a reading sits (a region, a
    meeting window, an agreement level) rather than flagging a signal. */
-.tag.is-tinted.context { border-color: rgba(196, 154, 90, 0.24); background: rgba(196, 154, 90, 0.06); color: var(--accent-2); }
+.tag.is-tinted.context { border-color: color-mix(in srgb, var(--accent-2) 24%, transparent); background: color-mix(in srgb, var(--accent-2) 6%, transparent); color: var(--accent-2); }
 
 /* ── Button ───────────────────────────────────────────────────────────────
    Opt in with class="btn" on a <button>. The default is the 28px data
@@ -534,8 +534,9 @@
    --panel-strong edge); size and emphasis are modifiers. Navigation chrome
    (top bar, drawer, mode bars, tabs) keeps its own rules.
 
-   Font family is left to the view: several views set `font: inherit`,
-   which pulls buttons back to mono, and V2 resolves that across the app.
+   Buttons take --font-ui from the global button rule in tokens.css. A view
+   rule that resets `font: inherit` sets --font-ui again after it, or
+   --font-num on a button that shows figures (a card or a tile).
 
    States sit in :where() so they keep the specificity of .btn and a view's
    scoped class (.tick, .row-select) still wins; :disabled and
@@ -610,7 +611,7 @@
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--panel-strong);
   border-radius: var(--radius-sm);
-  background: var(--bg-1);
+  background: var(--tint);
   color: var(--text-0);
 }
 
@@ -667,7 +668,7 @@ textarea.form-control {
 
 .stat span {
   color: var(--text-2);
-  text-transform: uppercase;
+  text-transform: var(--label-case);
   letter-spacing: 0.1em;
   font-size: var(--text-2xs);
 }
