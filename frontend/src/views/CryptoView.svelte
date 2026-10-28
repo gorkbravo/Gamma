@@ -348,17 +348,17 @@
               <h3>Layer Treemap</h3>
             </div>
             <div class="panel-actions">
-              <button type="button" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
-              <button type="button" class="secondary" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
+              <button type="button" class="btn" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
+              <button type="button" class="btn is-ghost" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
             </div>
           </div>
 
           <div class="screener-strip">
-            <label class="search-field filter-wide"><span>Search</span><input bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
-            <label><span>Narrative</span><select bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
-            <label><span>Sort</span><select bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
-            <label><span>Min Mcap</span><input bind:value={minMarketCap} placeholder="1B" /></label>
-            <label><span>Min Volume</span><input bind:value={minVolume} placeholder="25M" /></label>
+            <label class="search-field filter-wide"><span>Search</span><input class="form-control is-large" bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
+            <label><span>Narrative</span><select class="form-control is-large" bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
+            <label><span>Sort</span><select class="form-control is-large" bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
+            <label><span>Min Mcap</span><input class="form-control is-large" bind:value={minMarketCap} placeholder="1B" /></label>
+            <label><span>Min Volume</span><input class="form-control is-large" bind:value={minVolume} placeholder="25M" /></label>
           </div>
 
           <CryptoTreemapBoard
@@ -542,7 +542,7 @@
               </div>
               <label class="hero-control-field">
                 <span>Time</span>
-                <select bind:value={heroLookbackDays} on:change={handleHeroLookbackChange}>
+                <select class="form-control is-large" bind:value={heroLookbackDays} on:change={handleHeroLookbackChange}>
                   {#each heroLookbackOptions as option}
                     <option value={option.value}>{option.label}</option>
                   {/each}
@@ -553,53 +553,53 @@
 
           <div class="kpi-grid hero-stat-strip">
             {#if heroCanvas === "basket" && syntheticPortfolio}
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Basket Return</span>
                 <strong class:absent={pct(syntheticPortfolio.cumulative_return_pct) === "N/A"}>{pct(syntheticPortfolio.cumulative_return_pct)}</strong>
                 <small>{syntheticPortfolio.lookback_days}D window</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Vs {syntheticPortfolio.benchmark_label}</span>
                 <strong class={toneClass(syntheticPortfolio.relative_return_pct)} class:absent={pct(syntheticPortfolio.relative_return_pct) === "N/A"}>{pct(syntheticPortfolio.relative_return_pct)}</strong>
                 <small>{pct(syntheticPortfolio.benchmark_return_pct)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Volatility</span>
                 <strong class:absent={pct(syntheticPortfolio.annualized_volatility_pct) === "N/A"}>{pct(syntheticPortfolio.annualized_volatility_pct)}</strong>
                 <small>annualized</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Weighted Mcap</span>
                 <strong class:absent={compactMoney(syntheticPortfolio.weighted_market_cap) === "N/A"}>{compactMoney(syntheticPortfolio.weighted_market_cap)}</strong>
                 <small>Turnover {ratio(syntheticPortfolio.weighted_turnover_ratio_24h)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Positions</span>
                 <strong>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong>
                 <small>effective</small>
               </div>
             {:else}
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Price</span>
                 <strong class:absent={money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2) === "N/A"}>{money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2)}</strong>
                 <small class={toneClass(detail?.price_change_pct_24h)}>{pct(detail?.price_change_pct_24h)} 24H</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>Market Cap</span>
                 <strong class:absent={compactMoney(detail?.market_cap) === "N/A"}>{compactMoney(detail?.market_cap)}</strong>
                 <small>FDV {compactMoney(detail?.fully_diluted_valuation)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>24H Volume</span>
                 <strong class:absent={compactMoney(detail?.total_volume) === "N/A"}>{compactMoney(detail?.total_volume)}</strong>
                 <small>Turnover {ratio(detail?.turnover_ratio_24h)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>7D</span>
                 <strong class={toneClass(detail?.price_change_pct_7d)} class:absent={pct(detail?.price_change_pct_7d) === "N/A"}>{pct(detail?.price_change_pct_7d)}</strong>
                 <small>30D {pct(detail?.price_change_pct_30d)}</small>
               </div>
-              <div class="metric hero-stat">
+              <div class="stat is-large hero-stat">
                 <span>24H Range</span>
                 <strong>{money(detail?.low_24h, 2)}–{money(detail?.high_24h, 2)}</strong>
                 <small>Rank #{detail?.market_cap_rank ?? "N/A"}</small>
@@ -793,22 +793,22 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric">
+            <article class="stat is-large">
               <span>DEX Share</span>
               <strong class:absent={pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null) === "N/A"}>{pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null)}</strong>
               <small>of spot volume</small>
             </article>
-            <article class="metric">
+            <article class="stat is-large">
               <span>Buy Pressure</span>
               <strong class={toneClass((flow?.buy_pressure_pct ?? 50) - 50)} class:absent={pct(flow?.buy_pressure_pct) === "N/A"}>{pct(flow?.buy_pressure_pct)}</strong>
               <small>{flow?.active_trader_proxy_24h?.toLocaleString("en-US") ?? "N/A"} trader proxy</small>
             </article>
-            <article class="metric">
+            <article class="stat is-large">
               <span>Reserve / Volume</span>
               <strong class:absent={ratio(flow?.reserve_volume_ratio_24h) === "N/A"}>{ratio(flow?.reserve_volume_ratio_24h)}</strong>
               <small>{flow?.slippage_proxy_label ?? "N/A"} depth</small>
             </article>
-            <article class="metric">
+            <article class="stat is-large">
               <span>Top Pool Share</span>
               <strong class:absent={pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null) === "N/A"}>{pct(flow?.top_pool_reserve_share != null ? flow.top_pool_reserve_share * 100 : null)}</strong>
               <small>{flow?.pool_count ?? 0} matched pools</small>
@@ -948,13 +948,13 @@
             <div class="field-grid">
               <label>
                 <span>Preset</span>
-                <select bind:value={selectedBasketPreset} on:change={(event) => applyBasketPreset((event.currentTarget as HTMLSelectElement).value)}>
+                <select class="form-control is-large" bind:value={selectedBasketPreset} on:change={(event) => applyBasketPreset((event.currentTarget as HTMLSelectElement).value)}>
                   {#each basketPresets as preset}<option value={preset.id}>{preset.label}</option>{/each}
                 </select>
               </label>
               <label>
                 <span>Benchmark</span>
-                <select bind:value={syntheticBenchmarkTokenId}>
+                <select class="form-control is-large" bind:value={syntheticBenchmarkTokenId}>
                   <option value="bitcoin">Bitcoin</option>
                   {#if detail}<option value={detail.token_id}>{detail.symbol.toUpperCase()} (selected)</option>{/if}
                   {#each benchmarkCandidates as token}
@@ -968,7 +968,7 @@
 
             <label class="textarea-field">
               <span>Synthetic Portfolio</span>
-              <textarea bind:value={syntheticText} rows="7" placeholder="BTC 0.50&#10;ETH 0.30&#10;SOL 0.20"></textarea>
+              <textarea class="form-control" bind:value={syntheticText} rows="7" placeholder="BTC 0.50&#10;ETH 0.30&#10;SOL 0.20"></textarea>
             </label>
 
             {#if basketWarning}
@@ -990,9 +990,9 @@
             {/if}
 
             <div class="builder-actions">
-              <button type="button" on:click={normalizeSynthetic}>Normalize</button>
-              <button type="button" class="secondary" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
-              <button type="button" class="secondary" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
+              <button type="button" class="btn" on:click={normalizeSynthetic}>Normalize</button>
+              <button type="button" class="btn is-ghost" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
+              <button type="button" class="btn is-ghost" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
             </div>
 
             <div class="table-wrap compact-wrap">
@@ -1242,28 +1242,12 @@
     white-space: nowrap;
   }
 
+  /* Buttons are .btn from primitives.css (secondary actions add .is-ghost);
+     the basket cards below are plain buttons. All keep the view's 12px mono
+     figures: `font: inherit` is left for V2. */
   button {
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-5);
     font: inherit;
     font-size: var(--text-sm);
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-  }
-
-  button.secondary {
-    color: var(--text-1);
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-    border-color: var(--panel-border);
   }
 
   .loading-pill {
@@ -1283,27 +1267,16 @@
     background: color-mix(in srgb, var(--warning) 6%, transparent);
   }
 
+  /* Fields are .form-control.is-large from primitives.css. */
   input,
   select,
   textarea {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-4);
     font: inherit;
     font-size: var(--text-base);
-    min-height: 2rem;
   }
 
   textarea {
-    resize: vertical;
     min-height: 8rem;
-  }
-
-  input:hover,
-  select:hover,
-  textarea:hover {
-    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
   }
 
   label,
@@ -1446,39 +1419,13 @@
     margin-top: 0.05rem;
   }
 
-  .metric {
-    padding: var(--space-2) var(--space-6);
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    display: grid;
-    gap: var(--space-1);
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .metric span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-xs);
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-2) 0;
-    font-size: var(--text-lg);
-    color: var(--text-0);
-  }
+  /* Stat cells are .stat.is-large from primitives.css. */
 
   .hero-stat small {
     line-height: 1.35;
   }
 
-  .metric small,
+  .stat small,
   .market-title small,
   .focus-row p,
   .meta-row span {
@@ -1486,19 +1433,19 @@
   }
 
   .headline-kpi-meta.positive,
-  .metric small.positive,
+  .stat small.positive,
   .hero-stat small.positive {
     color: var(--positive);
   }
 
   .headline-kpi-meta.negative,
-  .metric small.negative,
+  .stat small.negative,
   .hero-stat small.negative {
     color: var(--negative);
   }
 
   .headline-kpi-meta.warning,
-  .metric small.warning,
+  .stat small.warning,
   .hero-stat small.warning {
     color: var(--warning);
   }
@@ -1580,10 +1527,16 @@
   .basket-card {
     border: 1px solid var(--divider);
     background: transparent;
+    color: var(--text-0);
+    cursor: pointer;
     padding: var(--space-4);
     display: grid;
     gap: var(--space-1);
     text-align: left;
+  }
+
+  .basket-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .tag-list {

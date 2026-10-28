@@ -262,13 +262,13 @@
       <div class="handoff-actions" aria-label="Strategy Lab macro lens actions">
         <button
           type="button"
-          class="ghost-action"
+          class="btn is-small is-ghost"
           on:click={() => sendMacroLensToStrategyLab(false)}
           disabled={loading || !onSendToStrategyLab}
         >
           Use as Lens
         </button>
-        <button
+        <button class="btn is-small"
           type="button"
           on:click={() => sendMacroLensToStrategyLab(true)}
           disabled={loading || !onSendToStrategyLab}
@@ -308,24 +308,24 @@
     <div class="context-bar">
       <div class="context-group">
         <label><span>Region</span>
-          <select value={$macroContext.region} on:change={(e) => refreshContext({ region: (e.currentTarget as HTMLSelectElement).value as MacroContextState["region"] })}>
+          <select class="form-control is-small" value={$macroContext.region} on:change={(e) => refreshContext({ region: (e.currentTarget as HTMLSelectElement).value as MacroContextState["region"] })}>
             <option value="US">US</option><option value="EU">EU</option><option value="Global">Global</option>
           </select>
         </label>
         <label><span>Timeframe</span>
-          <select value={$macroContext.timeframe} on:change={(e) => refreshContext({ timeframe: (e.currentTarget as HTMLSelectElement).value as MacroContextState["timeframe"] })}>
+          <select class="form-control is-small" value={$macroContext.timeframe} on:change={(e) => refreshContext({ timeframe: (e.currentTarget as HTMLSelectElement).value as MacroContextState["timeframe"] })}>
             <option value="1M">1M</option><option value="3M">3M</option><option value="6M">6M</option><option value="1Y">1Y</option>
           </select>
         </label>
       </div>
       <div class="context-group">
         <label><span>Theme</span>
-          <select value={$macroContext.theme} on:change={(e) => refreshContext({ theme: (e.currentTarget as HTMLSelectElement).value as MacroTheme })}>
+          <select class="form-control is-small" value={$macroContext.theme} on:change={(e) => refreshContext({ theme: (e.currentTarget as HTMLSelectElement).value as MacroTheme })}>
             {#each Object.entries(themeLabels) as [value, label]}<option value={value}>{label}</option>{/each}
           </select>
         </label>
         <label><span>Compare</span>
-          <select value={$macroContext.comparisonRegion ?? ""} disabled={$macroContext.region === "Global"} on:change={(e) => refreshContext({ comparisonRegion: ((e.currentTarget as HTMLSelectElement).value || null) as MacroContextState["comparisonRegion"] })}>
+          <select class="form-control is-small" value={$macroContext.comparisonRegion ?? ""} disabled={$macroContext.region === "Global"} on:change={(e) => refreshContext({ comparisonRegion: ((e.currentTarget as HTMLSelectElement).value || null) as MacroContextState["comparisonRegion"] })}>
             <option value="">None</option>
             {#each compareOptions as region}<option value={region}>{region}</option>{/each}
           </select>
@@ -375,41 +375,14 @@
     flex: 0 0 auto;
   }
 
+  /* The Strategy Lab handoff buttons are .btn.is-small from primitives.css
+     (the first adds .is-ghost). They keep the view's mono figures: `font:
+     inherit` is left for V2, and it resets the size, so .is-small's 11px is
+     repeated here. */
   .handoff-actions button {
-    min-height: 25px;
-    padding: var(--space-2) var(--space-4);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
-    color: var(--text-1);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     white-space: nowrap;
-    cursor: pointer;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-  }
-
-  .handoff-actions button:hover:not(:disabled) {
-    background: var(--hover-bg);
-    color: var(--text-0);
-  }
-
-  .handoff-actions button:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-  }
-
-  .handoff-actions button:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-
-  .handoff-actions .ghost-action {
-    background: transparent;
-  }
-
-  .handoff-actions .ghost-action:hover:not(:disabled) {
-    border-color: var(--accent);
   }
 
   /* ── Headline KPI strip ── */
@@ -512,22 +485,13 @@
     font-weight: 500;
   }
 
+  /* Context pickers are .form-control.is-small from primitives.css; they keep
+     the view's mono figures (`font: inherit`, left for V2). */
   .context-bar select {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    height: 24px;
-    padding: var(--space-1) var(--space-3);
+    min-width: 5rem;
     font: inherit;
     font-size: var(--text-sm);
-    border-radius: 2px;
-    min-width: 5rem;
-    cursor: pointer;
-    transition: border-color 120ms ease;
   }
-
-  .context-bar select:hover { border-color: rgba(122, 166, 200, 0.32); }
-  .context-bar select:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
   .coverage-note {
     color: var(--text-2);

@@ -689,7 +689,7 @@
           <!-- Entrar en el campo selecciona el símbolo: escribir lo sustituye en vez de concatenar
                ("USOBNO", 2026-10-27). Con ratón se selecciona en el clic que da el foco, porque el
                mouseup deshace una selección hecha en focus. -->
-          <input
+          <input class="form-control"
             bind:value={symbol}
             on:focus={(event) => event.currentTarget.select()}
             on:pointerdown={(event) => (symbolFocusPending = document.activeElement !== event.currentTarget)}
@@ -702,16 +702,16 @@
             aria-label="Options underlying symbol"
           />
         </label>
-        <button class="primary-action" type="button" on:click={loadMaxSurface} disabled={loading || sessionLoading || !requestSymbol}>
+        <button type="button" class="btn is-primary" on:click={loadMaxSurface} disabled={loading || sessionLoading || !requestSymbol}>
           {loading ? "LOADING..." : result ? "Reload Max Surface" : "Load Max Surface"}
         </button>
         {#if session?.running}
-          <button type="button" on:click={stopSession} disabled={sessionLoading}>
+          <button type="button" class="btn" on:click={stopSession} disabled={sessionLoading}>
             {sessionLoading ? "STOPPING..." : "Stop Stream"}
           </button>
         {/if}
         <!-- Nombre propio para no colisionar con el botón Copilot de la cabecera (GUA-20261021-16). -->
-        <button type="button" aria-label="Send this options surface to Copilot" on:click={sendSurfaceToCopilot} disabled={loading || !result}>Copilot</button>
+        <button type="button" class="btn" aria-label="Send this options surface to Copilot" on:click={sendSurfaceToCopilot} disabled={loading || !result}>Copilot</button>
       </div>
     </div>
 
@@ -773,7 +773,7 @@
         <article class="panel split-panel">
           <div class="panel-head">
             <h3>Expiry Chain</h3>
-            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
+            <select class="form-control" value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
               {#each result?.expiries ?? [] as expiry}
                 <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
               {/each}
@@ -821,7 +821,7 @@
               {#if payoffMatrix}
                 <span class="payoff-meta">ATM {fmt(payoffMatrix.strike, 0)} {payoffOptionType} · @ {money(payoffMatrix.premium)} · IV {pct(payoffMatrix.sigma)} · % of max risk</span>
               {/if}
-              <select bind:value={payoffOptionType} aria-label="Payoff option type">
+              <select class="form-control" bind:value={payoffOptionType} aria-label="Payoff option type">
                 <option value="straddle">Straddle (neutral)</option>
                 <option value="call">Call</option>
                 <option value="put">Put</option>
@@ -918,7 +918,7 @@
       <article class="panel table-panel">
         <div class="table-header">
           <h3>Options Chain</h3>
-          <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
+          <select class="form-control" value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
             {#each result?.expiries ?? [] as expiry}
               <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
             {/each}
@@ -953,9 +953,9 @@
                   <td class:itm={putItm} class:absent={fmt(row.putDelta, 3) === "N/A"}>{fmt(row.putDelta, 3)}</td>
                   <td class:itm={putItm} class:absent={fmt(row.putOpenInterest, 0) === "N/A"}>{fmt(row.putOpenInterest, 0)}</td>
                   <td class="action-cell">
-                    <button type="button" on:click={() => addLeg(row, "call")}>+C</button>
-                    <button type="button" on:click={() => addLeg(row, "put")}>+P</button>
-                    <button type="button" on:click={() => sendOptionRowToStrategyLab(row, "call", true)} disabled={!onSendToStrategyLab}>SL</button>
+                    <button type="button" class="btn" on:click={() => addLeg(row, "call")}>+C</button>
+                    <button type="button" class="btn" on:click={() => addLeg(row, "put")}>+P</button>
+                    <button type="button" class="btn" on:click={() => sendOptionRowToStrategyLab(row, "call", true)} disabled={!onSendToStrategyLab}>SL</button>
                   </td>
                 </tr>
               {/each}
@@ -980,7 +980,7 @@
         <article class="panel greek-panel">
           <div class="panel-head">
             <h3>Gamma-Owned Greeks</h3>
-            <select bind:value={selectedGreekMetric} aria-label="Greek metric">
+            <select class="form-control" bind:value={selectedGreekMetric} aria-label="Greek metric">
               <option value="delta">Delta</option>
               <option value="gamma">Gamma</option>
               <option value="vega">Vega</option>
@@ -1243,7 +1243,7 @@
                 </span>
               {/if}
             </h3>
-            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
+            <select class="form-control" value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
               {#each result?.expiries ?? [] as expiry}
                 <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
               {/each}
@@ -1301,15 +1301,15 @@
         <div class="panel-head">
           <h3>Strategy Builder</h3>
           <div class="builder-controls">
-            <select bind:value={selectedSide} aria-label="Strategy leg side">
+            <select class="form-control" bind:value={selectedSide} aria-label="Strategy leg side">
               <option value="long">Long</option>
               <option value="short">Short</option>
             </select>
-            <select bind:value={selectedOptionType} aria-label="Strategy leg option type">
+            <select class="form-control" bind:value={selectedOptionType} aria-label="Strategy leg option type">
               <option value="call">Call</option>
               <option value="put">Put</option>
             </select>
-            <select
+            <select class="form-control"
               value={activeExpiry ?? ""}
               on:change={(event) => selectedExpiry = event.currentTarget.value}
               aria-label="Strategy expiry"
@@ -1321,7 +1321,7 @@
             </select>
             <label class="contracts-field">
               Contracts
-              <input
+              <input class="form-control"
                 type="number"
                 min="1"
                 step="1"
@@ -1330,7 +1330,7 @@
                 aria-label="Contracts per structure"
               />
             </label>
-            <button type="button" on:click={clearStrategy} disabled={!strategyLegs.length}>Clear</button>
+            <button type="button" class="btn" on:click={clearStrategy} disabled={!strategyLegs.length}>Clear</button>
           </div>
         </div>
 
@@ -1339,7 +1339,7 @@
           {#each STRATEGY_TEMPLATES as template}
             <button
               type="button"
-              class="template-button"
+              class="btn template-button"
               title={template.stance}
               aria-label={`${template.label} template, ${template.stance}`}
               on:click={() => applyStrategyTemplate(template.id)}
@@ -1369,7 +1369,7 @@
                     <td class:absent={fmt(row.strike, 2) === "N/A"}>{fmt(row.strike, 2)}</td>
                     <td class:absent={money(row.callMidpoint) === "N/A"}>{money(row.callMidpoint)}</td>
                     <td class:absent={money(row.putMidpoint) === "N/A"}>{money(row.putMidpoint)}</td>
-                    <td><button type="button" on:click={() => addLeg(row)}>Add</button></td>
+                    <td><button type="button" class="btn" on:click={() => addLeg(row)}>Add</button></td>
                   </tr>
                 {/each}
               </tbody>
@@ -1383,7 +1383,7 @@
                 <div class="leg-row">
                   <span>{leg.side.toUpperCase()} {leg.optionType.toUpperCase()}</span>
                   <strong>{formatExpiry(leg.expiry)} {fmt(leg.strike, 2)} @ {money(leg.premium)}</strong>
-                  <button type="button" on:click={() => removeLeg(leg.id)}>Remove</button>
+                  <button type="button" class="btn" on:click={() => removeLeg(leg.id)}>Remove</button>
                 </div>
               {/each}
             {:else}
@@ -1654,31 +1654,14 @@
     font-weight: 650;
   }
 
+  /* Controls are .btn and .form-control from primitives.css (the load action
+     adds .is-primary). They keep the view's body-size mono figures:
+     `font: inherit` is left for V2. */
   button,
   input,
   select {
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
-    color: var(--text-0);
-    min-height: 28px;
-    padding: var(--space-2) var(--space-4);
     font: inherit;
     font-size: var(--text-base);
-    border-radius: 2px;
-  }
-
-  button {
-    cursor: pointer;
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-  }
-
-  .primary-action {
-    border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .symbol-control {

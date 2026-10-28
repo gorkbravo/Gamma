@@ -218,7 +218,7 @@
         <h2 id="setup-title" tabindex="-1" bind:this={headingEl}>{title}</h2>
       </div>
       {#if !result}
-        <button type="button" class="ghost close" aria-label="Close setup" on:click={onClose}>Close</button>
+        <button type="button" class="btn is-ghost close" aria-label="Close setup" on:click={onClose}>Close</button>
       {/if}
     </header>
 
@@ -338,7 +338,7 @@
         {/if}
         <p class="note">Change the address with IB_HOST, IB_PORT and IB_CLIENT_ID in the environment or .env file.</p>
         {#if report.data_mode.current === "live" && report.ibkr.status !== "connected"}
-          <button type="button" class="ghost" disabled={connectionBusy} on:click={() => void onTestConnection()}>
+          <button type="button" class="btn is-ghost" disabled={connectionBusy} on:click={() => void onTestConnection()}>
             {connectionBusy ? "Connecting..." : "Test connection"}
           </button>
         {/if}
@@ -346,7 +346,7 @@
         <div class="fields">
           <label class="field">
             <span class="field-label">Base currency</span>
-            <select bind:value={draft.baseCurrency} disabled={report.base_currency.locked_by != null}>
+            <select class="form-control" bind:value={draft.baseCurrency} disabled={report.base_currency.locked_by != null}>
               {#each report.base_currency.options as option}
                 <option value={option}>{option}</option>
               {/each}
@@ -362,7 +362,7 @@
           {#if draft.dataMode === "live"}
             <label class="field">
               <span class="field-label">Market data</span>
-              <select bind:value={draft.marketDataMode} disabled={report.market_data_mode.locked_by != null}>
+              <select class="form-control" bind:value={draft.marketDataMode} disabled={report.market_data_mode.locked_by != null}>
                 <option value="delayed">Delayed</option>
                 <option value="live">Live</option>
                 <option value="auto">Auto</option>
@@ -439,7 +439,7 @@
           <div class="fields">
             <label class="field">
               <span class="field-label">Name</span>
-              <input
+              <input class="form-control"
                 type="text"
                 autocomplete="name"
                 maxlength={SEC_NAME_MAX}
@@ -451,7 +451,7 @@
             </label>
             <label class="field">
               <span class="field-label">Email</span>
-              <input
+              <input class="form-control"
                 type="email"
                 autocomplete="email"
                 maxlength={SEC_EMAIL_MAX}
@@ -533,26 +533,26 @@
     <footer class="foot">
       {#if result}
         <span></span>
-        <button type="button" class="primary" bind:this={doneEl} on:click={onClose}>Done</button>
+        <button type="button" class="btn is-primary" bind:this={doneEl} on:click={onClose}>Done</button>
       {:else if !report || !draft}
         <span></span>
         {#if loadError}
-          <button type="button" class="ghost" on:click={onRetry} disabled={loading}>Retry</button>
+          <button type="button" class="btn is-ghost" on:click={onRetry} disabled={loading}>Retry</button>
         {/if}
       {:else}
         <div class="left">
           {#if stepIndex > 0}
-            <button type="button" class="ghost" on:click={() => void goTo(stepIndex - 1)} disabled={saving}>Back</button>
+            <button type="button" class="btn is-ghost" on:click={() => void goTo(stepIndex - 1)} disabled={saving}>Back</button>
           {:else if firstRun}
-            <button type="button" class="ghost" on:click={() => void skip()} disabled={saving}>Skip setup</button>
+            <button type="button" class="btn is-ghost" on:click={() => void skip()} disabled={saving}>Skip setup</button>
           {/if}
         </div>
         {#if isLast}
-          <button type="button" class="primary" on:click={() => void finish()} disabled={saving}>
+          <button type="button" class="btn is-primary" on:click={() => void finish()} disabled={saving}>
             {saving ? "Saving..." : "Finish setup"}
           </button>
         {:else}
-          <button type="button" class="primary" on:click={() => void goTo(stepIndex + 1)} disabled={!canAdvance}>
+          <button type="button" class="btn is-primary" on:click={() => void goTo(stepIndex + 1)} disabled={!canAdvance}>
             Next: {stepLabel(steps[stepIndex + 1])}
           </button>
         {/if}
@@ -839,27 +839,18 @@
     color: var(--warning);
   }
 
+  /* Fields are .form-control and buttons .btn from primitives.css (the main
+     action adds .is-primary, secondary ones .is-ghost). */
+
   select,
   input[type="text"],
   input[type="email"] {
-    min-height: 30px;
-    padding: 0 var(--space-4);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
-    color: var(--text-0);
     font-family: var(--app-font);
     font-size: var(--text-sm);
   }
 
   input[aria-invalid="true"] {
     border-color: var(--warning);
-  }
-
-  select:disabled,
-  input:disabled {
-    cursor: not-allowed;
-    opacity: 0.65;
   }
 
   .check {
@@ -941,36 +932,10 @@
   }
 
   button {
-    min-height: 28px;
-    padding: 0 var(--space-5);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
-    color: var(--text-0);
     font-family: var(--display-font);
     font-size: var(--text-sm);
     font-weight: 500;
-    cursor: pointer;
     transition: border-color var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);
-  }
-
-  button:hover:enabled {
-    border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-strong));
-    background: var(--hover-bg);
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-
-  .primary {
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-  }
-
-  .ghost {
-    background: transparent;
   }
 
   .close {

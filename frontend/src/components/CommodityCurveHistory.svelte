@@ -100,19 +100,19 @@
 </script>
 
 <article class="history-panel" aria-label="Commodity curve history">
-  <header><h3>Saved curves & calendar spreads</h3><span aria-live="polite">{busy ? "Updating…" : `${captures.length} captures`}</span><button on:click={() => run(load)} disabled={busy}>Refresh Saved</button>
-    <button on:click={saveCapture} disabled={busy || providerLoading || !canCapture}>Save Current Curve</button></header>
+  <header><h3>Saved curves & calendar spreads</h3><span aria-live="polite">{busy ? "Updating…" : `${captures.length} captures`}</span><button class="btn" on:click={() => run(load)} disabled={busy}>Refresh Saved</button>
+    <button class="btn" on:click={saveCapture} disabled={busy || providerLoading || !canCapture}>Save Current Curve</button></header>
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if error}<p role="alert">{error} Check the data or connection and retry.</p>{/if}
   {#each warnings as warning}<p class="warning">{warning}</p>{/each}
   <div class="controls">
-    <label><span>Baseline capture</span><select aria-label="Baseline capture" bind:value={baselineId} on:change={clearComparison} disabled={busy}>
+    <label><span>Baseline capture</span><select class="form-control" aria-label="Baseline capture" bind:value={baselineId} on:change={clearComparison} disabled={busy}>
       <option value="">Select capture</option>{#each captures as capture}<option value={capture.id}>{captureLabel(capture)}</option>{/each}</select></label>
-    <label><span>Comparison capture</span><select aria-label="Comparison capture" bind:value={comparisonId} on:change={changeComparisonCapture} disabled={busy}>
+    <label><span>Comparison capture</span><select class="form-control" aria-label="Comparison capture" bind:value={comparisonId} on:change={changeComparisonCapture} disabled={busy}>
       <option value="">Select capture</option>{#each captures as capture}<option value={capture.id}>{captureLabel(capture)}</option>{/each}</select></label>
-    <button on:click={reopen} disabled={busy || !comparisonId}>Reopen Capture</button>
-    <button on:click={compare} disabled={busy || !baselineId || !comparisonId}>Compare Captures</button>
-    <button on:click={() => deleteRecord("capture", comparisonId)} disabled={busy || !comparisonId}>{captureDeleteArmed ? "Confirm Delete Capture" : "Delete Capture"}</button>
+    <button class="btn" on:click={reopen} disabled={busy || !comparisonId}>Reopen Capture</button>
+    <button class="btn" on:click={compare} disabled={busy || !baselineId || !comparisonId}>Compare Captures</button>
+    <button class="btn" on:click={() => deleteRecord("capture", comparisonId)} disabled={busy || !comparisonId}>{captureDeleteArmed ? "Confirm Delete Capture" : "Delete Capture"}</button>
   </div>
   {#if !captures.length}<p>{busy ? "Loading retained curves…" : "No saved curves for this instrument. Save the displayed curve to start a history."}</p>{/if}
   {#if comparison}
@@ -137,17 +137,17 @@
       {#each [...retained.payload.curve.warnings, ...retained.payload.coverage.caveats] as warning}<p>{warning}</p>{/each}
     </details>
     <div class="controls">
-      <label><span>Left contract</span><select aria-label="Left contract" bind:value={leftId} disabled={busy}>{#each retainedNodes as node}<option value={node.contract.contract_id}>{node.contract.symbol} · {node.contract.contract_month} · {node.contract.contract_id}</option>{/each}</select></label>
-      <label><span>Right contract</span><select aria-label="Right contract" bind:value={rightId} disabled={busy}>{#each retainedNodes as node}<option value={node.contract.contract_id}>{node.contract.symbol} · {node.contract.contract_month} · {node.contract.contract_id}</option>{/each}</select></label>
-      <label><span>Spread name</span><input bind:value={spreadLabel} maxlength="160" placeholder="Exact calendar pair" /></label>
-      <button on:click={trackSpread} disabled={busy || !leftId || !rightId || leftId === rightId}>Track Calendar Spread</button>
+      <label><span>Left contract</span><select class="form-control" aria-label="Left contract" bind:value={leftId} disabled={busy}>{#each retainedNodes as node}<option value={node.contract.contract_id}>{node.contract.symbol} · {node.contract.contract_month} · {node.contract.contract_id}</option>{/each}</select></label>
+      <label><span>Right contract</span><select class="form-control" aria-label="Right contract" bind:value={rightId} disabled={busy}>{#each retainedNodes as node}<option value={node.contract.contract_id}>{node.contract.symbol} · {node.contract.contract_month} · {node.contract.contract_id}</option>{/each}</select></label>
+      <label><span>Spread name</span><input class="form-control" bind:value={spreadLabel} maxlength="160" placeholder="Exact calendar pair" /></label>
+      <button class="btn" on:click={trackSpread} disabled={busy || !leftId || !rightId || leftId === rightId}>Track Calendar Spread</button>
     </div>
   {/if}
   <div class="controls">
-    <label><span>Saved calendar spread</span><select aria-label="Saved calendar spread" bind:value={spreadId} on:change={() => history = null} disabled={busy}>
+    <label><span>Saved calendar spread</span><select class="form-control" aria-label="Saved calendar spread" bind:value={spreadId} on:change={() => history = null} disabled={busy}>
       <option value="">Select spread</option>{#each spreads as spread}<option value={spread.id}>{spread.payload.label}</option>{/each}</select></label>
-    <button on:click={loadSpread} disabled={busy || !spreadId}>Load Spread History</button>
-    <button on:click={() => deleteRecord("spread", spreadId)} disabled={busy || !spreadId}>{spreadDeleteArmed ? "Confirm Delete Spread" : "Delete Spread"}</button>
+    <button class="btn" on:click={loadSpread} disabled={busy || !spreadId}>Load Spread History</button>
+    <button class="btn" on:click={() => deleteRecord("spread", spreadId)} disabled={busy || !spreadId}>{spreadDeleteArmed ? "Confirm Delete Spread" : "Delete Spread"}</button>
   </div>
   {#if history}
     <h4>{history.spread.payload.label} · Left − Right · {history.spread.payload.unit}</h4>
@@ -167,8 +167,9 @@
   p { padding: var(--space-3) var(--space-5); margin: 0; color: var(--text-1); font-size: var(--text-sm); overflow-wrap: anywhere; }
   [role=alert], .warning { color: var(--warning); }
   label { display: grid; gap: var(--space-2); min-width: 0; flex: 1 1 220px; font-size: var(--text-sm); }
-  button, input, select { min-height: 28px; color: var(--text-0); background: var(--bg-1); border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-4); font: inherit; }
-  input, select { min-width: 0; width: 100%; box-sizing: border-box; } button:disabled { opacity: 0.5; }
+  /* Controls are .btn and .form-control from primitives.css; `font: inherit` stays for V2. */
+  button, input, select { font: inherit; }
+  input, select { min-width: 0; width: 100%; box-sizing: border-box; }
   /* Cells come from .data-table.is-figures.is-nowrap in primitives.css; the
      last column here is a label (coverage, provider), so it reads left. */
   .table-wrap { overflow-x: auto; } table { font-family: var(--app-font), monospace; }

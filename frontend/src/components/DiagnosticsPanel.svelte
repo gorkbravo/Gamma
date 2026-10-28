@@ -31,10 +31,10 @@
     </div>
 
     <div class="actions">
-      <button on:click={onRunDiagnostics} disabled={actionLoading}>{actionLoading ? "Working..." : "Run Diagnostics"}</button>
-      <button on:click={onForceSubscribe} disabled={actionLoading}>Force Subscribe</button>
-      <button on:click={onClearHistory} disabled={actionLoading}>Clear History</button>
-      <button on:click={onRefresh} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button>
+      <button class="btn" on:click={onRunDiagnostics} disabled={actionLoading}>{actionLoading ? "Working..." : "Run Diagnostics"}</button>
+      <button class="btn" on:click={onForceSubscribe} disabled={actionLoading}>Force Subscribe</button>
+      <button class="btn" on:click={onClearHistory} disabled={actionLoading}>Clear History</button>
+      <button class="btn" on:click={onRefresh} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button>
     </div>
   </div>
 
@@ -195,13 +195,10 @@
     font-size: var(--text-sm);
   }
 
+  /* Buttons are .btn from primitives.css; `font: inherit` is left for V2. */
+
   button {
-    background: var(--surface-0);
-    border: 1px solid var(--panel-strong);
-    color: var(--text-0);
-    padding: var(--space-4) var(--space-5);
     font: inherit;
-    cursor: pointer;
   }
 
   @media (max-width: 1080px) {

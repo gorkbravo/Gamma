@@ -1281,7 +1281,7 @@
             </div>
             <div class="treemap-header-right">
               <div class="ctrl-group">
-                <select class="ctrl-select" bind:value={overviewUniverseId} on:change={handleOverviewUniverseChange} title="Universe">
+                <select class="form-control is-large ctrl-select" bind:value={overviewUniverseId} on:change={handleOverviewUniverseChange} title="Universe">
                   {#each (overview?.available_universes ?? [{
                     universe_id: "broad_us_market",
                     label: "Broad US Market",
@@ -1295,22 +1295,22 @@
                     <option value={item.universe_id}>{item.label}</option>
                   {/each}
                 </select>
-                <select class="ctrl-select" bind:value={overviewSortBy} title="Size by">
+                <select class="form-control is-large ctrl-select" bind:value={overviewSortBy} title="Size by">
                   {#each overviewSortOptions(overview) as item}
                     <option value={item.sort_id}>{item.label}</option>
                   {/each}
                 </select>
-                <select class="ctrl-select ctrl-select--short" bind:value={overviewTimeframe} on:change={handleOverviewTimeframeChange} title="Timeframe">
+                <select class="form-control is-large ctrl-select ctrl-select--short" bind:value={overviewTimeframe} on:change={handleOverviewTimeframeChange} title="Timeframe">
                   {#each overview?.available_timeframes ?? ["DoD", "1M", "3M", "6M", "1Y"] as item}
                     <option value={item}>{overviewTimeframeLabels[item] ?? item}</option>
                   {/each}
                 </select>
               </div>
               <div class="builder-actions compact">
-                <button type="button" class="ghost-button" on:click={() => void loadOverview({ forceRefresh: true })} disabled={overviewLoading}>
+                <button type="button" class="btn is-large is-ghost" on:click={() => void loadOverview({ forceRefresh: true })} disabled={overviewLoading}>
                   {overviewLoading ? "Loading..." : "Refresh"}
                 </button>
-                <button type="button" on:click={() => inspectOverviewNodeInScope(selectedOverviewNode)} disabled={!selectedOverviewNode?.symbol}>
+                <button type="button" class="btn is-large" on:click={() => inspectOverviewNodeInScope(selectedOverviewNode)} disabled={!selectedOverviewNode?.symbol}>
                   Inspect Scope
                 </button>
               </div>
@@ -1330,7 +1330,7 @@
                       {@const density = treemapDensityClass(tile.rect, section.rect)}
                       <button
                         type="button"
-                        class={`treemap-tile ${density}`}
+                        class={`btn is-large treemap-tile ${density}`}
                         class:selected={selectedOverviewNode?.node_id === tile.node.node_id}
                         style={overviewTileStyle(tile, overviewMetric, overviewMetricMaxAbs)}
                         aria-label={`${section.label}. ${tile.node.label}. ${overviewMetricLabel(overviewMetric)} ${formatResearchOverviewMetricValue(tile.colorValue, overviewMetric)}. ${researchSortMetricLabel(overviewSortBy)} ${formatResearchOverviewSortValue(tile.metricValue, overviewSortBy)}`}
@@ -1493,7 +1493,7 @@
           <div class="header-actions">
             <label class="inline-field timeframe-field">
               <span>Timeframe</span>
-              <select bind:value={timeframe}>
+              <select class="form-control is-large" bind:value={timeframe}>
                 {#each timeframes as option}
                   <option value={option}>{option}</option>
                 {/each}
@@ -1501,7 +1501,7 @@
             </label>
             <label class="inline-field view-field">
               <span>View</span>
-              <select bind:value={chartMode}>
+              <select class="form-control is-large" bind:value={chartMode}>
                 {#each Object.entries(chartModeLabels) as [value, label]}
                   <option value={value}>{label}</option>
                 {/each}
@@ -1511,37 +1511,37 @@
         </div>
 
         <div class="kpi-grid summary-kpis">
-          <article class="metric">
+          <article class="stat">
             <span>Lookback Return</span>
             <strong class:positive={(result?.summary.total_return ?? 0) > 0} class:negative={(result?.summary.total_return ?? 0) < 0}>{pct(result?.summary.total_return)}</strong>
             <small>{result?.observations_count ?? 0} obs / {lookbackDays}D</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Latest Day</span>
             <strong class:positive={(result?.latest_daily_return ?? 0) > 0} class:negative={(result?.latest_daily_return ?? 0) < 0}>{pct(result?.latest_daily_return)}</strong>
             <small>{latestDailySubLabel(result)}</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Annual Return</span>
             <strong class:absent={pct(result?.summary.annual_return) === "N/A"}>{pct(result?.summary.annual_return)}</strong>
             <small>{result?.benchmark_symbol ?? "N/A"} benchmark</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Annual Vol</span>
             <strong class:absent={pct(result?.summary.annual_vol) === "N/A"}>{pct(result?.summary.annual_vol)}</strong>
             <small>{fmt(structureMetrics.aligned_symbol_count, 0)} aligned names</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Max Drawdown</span>
             <strong class:negative={(result?.summary.max_drawdown ?? 0) < 0}>{pct(result?.summary.max_drawdown)}</strong>
             <small>{pct(structureMetrics.top_weight)} top weight</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Beta</span>
             <strong class:elevated={(result?.summary.beta ?? 0) > 1.2}>{fmt(result?.summary.beta, 3)}</strong>
             <small>{coverageMetrics.benchmark_overlap_count} overlap obs</small>
           </article>
-          <article class="metric">
+          <article class="stat">
             <span>Correlation</span>
             <strong class:absent={fmt(result?.summary.correlation, 3) === "N/A"}>{fmt(result?.summary.correlation, 3)}</strong>
             <small>{pct(structureMetrics.top5_weight)} top-5 weight</small>
@@ -1683,18 +1683,18 @@
         <div class="field-grid">
           <label>
             <span>Scope</span>
-            <select bind:value={scopeType}>
+            <select class="form-control is-large" bind:value={scopeType}>
               <option value="single_ticker">Single Ticker</option>
               <option value="synthetic_portfolio">Synthetic Portfolio</option>
             </select>
           </label>
           <label>
             <span>Benchmark</span>
-            <input bind:value={benchmarkSymbol} placeholder="SPY" />
+            <input class="form-control is-large" bind:value={benchmarkSymbol} placeholder="SPY" />
           </label>
           <label>
             <span>Lookback</span>
-            <select bind:value={lookbackDays}>
+            <select class="form-control is-large" bind:value={lookbackDays}>
               <option value={126}>126D</option>
               <option value={252}>252D</option>
               <option value={504}>504D</option>
@@ -1705,7 +1705,7 @@
         {#if scopeType === "single_ticker"}
           <label>
             <span>Ticker</span>
-            <input bind:value={primarySymbol} placeholder="AAPL" />
+            <input class="form-control is-large" bind:value={primarySymbol} placeholder="AAPL" />
           </label>
         {:else}
           <div class="subsection">
@@ -1716,7 +1716,7 @@
 
             <label>
               <span>Preset</span>
-              <select bind:value={selectedPreset} on:change={() => applyPreset(selectedPreset)}>
+              <select class="form-control is-large" bind:value={selectedPreset} on:change={() => applyPreset(selectedPreset)}>
                 {#each presetBaskets as preset}
                   <option value={preset.id}>{preset.label}</option>
                 {/each}
@@ -1725,12 +1725,12 @@
 
             <label>
               <span>Synthetic Portfolio</span>
-              <textarea bind:value={syntheticText} rows="7" spellcheck="false"></textarea>
+              <textarea class="form-control" bind:value={syntheticText} rows="7" spellcheck="false"></textarea>
             </label>
 
             <div class="builder-actions compact">
-              <button type="button" on:click={normalizeSynthetic}>Normalize</button>
-              <button type="button" class="ghost-button" on:click={() => applyPreset(selectedPreset)}>Load Preset</button>
+              <button type="button" class="btn is-large" on:click={normalizeSynthetic}>Normalize</button>
+              <button type="button" class="btn is-large is-ghost" on:click={() => applyPreset(selectedPreset)}>Load Preset</button>
             </div>
           </div>
         {/if}
@@ -1751,8 +1751,8 @@
               {/each}
             </div>
             <div class="builder-actions compact">
-              <button type="button" on:click={() => sendSignedBookToStrategyLab(false)}>Send Signed Book to Strategy Lab</button>
-              <button type="button" class="ghost-button" on:click={() => sendSignedBookToStrategyLab(true)}>Send &amp; Open</button>
+              <button type="button" class="btn is-large" on:click={() => sendSignedBookToStrategyLab(false)}>Send Signed Book to Strategy Lab</button>
+              <button type="button" class="btn is-large is-ghost" on:click={() => sendSignedBookToStrategyLab(true)}>Send &amp; Open</button>
             </div>
           </div>
         {/if}
@@ -1760,18 +1760,18 @@
         {#if focalScopeSuggestion}
           <p class="muted focal-hint">
             Focus {focalScopeSuggestion} is available but not loaded; the active basket is preserved.
-            <button type="button" class="ghost-button" on:click={loadFocalSingleTickerScope}>Load {focalScopeSuggestion} scope</button>
+            <button type="button" class="btn is-large is-ghost" on:click={loadFocalSingleTickerScope}>Load {focalScopeSuggestion} scope</button>
           </p>
         {/if}
 
         <div class="builder-actions">
-          <button on:click={submit} disabled={loading}>{loading ? "Running..." : "Run Analysis"}</button>
-          <button type="button" class="ghost-button" on:click={resetBuilder}>Reset Builder</button>
+          <button class="btn is-large" on:click={submit} disabled={loading}>{loading ? "Running..." : "Run Analysis"}</button>
+          <button type="button" class="btn is-large is-ghost" on:click={resetBuilder}>Reset Builder</button>
           {#if scopeType === "single_ticker"}
-            <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>
+            <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>
               + Strategy
             </button>
-            <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>
+            <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>
               Add &amp; Open
             </button>
           {/if}
@@ -1894,12 +1894,12 @@
         </div>
 
         <div class="builder-actions">
-          <button type="button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
+          <button type="button" class="btn is-large" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
             {riskHandoffLoading ? "Opening..." : "Open In Risk"}
           </button>
-          <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
-          <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>+ Strategy</button>
-          <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
+          <button type="button" class="btn is-large is-ghost" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
+          <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>+ Strategy</button>
+          <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
         </div>
 
         {#if result?.snapshot}
@@ -1928,12 +1928,12 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric"><span>Aligned Obs</span><strong>{compareResult?.aligned_observation_count ?? 0}</strong><small>Common return calendar</small></article>
-            <article class="metric"><span>Relative Return</span><strong class:absent={pct(compareResult?.relative_return) === "N/A"}>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
-            <article class="metric"><span>Vol Difference</span><strong class:absent={pct(compareResult?.volatility_difference) === "N/A"}>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
-            <article class="metric"><span>Drawdown Gap</span><strong class:absent={pct(compareResult?.max_drawdown_difference) === "N/A"}>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
-            <article class="metric"><span>Correlation</span><strong class:absent={fmt(compareResult?.correlation, 3) === "N/A"}>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
-            <article class="metric"><span>Beta</span><strong class:absent={fmt(compareResult?.beta, 3) === "N/A"}>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
+            <article class="stat"><span>Aligned Obs</span><strong>{compareResult?.aligned_observation_count ?? 0}</strong><small>Common return calendar</small></article>
+            <article class="stat"><span>Relative Return</span><strong class:absent={pct(compareResult?.relative_return) === "N/A"}>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
+            <article class="stat"><span>Vol Difference</span><strong class:absent={pct(compareResult?.volatility_difference) === "N/A"}>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
+            <article class="stat"><span>Drawdown Gap</span><strong class:absent={pct(compareResult?.max_drawdown_difference) === "N/A"}>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
+            <article class="stat"><span>Correlation</span><strong class:absent={fmt(compareResult?.correlation, 3) === "N/A"}>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
+            <article class="stat"><span>Beta</span><strong class:absent={fmt(compareResult?.beta, 3) === "N/A"}>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
           </div>
 
           <TimeSeriesChart series={compareChartSeries} height={380} emptyMessage="Select two loaded or saved return streams to compare." />
@@ -1947,18 +1947,18 @@
                 <h3>Forwardable Research State</h3>
               </div>
               <div class="builder-actions compact">
-                <button type="button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
+                <button type="button" class="btn is-large" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
                   {riskHandoffLoading ? "Opening..." : "Risk"}
                 </button>
-                <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Options</button>
-                <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
+                <button type="button" class="btn is-large is-ghost" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Options</button>
+                <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
               </div>
             </div>
             <div class="kpi-grid">
-              <article class="metric"><span>Scope</span><strong>{formatScopeLabel(result?.scope_type)}</strong><small>{activePrimaryScopeLabel(result)}</small></article>
-              <article class="metric"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? benchmarkSymbol}</strong><small>{coverageMetrics.benchmark_overlap_count} overlap obs</small></article>
-              <article class="metric"><span>Available Names</span><strong>{coverageMetrics.available_symbols.length}</strong><small>{coverageMetrics.missing_symbols.length} missing</small></article>
-              <article class="metric"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
+              <article class="stat"><span>Scope</span><strong>{formatScopeLabel(result?.scope_type)}</strong><small>{activePrimaryScopeLabel(result)}</small></article>
+              <article class="stat"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? benchmarkSymbol}</strong><small>{coverageMetrics.benchmark_overlap_count} overlap obs</small></article>
+              <article class="stat"><span>Available Names</span><strong>{coverageMetrics.available_symbols.length}</strong><small>{coverageMetrics.missing_symbols.length} missing</small></article>
+              <article class="stat"><span>Effective Positions</span><strong class:absent={fmt(structureMetrics.effective_positions, 2) === "N/A"}>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
             </div>
           </article>
         {/if}
@@ -1998,9 +1998,9 @@
       <aside class="support-column">
         <article class="panel control-panel">
           <div class="rail-header"><div><p class="eyebrow">{mode === "scenario_context" ? "Scenario Objects" : "Comparable Objects"}</p><h3>Select Streams</h3></div><strong>{compareOptions.length} available</strong></div>
-          <label><span>Left</span><select bind:value={compareLeftSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
-          <label><span>Right</span><select bind:value={compareRightSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
-          <div class="builder-actions"><button type="button" on:click={runComparison} disabled={compareLoading || compareOptions.length < 2}>{compareLoading ? "Comparing..." : "Run Compare"}</button></div>
+          <label><span>Left</span><select class="form-control is-large" bind:value={compareLeftSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
+          <label><span>Right</span><select class="form-control is-large" bind:value={compareRightSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
+          <div class="builder-actions"><button type="button" class="btn is-large" on:click={runComparison} disabled={compareLoading || compareOptions.length < 2}>{compareLoading ? "Comparing..." : "Run Compare"}</button></div>
           {#if compareWarning}<p class="warning">{compareWarning}</p>{/if}
         </article>
 
@@ -2049,7 +2049,7 @@
         <article class="panel table-panel">
           <div class="panel-header tight-head">
             <h3>Saved Research Objects</h3>
-            <button type="button" class="ghost-button inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
+            <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
           </div>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
@@ -2065,10 +2065,10 @@
                       <td>
                         <div class="table-actions">
                           {#if savedResearchCanReloadScope(item)}
-                            <button type="button" class="ghost-button" on:click={() => loadSavedScope(item)}>Load Scope</button>
+                            <button type="button" class="btn is-large is-ghost" on:click={() => loadSavedScope(item)}>Load Scope</button>
                           {/if}
-                          <button type="button" class="ghost-button" on:click={() => useSavedInCompare(item)} disabled={!savedResearchHasReturnStream(item)}>Compare</button>
-                          <button type="button" class="ghost-button" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
+                          <button type="button" class="btn is-large is-ghost" on:click={() => useSavedInCompare(item)} disabled={!savedResearchHasReturnStream(item)}>Compare</button>
+                          <button type="button" class="btn is-large is-ghost" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
                         </div>
                       </td>
                     </tr>
@@ -2085,9 +2085,9 @@
       <aside class="support-column">
         <article class="panel control-panel">
           <div class="rail-header"><div><p class="eyebrow">Save Current</p><h3>Scope Analysis</h3></div></div>
-          <label><span>Scope Title</span><input bind:value={savedScopeTitle} /></label>
-          <div class="builder-actions"><button type="button" on:click={saveScopeRun} disabled={!result || savedLoading}>Save Scope</button></div>
-          <label><span>Notes</span><textarea bind:value={savedNotes} rows="5"></textarea></label>
+          <label><span>Scope Title</span><input class="form-control is-large" bind:value={savedScopeTitle} /></label>
+          <div class="builder-actions"><button type="button" class="btn is-large" on:click={saveScopeRun} disabled={!result || savedLoading}>Save Scope</button></div>
+          <label><span>Notes</span><textarea class="form-control" bind:value={savedNotes} rows="5"></textarea></label>
         </article>
 
         <article class="panel rail-panel">
@@ -2646,41 +2646,7 @@
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
-  .metric {
-    min-width: 0;
-    padding: var(--space-2) var(--space-5);
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    text-align: left;
-    display: grid;
-    gap: var(--space-1);
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .metric span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-1) 0 0.05rem;
-    font-size: var(--text-md);
-    line-height: 1.2;
-    color: var(--text-0);
-  }
-
-  .metric small {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-  }
+  /* Stat cells are .stat from primitives.css. */
 
   /* ── Typography ── */
   .group-label,
@@ -2786,66 +2752,22 @@
     min-width: 0;
   }
 
+  /* Controls are .btn.is-large and .form-control.is-large from primitives.css
+     (ghost buttons add .is-ghost). Here they fill their grid cell and keep
+     the view's mono figures: `font: inherit` is left for V2. */
   input,
   select,
   textarea,
   button {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-3) var(--space-4);
-    font: inherit;
-    font-size: var(--text-base);
     display: block;
     width: 100%;
     box-sizing: border-box;
-    border-radius: var(--radius-sm);
+    font: inherit;
+    font-size: var(--text-base);
   }
 
   textarea {
     min-height: 7rem;
-    resize: vertical;
-  }
-
-  input,
-  select,
-  button {
-    min-height: 2rem;
-    line-height: 1.2;
-  }
-
-  input:hover,
-  select:hover,
-  textarea:hover {
-    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
-  }
-
-  input:focus-visible,
-  select:focus-visible,
-  textarea:focus-visible,
-  button:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-  }
-
-  button {
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    color: var(--text-2);
-    border-color: var(--panel-border);
-    background: var(--bg-1);
-  }
-
-  .ghost-button {
-    background: transparent;
-    color: var(--text-1);
   }
 
   .builder-actions {
@@ -3046,13 +2968,13 @@
       justify-content: flex-start;
     }
 
-    .metric {
+    .stat {
       padding: var(--space-4) 0;
       border-left: 0;
       border-top: 1px solid var(--divider);
     }
 
-    .metric:first-child {
+    .stat:first-child {
       padding-top: 0;
       border-top: 0;
     }

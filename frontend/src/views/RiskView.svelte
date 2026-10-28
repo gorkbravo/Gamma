@@ -804,41 +804,41 @@
   <article class="panel controls-card">
     <div class="controls-bar">
       <label class="control source-control"><span>Source</span>
-        <select bind:value={selectedSource}>
+        <select class="form-control" bind:value={selectedSource}>
           {#each availableRiskSources as source}
             <option value={source.id}>{source.label}</option>
           {/each}
         </select>
       </label>
-      <label class="control"><span>Benchmark</span><input bind:value={benchmarkSymbol} /></label>
+      <label class="control"><span>Benchmark</span><input class="form-control" bind:value={benchmarkSymbol} /></label>
       <label class="control"><span>Lookback</span>
-        <select bind:value={lookbackDays}>
+        <select class="form-control" bind:value={lookbackDays}>
           {#each STANDARD_LOOKBACKS as days}<option value={days}>{days}D</option>{/each}
           <!-- Un lookback del libro fuera de la lista se muestra en vez de dejar el control en blanco. -->
           {#if !STANDARD_LOOKBACKS.includes(lookbackDays)}<option value={lookbackDays}>{lookbackDays}D</option>{/if}
         </select>
       </label>
       <label class="control"><span>Frequency</span>
-        <select bind:value={returnFrequency}>
+        <select class="form-control" bind:value={returnFrequency}>
           <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
         </select>
       </label>
-      <label class="control"><span>Confidence</span><select bind:value={confidence}><option value={0.9}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option></select></label>
-      <label class="control"><span>Horizon</span><select bind:value={horizonDays}><option value={1}>1D</option><option value={10}>10D</option><option value={21}>21D</option></select></label>
-      <label class="control"><span>Beta win.</span><select bind:value={betaWindow}><option value={63}>63D</option><option value={126}>126D</option><option value={252}>252D</option></select></label>
-      <label class="control"><span>MC horiz.</span><select bind:value={mcHorizonDays}><option value={5}>5D</option><option value={10}>10D</option><option value={21}>21D</option><option value={63}>63D</option></select></label>
-      <label class="control"><span>MC model</span><select bind:value={mcSimulationModel}><option value="Gaussian">Gaussian</option><option value="Bootstrap">Bootstrap</option></select></label>
-      <label class="control"><span>Sims</span><select bind:value={mcNumSimulations}><option value={1000}>1k</option><option value={2000}>2k</option><option value={5000}>5k</option></select></label>
+      <label class="control"><span>Confidence</span><select class="form-control" bind:value={confidence}><option value={0.9}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option></select></label>
+      <label class="control"><span>Horizon</span><select class="form-control" bind:value={horizonDays}><option value={1}>1D</option><option value={10}>10D</option><option value={21}>21D</option></select></label>
+      <label class="control"><span>Beta win.</span><select class="form-control" bind:value={betaWindow}><option value={63}>63D</option><option value={126}>126D</option><option value={252}>252D</option></select></label>
+      <label class="control"><span>MC horiz.</span><select class="form-control" bind:value={mcHorizonDays}><option value={5}>5D</option><option value={10}>10D</option><option value={21}>21D</option><option value={63}>63D</option></select></label>
+      <label class="control"><span>MC model</span><select class="form-control" bind:value={mcSimulationModel}><option value="Gaussian">Gaussian</option><option value="Bootstrap">Bootstrap</option></select></label>
+      <label class="control"><span>Sims</span><select class="form-control" bind:value={mcNumSimulations}><option value={1000}>1k</option><option value={2000}>2k</option><option value={5000}>5k</option></select></label>
       <div class="actions">
         {#if strategyLabResearchBook && selectedSource !== "strategy_lab_book"}
-          <button class="action-btn" on:click={loadStrategyBook} disabled={loading}>
+          <button class="btn action-btn" on:click={loadStrategyBook} disabled={loading}>
             Load Strategy Book
           </button>
         {/if}
-        <button class="action-btn" on:click={() => submit("core")} disabled={loading || !computeSnapshot}>
+        <button class="btn action-btn" on:click={() => submit("core")} disabled={loading || !computeSnapshot}>
           {loading && activeComputeMethod === "core" ? "Computing" : "Compute Core"}
         </button>
-        <button class="action-btn primary" on:click={() => submit("monteCarlo")} disabled={loading || !computeSnapshot}>
+        <button class="btn is-primary action-btn" on:click={() => submit("monteCarlo")} disabled={loading || !computeSnapshot}>
           {loading && activeComputeMethod === "monteCarlo" ? "Running" : "Run MC"}
         </button>
       </div>
@@ -1601,37 +1601,27 @@
     font-weight: 500;
   }
 
-  /* ── Inputs / buttons ── */
+  /* ── Inputs / buttons ──
+     Fields are .form-control and the action buttons .btn from primitives.css
+     (the main one adds .is-primary); they keep the view's 12px mono figures
+     (`font: inherit`, left for V2). The row selectors and dependency zoom
+     controls are plain buttons styled where they are used. */
   input,
   select,
   .action-btn {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    height: 28px;
-    padding: var(--space-2) var(--space-4);
     font: inherit;
     font-size: var(--text-sm);
-    border-radius: 2px;
   }
 
-  input:focus,
-  select:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+  /* Risk's action buttons read as uppercase commands with an accent hover. */
   .action-btn {
-    cursor: pointer;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 600;
     padding: 0 var(--space-5);
   }
   .action-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .action-btn.primary {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
-    color: var(--accent);
-  }
-  .action-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .action-btn.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
   /* ── Panel headers ──
      The 26px row is .panel-title from primitives.css. Table panels keep their

@@ -843,11 +843,11 @@
         <div class="filter-row">
           <label class="grow">
             <span>Search</span>
-            <input bind:value={query} placeholder="Fed, election, inflation, semis..." on:keydown={handleSearchKeydown} />
+            <input class="form-control" bind:value={query} placeholder="Fed, election, inflation, semis..." on:keydown={handleSearchKeydown} />
           </label>
           <label>
             <span>Status</span>
-            <select bind:value={status}>
+            <select class="form-control" bind:value={status}>
               <option value="open">Open</option>
               <option value="closed">Closed</option>
               <option value="all">All</option>
@@ -855,7 +855,7 @@
           </label>
           <label>
             <span>Sort</span>
-            <select bind:value={sortBy}>
+            <select class="form-control" bind:value={sortBy}>
               <option value="research_rank">Research Rank</option>
               <option value="volume_desc">Volume</option>
               <option value="liquidity_desc">Liquidity</option>
@@ -866,7 +866,7 @@
           </label>
           <label>
             <span>Category</span>
-            <select bind:value={category}>
+            <select class="form-control" bind:value={category}>
               <option value="">All</option>
               {#each availableCategories as option}
                 <option value={option}>{option}</option>
@@ -875,7 +875,7 @@
           </label>
           <label>
             <span>Rows</span>
-            <select bind:value={screenerLimit}>
+            <select class="form-control" bind:value={screenerLimit}>
               <option value={20}>20</option>
               <option value={40}>40</option>
               <option value={60}>60</option>
@@ -887,37 +887,33 @@
         <div class="filter-row">
           <label>
             <span>Min Vol</span>
-            <input type="number" min="0" step="1000" bind:value={minVolume} placeholder="0" />
+            <input class="form-control" type="number" min="0" step="1000" bind:value={minVolume} placeholder="0" />
           </label>
           <label>
             <span>Min Liq</span>
-            <input type="number" min="0" step="1000" bind:value={minLiquidity} placeholder="0" />
+            <input class="form-control" type="number" min="0" step="1000" bind:value={minLiquidity} placeholder="0" />
           </label>
           <label>
             <span>Prob %</span>
-            <input type="number" min="0" max="100" bind:value={minProbability} placeholder="min" />
+            <input class="form-control" type="number" min="0" max="100" bind:value={minProbability} placeholder="min" />
           </label>
           <label>
             <span>To %</span>
-            <input type="number" min="0" max="100" bind:value={maxProbability} placeholder="max" />
+            <input class="form-control" type="number" min="0" max="100" bind:value={maxProbability} placeholder="max" />
           </label>
           <label>
             <span>Max Days</span>
-            <input type="number" min="0" bind:value={maxDaysToResolution} placeholder="any" />
+            <input class="form-control" type="number" min="0" bind:value={maxDaysToResolution} placeholder="any" />
           </label>
           <label>
             <span>Min Δ %</span>
-            <input type="number" min="0" max="100" bind:value={minRepricingAbs} placeholder="0" />
+            <input class="form-control" type="number" min="0" max="100" bind:value={minRepricingAbs} placeholder="0" />
           </label>
           <div class="venue-picker">
             {#each venueButtons as venue}
               <button
                 type="button"
-                class="{venueSelection.includes(venue.venue as VenueKey) ? 'selected' : ''} {venueSelection.includes(
-                  venue.venue as VenueKey
-                )
-                  ? venueTone(venue.status)
-                  : ''}"
+                class="btn is-ghost {venueSelection.includes(venue.venue as VenueKey) ? 'selected' : ''} {venueSelection.includes( venue.venue as VenueKey ) ? venueTone(venue.status) : ''}"
                 on:click={() => toggleVenue(venue.venue as VenueKey)}
               >
                 <strong>{venue.venue === "polymarket" ? "PM" : "KL"}</strong>
@@ -928,7 +924,7 @@
           <div class="filter-actions">
             <button
               type="button"
-              class="ghost-button"
+              class="btn is-ghost ghost-button"
               class:selected={groupEvents}
               aria-pressed={groupEvents}
               disabled={!eventGroupCount && !groupEvents}
@@ -937,8 +933,8 @@
             >
               Group {eventGroupCount}
             </button>
-            <button type="button" class="ghost-button" on:click={resetFilters}>Reset</button>
-            <button type="button" on:click={() => runScreener(true)} disabled={loading}>Refresh</button>
+            <button type="button" class="btn is-ghost ghost-button" on:click={resetFilters}>Reset</button>
+            <button type="button" class="btn is-ghost" on:click={() => runScreener(true)} disabled={loading}>Refresh</button>
           </div>
         </div>
       </article>
@@ -1065,7 +1061,7 @@
                     <td class="tick-col">
                       <button
                         type="button"
-                        class="tick"
+                        class="btn is-ghost tick"
                         class:on={compareSelection.includes(entry.market_id)}
                         aria-label="Toggle comparison"
                         on:click|stopPropagation={() => toggleCompare(entry.market_id)}
@@ -1150,7 +1146,7 @@
           <div class="control-row">
             <div class="segmented" role="group" aria-label="History range">
               {#each HISTORY_RANGES as range}
-                <button
+                <button class="btn is-ghost"
                   type="button"
                   class:selected={historyRange === range.id}
                   disabled={!detail || historyLoading}
@@ -1162,7 +1158,7 @@
             </div>
             <div class="segmented" role="group" aria-label="Bar resolution">
               {#each RESOLUTION_CHOICES as choice}
-                <button
+                <button class="btn is-ghost"
                   type="button"
                   class:selected={historyResolution === choice.id}
                   disabled={!detail || historyLoading}
@@ -1175,7 +1171,7 @@
             {#if multiOutcome}
               <button
                 type="button"
-                class="ghost-button auto"
+                class="btn is-ghost ghost-button auto"
                 class:selected={showOutcomeOverlay}
                 on:click={() => (showOutcomeOverlay = !showOutcomeOverlay)}
               >
@@ -1183,20 +1179,20 @@
               </button>
             {/if}
             <div class="nav-actions">
-              <button type="button" class="ghost-button auto" on:click={() => stepContract(-1)} title="Previous ([)"
+              <button type="button" class="btn is-ghost ghost-button auto" on:click={() => stepContract(-1)} title="Previous ([)"
                 >←</button
               >
-              <button type="button" class="ghost-button auto" on:click={() => stepContract(1)} title="Next (])">→</button>
+              <button type="button" class="btn is-ghost ghost-button auto" on:click={() => stepContract(1)} title="Next (])">→</button>
               <button
                 type="button"
-                class="ghost-button auto"
+                class="btn is-ghost ghost-button auto"
                 class:selected={isWatched(detail?.market_id)}
                 disabled={!detail}
                 on:click={() => detail && toggleWatch(detail)}>{isWatched(detail?.market_id) ? "★" : "☆"}</button
               >
               <button
                 type="button"
-                class="ghost-button auto"
+                class="btn is-ghost ghost-button auto"
                 class:selected={detail ? compareSelection.includes(detail.market_id) : false}
                 disabled={!detail}
                 on:click={() => detail && toggleCompare(detail.market_id)}>Compare</button
@@ -1205,7 +1201,7 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Prob</span>
               <strong
                 class={marketTone(detail?.current_probability)}
@@ -1216,41 +1212,41 @@
               >
               <small>{history?.outcome_label ?? detail?.probability_label ?? "Primary outcome"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Window Δ</span>
               <strong class={toneOf(historyStats?.change)} class:absent={signedPct(historyStats?.change) === "N/A"}>{signedPct(historyStats?.change)}</strong>
               <small>{historyRange.toUpperCase()} range {pct(historyStats?.range_width)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Hi / Lo</span>
               <strong>{pct(historyStats?.high)} / {pct(historyStats?.low)}</strong>
               <small>now at {pct(historyStats?.percentile_of_range)} of range</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Daily Vol</span>
               <strong class={(historyStats?.daily_volatility ?? 0) >= 0.08 ? "elevated" : ""}
                 >{pct(historyStats?.daily_volatility)}</strong
               >
               <small>max move {signedPct(historyStats?.max_move)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>24H Vol</span>
               <strong use:flashOnChange={{ value: detail?.volume_24h, direction: "neutral" }}
                 >{fmt(detail?.volume_24h)}</strong
               >
               <small>total {fmt(detail?.volume)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Liquidity</span>
               <strong class:absent={fmt(detail?.liquidity) === "N/A"}>{fmt(detail?.liquidity)}</strong>
               <small>{(detail?.open_interest ?? 0) > 0 ? `OI ${fmt(detail?.open_interest)}` : "—"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Resolves</span>
               <strong>{daysLabel(daysToResolution)}</strong>
               <small>{dayStamp(detail?.end_time)}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Spread</span>
               <strong class={(depth?.spread ?? detail?.spread ?? 0) >= 0.05 ? "elevated" : ""}
                 >{pct(depth?.spread ?? detail?.spread, 1)}</strong
@@ -1350,19 +1346,19 @@
             </div>
             {#if eventBookLadder}
               <div class="kpi-strip">
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Structure</span>
                   <strong>{eventBookLadder.label}</strong>
                   <small>nested | not summed</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Monotonicity</span>
                   <strong class={eventBookLadder.inversions > 0 ? "elevated" : ""}
                     >{eventBookLadder.inversions > 0 ? `${eventBookLadder.inversions} inverted` : "Holds"}</strong
                   >
                   <small>{eventBookLadder.rule}</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Span</span>
                   <strong class:absent={!eventBookLadder.first}
                     >{eventBookLadder.first ? `${pct(eventBookLadder.first.probability)} → ${pct(eventBookLadder.last?.probability)}` : "N/A"}</strong
@@ -1374,7 +1370,7 @@
                     )}</small
                   >
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Flagged</span>
                   <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
                   <small>resolution terms</small>
@@ -1382,24 +1378,24 @@
               </div>
             {:else}
               <div class="kpi-strip">
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Book Sum</span>
                   <strong class={eventBook.overround_is_meaningful ? "" : "muted"} class:absent={pct(eventBook.probability_sum) === "N/A"}>{pct(eventBook.probability_sum)}</strong>
                   <small>{eventBookQuoted}/{eventBook.legs.length} quoted</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>{eventBook.overround_is_meaningful ? "Overround" : "Vs 100%"}</span>
                   <strong class={eventBook.overround_is_meaningful ? toneOf(eventBook.implied_overround) : "muted"}
                     >{signedPct(eventBook.implied_overround)}</strong
                   >
                   <small>{eventBook.overround_is_meaningful ? "book-complete check" : "descriptive only"}</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Favorite</span>
                   <strong>{truncName(eventBookFavorite?.subtitle ?? eventBookFavorite?.title, 20)}</strong>
                   <small>{pct(eventBookFavorite?.probability)}</small>
                 </article>
-                <article class="metric">
+                <article class="stat is-compact">
                   <span>Flagged</span>
                   <strong class={eventBookFlagged > 0 ? "elevated" : ""}>{eventBookFlagged}</strong>
                   <small>{eventBook.exclusivity_signal === "venue_grouped_candidates" ? "venue candidates" : "unverified"}</small>
@@ -1479,21 +1475,21 @@
           </div>
           {#if hasWalletRows}
             <div class="kpi-strip">
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Trades</span>
                 <strong>{wallet?.total_trades ?? 0}</strong>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Notional</span>
                 <strong class:absent={fmt(wallet?.total_notional, 2) === "N/A"}>{fmt(wallet?.total_notional, 2)}</strong>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Top Share</span>
                 <strong class={(wallet?.top_participant_share ?? 0) >= 0.45 ? "elevated" : ""}
                   >{pct(wallet?.top_participant_share)}</strong
                 >
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>HHI</span>
                 <strong class={(wallet?.concentration_hhi ?? 0) >= 0.25 ? "elevated" : ""}
                   >{wallet?.concentration_hhi?.toFixed(2) ?? "N/A"}</strong
@@ -1549,17 +1545,17 @@
           </div>
           <div class="strategy-actions">
             <div class="side-toggle" aria-label="Strategy Lab contract side">
-              <button type="button" class:selected={strategySide === "long_yes"} on:click={() => (strategySide = "long_yes")}
+              <button type="button" class="btn is-ghost" class:selected={strategySide === "long_yes"} on:click={() => (strategySide = "long_yes")}
                 >YES</button
               >
-              <button type="button" class:selected={strategySide === "long_no"} on:click={() => (strategySide = "long_no")}
+              <button type="button" class="btn is-ghost" class:selected={strategySide === "long_no"} on:click={() => (strategySide = "long_no")}
                 >NO</button
               >
             </div>
-            <button type="button" class="ghost-button" disabled={!detail} on:click={() => sendSelectedMarketToStrategyLab(false)}
+            <button type="button" class="btn is-ghost ghost-button" disabled={!detail} on:click={() => sendSelectedMarketToStrategyLab(false)}
               >+ Strategy</button
             >
-            <button type="button" disabled={!detail} on:click={() => sendSelectedMarketToStrategyLab(true)}
+            <button type="button" class="btn is-ghost" disabled={!detail} on:click={() => sendSelectedMarketToStrategyLab(true)}
               >Add &amp; Open</button
             >
           </div>
@@ -1594,7 +1590,7 @@
                     <td class="tick-col">
                       <button
                         type="button"
-                        class="tick"
+                        class="btn is-ghost tick"
                         aria-label={`Open in ${handoffTabLabel(handoff.intended_target_tab)}`}
                         disabled={!onCrossDomainHandoff}
                         on:click|stopPropagation={() => onCrossDomainHandoff?.(handoff)}>→</button
@@ -1649,22 +1645,22 @@
           </div>
           {#if depthLevels.length}
             <div class="kpi-strip">
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Bid Depth</span>
                 <strong class:absent={fmt(depth?.bid_notional_within_band, 0) === "N/A"}>{fmt(depth?.bid_notional_within_band, 0)}</strong>
                 <small>total {fmt(depth?.total_bid_notional, 0)}</small>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Ask Depth</span>
                 <strong class:absent={fmt(depth?.ask_notional_within_band, 0) === "N/A"}>{fmt(depth?.ask_notional_within_band, 0)}</strong>
                 <small>total {fmt(depth?.total_ask_notional, 0)}</small>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>Imbalance</span>
                 <strong class={toneOf(depth?.depth_imbalance)} class:absent={signedPct(depth?.depth_imbalance, 0) === "N/A"}>{signedPct(depth?.depth_imbalance, 0)}</strong>
                 <small>bid vs ask</small>
               </article>
-              <article class="metric">
+              <article class="stat is-compact">
                 <span>{fmt(depth?.reference_clip_notional, 0)} Cost</span>
                 <strong class={depth?.ask_slippage_reference == null ? "stale" : "elevated"}
                   >{depth?.ask_slippage_reference == null ? "N/A" : signedPct(depth.ask_slippage_reference, 2)}</strong
@@ -1746,7 +1742,7 @@
                       <td class="tick-col">
                         <button
                           type="button"
-                          class="tick"
+                          class="btn is-ghost tick"
                           class:on={compareSelection.includes(market.market_id)}
                           aria-label="Toggle comparison"
                           on:click|stopPropagation={() => toggleCompare(market.market_id)}
@@ -1778,7 +1774,7 @@
       <article class="panel temporary-comparison" aria-label="Temporary Copilot prediction comparison">
         <div class="table-header">
           <span>TEMPORARY · {workingAnalysis.title}</span>
-          <button type="button" class="auto" on:click={() => onCloseWorkingAnalysis?.()}>Return to live comparison</button>
+          <button type="button" class="btn is-ghost auto" on:click={() => onCloseWorkingAnalysis?.()}>Return to live comparison</button>
         </div>
         <div class="panel-notes">
           {#if temporaryComparison}
@@ -1795,12 +1791,12 @@
         <div class="table-header">
           <span>Comparison Basket</span>
           <div class="header-actions">
-            <button type="button" class="ghost-button auto" on:click={clearCompare} disabled={!!workingAnalysis || !compareSelection.length}
+            <button type="button" class="btn is-ghost ghost-button auto" on:click={clearCompare} disabled={!!workingAnalysis || !compareSelection.length}
               >Clear</button
             >
             <button
               type="button"
-              class="auto"
+              class="btn is-ghost auto"
               on:click={runComparison}
               disabled={!!workingAnalysis || compareSelection.length < 2 || compareLoading}>Recompute</button
             >
@@ -1831,7 +1827,7 @@
                   <td class="num {toneOf(leg?.stats?.change)}" class:absent={signedPct(leg?.stats?.change) === "N/A"}>{signedPct(leg?.stats?.change)}</td>
                   <td class="num">{leg?.stats?.point_count ?? 0}</td>
                   <td class="tick-col">
-                    <button type="button" class="tick" aria-label="Remove" disabled={!!workingAnalysis} on:click={() => toggleCompare(row.market_id)}
+                    <button type="button" class="btn is-ghost tick" aria-label="Remove" disabled={!!workingAnalysis} on:click={() => toggleCompare(row.market_id)}
                       >✕</button
                     >
                   </td>
@@ -1859,7 +1855,7 @@
           <small>{namedSets.length}/{savedResearch?.comparison_set_limit ?? 0}{savedLoading ? " | SAVING..." : ""}</small>
         </div>
         <div class="save-row">
-          <input
+          <input class="form-control"
             bind:value={newSetName}
             placeholder="Name this comparison"
             maxlength="120"
@@ -1867,7 +1863,7 @@
           />
           <button
             type="button"
-            class="auto"
+            class="btn is-ghost auto"
             disabled={!newSetName.trim() || compareSelection.length < 2 || savedLoading}
             on:click={saveCurrentSet}>Save</button
           >
@@ -1891,7 +1887,7 @@
                   <td class="tick-col">
                     <button
                       type="button"
-                      class="tick"
+                      class="btn is-ghost tick"
                       aria-label="Delete set"
                       on:click|stopPropagation={() => onDeleteComparisonSet?.(record.id)}>✕</button
                     >
@@ -1915,7 +1911,7 @@
           </div>
           <div class="segmented" role="group" aria-label="History range">
             {#each HISTORY_RANGES as range}
-              <button
+              <button class="btn is-ghost"
                 type="button"
                 class:selected={displayedRange === range.id}
                 disabled={!!workingAnalysis || compareLoading}
@@ -1943,24 +1939,24 @@
       {#if activeComparison?.basket}
         <article class="panel basket-panel">
           <div class="kpi-grid four">
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Legs</span>
               <strong>{activeComparison.basket.leg_count}</strong>
               <small>{activeComparison.basket.venues.join(" / ") || "—"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Prob Sum</span>
               <strong class:absent={pct(activeComparison.basket.probability_sum) === "N/A"}>{pct(activeComparison.basket.probability_sum)}</strong>
               <small>{activeComparison.basket.same_event ? "same venue event" : "cross-event"}</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Vs 100%</span>
               <strong class={toneOf(activeComparison.basket.implied_overround)}
                 >{signedPct(activeComparison.basket.implied_overround)}</strong
               >
               <small>descriptive only</small>
             </article>
-            <article class="metric">
+            <article class="stat is-compact">
               <span>Widest Gap</span>
               <strong class={(rankedPairs[0]?.current_spread ?? 0) >= 0.05 ? "elevated" : ""}
                 >{signedPct(rankedPairs[0]?.current_spread)}</strong
@@ -2064,7 +2060,7 @@
         <div class="control-row">
           <div class="segmented" role="group" aria-label="Calibration lead time">
             {#each CALIBRATION_LEAD_TIME_CHOICES as choice}
-              <button
+              <button class="btn is-ghost"
                 type="button"
                 class:selected={calibrationLeadTimes.includes(choice.hours)}
                 disabled={calibrationLoading}
@@ -2076,7 +2072,7 @@
           </div>
           <label class="inline">
             <span>Sample</span>
-            <select bind:value={calibrationSample} disabled={calibrationLoading} on:change={() => runCalibration()}>
+            <select class="form-control" bind:value={calibrationSample} disabled={calibrationLoading} on:change={() => runCalibration()}>
               {#each CALIBRATION_SAMPLE_CHOICES as choice}
                 <option value={choice}>{choice}</option>
               {/each}
@@ -2089,35 +2085,35 @@
             <small>{describeCalibrationMethod(calibration)}</small>
           </div>
           <div class="nav-actions">
-            <button type="button" class="auto" disabled={!calibrationMarketId || calibrationLoading} on:click={() => runCalibration()}
+            <button type="button" class="btn is-ghost auto" disabled={!calibrationMarketId || calibrationLoading} on:click={() => runCalibration()}
               >Recompute</button
             >
           </div>
         </div>
         <div class="kpi-grid five">
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Venue</span>
             <strong class:absent={calibration?.venue == null}>{calibration?.venue ?? "N/A"}</strong>
             <small>{calibration?.markets_sampled ?? 0} of {calibration?.resolved_markets_considered ?? 0} resolved</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Observations</span>
             <strong>{calibration?.sample_size ?? 0}</strong>
             <small>min {calibration?.minimum_curve_sample ?? 0} per curve</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Sample Period</span>
             <strong>{dayStamp(calibration?.sample_period_start)} → {dayStamp(calibration?.sample_period_end)}</strong>
             <small>{calibration?.markets_without_history ?? 0} without history</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Research Share</span>
             <strong class={(calibration?.research_share ?? 1) < 0.5 ? "stale" : ""}
               >{pct(calibration?.research_share, 0)}</strong
             >
             <small>{calibrationComposition}</small>
           </article>
-          <article class="metric">
+          <article class="stat is-compact">
             <span>Settlement Drift</span>
             <strong class="elevated" class:absent={pct(calibration?.convergence?.average_distance_to_outcome) === "N/A"}>{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
             <small>{pct(calibration?.convergence?.share_within_five_points, 0)} within 5pts of outcome</small>
@@ -2309,7 +2305,7 @@
     <td class="tick-col">
       <button
         type="button"
-        class="tick"
+        class="btn is-ghost tick"
         class:on={compareSelection.includes(market.market_id)}
         aria-label="Toggle comparison"
         on:click|stopPropagation={() => toggleCompare(market.market_id)}
@@ -2320,7 +2316,7 @@
     <td class="tick-col">
       <button
         type="button"
-        class="tick"
+        class="btn is-ghost tick"
         class:on={isWatched(market.market_id)}
         aria-label="Toggle watchlist"
         on:click|stopPropagation={() => toggleWatch(market)}
@@ -2533,40 +2529,11 @@
     padding-block: var(--space-2);
   }
 
-  .metric {
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: none;
-    padding: var(--space-2) var(--space-4);
-    min-width: 0;
-  }
-
-  .metric:first-child {
-    border-left: 0;
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-1) 0;
-    font-size: var(--text-base);
-    color: var(--text-0);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .metric small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  /* Stat cells are .stat.is-compact from primitives.css. */
 
   /* ── Typography ──────────────────────────────────────────── */
 
-  .group-label,
-  label > span,
-  .metric span {
+  .group-label, label > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
@@ -2611,31 +2578,14 @@
     gap: var(--space-1);
   }
 
+  /* Fields are .form-control and buttons .btn.is-ghost from primitives.css.
+     Here they fill their cell and keep the view's mono figures (`font:
+     inherit`, left for V2); toggles and pickers below set their own shape. */
   input,
-  select {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: var(--space-1) var(--space-3);
-    font: inherit;
-    width: 100%;
-    min-height: 1.75rem;
-  }
-
+  select,
   button {
-    border: 1px solid var(--panel-strong);
-    background: transparent;
-    color: var(--text-0);
-    padding: var(--space-1) var(--space-4);
     font: inherit;
     width: 100%;
-    cursor: pointer;
-    min-height: 1.75rem;
-  }
-
-  button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
   }
 
   button.auto,

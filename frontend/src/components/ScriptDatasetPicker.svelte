@@ -86,29 +86,29 @@
 
 <section class="picker" aria-label="Gamma dataset catalog">
   <label>Gamma dataset
-    <select aria-label="Gamma export domain" bind:value={domain} on:change={changeDomain} disabled={busy}>
+    <select class="form-control" aria-label="Gamma export domain" bind:value={domain} on:change={changeDomain} disabled={busy}>
       {#each definitions as item}<option value={item.domain}>{item.label}</option>{/each}
     </select>
   </label>
   <form on:submit|preventDefault={search} class="search-row">
-    <label>Search datasets<input aria-label="Search datasets" bind:value={query} maxlength="128" placeholder="Name or symbol" /></label>
-    <button disabled={busy} type="submit">{busy ? "Loading…" : "Search"}</button>
+    <label>Search datasets<input class="form-control" aria-label="Search datasets" bind:value={query} maxlength="128" placeholder="Name or symbol" /></label>
+    <button class="btn is-ghost" disabled={busy} type="submit">{busy ? "Loading…" : "Search"}</button>
   </form>
   {#if rows.length}
     <label>Dataset
-      <select aria-label="Dataset" bind:value={selected} disabled={busy}>
+      <select class="form-control" aria-label="Dataset" bind:value={selected} disabled={busy}>
         {#each rows as item, index}<option value={String(index)}>{item.label}</option>{/each}
       </select>
     </label>
     <div class="controls">
       {#if domain === "equity_history"}
-        <label>Lookback days<input aria-label="Lookback days" type="number" min="20" max="3650" bind:value={days} disabled={busy} /></label>
-        <label>Frequency<select bind:value={frequency} disabled={busy}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+        <label>Lookback days<input class="form-control" aria-label="Lookback days" type="number" min="20" max="3650" bind:value={days} disabled={busy} /></label>
+        <label>Frequency<select class="form-control" bind:value={frequency} disabled={busy}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
       {:else if ["macro_series", "crypto_history", "prediction_history"].includes(domain)}
-        <label>Timeframe<select aria-label="Dataset timeframe" bind:value={timeframe} disabled={busy}>{#each ranges as range}<option value={range}>{range}</option>{/each}</select></label>
+        <label>Timeframe<select class="form-control" aria-label="Dataset timeframe" bind:value={timeframe} disabled={busy}>{#each ranges as range}<option value={range}>{range}</option>{/each}</select></label>
       {/if}
     </div>
-    <button on:click={inspect} disabled={disabled || busy || !selection}>Inspect dataset</button>
+    <button class="btn is-ghost" on:click={inspect} disabled={disabled || busy || !selection}>Inspect dataset</button>
   {:else if searched && !error}<p role="status">No matching datasets. Try another search or add an external file.</p>{/if}
   {#if error}<p class="warning" role="alert">{error}</p>{/if}
   {#if warnings.length}<details><summary>Discovery warnings ({warnings.length})</summary>{#each warnings as warning}<p>{warning}</p>{/each}</details>{/if}
@@ -129,8 +129,8 @@
         </tbody></table></div>
       </details>
       {#each preview.warnings as warning}<p class="warning">{warning}</p>{/each}
-      <label>Snapshot filename<input aria-label="Snapshot filename" bind:value={filename} /></label>
-      <button on:click={add} disabled={disabled || busy || !filename.endsWith(".json")}>Add Gamma dataset</button>
+      <label>Snapshot filename<input class="form-control" aria-label="Snapshot filename" bind:value={filename} /></label>
+      <button class="btn is-ghost" on:click={add} disabled={disabled || busy || !filename.endsWith(".json")}>Add Gamma dataset</button>
       <p>Preview retained for 10 minutes. Add copies these exact inspected bytes.</p>
     </div>
   {/if}
@@ -143,12 +143,12 @@
   label, p, summary { font-size: var(--text-xs); }
   label, summary { font-family: var(--display-font); color: var(--text-2); }
   p { margin: 0; color: var(--text-2); overflow-wrap: anywhere; line-height: var(--leading-normal); }
-  input, select, button { min-width: 0; max-width: 100%; min-height: 30px; border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); background: var(--bg-1); color: var(--text-1); padding: var(--space-3); font: inherit; }
+  /* Fields are .form-control and buttons .btn.is-ghost from primitives.css;
+     `font: inherit` is left for V2. */
+  input, select, button { min-width: 0; max-width: 100%; font: inherit; }
   input, select { width: 100%; box-sizing: border-box; }
-  button, summary { cursor: pointer; }
-  button { background: transparent; }
-  button:disabled { opacity: 0.45; cursor: not-allowed; }
-  :is(button, select, input, summary):focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+  summary { cursor: pointer; }
+  summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
   .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: end; }
   .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: var(--space-3); }
   .preview { border-block: 1px solid var(--divider); padding-block: var(--space-4); }

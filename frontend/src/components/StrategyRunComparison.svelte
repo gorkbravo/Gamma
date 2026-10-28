@@ -38,10 +38,10 @@
 </script>
 
 <article class="comparison-panel" aria-label="Saved experiment comparison">
-  <div class="header"><h3>Compare experiments</h3><button on:click={compare} disabled={loading || !baseline || !comparison}>{loading ? "Comparing…" : "Compare Runs"}</button></div>
+  <div class="header"><h3>Compare experiments</h3><button class="btn" on:click={compare} disabled={loading || !baseline || !comparison}>{loading ? "Comparing…" : "Compare Runs"}</button></div>
   <div class="selectors">
-    <label>Baseline<select bind:value={baselineId}><option value="">Select saved experiment</option>{#each experiments as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
-    <label>Comparison<select bind:value={comparisonId}><option value="current">Current composition</option>{#each experiments as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
+    <label>Baseline<select class="form-control" bind:value={baselineId}><option value="">Select saved experiment</option>{#each experiments as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
+    <label>Comparison<select class="form-control" bind:value={comparisonId}><option value="current">Current composition</option>{#each experiments as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
   </div>
   {#if baseline && comparison}
     <p>Baseline weights: {weights(baseline)}</p><p>Comparison weights: {weights(comparison)}</p>
@@ -68,9 +68,8 @@
   .header, .selectors { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-5); }
   h3 { margin: 0; margin-right: auto; font-size: var(--text-md); }
   label { display: grid; gap: var(--space-2); flex: 1 1 220px; min-width: 0; font-family: var(--display-font); }
-  button, select { min-height: 28px; padding: var(--space-2) var(--space-4); background: var(--bg-1); color: var(--text-0); border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); }
+  /* Controls are .btn and .form-control from primitives.css. */
   select { width: 100%; min-width: 0; }
-  button:disabled { opacity: 0.5; }
   p { margin: 0; padding: var(--space-3) var(--space-5); font-size: var(--text-sm); color: var(--text-1); overflow-wrap: anywhere; }
   /* Cells come from .data-table.is-figures in primitives.css. */
 </style>

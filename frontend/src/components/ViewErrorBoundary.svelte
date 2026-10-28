@@ -44,7 +44,7 @@
       <strong>{label} failed to render</strong>
       <span class="message">{error instanceof Error ? error.message || error.name : String(error ?? "Unknown error")}</span>
       <small>Navigation and the topbar keep working. Retry remounts the view; edits it had not stored may be lost.</small>
-      <button type="button" onclick={() => retry(reset)}>Retry</button>
+      <button type="button" class="btn is-ghost" onclick={() => retry(reset)}>Retry</button>
     </div>
   {/snippet}
 </svelte:boundary>
@@ -76,19 +76,10 @@
     font-size: var(--text-xs);
   }
 
+  /* The retry button is .btn.is-ghost from primitives.css. */
+
   .view-error button {
     margin-top: var(--space-2);
-    padding: var(--space-1) var(--space-4);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-1);
     font-size: var(--text-sm);
-    cursor: pointer;
-  }
-
-  .view-error button:hover {
-    color: var(--text-0);
-    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
   }
 </style>

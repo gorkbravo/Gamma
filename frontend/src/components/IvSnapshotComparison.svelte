@@ -69,12 +69,12 @@
 <article class="snapshot-panel" aria-label="Options snapshot comparison">
   <div class="controls">
     <h3>Snapshot comparison</h3>
-    <button on:click={capture} disabled={saving || !surface?.snapshot_available || !surface.points || surface.symbol !== activeSymbol}>{saving ? "Capturing…" : "Capture displayed surface"}</button>
-    <button on:click={() => refresh(activeSymbol)} disabled={loading || saving || !activeSymbol}>Reload captures</button>
+    <button class="btn" on:click={capture} disabled={saving || !surface?.snapshot_available || !surface.points || surface.symbol !== activeSymbol}>{saving ? "Capturing…" : "Capture displayed surface"}</button>
+    <button class="btn" on:click={() => refresh(activeSymbol)} disabled={loading || saving || !activeSymbol}>Reload captures</button>
   </div>
   <div class="selectors">
-    <label>Baseline<select bind:value={beforeId} disabled={!snapshots.length}><option value="">Select capture</option>{#each snapshots as row}<option value={row.snapshot_id}>{label(row)}</option>{/each}</select></label>
-    <label>Comparison<select bind:value={afterId} disabled={!snapshots.length}><option value="">Select capture</option>{#each snapshots as row}<option value={row.snapshot_id}>{label(row)}</option>{/each}</select></label>
+    <label>Baseline<select class="form-control" bind:value={beforeId} disabled={!snapshots.length}><option value="">Select capture</option>{#each snapshots as row}<option value={row.snapshot_id}>{label(row)}</option>{/each}</select></label>
+    <label>Comparison<select class="form-control" bind:value={afterId} disabled={!snapshots.length}><option value="">Select capture</option>{#each snapshots as row}<option value={row.snapshot_id}>{label(row)}</option>{/each}</select></label>
   </div>
   {#if error}<p role="alert">{error} Use Reload captures to retry.</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
@@ -114,8 +114,7 @@
   .snapshot-panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); min-width: 0; }
   .controls, .selectors { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-5); }
   h3 { margin: 0; font-size: var(--text-md); margin-right: auto; }
-  button, select { background: var(--bg-1); color: var(--text-0); border: 1px solid var(--panel-strong); border-radius: var(--radius-sm); min-height: 28px; padding: var(--space-2) var(--space-4); }
-  button:disabled { opacity: 0.5; }
+  /* Controls are .btn and .form-control from primitives.css. */
   label { display: grid; gap: var(--space-2); flex: 1 1 260px; min-width: 0; font-family: var(--display-font); font-size: var(--text-sm); }
   select { width: 100%; min-width: 0; font-family: var(--app-font), monospace; }
   p { margin: 0; padding: var(--space-3) var(--space-5); color: var(--text-1); font-size: var(--text-sm); overflow-wrap: anywhere; }
