@@ -1152,7 +1152,7 @@
               <div class="kpi-grid">
                 <article class="stat"><span>Total Return</span><strong class={signClass(strategyComposition.metrics.total_return)} class:absent={pct(strategyComposition.metrics.total_return) === "N/A"}>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
                 <article class="stat"><span>Annual Vol</span><strong class:absent={pct(strategyComposition.metrics.annual_volatility) === "N/A"}>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
-                <article class="stat"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
+                <article class="stat"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0} class:absent={pct(strategyComposition.metrics.max_drawdown) === "N/A"}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
                 <article class="stat"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
                 <article class="stat"><span>Lenses</span><strong>{strategyComposition.lenses.length}</strong><small>{strategyComposition.overlays.length} overlays</small></article>
               </div>
@@ -1196,7 +1196,7 @@
             <article class="stat"><span>Annual Vol</span><strong class:absent={pct(activeStrategyResult?.metrics.annual_volatility) === "N/A"}>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
             <article class="stat"><span>Sharpe</span><strong class={signClass(activeStrategyResult?.metrics.sharpe_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sharpe_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
             <article class="stat"><span>Sortino</span><strong class={signClass(activeStrategyResult?.metrics.sortino_ratio)} class:absent={fmt(activeStrategyResult?.metrics.sortino_ratio, 2) === "N/A"}>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
-            <article class="stat"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
+            <article class="stat"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0} class:absent={pct(activeStrategyResult?.metrics.max_drawdown) === "N/A"}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
           </div>
 
           <TimeSeriesChart series={strategyChartSeries} height={320} emptyMessage="Import CSV returns to populate Strategy Lab." />

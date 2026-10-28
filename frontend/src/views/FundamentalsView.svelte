@@ -1525,19 +1525,19 @@
           </article>
           <article class="stat is-large">
             <span>Enterprise Value</span>
-            <strong>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.enterprise_value)}</strong>
+            <strong class:absent={(dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.enterprise_value)) === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.enterprise_value)}</strong>
           </article>
           <article class="stat is-large">
             <span>Equity Value</span>
-            <strong>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.equity_value)}</strong>
+            <strong class:absent={(dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.equity_value)) === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.equity_value)}</strong>
           </article>
           <article class="stat is-large">
             <span>Implied / Share</span>
-            <strong>{dcfDecisionGate.blocked ? "N/A" : currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong>
+            <strong class:absent={(dcfDecisionGate.blocked ? "N/A" : currency(activeScenarioSummary?.implied_value_per_share, 2)) === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong>
           </article>
           <article class="stat is-large">
             <span>Upside / Downside</span>
-            <strong class={dcfDecisionGate.blocked ? "" : toneClass(activeScenarioSummary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(activeScenarioSummary?.upside_downside_pct)}</strong>
+            <strong class={dcfDecisionGate.blocked ? "" : toneClass(activeScenarioSummary?.upside_downside_pct)} class:absent={(dcfDecisionGate.blocked ? "N/A" : pct(activeScenarioSummary?.upside_downside_pct)) === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : pct(activeScenarioSummary?.upside_downside_pct)}</strong>
           </article>
         </div>
 
@@ -1937,11 +1937,11 @@
           </article>
           <article class="stat is-large">
             <span>Base Value / Share</span>
-            <strong>{dcfDecisionGate.blocked ? "N/A" : currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)}</strong>
+            <strong class:absent={(dcfDecisionGate.blocked ? "N/A" : currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)) === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)}</strong>
           </article>
           <article class="stat is-large">
             <span>Base Gap</span>
-            <strong class={dcfDecisionGate.blocked ? "" : toneClass(reverseValuation?.base_case_summary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(reverseValuation?.base_case_summary?.upside_downside_pct)}</strong>
+            <strong class={dcfDecisionGate.blocked ? "" : toneClass(reverseValuation?.base_case_summary?.upside_downside_pct)} class:absent={(dcfDecisionGate.blocked ? "N/A" : pct(reverseValuation?.base_case_summary?.upside_downside_pct)) === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : pct(reverseValuation?.base_case_summary?.upside_downside_pct)}</strong>
           </article>
         </div>
         {#if dcfDecisionGate.blocked}
@@ -2007,7 +2007,7 @@
             {#each reverseGapMetrics as metric}
               <article class="stat is-large">
                 <span>{metric.label}</span>
-                <strong class={dcfDecisionGate.blocked ? "" : metricTone(metric.metric_id, metric.value)}>{dcfDecisionGate.blocked ? "N/A" : metric.display_value ?? "N/A"}</strong>
+                <strong class={dcfDecisionGate.blocked ? "" : metricTone(metric.metric_id, metric.value)} class:absent={(dcfDecisionGate.blocked ? "N/A" : metric.display_value ?? "N/A") === "N/A"}>{dcfDecisionGate.blocked ? "N/A" : metric.display_value ?? "N/A"}</strong>
               </article>
             {:else}
               <div class="empty-panel">Scenario gap metrics appear with the reverse valuation payload.</div>

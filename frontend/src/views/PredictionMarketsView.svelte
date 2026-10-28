@@ -2108,14 +2108,14 @@
           </article>
           <article class="stat is-compact">
             <span>Research Share</span>
-            <strong class={(calibration?.research_share ?? 1) < 0.5 ? "stale" : ""}
+            <strong class={(calibration?.research_share ?? 1) < 0.5 ? "stale" : ""} class:absent={pct(calibration?.research_share, 0) === "N/A"}
               >{pct(calibration?.research_share, 0)}</strong
             >
             <small>{calibrationComposition}</small>
           </article>
           <article class="stat is-compact">
             <span>Settlement Drift</span>
-            <strong class="elevated" class:absent={pct(calibration?.convergence?.average_distance_to_outcome) === "N/A"}>{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
+            <strong class:elevated={pct(calibration?.convergence?.average_distance_to_outcome) !== "N/A"} class:absent={pct(calibration?.convergence?.average_distance_to_outcome) === "N/A"}>{pct(calibration?.convergence?.average_distance_to_outcome)}</strong>
             <small>{pct(calibration?.convergence?.share_within_five_points, 0)} within 5pts of outcome</small>
           </article>
         </div>

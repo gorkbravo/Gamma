@@ -575,7 +575,7 @@
               </div>
               <div class="stat is-large hero-stat">
                 <span>Positions</span>
-                <strong>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong>
+                <strong class:absent={(syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A") === "N/A"}>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong>
                 <small>effective</small>
               </div>
             {:else}
@@ -800,7 +800,7 @@
             </article>
             <article class="stat is-large">
               <span>Buy Pressure</span>
-              <strong class={toneClass((flow?.buy_pressure_pct ?? 50) - 50)} class:absent={pct(flow?.buy_pressure_pct) === "N/A"}>{pct(flow?.buy_pressure_pct)}</strong>
+              <strong class={flow?.buy_pressure_pct == null ? "" : toneClass(flow.buy_pressure_pct - 50)} class:absent={pct(flow?.buy_pressure_pct) === "N/A"}>{pct(flow?.buy_pressure_pct)}</strong>
               <small>{flow?.active_trader_proxy_24h?.toLocaleString("en-US") ?? "N/A"} trader proxy</small>
             </article>
             <article class="stat is-large">

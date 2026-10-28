@@ -1513,12 +1513,12 @@
         <div class="kpi-grid summary-kpis">
           <article class="stat">
             <span>Lookback Return</span>
-            <strong class:positive={(result?.summary.total_return ?? 0) > 0} class:negative={(result?.summary.total_return ?? 0) < 0}>{pct(result?.summary.total_return)}</strong>
+            <strong class:positive={(result?.summary.total_return ?? 0) > 0} class:negative={(result?.summary.total_return ?? 0) < 0} class:absent={pct(result?.summary.total_return) === "N/A"}>{pct(result?.summary.total_return)}</strong>
             <small>{result?.observations_count ?? 0} obs / {lookbackDays}D</small>
           </article>
           <article class="stat">
             <span>Latest Day</span>
-            <strong class:positive={(result?.latest_daily_return ?? 0) > 0} class:negative={(result?.latest_daily_return ?? 0) < 0}>{pct(result?.latest_daily_return)}</strong>
+            <strong class:positive={(result?.latest_daily_return ?? 0) > 0} class:negative={(result?.latest_daily_return ?? 0) < 0} class:absent={pct(result?.latest_daily_return) === "N/A"}>{pct(result?.latest_daily_return)}</strong>
             <small>{latestDailySubLabel(result)}</small>
           </article>
           <article class="stat">
@@ -1533,12 +1533,12 @@
           </article>
           <article class="stat">
             <span>Max Drawdown</span>
-            <strong class:negative={(result?.summary.max_drawdown ?? 0) < 0}>{pct(result?.summary.max_drawdown)}</strong>
+            <strong class:negative={(result?.summary.max_drawdown ?? 0) < 0} class:absent={pct(result?.summary.max_drawdown) === "N/A"}>{pct(result?.summary.max_drawdown)}</strong>
             <small>{pct(structureMetrics.top_weight)} top weight</small>
           </article>
           <article class="stat">
             <span>Beta</span>
-            <strong class:elevated={(result?.summary.beta ?? 0) > 1.2}>{fmt(result?.summary.beta, 3)}</strong>
+            <strong class:elevated={(result?.summary.beta ?? 0) > 1.2} class:absent={fmt(result?.summary.beta, 3) === "N/A"}>{fmt(result?.summary.beta, 3)}</strong>
             <small>{coverageMetrics.benchmark_overlap_count} overlap obs</small>
           </article>
           <article class="stat">
