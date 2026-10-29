@@ -2,6 +2,7 @@
   import type { CopilotDiagnostics, ProviderUsageResponse, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
+  import { setThemePreference, themePreference, type ThemePreference } from "../lib/stores/appearance";
   import type { RequestMetricSnapshot } from "../lib/request-metrics";
   import {
     buildProviderHealthView,
@@ -246,6 +247,19 @@
               {/if}
             </div>
           {/if}
+        </div>
+
+        <div class="settings-section field">
+          <span class="label">Theme</span>
+          <select
+            value={$themePreference}
+            on:change={(event) => setThemePreference(event.currentTarget.value as ThemePreference)}
+          >
+            <option value="dark">Dark (Default)</option>
+            <option value="light">Light</option>
+            <option value="system">System</option>
+          </select>
+          <small>System follows the operating system's light or dark setting.</small>
         </div>
 
         <div class="settings-section field">
