@@ -65,6 +65,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { colorWithAlpha } from "../lib/chart-colors";
+  import { resolvedTheme } from "../lib/stores/appearance";
 
   export let strikes: number[] = [];
   export let expiries: string[] = [];
@@ -112,7 +113,8 @@
   let vMin = 0;
   let vMax = 1;
 
-  /* Canvas colours, read from tokens.css when the surface mounts. */
+  /* Canvas colours, read from tokens.css when the surface mounts and again
+     when the theme changes. */
   const theme = {
     text: "",
     grid: "",
@@ -131,6 +133,11 @@
   $: legendGradient = `linear-gradient(90deg, ${SURFACE_COLORMAPS[colormap]
     .map((c, i, arr) => `rgb(${c[0]},${c[1]},${c[2]}) ${(i / (arr.length - 1)) * 100}%`)
     .join(", ")})`;
+
+  $: if (ctx && $resolvedTheme) {
+    readTheme();
+    scheduleRender();
+  }
 
   $: if (ctx && grid && observedPoints) {
     computeRange();

@@ -4,6 +4,7 @@
   import "maplibre-gl/dist/maplibre-gl.css";
   import { WS_BASE } from "../lib/api/client";
   import { apiInstantDate } from "../lib/time";
+  import { resolvedTheme } from "../lib/stores/appearance";
   import type {
     MaritimeAisPosition,
     MaritimeChokepointDefinition,
@@ -45,24 +46,25 @@
     | null;
 
   /* MapLibre paint properties need literal colours, so the tokens are read
-     once from the document rather than copied into this file by hand. */
+     from the document rather than copied into this file by hand, and read
+     again when the theme changes (readThemeColors, applyThemeColors). */
   function token(name: string) {
     if (typeof document === "undefined") return "";
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  const BG0 = token("--bg-0");
-  const TEXT2 = token("--text-2");
-  const WATER = token("--bg-0");
+  let BG0 = "";
+  let TEXT2 = "";
   /* Land is the surface, water is the void. --panel-strong separates them a
      little more than the old navy did (1.62 vs 1.32) while staying neutral. */
-  const LAND = token("--panel-strong");
-  const BORDER_COUNTRY = token("--accent");
-  const BORDER_INNER = token("--text-2");
-  const LANE = token("--accent");
-  const ACCENT = token("--accent");
-  const TEXT0 = token("--text-0");
-  const TEXT1 = token("--text-1");
+  let WATER = "";
+  let LAND = "";
+  let BORDER_COUNTRY = "";
+  let BORDER_INNER = "";
+  let LANE = "";
+  let ACCENT = "";
+  let TEXT0 = "";
+  let TEXT1 = "";
   const AIS_ZOOM_THRESHOLD = 4;
   const VIEWPORT_DEBOUNCE_MS = 1500;
   const MAX_LIVE_POSITIONS = 600;
@@ -71,17 +73,33 @@
   /* Vessel class is an unordered category, so these come from the categorical
      ramp. Cargo and container both used to be --positive green, which made
      the two largest classes on the map indistinguishable. */
-  const VESSEL_COLORS: Record<string, string> = {
-    tanker: token("--cat-4"),
-    lng_carrier: token("--cat-1"),
-    cargo: token("--cat-2"),
-    container: token("--cat-5"),
-    dry_bulk: token("--cat-3"),
-    passenger: token("--cat-7"),
-    fishing: token("--cat-8"),
-    special: token("--cat-6"),
-    unknown: token("--text-2"),
-  };
+  let VESSEL_COLORS: Record<string, string> = {};
+
+  function readThemeColors() {
+    BG0 = token("--bg-0");
+    TEXT2 = token("--text-2");
+    WATER = token("--bg-0");
+    LAND = token("--panel-strong");
+    BORDER_COUNTRY = token("--accent");
+    BORDER_INNER = token("--text-2");
+    LANE = token("--accent");
+    ACCENT = token("--accent");
+    TEXT0 = token("--text-0");
+    TEXT1 = token("--text-1");
+    VESSEL_COLORS = {
+      tanker: token("--cat-4"),
+      lng_carrier: token("--cat-1"),
+      cargo: token("--cat-2"),
+      container: token("--cat-5"),
+      dry_bulk: token("--cat-3"),
+      passenger: token("--cat-7"),
+      fishing: token("--cat-8"),
+      special: token("--cat-6"),
+      unknown: token("--text-2"),
+    };
+  }
+
+  readThemeColors();
 
   let container: HTMLDivElement;
   let map: maplibregl.Map | null = null;
@@ -324,10 +342,15 @@
     }
   }
 
+  /* The CARTO base style's layers, recorded on the first recolour (before
+     this component adds its own), so a theme change never hides or repaints
+     the lanes, ports and vessels on top. */
+  let baseLayerIds: string[] | null = null;
+
   function recolorBaseMap() {
     if (!map) return;
-    for (const layer of map.getStyle()?.layers ?? []) {
-      const id = layer.id;
+    baseLayerIds ??= (map.getStyle()?.layers ?? []).map((layer) => layer.id);
+    for (const id of baseLayerIds) {
       if (id === "background") {
         // background = land base — everything that isn't explicitly filled by another layer
         setPaint(id, "background-color", LAND);
@@ -1250,7 +1273,60 @@
     });
   });
 
+  /* Repaint every themed layer with the new tokens. The chevron icons bake
+     their colour into an image, so the images are redrawn. */
+  function applyThemeColors() {
+    if (!map || !map.isStyleLoaded()) return;
+    recolorBaseMap();
+    const paints: Array<[string, string, unknown]> = [
+      ["shipping-lanes-aura", "line-color", LANE],
+      ["shipping-lanes-glow", "line-color", LANE],
+      ["shipping-lanes-body", "line-color", LANE],
+      ["vessels-halo", "circle-color", groupColorExpression("vessel_group")],
+      ["major-ports-halo", "circle-color", groupColorExpression("port_group")],
+      ["major-ports-dot", "circle-color", groupColorExpression("port_group")],
+      ["major-ports-dot", "circle-stroke-color", BG0],
+      ["major-ports-labels", "text-color", TEXT1],
+      ["major-ports-labels", "text-halo-color", BG0],
+      ["ports-dot", "circle-color", groupColorExpression("port_group")],
+      ["ports-dot", "circle-stroke-color", BG0],
+      ["chokepoints-fill", "fill-color", stressColorExpression()],
+      ["chokepoints-outline", "line-color", stressColorExpression()],
+      ["chokepoints-focus", "line-color", TEXT0],
+      ["chokepoints-labels", "text-color", TEXT2],
+      ["chokepoints-labels", "text-halo-color", BG0],
+      ["flow-tracks-glow", "line-color", groupColorExpression("vessel_group")],
+      ["flow-tracks-line", "line-color", groupColorExpression("vessel_group")],
+      ["replay-line-glow", "line-color", ACCENT],
+      ["replay-line-body", "line-color", ACCENT],
+      ["replay-point", "circle-color", ACCENT],
+      ["replay-point", "circle-stroke-color", BG0],
+      ["watchlist-halo", "circle-color", TEXT0],
+      ["watchlist-halo", "circle-stroke-color", TEXT0],
+    ];
+    for (const [layerId, property, value] of paints) setPaint(layerId, property, value);
+    for (const group of VESSEL_GROUPS) {
+      const id = `vessel-chevron-${group}`;
+      const image = chevronImage(VESSEL_COLORS[group] ?? VESSEL_COLORS.unknown);
+      if (!image) continue;
+      if (map.hasImage(id)) map.updateImage(id, image);
+      else map.addImage(id, image);
+    }
+  }
+
+  let themeSeen = false;
+  const unsubscribeTheme = resolvedTheme.subscribe(() => {
+    // The first call is the subscription itself; the colours are already read.
+    if (!themeSeen) {
+      themeSeen = true;
+      return;
+    }
+    readThemeColors();
+    applyThemeColors();
+  });
+
   onDestroy(() => {
+    unsubscribeTheme();
     closeLiveSocket("component destroyed", "idle", true);
     if (coverageChipTimer) clearTimeout(coverageChipTimer);
     popup?.remove();
