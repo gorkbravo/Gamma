@@ -70,10 +70,55 @@ export function setThemePreference(preference: ThemePreference) {
   applyResolvedTheme();
 }
 
-/* Called once per window before the app mounts: applies the theme and
+/* Data figures: the typeface of figures in tables, stats and charts. It
+   overrides --font-num only, so code keeps --font-code. An empty choice
+   keeps the token's own stack. */
+export const DATA_FIGURES_STORAGE_KEY = "gamma.dataFigures";
+export const DATA_FIGURE_FONTS = ["Cascadia Mono", "Consolas", "JetBrains Mono", "IBM Plex Mono", "Courier New"] as const;
+export type DataFigureFont = "" | (typeof DATA_FIGURE_FONTS)[number];
+
+export function parseDataFigureFont(value: unknown): DataFigureFont {
+  return (DATA_FIGURE_FONTS as readonly unknown[]).includes(value) ? (value as DataFigureFont) : "";
+}
+
+function readStoredDataFigures(): DataFigureFont {
+  try {
+    return parseDataFigureFont(typeof localStorage === "undefined" ? null : localStorage.getItem(DATA_FIGURES_STORAGE_KEY));
+  } catch {
+    return "";
+  }
+}
+
+export const dataFigureFont = writable<DataFigureFont>(readStoredDataFigures());
+
+function applyDataFigureFont(font: DataFigureFont) {
+  if (typeof document === "undefined") return;
+  if (font) {
+    document.documentElement.style.setProperty("--font-num", `"${font}"`);
+  } else {
+    document.documentElement.style.removeProperty("--font-num");
+  }
+}
+
+export function setDataFigureFont(font: DataFigureFont) {
+  dataFigureFont.set(font);
+  try {
+    if (font) {
+      localStorage.setItem(DATA_FIGURES_STORAGE_KEY, font);
+    } else {
+      localStorage.removeItem(DATA_FIGURES_STORAGE_KEY);
+    }
+  } catch {
+    // Best-effort, as for the theme.
+  }
+  applyDataFigureFont(font);
+}
+
+/* Called once per window before the app mounts: applies both choices and
    follows the operating system while the preference is System. */
 export function initAppearance() {
   applyResolvedTheme();
+  applyDataFigureFont(readStoredDataFigures());
   if (typeof matchMedia === "function") {
     matchMedia(SYSTEM_DARK_QUERY).addEventListener("change", () => {
       if (currentPreference === "system") applyResolvedTheme();

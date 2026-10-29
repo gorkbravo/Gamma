@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import { colorWithAlpha, resolveChartColor } from "../lib/chart-colors";
   import { normalizeChartData } from "../lib/chart-data";
-  import { chartTheme } from "../lib/stores/app";
   import { resolvedTheme } from "../lib/stores/appearance";
   import {
     AreaSeries,
@@ -61,8 +60,6 @@
   let pendingRecreate = false;
   let pendingFitContent = false;
 
-  let currentTheme = "blue";
-  $: currentTheme = $chartTheme;
   $: seriesWithData = series.filter((item) => item.data.length);
 
   function buildTickLabelMap() {
@@ -347,7 +344,6 @@
       ])
     );
     signature;
-    currentTheme;
     // The chart reads its colours from the tokens, so a theme change rebuilds it.
     $resolvedTheme;
     scheduleRefresh({ recreate: true, fitContent: true });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THEME_PREFERENCE, parseThemePreference, resolveTheme } from "./appearance";
+import { DEFAULT_THEME_PREFERENCE, parseDataFigureFont, parseThemePreference, resolveTheme } from "./appearance";
 
 describe("theme preference", () => {
   it("defaults to dark until the light theme is complete", () => {
@@ -18,5 +18,13 @@ describe("theme preference", () => {
     expect(resolveTheme("system", false)).toBe("light");
     expect(resolveTheme("light", true)).toBe("light");
     expect(resolveTheme("dark", false)).toBe("dark");
+  });
+});
+
+describe("data figures font", () => {
+  it("keeps a listed font and falls back to the token's own stack", () => {
+    expect(parseDataFigureFont("Consolas")).toBe("Consolas");
+    expect(parseDataFigureFont("Comic Sans MS")).toBe("");
+    expect(parseDataFigureFont(null)).toBe("");
   });
 });
