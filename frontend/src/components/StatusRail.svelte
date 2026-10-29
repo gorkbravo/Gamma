@@ -438,7 +438,7 @@
     padding: var(--space-6);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
-    background: rgba(8, 13, 18, 0.98);
+    background: var(--popover-bg);
     box-shadow: 0 18px 40px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
   }
 

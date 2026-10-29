@@ -132,17 +132,17 @@
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label="Monte Carlo fan chart">
       <defs>
         <linearGradient id="fan-band-outer" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="rgba(122, 166, 200, 0.22)" />
-          <stop offset="100%" stop-color="rgba(122, 166, 200, 0.08)" />
+          <stop offset="0%" style="stop-color: rgba(var(--accent-rgb), 0.22)" />
+          <stop offset="100%" style="stop-color: rgba(var(--accent-rgb), 0.08)" />
         </linearGradient>
         <linearGradient id="fan-band-inner" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="rgba(122, 166, 200, 0.34)" />
-          <stop offset="100%" stop-color="rgba(122, 166, 200, 0.14)" />
+          <stop offset="0%" style="stop-color: rgba(var(--accent-rgb), 0.34)" />
+          <stop offset="100%" style="stop-color: rgba(var(--accent-rgb), 0.14)" />
         </linearGradient>
         <linearGradient id="fan-path-fill" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="rgba(122, 166, 200, 0.2)" />
-          <stop offset="65%" stop-color="rgba(122, 166, 200, 0.06)" />
-          <stop offset="100%" stop-color="rgba(122, 166, 200, 0)" />
+          <stop offset="0%" style="stop-color: rgba(var(--accent-rgb), 0.2)" />
+          <stop offset="65%" style="stop-color: rgba(var(--accent-rgb), 0.06)" />
+          <stop offset="100%" style="stop-color: rgba(var(--accent-rgb), 0)" />
         </linearGradient>
       </defs>
       {#each [0.2, 0.4, 0.6, 0.8] as ratio}
@@ -278,7 +278,7 @@
 
   .history {
     fill: none;
-    stroke: rgba(244, 247, 251, 0.94);
+    stroke: var(--chart-history);
     stroke-width: 2.15;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -286,7 +286,7 @@
 
   .history-halo {
     fill: none;
-    stroke: rgba(244, 247, 251, 0.12);
+    stroke: var(--chart-history-halo);
     stroke-width: 4.6;
     stroke-linecap: round;
     stroke-linejoin: round;
