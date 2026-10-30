@@ -247,7 +247,7 @@ Side effects reviewed on the before/after pairs: sans labels are narrower, so bu
 
 ## V3 theme infrastructure
 
-V3 ran on branch `claude/v3-theme-infrastructure` from main a1c74e2, one commit per step: 175e419 theme preference, 8dc3dbc light token block and contrast test, 3ec377c charts, 3D surface and map repaint on theme change, 7d5430d chart theme retired and Data Figures, 1d36bd0 theme colours for the last dark-only literals.
+V3 ran on branch `claude/v3-theme-infrastructure` from main a1c74e2, one commit per step: 175e419 theme preference, 8dc3dbc light token block and contrast test, 3ec377c charts, 3D surface and map repaint on theme change, 7d5430d chart theme retired and Data Figures, 1d36bd0 theme colours for the last dark-only literals, 29e0b79 open windows kept in sync, 8948d0a WCAG AA on every rendered text.
 
 ### Theme preference
 
@@ -286,7 +286,7 @@ Categorical (`--cat-*`) and intensity (`--data-*`) colours, which B′ does not 
 - `TimeSeriesChart` rebuilds on a theme change, as it already did for the retired chart theme.
 - `Surface3D` re-reads its canvas colours and redraws.
 - `MaritimeMap` re-reads its MapLibre colours and repaints the base map, lanes, ports, chokepoints, flows, replay and watchlist layers, and redraws the vessel chevrons. No light CARTO style is needed: Gamma already hides the base style's layers and recolours the background, water and borders from tokens. Repainting found a bug: the base-map recolour hid every layer that was not a base layer, including Gamma's own lanes and ports. It now touches only the base style's layers, recorded on first load.
-- The SVG charts (FanChart, DistributionChart, BarRankChart) and the CodeMirror editor theme themselves with CSS variables and follow without code. The editor keeps CodeMirror's default syntax colours in both themes, as before.
+- The SVG charts (FanChart, DistributionChart, BarRankChart) and the CodeMirror editor theme themselves with CSS variables and follow without code. The editor's syntax colours came to tokens later (see the closed gaps below).
 - FanChart's gradient stops are `rgba(var(--accent-rgb), α)`: unlike a `color-mix()` stop, this paints exactly what the literal did. Its history line and the Settings popover gained tokens with a value per theme.
 
 ### Verification
@@ -295,12 +295,23 @@ Categorical (`--cat-*`) and intensity (`--data-*`) colours, which B′ does not 
 - Live switch: Settings, dark → light → dark on Commodities and Sealanes without a reload and with no page errors. The chart and the map repaint; the second dark frame matches the first apart from rounded-corner antialiasing.
 - Light review: all 52 screens, the Setup dialog, the landing page, the open Copilot drawer and the Sealanes shelf were captured in the light theme for review, with the V3 handover note. The e2e harness pages do not initialise the theme and stay dark; they are test fixtures.
 
+### Gaps closed after the first review (2026-10-30)
+
+- **Open windows stay in sync.** A theme or Data Figures change reaches the app's other open windows (the key bindings window, a second tab) through the `storage` event (`applyStoredChange()` in `appearance.ts`, unit-tested). In the desktop app the key bindings window is a Tauri `WebviewWindow` of the same origin, and WebView2 runs without incognito, so the preference persists and is shared (checked by reading the Tauri config and launcher; the packaged app was not run).
+- **Live checks** (Playwright, mock mode): System follows the OS light → dark → light while the app is open; an open key bindings window follows Light, Data Figures and Dark from the main window; the 3D surface, the Script editor, FanChart, DistributionChart and BarRankChart repaint on a live switch and return to their exact dark frame. The 3D surface needed the backend paused for that comparison, because Options data moves on its own. FanChart and DistributionChart were mounted in a temporary probe page, since mock mode never renders them.
+- **Rendered contrast audit.** A Playwright audit walked every view and mode in both themes, the Setup dialog, the landing page, Settings and the Copilot drawer, composited each visible text over its effective background, and compared it with 4.5:1 (3:1 for large text). Disabled controls are exempt, as WCAG allows. Before the fixes: 81 texts failed in light and 28 in dark, the dark ones already present on main. They fell into three groups:
+  - Text on heat-map fills: Crypto treemap tiles, the Options payoff grid's at-the-money row, the IV surface table, and (by reading the code) the strategy payoff matrix. A tone or muted colour on a strong fill cannot reach 4.5:1. New token `--heat-text` (`var(--text-0)`): that text is neutral in both themes, because the fill carries the tone and the sign the direction. Tile symbols move from `--text-2` to `--text-1`, and fitted IV cells keep italics instead of a muted colour.
+  - The Script editor's syntax colours: CodeMirror's default style is made for a light background and measured 2.6–3:1 on the dark one. A `HighlightStyle` built from the tokens (comments `--text-2`, strings `--positive`, keywords `--accent`, numbers `--warning`, definitions `--text-0`) replaces it in both themes. `@codemirror/language` and `@lezer/highlight`, until now transitive, become declared dependencies.
+  - Decorative separators ("|" in the Commodities provenance footer, "·" in Macro events), which WCAG exempts as decoration. They are now `aria-hidden` so screen readers skip them too.
+  - These fixes change the dark theme only in those elements; the user approved fixing dark as well (2026-10-30). Before/after pairs are with the V3 handover note.
+
 ### Kept exceptions and open items
 
 - The raw-colour gate keeps: FanChart's grid line and tooltip edge, the MaritimeMap chevron outline (all read on both backgrounds), the unused MacroCoherencePanel, and the eighth Risk cluster colour and viridis end stop (data).
 - V4: the light theme keeps the terminal structure (borders, mono, uppercase labels) until the B′ values land; the default moves to System then.
 - V6: the Tauri splash screen and the marketing site stay dark-only.
 - `--text-3` is still referenced in two places and defined nowhere.
+- Not verified by running it: the packaged desktop app (persistence and cross-window sync were checked in its configuration and code).
 
 ## Doctrine rewrite map (V5)
 
@@ -349,3 +360,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-10-28: V2 on branch `claude/v2-token-completeness` from local main 9412498: 2b3ee01 font roles, 5be065d new tokens, 600d961 raw colours onto tokens, 1b5ed86 chart colours and flashes, 32362a3 `font: inherit` on chrome buttons, bb26c40 the raw-colour gate. For step 6 the user chose to keep every input, select and textarea as it was. Steps 2–5 and 7 changed no pixel in mock mode; step 6 before/after pairs are with the V2 handover note. Decisions and kept exceptions are under [V2 token completeness and font roles](#v2-token-completeness-and-font-roles). The user reviewed the pairs, accepted the change and merged the branch into main as 9676017 (not pushed). V2 is complete.
 - 2026-10-29: main pushed to origin (ffefb09..a1c74e2), so V1 and V2 are on the remote.
 - 2026-10-29/30: V3 on branch `claude/v3-theme-infrastructure` from main a1c74e2: 175e419 theme preference, 8dc3dbc light token block and contrast test, 3ec377c charts, 3D surface and map repaint, 7d5430d chart theme retired and Data Figures, 1d36bd0 theme colours for the last dark-only literals. The user chose Dark as the default until V4. Dark stays pixel-identical in mock mode; light screenshots are with the V3 handover note. Not merged.
+- 2026-10-30: gaps closed on the same branch after the first review: 29e0b79 keeps open windows on the same theme, and a rendered contrast audit led to 8948d0a (neutral text on heat-map fills and token syntax colours in the Script editor, in both themes with the user's approval; decorative separators aria-hidden). The audit now finds no failing text in either theme.
