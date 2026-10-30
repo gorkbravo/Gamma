@@ -95,6 +95,10 @@
   --text-0: #f0f2f5;
   --text-1: #c2c8d0;
   --text-2: #8a919a;
+  /* Text on a heat-map fill (treemap tiles, payoff and IV grids): neutral,
+     because the fill carries the tone and the sign the direction. A tone or
+     muted colour on a strong fill falls below WCAG AA. */
+  --heat-text: var(--text-0);
 
   /* ── Interactive accent (blue stays for interactive elements) ── */
   --accent: #7aa6c8;

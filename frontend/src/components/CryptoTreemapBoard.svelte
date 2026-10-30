@@ -182,7 +182,7 @@
   }
 
   .tile-symbol {
-    color: var(--text-2);
+    color: var(--text-1);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: var(--text-2xs);
@@ -259,6 +259,12 @@
 
   .negative {
     color: var(--negative);
+  }
+
+  /* The move sits on its own heat fill, so it takes the neutral heat text. */
+  .tile-move.positive,
+  .tile-move.negative {
+    color: var(--heat-text);
   }
 
   .empty-inline {

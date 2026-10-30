@@ -112,7 +112,7 @@
               </div>
               <span class="study-meta">
                 <span class="event-date" class:absent={shortDate(study.event.scheduled_at) === "N/A"}>{shortDate(study.event.scheduled_at)}</span>
-                <span class="event-sep">·</span>
+                <span class="event-sep" aria-hidden="true">·</span>
                 <span>{study.window_label}</span>
               </span>
               <p class="study-summary">{study.summary}</p>
@@ -165,7 +165,7 @@
               </div>
               <span class="study-meta">
                 <span class="event-date" class:absent={shortDate(study.event.scheduled_at) === "N/A"}>{shortDate(study.event.scheduled_at)}</span>
-                <span class="event-sep">·</span>
+                <span class="event-sep" aria-hidden="true">·</span>
                 <span>{study.window_label}</span>
               </span>
               <p class="study-summary">{study.summary}</p>
@@ -230,9 +230,9 @@
               <strong>{event.title}</strong>
               <span class="list-detail">
                 <span class="event-date" class:absent={shortDate(event.scheduled_at) === "N/A"}>{shortDate(event.scheduled_at)}</span>
-                <span class="event-sep">·</span>
+                <span class="event-sep" aria-hidden="true">·</span>
                 <span class="event-category">{event.category}</span>
-                <span class="event-sep">·</span>
+                <span class="event-sep" aria-hidden="true">·</span>
                 <span class="event-category">{event.importance}</span>
               </span>
             </div>
