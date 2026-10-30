@@ -3,6 +3,8 @@
   import { Compartment, EditorState } from "@codemirror/state";
   import { EditorView } from "@codemirror/view";
   import { python } from "@codemirror/lang-python";
+  import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+  import { tags } from "@lezer/highlight";
   import { onDestroy, onMount } from "svelte";
 
   export let value = "";
@@ -33,14 +35,28 @@
       backgroundColor: "var(--surface-1)",
       borderRight: "1px solid var(--panel-border)"
     },
+    // The hover tint: 6% of the accent in dark, 4% in light, so comments
+    // keep 4.5:1 on the active line.
     ".cm-activeLine, .cm-activeLineGutter": {
-      backgroundColor: "color-mix(in srgb, var(--accent) 6%, transparent)"
+      backgroundColor: "var(--hover-bg)"
     },
     ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
       backgroundColor: "color-mix(in srgb, var(--accent) 24%, transparent) !important"
     },
     "&.cm-focused": { outline: "2px solid color-mix(in srgb, var(--accent) 55%, transparent)" }
   });
+
+  /* Syntax colours come from the tokens, so they follow the theme and reach
+     WCAG AA on the editor background. CodeMirror's default style is made
+     for a light background and fell to 2.6:1 on the dark one. */
+  const highlight = HighlightStyle.define([
+    { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--text-2)" },
+    { tag: [tags.string, tags.special(tags.string)], color: "var(--positive)" },
+    { tag: [tags.keyword, tags.controlKeyword, tags.definitionKeyword, tags.operatorKeyword, tags.moduleKeyword, tags.self], color: "var(--accent)" },
+    { tag: [tags.number, tags.bool, tags.null], color: "var(--warning)" },
+    { tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.definition(tags.variableName), tags.className], color: "var(--text-0)" },
+    { tag: tags.invalid, color: "var(--negative)" }
+  ]);
 
   onMount(() => {
     view = new EditorView({
@@ -50,6 +66,7 @@
         extensions: [
           basicSetup,
           python(),
+          syntaxHighlighting(highlight),
           theme,
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({

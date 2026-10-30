@@ -2647,10 +2647,10 @@
     <footer class="panel provenance">
       <span class="prov-label">Source</span>
       <span>{workspace.source_provider} · {workspace.origin}</span>
-      <span class="prov-sep">|</span>
+      <span class="prov-sep" aria-hidden="true">|</span>
       <span class="meta">{workspace.transformation_note}</span>
       {#if workspace.coverage.caveats.length}
-        <span class="prov-sep">|</span>
+        <span class="prov-sep" aria-hidden="true">|</span>
         <span class="prov-label">Caveats</span>
         <span class="meta">{workspace.coverage.caveats.slice(0, 3).join(" · ")}</span>
       {/if}

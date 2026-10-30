@@ -1,7 +1,15 @@
 <script lang="ts">
   import type { CopilotDiagnostics, ProviderUsageResponse, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
-  import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
+  import {
+    DATA_FIGURE_FONTS,
+    dataFigureFont,
+    setDataFigureFont,
+    setThemePreference,
+    themePreference,
+    type DataFigureFont,
+    type ThemePreference
+  } from "../lib/stores/appearance";
   import type { RequestMetricSnapshot } from "../lib/request-metrics";
   import {
     buildProviderHealthView,
@@ -45,9 +53,6 @@
   }
 
   $: workspaceLabel = getWorkspaceLabel(workspaceMode);
-
-  let selectedChartTheme: string = "blue";
-  let selectedFontFamily: string = "Cascadia Mono";
 
   // GUA-20260903-10: todas las filas (antes solo 4) y sin atribuir explícito; suman el total.
   $: usageView = buildProviderUsageView(providerUsage);
@@ -249,30 +254,30 @@
         </div>
 
         <div class="settings-section field">
-          <span class="label">Chart Theme</span>
+          <span class="label">Theme</span>
           <select
-            bind:value={selectedChartTheme}
-            on:change={() => setChartTheme(selectedChartTheme as "blue" | "amber" | "green")}
+            value={$themePreference}
+            on:change={(event) => setThemePreference(event.currentTarget.value as ThemePreference)}
           >
-            <option value="blue">Blue (Default)</option>
-            <option value="amber">Amber Phosphor</option>
-            <option value="green">Green Phosphor</option>
+            <option value="dark">Dark (Default)</option>
+            <option value="light">Light</option>
+            <option value="system">System</option>
           </select>
-          <small>Changes chart line and area colors across all views.</small>
+          <small>System follows the operating system's light or dark setting.</small>
         </div>
 
         <div class="settings-section field">
-          <span class="label">Font Family</span>
+          <span class="label">Data Figures</span>
           <select
-            bind:value={selectedFontFamily}
-            on:change={() => setFontFamily(selectedFontFamily as FontFamily)}
+            value={$dataFigureFont}
+            on:change={(event) => setDataFigureFont(event.currentTarget.value as DataFigureFont)}
           >
-            <option value="Cascadia Mono">Cascadia Mono (Default)</option>
-            <option value="Consolas">Consolas</option>
-            <option value="JetBrains Mono">JetBrains Mono</option>
-            <option value="IBM Plex Mono">IBM Plex Mono</option>
-            <option value="Courier New">Courier New</option>
+            <option value="">Default</option>
+            {#each DATA_FIGURE_FONTS as font}
+              <option value={font}>{font}</option>
+            {/each}
           </select>
+          <small>The typeface of figures in tables, stats and charts. Code keeps its own font.</small>
         </div>
 
         <div class="settings-section">
@@ -433,7 +438,7 @@
     padding: var(--space-6);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
-    background: rgba(8, 13, 18, 0.98);
+    background: var(--popover-bg);
     box-shadow: 0 18px 40px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
   }
 

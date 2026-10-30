@@ -851,32 +851,6 @@ export const ivUnderlyingHistory = writable<IvUnderlyingHistoryResponse | null>(
 export const ivSession = writable<IvSessionStatus | null>(null);
 export const ivError = writable("");
 
-export type ChartTheme = "blue" | "amber" | "green";
-export const chartTheme = writable<ChartTheme>("blue");
-
-export function setChartTheme(theme: ChartTheme) {
-  chartTheme.set(theme);
-  if (typeof document !== "undefined") {
-    if (theme === "blue") {
-      document.documentElement.removeAttribute("data-chart-theme");
-    } else {
-      document.documentElement.setAttribute("data-chart-theme", theme);
-    }
-  }
-}
-
-export type FontFamily = "Consolas" | "JetBrains Mono" | "Cascadia Mono" | "IBM Plex Mono" | "Courier New";
-export const fontFamily = writable<FontFamily>("Consolas");
-
-export function setFontFamily(family: FontFamily) {
-  fontFamily.set(family);
-  if (typeof document !== "undefined") {
-    // Both monospace roles follow the choice, as the single --app-font did.
-    document.documentElement.style.setProperty("--font-num", `"${family}"`);
-    document.documentElement.style.setProperty("--font-code", `"${family}"`);
-  }
-}
-
 const STRATEGY_LAB_HANDOFF_STORAGE_KEY = "gamma.strategyLab.handoffQueue.v1";
 // Restored handoffs older than this are grouped as an earlier session instead of
 // silently reappearing as current research context (usability audit P0 leftover).

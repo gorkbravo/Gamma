@@ -597,7 +597,7 @@
     }
     const color = value >= 0 ? "var(--positive)" : "var(--negative)";
     const intensity = Math.min(0.52, (Math.abs(value) / Math.max(strategyPayoffMatrix.maxAbsPl, 0.01)) * 0.52);
-    return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 100)}%, transparent); color: ${color};`;
+    return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 100)}%, transparent); color: var(--heat-text);`;
   }
 
   const payoffPct = (value: number) => `${value >= 0 ? "+" : ""}${Math.round(Math.max(-1, value) * 100)}`;
@@ -1823,9 +1823,9 @@
     letter-spacing: 0.04em;
   }
 
-  /* Fitted cells stay readable but never pass as quotes. */
+  /* Fitted cells stay italic so they never pass as quotes; their colour is
+     the heat text, because a muted colour fails AA on the stronger fills. */
   .surface-table td.fitted {
-    color: var(--text-2);
     font-style: italic;
   }
 
@@ -1889,7 +1889,13 @@
   }
 
   .surface-table td {
+    color: var(--heat-text);
     cursor: crosshair;
+  }
+
+  /* Unavailable cells carry no fill and stay dimmed. */
+  .surface-table td.absent {
+    color: var(--text-2);
   }
 
   .surface-table thead th {
@@ -2071,8 +2077,9 @@
     letter-spacing: 0.05em;
   }
 
-  .payoff-heatmap td {
-    color: var(--text-0);
+  .payoff-heatmap td,
+  .payoff-heatmap tr.atm td {
+    color: var(--heat-text);
   }
 
   .payoff-heatmap .price-col {

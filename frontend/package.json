@@ -31,6 +31,8 @@
   },
   "dependencies": {
     "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/language": "^6.12.4",
+    "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2.10.1",
     "codemirror": "^6.0.2",
     "hls.js": "^1.6.16",

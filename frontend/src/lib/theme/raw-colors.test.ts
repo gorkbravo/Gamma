@@ -24,16 +24,8 @@ interface RawColorException {
 }
 
 const RAW_COLOR_EXCEPTIONS: RawColorException[] = [
-  ...["0.22", "0.08", "0.34", "0.14", "0.2", "0.06", "0"].map((alpha) => ({
-    file: "components/FanChart.svelte",
-    literal: `rgba(122, 166, 200, ${alpha})`,
-    reason: "SVG gradient stop: a mixed or var() stop colour interpolates in floating point and moves pixels by one level"
-  })),
   { file: "components/FanChart.svelte", literal: "rgba(42, 56, 70, 0.26)", reason: "grid line, a one-off navy with no token" },
-  { file: "components/FanChart.svelte", literal: "rgba(244, 247, 251, 0.94)", reason: "history line, a one-off white with no token" },
-  { file: "components/FanChart.svelte", literal: "rgba(244, 247, 251, 0.12)", reason: "history line halo, same one-off white" },
   { file: "components/FanChart.svelte", literal: "rgba(106, 168, 255, 0.32)", reason: "tooltip edge, a one-off blue with no token" },
-  { file: "components/StatusRail.svelte", literal: "rgba(8, 13, 18, 0.98)", reason: "settings popover background, a one-off near-black with no token" },
   { file: "components/MaritimeMap.svelte", literal: "rgba(2, 6, 12, 0.7)", reason: "vessel chevron outline drawn on canvas, a one-off with no token" },
   { file: "components/MacroCoherencePanel.svelte", literal: "rgba(255, 255, 255, 0.015)", reason: "component is not imported anywhere" },
   { file: "views/RiskView.svelte", literal: "rgb(87, 135, 176)", reason: "eighth cluster colour, no token" },

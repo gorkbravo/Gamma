@@ -13,7 +13,7 @@
        --font-code   code, raw JSON and model output, the Script editor
      Today ui and label are the sans and num and code the mono. The document
      still defaults to --font-num, so data cells need no class. The Settings
-     font choice overrides --font-num and --font-code on the root element. */
+     "Data figures" choice overrides --font-num on the root element. */
   --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
   --font-label: var(--font-ui);
   --font-num: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
@@ -67,7 +67,9 @@
   --motion-base: 180ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
-  /* ── Background layers (shifted to true neutral) ── */
+  /* ── Background layers (shifted to true neutral) ──
+     --canvas is the page behind the panels; in the dark theme it is the
+     panel colour itself, so only borders and the dot grid separate them. */
   --bg-0: #070809;
   --bg-1: #0b0d10;
   --bg-2: #0f1114;
@@ -79,6 +81,7 @@
   --surface-2: #141719;
   --surface-soft: rgba(10, 12, 14, 0.62);
   --panel-bg: var(--bg-0);
+  --canvas: var(--bg-0);
   /* The quiet fill for fields and a tinted table header band; today the
      control background. */
   --tint: var(--bg-1);
@@ -92,9 +95,16 @@
   --text-0: #f0f2f5;
   --text-1: #c2c8d0;
   --text-2: #8a919a;
+  /* Text on a heat-map fill (treemap tiles, payoff and IV grids): neutral,
+     because the fill carries the tone and the sign the direction. A tone or
+     muted colour on a strong fill falls below WCAG AA. */
+  --heat-text: var(--text-0);
 
   /* ── Interactive accent (blue stays for interactive elements) ── */
   --accent: #7aa6c8;
+  /* The accent's channels, for translucent gradient stops written
+     rgba(var(--accent-rgb), α): exact, where a color-mix() stop is not. */
+  --accent-rgb: 122, 166, 200;
   --accent-2: #c49a5a;
 
   /* ── Semantic: status ── */
@@ -142,6 +152,9 @@
   --rule-navy: #2e3c4a;   /* rules and outlines in the Macro and Copilot cards, chart axes */
   --track: #273544;       /* the unfilled part of bar, gauge and band tracks */
   --chart-halo: #070b10;  /* tooltip backing and dot outlines in the SVG charts */
+  --chart-history: rgba(244, 247, 251, 0.94);       /* the FanChart history line */
+  --chart-history-halo: rgba(244, 247, 251, 0.12);  /* and its halo */
+  --popover-bg: rgba(8, 13, 18, 0.98);              /* the Settings popover */
 
   /* ── Shadows and scrim ── every shadow mixes from --shadow-ink. */
   --shadow-ink: #000;
@@ -154,7 +167,7 @@
      case from here. Labels styled inside a view still set their own. */
   --label-case: uppercase;
 
-  /* ── Chart themes ── */
+  /* ── Chart series ── */
   --chart-primary: #7aa6c8;
   --chart-secondary: #c49a5a;
   --chart-negative: #cc6f64;
@@ -179,21 +192,102 @@
   /* ── Interaction states ── */
   --hover-bg: color-mix(in srgb, var(--accent) 6%, transparent);
   --active-bg: color-mix(in srgb, var(--accent) 12%, transparent);
-  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
+  /* 60%, not the earlier 55%, to reach 3:1 on the panel (WCAG focus). */
+  --focus-ring: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
-/* ── Theme: Amber phosphor ── */
-:root[data-chart-theme="amber"] {
-  --chart-primary: #d4a054;
-  --chart-secondary: #8a919a;
-  --chart-negative: #d97a70;
-}
+/* ── Theme: light ──
+   data-theme="light" on <html> (src/lib/stores/appearance.ts) layers these
+   values over the dark block above. Colours follow the B′ light palette in
+   docs/visual_refresh_plan.md, a shade darker where the contrast test
+   needed it (--text-2, the semantic colours on their 13% fills); the
+   structure (borders, mono figures, uppercase labels) stays until V4. Tokens that script reads (--divider,
+   --accent, the chart, semantic, text and surface colours) stay literal hex,
+   as in the dark block. Derived tokens (--panel-bg, --tint, the soft fills,
+   --scrim, --table-stripe) follow their bases unless restated here. The
+   contrast test (contrast.test.ts) checks WCAG AA for both blocks. */
+:root[data-theme="light"] {
+  color-scheme: light;
 
-/* ── Theme: Green phosphor ── */
-:root[data-chart-theme="green"] {
-  --chart-primary: #4bb474;
-  --chart-secondary: #8a919a;
-  --chart-negative: #d97a70;
+  /* Surfaces: white sheets on a cool grey canvas. */
+  --canvas: #eceff3;
+  --bg-0: #ffffff;
+  --bg-1: #f4f6f9;
+  --bg-2: #eef1f4;
+  --bg-3: #e3e7ec;
+  --surface-0: #f8f9fb;
+  --surface-1: #f4f6f9;
+  --surface-2: #e9edf2;
+  --surface-soft: rgba(244, 246, 249, 0.72);
+
+  /* Edges: slightly stronger than B′'s lines, because V3 keeps the panel
+     borders that B′ removes. */
+  --panel-border: #dce1e8;
+  --panel-strong: #c3cbd6;
+  --divider: #e1e6ec;
+
+  --text-0: #0f1720;
+  --text-1: #3b4655;
+  --text-2: #636e7f;
+
+  --accent: #2952cc;
+  --accent-rgb: 41, 82, 204;
+  --accent-2: #8a5a00;
+
+  --positive: #0c7049;
+  --negative: #b83329;
+  --warning: #8a5a00;
+  --negative-muted: #b83329;
+
+  /* B′ strengths: accent 9%, semantic fills 13%. */
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, transparent);
+  --positive-soft: color-mix(in srgb, var(--positive) 13%, transparent);
+  --negative-soft: color-mix(in srgb, var(--negative-muted) 13%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 13%, transparent);
+
+  /* Categorical and intensity colours, darkened to 3:1 on white. */
+  --cat-1: #2952cc;
+  --cat-2: #0c7049;
+  --cat-3: #8a5a00;
+  --cat-4: #b83329;
+  --cat-5: #12786c;
+  --cat-6: #6b54b6;
+  --cat-7: #566578;
+  --cat-8: #587628;
+
+  --data-hot: #0c7049;
+  --data-warm: #8a5a00;
+  --data-cool: #2c6aa0;
+  --data-cold: #636e7f;
+  --data-elevated: #9a5b00;
+  --data-extreme: #b83329;
+
+  --rule-navy: #8a97a8;
+  --track: #b8c2ce;
+  --chart-halo: #ffffff;
+  --chart-history: rgba(15, 23, 32, 0.88);
+  --chart-history-halo: rgba(15, 23, 32, 0.1);
+  --popover-bg: rgba(255, 255, 255, 0.98);
+
+  /* Shadows lighter than on the dark canvas; B′ scrim. */
+  --shadow-ink: rgba(15, 23, 32, 0.4);
+  --scrim: rgba(18, 26, 38, 0.22);
+
+  --chart-primary: #2952cc;
+  --chart-secondary: #8a5a00;
+  --chart-negative: #b83329;
+
+  --flash-up: rgba(12, 112, 73, 0.16);
+  --flash-down: rgba(184, 51, 41, 0.16);
+  --flash-neutral: rgba(138, 90, 0, 0.14);
+
+  /* B′ drops the dot grid. */
+  --canvas-dot: transparent;
+
+  /* B′ hover 4% and selection 9% of the accent; a solid focus ring. */
+  --hover-bg: color-mix(in srgb, var(--accent) 4%, transparent);
+  --active-bg: color-mix(in srgb, var(--accent) 9%, transparent);
+  --focus-ring: var(--accent);
 }
 
 html,
@@ -201,7 +295,7 @@ body,
 #app {
   margin: 0;
   min-height: 100%;
-  background-color: var(--bg-0);
+  background-color: var(--canvas);
   /* Canvas dot grid — the app's only texture. Panels are solid --bg-0, so
      dots show only in seams and empty canvas. Must stay dimmer than --text-2
      so it never competes with labels; 24px steps match --space-7. */

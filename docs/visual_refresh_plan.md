@@ -3,8 +3,8 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
-- Last reviewed: 2026-10-28
-- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3–V6 planned.
+- Last reviewed: 2026-10-30
+- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete on branch `claude/v3-theme-infrastructure` (175e419…), pending the user's review; not merged. V4–V6 planned.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
 - Doctrine: [`design_principles.md`](./design_principles.md) stays authoritative for the current look until V5 rewrites it. Do not apply B′ values to views before V4.
@@ -87,7 +87,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 |---|---|---|---|
 | V1 — Shared primitives under the current look | Extend `frontend/src/lib/theme/primitives.css` (panel, header, mode bar, KPIs and eyebrow already exist) with the data table, tag, 26px panel title, inline stats, buttons, inputs and selects. Migrate the ~20 scoped `th, td` copies and 9 `.tag` copies. Keep genuine local exceptions as scoped overrides and list them. | No visual change except the deliberate convergences listed under [V1 convergences and kept exceptions](#v1-convergences-and-kept-exceptions), each reviewed on before/after screenshots of every view in mock mode (1440×900, DPR 1). `npm run typecheck`, `npm test` and `npm run build` pass without warnings from the changed files. | Done (2026-10-28), merged into main as 77d40e5 and 7867445 |
 | V2 — Token completeness and font roles | Replace the 71 raw `rgba(122, 166, 200, …)` values and 92 hex literals (18 files). Fix the ~62 `font: inherit` that pull chrome back to mono. Split `--app-font`/`--display-font` into `--font-ui`, `--font-num`, `--font-code` and `--font-label`. Add tint, soft semantic, scrim, `--panel-radius`, `--panel-border-width` and label-case tokens. Move `chart-colors.ts` and the flash keyframes onto tokens. | Values unchanged, so screenshot parity still holds. A grep gate shows no raw accent colors or hex literals in `.svelte` files outside a documented exception list. | Done (2026-10-28), merged into main as 9676017; see [V2 token completeness and font roles](#v2-token-completeness-and-font-roles) |
-| V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Planned |
+| V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Done on branch `claude/v3-theme-infrastructure` (2026-10-30), pending review; see [V3 theme infrastructure](#v3-theme-infrastructure) |
 | V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Planned |
 | V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Planned |
 | V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Planned |
@@ -245,6 +245,74 @@ Side effects reviewed on the before/after pairs: sans labels are narrower, so bu
 - The Copilot card backdrop (black at 40%) and the Setup dialog backdrop (`--bg-0` at 78%) keep their own values; V4 converges them on `--scrim`.
 - `--text-3` is referenced in `AuthenticatedResearchScriptImage.svelte` and the Script editor theme but defined nowhere, so those colours fall back to inheritance. Found during the inventory; not changed.
 
+## V3 theme infrastructure
+
+V3 ran on branch `claude/v3-theme-infrastructure` from main a1c74e2, one commit per step: 175e419 theme preference, 8dc3dbc light token block and contrast test, 3ec377c charts, 3D surface and map repaint on theme change, 7d5430d chart theme retired and Data Figures, 1d36bd0 theme colours for the last dark-only literals, 29e0b79 open windows kept in sync, 8948d0a WCAG AA on every rendered text.
+
+### Theme preference
+
+- `frontend/src/lib/stores/appearance.ts` holds the preference (System, Light or Dark), persists it in `localStorage` (`gamma.theme`) and writes the resolved theme to `data-theme` on `<html>`. System follows the operating system, including changes while the app is open. `index.html` and `keybindings.html` apply the stored choice in an inline script before first paint.
+- **Default: Dark until V4**, as the user decided on 2026-10-29: the light theme is a hybrid until V4 restyles the structure. The target default stays System.
+- Settings has Theme (Dark, Light, System) and Data Figures (Default or one of five monospace fonts). Data Figures overrides `--font-num` only, so code keeps `--font-code`, and persists in `gamma.dataFigures`. The blue, amber and green chart themes are retired. Neither old setting was persisted, so nothing needed migrating.
+
+### Light token block
+
+`tokens.css` layers `:root[data-theme="light"]` over the dark block. Derived tokens (`--panel-bg`, `--tint`, the soft fills, `--table-stripe`) follow their bases. Tokens that script reads stay literal hex in both blocks.
+
+| Role | B′ light | V3 light | Why it differs |
+|---|---|---|---|
+| Canvas | `#eceff3` | `--canvas` `#eceff3` | new token; equals `--bg-0` in dark |
+| Sheet | `#ffffff` | `--bg-0`, `--panel-bg` `#ffffff` | |
+| Tint | `#f4f6f9` | `--bg-1`, `--tint` `#f4f6f9` | |
+| Line / line strong | `#e3e7ec` / `#cfd6df` | `--panel-border` `#dce1e8` / `--panel-strong` `#c3cbd6` | a shade stronger, because V3 keeps the panel and control borders B′ removes |
+| Rule | `#eef1f4` | `--divider` `#e1e6ec` | same reason |
+| Text 0 / 1 / 2 | `#0f1720` / `#3b4655` / `#697485` | `#0f1720` / `#3b4655` / `#636e7f` | `--text-2` reaches 4.5:1 on the tint |
+| Accent | `#2952cc` | `#2952cc` | |
+| Positive / negative / warning | `#0f7b52` / `#c4372c` / `#986000` | `#0c7049` / `#b83329` / `#8a5a00` | 4.5:1 on their 13% soft fills |
+| Accent soft / hover | 9% / 4% | `--accent-soft`, `--active-bg` 9%; `--hover-bg` 4% | |
+| Semantic soft fills | 13–14% | 13% | |
+| Chart secondary | `#b7bfcb` grey | `#8a5a00` gold | the secondary series keeps its dark-theme role until V4 restyles charts; B′ grey is 1.8:1 on white |
+| Scrim | `rgba(18, 26, 38, 0.22)` | the same | |
+| Dot grid | removed | `--canvas-dot: transparent` | |
+
+Categorical (`--cat-*`) and intensity (`--data-*`) colours, which B′ does not specify, are darkened to reach 3:1 on white.
+
+### Contrast gate
+
+`frontend/src/lib/theme/contrast.test.ts` resolves the tokens of both blocks (including `var()` and `color-mix()`), composites translucent colours over their background and checks WCAG AA: 4.5:1 for text on panels, tints and surfaces and for semantic text on its soft fill (warning on its fill included), and 3:1 for chart, categorical and intensity colours and the focus ring. Both themes pass. To pass in dark, `--focus-ring` went from 55% to 60% of the accent (it measured 2.99:1); it shows only on keyboard focus.
+
+### Charts, the map and the editor
+
+- `TimeSeriesChart` rebuilds on a theme change, as it already did for the retired chart theme.
+- `Surface3D` re-reads its canvas colours and redraws.
+- `MaritimeMap` re-reads its MapLibre colours and repaints the base map, lanes, ports, chokepoints, flows, replay and watchlist layers, and redraws the vessel chevrons. No light CARTO style is needed: Gamma already hides the base style's layers and recolours the background, water and borders from tokens. Repainting found a bug: the base-map recolour hid every layer that was not a base layer, including Gamma's own lanes and ports. It now touches only the base style's layers, recorded on first load.
+- The SVG charts (FanChart, DistributionChart, BarRankChart) and the CodeMirror editor theme themselves with CSS variables and follow without code. The editor's syntax colours came to tokens later (see the closed gaps below).
+- FanChart's gradient stops are `rgba(var(--accent-rgb), α)`: unlike a `color-mix()` stop, this paints exactly what the literal did. Its history line and the Settings popover gained tokens with a value per theme.
+
+### Verification
+
+- Dark parity: two dark captures of main as noise control, then the branch at 7d5430d, all 52 mock-mode screens at 1440×900, DPR 1, with computed styles. No style or geometry difference outside the known noisy screens (Crypto, Options and Sitrep data, timestamps, the Refresh button) apart from one antialiased corner pixel group. The Setup dialog, the landing page and four e2e harnesses are identical. A later dark run at 1d36bd0 started after midnight and differs from it only in date-driven data (Prediction Markets fresh/delayed chips, Macro FRED loads, Portfolio history); none of its style changes comes from a token.
+- Live switch: Settings, dark → light → dark on Commodities and Sealanes without a reload and with no page errors. The chart and the map repaint; the second dark frame matches the first apart from rounded-corner antialiasing.
+- Light review: all 52 screens, the Setup dialog, the landing page, the open Copilot drawer and the Sealanes shelf were captured in the light theme for review, with the V3 handover note. The e2e harness pages do not initialise the theme and stay dark; they are test fixtures.
+
+### Gaps closed after the first review (2026-10-30)
+
+- **Open windows stay in sync.** A theme or Data Figures change reaches the app's other open windows (the key bindings window, a second tab) through the `storage` event (`applyStoredChange()` in `appearance.ts`, unit-tested). In the desktop app the key bindings window is a Tauri `WebviewWindow` of the same origin, and WebView2 runs without incognito, so the preference persists and is shared (checked by reading the Tauri config and launcher; the packaged app was not run).
+- **Live checks** (Playwright, mock mode): System follows the OS light → dark → light while the app is open; an open key bindings window follows Light, Data Figures and Dark from the main window; the 3D surface, the Script editor, FanChart, DistributionChart and BarRankChart repaint on a live switch and return to their exact dark frame. The 3D surface needed the backend paused for that comparison, because Options data moves on its own. FanChart and DistributionChart were mounted in a temporary probe page, since mock mode never renders them.
+- **Rendered contrast audit.** A Playwright audit walked every view and mode in both themes, the Setup dialog, the landing page, Settings and the Copilot drawer, composited each visible text over its effective background, and compared it with 4.5:1 (3:1 for large text). Disabled controls are exempt, as WCAG allows. Before the fixes: 81 texts failed in light and 28 in dark, the dark ones already present on main. They fell into three groups:
+  - Text on heat-map fills: Crypto treemap tiles, the Options payoff grid's at-the-money row, the IV surface table, and (by reading the code) the strategy payoff matrix. A tone or muted colour on a strong fill cannot reach 4.5:1. New token `--heat-text` (`var(--text-0)`): that text is neutral in both themes, because the fill carries the tone and the sign the direction. Tile symbols move from `--text-2` to `--text-1`, and fitted IV cells keep italics instead of a muted colour.
+  - The Script editor's syntax colours: CodeMirror's default style is made for a light background and measured 2.6–3:1 on the dark one. A `HighlightStyle` built from the tokens (comments `--text-2`, strings `--positive`, keywords `--accent`, numbers `--warning`, definitions `--text-0`) replaces it in both themes. `@codemirror/language` and `@lezer/highlight`, until now transitive, become declared dependencies.
+  - Decorative separators ("|" in the Commodities provenance footer, "·" in Macro events), which WCAG exempts as decoration. They are now `aria-hidden` so screen readers skip them too.
+  - These fixes change the dark theme only in those elements; the user approved fixing dark as well (2026-10-30). Before/after pairs are with the V3 handover note.
+
+### Kept exceptions and open items
+
+- The raw-colour gate keeps: FanChart's grid line and tooltip edge, the MaritimeMap chevron outline (all read on both backgrounds), the unused MacroCoherencePanel, and the eighth Risk cluster colour and viridis end stop (data).
+- V4: the light theme keeps the terminal structure (borders, mono, uppercase labels) until the B′ values land; the default moves to System then.
+- V6: the Tauri splash screen and the marketing site stay dark-only.
+- `--text-3` is still referenced in two places and defined nowhere.
+- Not verified by running it: the packaged desktop app (persistence and cross-window sync were checked in its configuration and code).
+
 ## Doctrine rewrite map (V5)
 
 Edit sections in place and keep the numbering and the rule names. Skills and reviews cite `§14`/`§15` and named rules.
@@ -290,3 +358,6 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-10-28: the controls showed no copy family like the tables did (34 components with their own base button: 7 heights and 11 paddings), so the user chose to converge them as well. e98fd26 moves buttons, inputs and selects onto `.btn` and `.form-control`, and dedc5d7 moves the inline stats onto `.stat`, on branch `claude/musing-easley-b0d363`. The convergences and exceptions are listed under "Controls and inline stats" above.
 - 2026-10-28: the user reviewed the controls and stats screenshots, accepted the convergences and merged the branch into main as 7867445 (not pushed). V1 is complete; the kept exceptions carry over to V2 (`font: inherit`, raw colours) and V4 (Copilot chat chrome).
 - 2026-10-28: V2 on branch `claude/v2-token-completeness` from local main 9412498: 2b3ee01 font roles, 5be065d new tokens, 600d961 raw colours onto tokens, 1b5ed86 chart colours and flashes, 32362a3 `font: inherit` on chrome buttons, bb26c40 the raw-colour gate. For step 6 the user chose to keep every input, select and textarea as it was. Steps 2–5 and 7 changed no pixel in mock mode; step 6 before/after pairs are with the V2 handover note. Decisions and kept exceptions are under [V2 token completeness and font roles](#v2-token-completeness-and-font-roles). The user reviewed the pairs, accepted the change and merged the branch into main as 9676017 (not pushed). V2 is complete.
+- 2026-10-29: main pushed to origin (ffefb09..a1c74e2), so V1 and V2 are on the remote.
+- 2026-10-29/30: V3 on branch `claude/v3-theme-infrastructure` from main a1c74e2: 175e419 theme preference, 8dc3dbc light token block and contrast test, 3ec377c charts, 3D surface and map repaint, 7d5430d chart theme retired and Data Figures, 1d36bd0 theme colours for the last dark-only literals. The user chose Dark as the default until V4. Dark stays pixel-identical in mock mode; light screenshots are with the V3 handover note. Not merged.
+- 2026-10-30: gaps closed on the same branch after the first review: 29e0b79 keeps open windows on the same theme, and a rendered contrast audit led to 8948d0a (neutral text on heat-map fills and token syntax colours in the Script editor, in both themes with the user's approval; decorative separators aria-hidden). The audit now finds no failing text in either theme.

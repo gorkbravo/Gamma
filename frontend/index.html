@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/gamma-mark.svg" />
     <title>Gamma</title>
+    <script>
+      // Apply the stored theme before first paint; mirrors resolveTheme() in
+      // src/lib/stores/appearance.ts (default dark until V4).
+      (function () {
+        var preference = "dark";
+        try { preference = localStorage.getItem("gamma.theme") || "dark"; } catch (error) {}
+        var light = preference === "light" ||
+          (preference === "system" && !matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
