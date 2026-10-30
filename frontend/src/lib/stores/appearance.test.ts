@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THEME_PREFERENCE, parseDataFigureFont, parseThemePreference, resolveTheme } from "./appearance";
+import { get } from "svelte/store";
+import {
+  DEFAULT_THEME_PREFERENCE,
+  applyStoredChange,
+  dataFigureFont,
+  parseDataFigureFont,
+  parseThemePreference,
+  resolveTheme,
+  resolvedTheme,
+  themePreference
+} from "./appearance";
 
 describe("theme preference", () => {
   it("defaults to dark until the light theme is complete", () => {
@@ -18,6 +28,23 @@ describe("theme preference", () => {
     expect(resolveTheme("system", false)).toBe("light");
     expect(resolveTheme("light", true)).toBe("light");
     expect(resolveTheme("dark", false)).toBe("dark");
+  });
+});
+
+describe("changes from another window", () => {
+  it("follows a theme or data figures choice stored elsewhere and ignores other keys", () => {
+    applyStoredChange("gamma.theme", "light");
+    expect(get(themePreference)).toBe("light");
+    expect(get(resolvedTheme)).toBe("light");
+
+    applyStoredChange("gamma.dataFigures", "Consolas");
+    expect(get(dataFigureFont)).toBe("Consolas");
+
+    applyStoredChange("gamma.macro", "dark");
+    expect(get(themePreference)).toBe("light");
+
+    applyStoredChange("gamma.theme", null);
+    expect(get(themePreference)).toBe("dark");
   });
 });
 

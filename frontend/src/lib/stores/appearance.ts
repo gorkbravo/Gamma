@@ -114,8 +114,24 @@ export function setDataFigureFont(font: DataFigureFont) {
   applyDataFigureFont(font);
 }
 
-/* Called once per window before the app mounts: applies both choices and
-   follows the operating system while the preference is System. */
+/* A choice made in another window of the app (the key bindings window, a
+   second tab) reaches this one as a storage event, so every open window
+   follows without a reload. */
+export function applyStoredChange(key: string | null, newValue: string | null) {
+  if (key === THEME_STORAGE_KEY) {
+    currentPreference = parseThemePreference(newValue);
+    themePreference.set(currentPreference);
+    applyResolvedTheme();
+  } else if (key === DATA_FIGURES_STORAGE_KEY) {
+    const font = parseDataFigureFont(newValue);
+    dataFigureFont.set(font);
+    applyDataFigureFont(font);
+  }
+}
+
+/* Called once per window before the app mounts: applies both choices,
+   follows the operating system while the preference is System, and follows
+   changes made in the app's other windows. */
 export function initAppearance() {
   applyResolvedTheme();
   applyDataFigureFont(readStoredDataFigures());
@@ -123,5 +139,8 @@ export function initAppearance() {
     matchMedia(SYSTEM_DARK_QUERY).addEventListener("change", () => {
       if (currentPreference === "system") applyResolvedTheme();
     });
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (event) => applyStoredChange(event.key, event.newValue));
   }
 }
