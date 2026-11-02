@@ -99,7 +99,7 @@ describe("CommoditiesView", () => {
       }
     });
 
-    expect(body).toContain("OFFICIAL PARTIAL");
+    expect(body).toContain("Official partial");
     expect(body).toContain("EIA coverage is official but partial and release-lagged.");
     expect(body).toContain("No inventory series linked.");
   });

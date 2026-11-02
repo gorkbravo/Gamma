@@ -115,7 +115,7 @@
     min-width: 0;
   }
 
-  h3 { margin: 0; font-size: var(--text-base); }
+  h3 { margin: 0; font-size: var(--text-title); }
 
   .card-badges {
     display: inline-flex;
@@ -148,9 +148,9 @@
 
   .coherence-stat {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   /* ── Signal grid ── */
@@ -174,9 +174,9 @@
   }
 
   .signal-role {
-    font-size: var(--text-2xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     color: var(--text-2);
   }
 

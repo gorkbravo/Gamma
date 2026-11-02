@@ -80,10 +80,10 @@
     padding: var(--space-2) var(--space-5);
     border-bottom: 1px solid var(--divider);
     color: var(--text-2);
-    font-size: var(--text-xs);
+    font-size: var(--text-title);
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   /* Cells, header and row identifiers come from .data-table.is-top in primitives.css. */

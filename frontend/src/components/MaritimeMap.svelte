@@ -1760,8 +1760,8 @@
     align-items: center;
     gap: var(--space-4);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     white-space: nowrap;
   }
 
@@ -1833,9 +1833,9 @@
   }
 
   .legend-item {
-    font-size: var(--text-2xs);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     color: var(--text-2);
     display: flex;
     align-items: center;
@@ -1873,11 +1873,11 @@
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     padding: var(--space-2) var(--space-4);
     cursor: pointer;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .map-ctrl-btn:hover,
@@ -1932,8 +1932,8 @@
     width: max-content;
     padding: var(--space-3) var(--space-4);
     font-size: var(--text-xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     cursor: pointer;
     pointer-events: auto;
   }
@@ -2044,25 +2044,25 @@
   .shelf-label {
     margin: 0;
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .shelf-action {
     padding: var(--space-2) var(--space-4);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
   }
 
   .compact-toggle,
   .mini-action {
     padding: var(--space-2) var(--space-4);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     cursor: pointer;
   }
 
@@ -2077,8 +2077,8 @@
     padding: var(--space-3) 0;
     color: var(--text-2);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .shelf-note {
@@ -2227,9 +2227,9 @@
   .drawer-grid span,
   .drawer-section span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .drawer-grid strong {
@@ -2316,8 +2316,8 @@
 
   :global(.mp-row span:first-child) {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     flex-shrink: 0;
   }
 

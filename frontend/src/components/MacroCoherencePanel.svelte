@@ -109,9 +109,9 @@
 
   .coherence-counts {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .coherence-summary,
@@ -146,9 +146,9 @@
 
   .lead-lag-label {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .lead-lag-card strong {

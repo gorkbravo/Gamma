@@ -269,8 +269,8 @@
     font-size: var(--text-xs);
     font-weight: 600;
     line-height: 1.2;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .settings-group {

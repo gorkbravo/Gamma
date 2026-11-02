@@ -1084,8 +1084,8 @@
   }
 
   h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
   }
 
   /* Buttons are .btn from primitives.css: secondary actions add
@@ -1138,9 +1138,9 @@
     border: 1px solid transparent;
     color: var(--text-2);
     padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     background: var(--tint);
     border-radius: var(--radius-pill);
   }
@@ -1211,10 +1211,10 @@
 
   .control-group > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   /* Fields are .form-control from primitives.css and keep the view's font. */
@@ -1296,10 +1296,10 @@
 
   .metric > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .metric strong {
@@ -1391,9 +1391,9 @@
 
   .message-tag {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .message-error p,
@@ -1482,10 +1482,10 @@
 
   .group-label,
   .provenance-list span {
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .pill-list {

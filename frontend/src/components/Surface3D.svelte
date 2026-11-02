@@ -572,7 +572,7 @@
         <span class="pick-source">{hoverPick.source === "observed" ? "OBS" : "FIT"}</span>
         <strong class="pick">{Math.round(hoverPick.strike)} · {hoverPick.dte}D · {formatValue(hoverPick.iv)}</strong>
       {:else}
-        {#if showObservedOverlay}<span class="fit-key"><i></i>{observedPoints.length} OBS / {surfaceModel.toUpperCase()} FIT</span>{/if}
+        {#if showObservedOverlay}<span class="fit-key"><i></i>{observedPoints.length} obs / {surfaceModel} fit</span>{/if}
         Drag to orbit · scroll to zoom
       {/if}
     </span>
@@ -661,9 +661,9 @@
 
   .surface3d-hint {
     margin-right: auto;
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -732,8 +732,8 @@
     gap: var(--space-4);
     font-size: var(--text-xs);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .surface3d-settings label.checkbox {
@@ -770,8 +770,8 @@
   .surface3d-settings .model-status {
     color: var(--warning);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .surface3d-canvas {

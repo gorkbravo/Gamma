@@ -84,9 +84,9 @@
   }
 
   h3, p { margin: 0; }
-  h3 { color: var(--text-0); font-size: var(--text-base); }
-  .eyebrow, small { color: var(--text-2); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.1em; }
-  .temporary { color: var(--accent); border: 1px solid currentColor; padding: var(--space-1) var(--space-3); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.1em; }
+  h3 { color: var(--text-0); font-size: var(--text-title); }
+  .eyebrow, small { color: var(--text-2); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0; }
+  .temporary { color: var(--accent); border: 1px solid currentColor; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0; }
   .safety { color: var(--text-1); font-size: var(--text-sm); }
 
   .assumptions, .metric-strip {

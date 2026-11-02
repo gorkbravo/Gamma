@@ -24,7 +24,7 @@
   export let hideGroup = false;
   export let hideSource = false;
   export let changeLabel = "Move";
-  export let pctChangeLabel = "%CHG";
+  export let pctChangeLabel = "% chg";
   export let showPctChange = false;
   export let contextLabel = "Context";
   export let hideContext = false;
@@ -249,8 +249,8 @@
 
   .empty-cell {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 

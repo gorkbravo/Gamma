@@ -399,7 +399,7 @@ describe("calibration method label", () => {
       is_validated: false
     });
 
-    expect(describeCalibrationMethod(summary)).toContain("UNVALIDATED");
+    expect(describeCalibrationMethod(summary)).toContain("Unvalidated");
   });
 });
 

@@ -327,9 +327,9 @@
   .focus-target {
     margin: 0;
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   /* ── Snapshot table ── */
@@ -431,9 +431,9 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: var(--leading-tight);
     min-height: calc(2em * 1.2);
     overflow: hidden;
@@ -487,7 +487,7 @@
     margin-left: auto;
     font-size: var(--text-base);
     color: var(--text-0);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   /* The FX pair pickers are .form-control from primitives.css and keep the
@@ -562,9 +562,9 @@
 
   .date-group-header {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
     border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 20%, transparent);

@@ -134,9 +134,9 @@
 
   .section-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .section-head small {
@@ -252,7 +252,7 @@
 
   .treemap-tile.micro .tile-symbol {
     font-size: var(--text-2xs);
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
   }
 
   .positive {

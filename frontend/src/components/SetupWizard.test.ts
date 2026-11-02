@@ -80,7 +80,7 @@ describe("SetupWizard", () => {
   it("states loading and failure without a draft", () => {
     const loading = render(SetupWizard, { props: { ...handlers, report: null, loading: true } });
     expect(loading.body).toContain("Reading setup status");
-    expect(loading.body).toContain("LOADING...");
+    expect(loading.body).toContain("Loading…");
 
     const failed = render(SetupWizard, { props: { ...handlers, report: null, loadError: "HTTP 500" } });
     expect(failed.body).toContain("Setup unavailable");

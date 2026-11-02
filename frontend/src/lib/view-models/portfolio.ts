@@ -687,7 +687,7 @@ export function derivePortfolioReadiness(input: {
   const lastFailure = input.snapshotState.lastFailureAt;
 
   return {
-    modeLabel: mockMode ? "MOCK / DEMO" : "LIVE / IBKR",
+    modeLabel: mockMode ? "Mock / demo" : "Live / IBKR",
     rows: [
       {
         label: "TWS Connection",

@@ -1151,16 +1151,16 @@
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .header-panel .subtitle {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .table-panel {
@@ -1182,8 +1182,8 @@
   .table-header span {
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -1253,9 +1253,9 @@
   }
 
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
     background: var(--accent-soft);
@@ -1292,16 +1292,16 @@
   .section-label,
   .focus-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .headline-kpi-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: 1.1;
   }
 
@@ -1313,7 +1313,7 @@
   }
 
   h3 {
-    font-size: var(--text-md);
+    font-size: var(--text-title);
   }
 
   .header-panel .headline-strip {

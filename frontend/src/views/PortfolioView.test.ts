@@ -43,7 +43,7 @@ describe("PortfolioView", () => {
       systemStatus: makeSystemStatus({ mock_mode: true })
     });
 
-    expect(body).toContain("MOCK / DEMO");
+    expect(body).toContain("Mock / demo");
     expect(body).toContain("Demo portfolio");
     expect(body).toContain("explicit mock data");
     expect(body).toContain(">Mock<");

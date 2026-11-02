@@ -112,26 +112,33 @@
   }
 
   .dot-label {
+    display: inline-block;
     margin-left: var(--space-2);
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     white-space: nowrap;
+  }
+
+  /* The label arrives as a provider or state word ("mock", "not loaded");
+     a sentence-case label starts with a capital. */
+  .dot-label::first-letter {
+    text-transform: uppercase;
   }
 
   .context-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .state {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-weight: 600;
     color: var(--text-1);
   }
@@ -167,8 +174,8 @@
 
   .quality {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .transform {
@@ -199,9 +206,9 @@
 
   .provenance-detail dt {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .provenance-detail dd {

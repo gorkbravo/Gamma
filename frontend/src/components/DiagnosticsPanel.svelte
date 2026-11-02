@@ -165,9 +165,9 @@
 
   .line-label {
     color: var(--text-1);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .warning .line-label,
@@ -190,8 +190,8 @@
     place-items: center;
     min-height: 100%;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 

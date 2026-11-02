@@ -243,10 +243,10 @@ describe("navigation tab ordering", () => {
       "scenarios",
       "optimization",
     ]);
-    expect(getTabLabel("sitrep")).toBe("SITREP");
-    expect(getTabLabel("commodities")).toBe("COMMODITIES");
-    expect(getTabLabel("maritime")).toBe("SEALANES");
-    expect(getTabLabel("iv")).toBe("OPTIONS");
+    expect(getTabLabel("sitrep")).toBe("Sitrep");
+    expect(getTabLabel("commodities")).toBe("Commodities");
+    expect(getTabLabel("maritime")).toBe("Sealanes");
+    expect(getTabLabel("iv")).toBe("Options");
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {

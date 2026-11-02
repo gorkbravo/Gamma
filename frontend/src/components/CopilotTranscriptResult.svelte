@@ -720,9 +720,9 @@
   .evidence h5,
   .provenance {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .field {
@@ -971,8 +971,8 @@
 
   dt {
     color: var(--text-2);
-    text-transform: uppercase;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    font-size: var(--text-xs);
   }
 
   dl > :nth-last-child(-n + 2) {
@@ -1064,9 +1064,9 @@
     flex-wrap: wrap;
     gap: var(--space-3);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .warning-label {

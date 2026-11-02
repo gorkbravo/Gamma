@@ -61,9 +61,9 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: var(--leading-tight);
     min-height: calc(2em * 1.2);
     overflow: hidden;

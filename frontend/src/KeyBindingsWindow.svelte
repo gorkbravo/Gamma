@@ -227,10 +227,10 @@
   .header {
     padding-top: 0;
     border-top: 0;
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     color: var(--text-2);
   }
 

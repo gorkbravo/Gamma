@@ -91,8 +91,8 @@ function barWidth(value: number, maxAbs: number) {
   }
 
   .empty {
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
     padding: var(--space-4) var(--space-5);
   }

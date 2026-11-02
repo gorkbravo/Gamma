@@ -2139,16 +2139,16 @@
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .header-panel .subtitle {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .performance-panel,
@@ -2165,9 +2165,9 @@
   /* ── Header panel internals ── */
 
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
     background: var(--accent-soft);
@@ -2293,9 +2293,9 @@
 
   .treemap-section-head span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2417,7 +2417,7 @@
 
   .treemap-tile.micro strong {
     font-size: var(--text-2xs);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .treemap-empty {
@@ -2426,8 +2426,8 @@
     display: grid;
     place-items: center;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 
@@ -2458,7 +2458,7 @@
 
   .treemap-tooltip-head strong {
     font-size: var(--text-md);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     color: var(--text-0);
   }
 
@@ -2495,9 +2495,9 @@
 
   .treemap-tooltip-sector {
     margin-top: var(--space-1);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -2519,9 +2519,9 @@
 
   .treemap-tooltip-metrics dt {
     margin: 0;
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
     white-space: nowrap;
     overflow: hidden;
@@ -2653,9 +2653,9 @@
   .inline-field > span,
   label > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   h2 {
@@ -2665,8 +2665,8 @@
   }
 
   h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
     color: var(--text-0);
   }
 
@@ -2674,8 +2674,8 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--text-0);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   h2,
@@ -2719,8 +2719,8 @@
   .row span {
     color: var(--text-2);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .row strong {
@@ -2905,9 +2905,9 @@
 
   .note-tag {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .note-row.info .note-tag,

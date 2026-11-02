@@ -309,9 +309,9 @@
   .label {
     display: block;
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   strong {
@@ -384,8 +384,8 @@
     font-family: var(--font-label);
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .conn-label.mock {
@@ -544,8 +544,8 @@
 
   .health-row span {
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .health-row small {

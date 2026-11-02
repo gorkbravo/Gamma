@@ -850,7 +850,8 @@
   }
 
   function displayStatus(value: string | null | undefined) {
-    return humanize(value).toUpperCase();
+    const label = humanize(value);
+    return label.charAt(0).toUpperCase() + label.slice(1);
   }
 
   function valueClass(value: number | null | undefined) {
@@ -1405,7 +1406,7 @@
         </div>
       {/if}
       <button type="button" class="btn is-small refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
-        {loading ? "LOADING..." : "Refresh"}
+        {loading ? "Loading…" : "Refresh"}
       </button>
     </div>
 
@@ -2700,9 +2701,9 @@
     color: var(--accent);
     border: 1px solid var(--panel-strong);
     padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .basis-strip {
@@ -2719,16 +2720,16 @@
   .basis-strip em {
     color: var(--text-2);
     font-style: normal;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     margin-right: var(--space-2);
   }
 
   .basis-strip strong {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .handoff-actions {
@@ -2770,9 +2771,9 @@
 
   .control > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     line-height: 1.1;
   }
 
@@ -2799,9 +2800,9 @@
 
   .ctx-kpi span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     line-height: 1.1;
   }
 
@@ -2964,9 +2965,9 @@
 
   .inline-stats span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .inline-stats strong {
@@ -3018,9 +3019,9 @@
   .matrix-table .inventory-col { width: 14%; }
   .sector-cell {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     font-weight: 600;
     border-right: 1px solid var(--divider);
     background: color-mix(in srgb, var(--accent) 3%, transparent);
@@ -3189,9 +3190,9 @@
 
   .tip-row span:first-child {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .tip-row span:last-child {
@@ -3216,10 +3217,10 @@
   .rank-block h3 {
     margin: 0 0 var(--space-3);
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-title);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .rank-list {
@@ -3532,9 +3533,9 @@
 
   .provenance .prov-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     font-weight: 600;
   }
 

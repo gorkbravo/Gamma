@@ -1029,7 +1029,7 @@
                   {/if}
                 {/each}
               {:else}
-                <tr><td colspan="13" class="empty-row">{loading ? "LOADING..." : "No markets matched."}</td></tr>
+                <tr><td colspan="13" class="empty-row">{loading ? "Loading…" : "No markets matched."}</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1259,7 +1259,7 @@
             series={chartSeries}
             height={360}
             showLegend={chartSeries.length > 1}
-            emptyMessage={historyLoading ? "LOADING..." : "Select a market to load probability history."}
+            emptyMessage={historyLoading ? "Loading…" : "Select a market to load probability history."}
           />
 
           <div class="chart-foot">
@@ -1546,10 +1546,10 @@
           <div class="strategy-actions">
             <div class="side-toggle segmented" aria-label="Strategy Lab contract side">
               <button type="button" class="btn is-ghost" class:selected={strategySide === "long_yes"} on:click={() => (strategySide = "long_yes")}
-                >YES</button
+                >Yes</button
               >
               <button type="button" class="btn is-ghost" class:selected={strategySide === "long_no"} on:click={() => (strategySide = "long_no")}
-                >NO</button
+                >No</button
               >
             </div>
             <button type="button" class="btn is-ghost ghost-button" disabled={!detail} on:click={() => sendSelectedMarketToStrategyLab(false)}
@@ -1693,7 +1693,7 @@
               </tbody>
             </table>
           {:else}
-            <p class="empty-state">{loading ? "LOADING..." : "No resting depth returned for this contract."}</p>
+            <p class="empty-state">{loading ? "Loading…" : "No resting depth returned for this contract."}</p>
           {/if}
           {#if depth?.warnings?.length}
             <div class="panel-notes">
@@ -1926,7 +1926,7 @@
           series={comparisonSeries}
           height={320}
           showLegend={true}
-          emptyMessage={compareLoading ? "LOADING..." : "Select at least two contracts to compare."}
+          emptyMessage={compareLoading ? "Loading…" : "Select at least two contracts to compare."}
         />
         <div class="chart-foot">
           <strong>
@@ -2026,7 +2026,7 @@
           </div>
         {:else}
           <p class="empty-state">
-            {compareLoading ? "LOADING..." : "Pair analytics appear once two contracts have overlapping history."}
+            {compareLoading ? "Loading…" : "Pair analytics appear once two contracts have overlapping history."}
           </p>
         {/if}
       </article>
@@ -2163,7 +2163,7 @@
         {:else}
           <p class="empty-state">
             {calibrationLoading
-              ? "LOADING..."
+              ? "Loading…"
               : calibrationMarketId
                 ? "No lead-time observations were measured for this venue."
                 : "Select a contract to choose a venue."}
@@ -2213,7 +2213,7 @@
             </tbody>
           </table>
         {:else}
-          <p class="empty-state">{calibrationLoading ? "LOADING..." : "No lead-time curve was measured."}</p>
+          <p class="empty-state">{calibrationLoading ? "Loading…" : "No lead-time curve was measured."}</p>
         {/if}
       </article>
 
@@ -2244,7 +2244,7 @@
                     <td class="wrap-cell"><strong>{truncName(observation.title, 48)}</strong></td>
                     <td class="num" class:absent={pct(observation.probability) === "N/A"}>{pct(observation.probability)}</td>
                     <td class="num muted" class:absent={pct(observation.settlement_probability) === "N/A"}>{pct(observation.settlement_probability)}</td>
-                    <td class={observation.outcome ? "positive" : "negative"}>{observation.outcome ? "YES" : "NO"}</td>
+                    <td class={observation.outcome ? "positive" : "negative"}>{observation.outcome ? "Yes" : "No"}</td>
                     <td class="num {toneOf(surprise)}" class:absent={signedPct(surprise) === "N/A"}>{signedPct(surprise)}</td>
                     <td class:absent={dayStamp(observation.settled_at) === "N/A"}>{dayStamp(observation.settled_at)}</td>
                   </tr>
@@ -2253,7 +2253,7 @@
             </table>
           </div>
         {:else}
-          <p class="empty-state">{calibrationLoading ? "LOADING..." : "No contract was sampled at the selected lead time."}</p>
+          <p class="empty-state">{calibrationLoading ? "Loading…" : "No contract was sampled at the selected lead time."}</p>
         {/if}
       </article>
 
@@ -2472,8 +2472,8 @@
     min-height: 1.65rem;
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
     gap: var(--space-4);
   }
@@ -2535,8 +2535,8 @@
 
   .group-label, label > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
   }
 
@@ -2658,7 +2658,7 @@
     border: 0;
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     padding: var(--space-1) var(--space-3);
   }
 
@@ -2689,9 +2689,9 @@
   }
 
   .method-line span {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   /* Two thin bars per bucket: priced against realized. Drawn only when the
@@ -2769,7 +2769,7 @@
     border: 0;
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
   }
 
   .side-toggle button:last-child {
@@ -2802,8 +2802,8 @@
     background: var(--accent-soft);
     color: var(--text-1);
     padding: var(--space-1) var(--space-3);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
     border-radius: var(--radius-pill);
   }
@@ -2935,9 +2935,9 @@
   tbody tr.section-row td {
     background: var(--surface-0);
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     white-space: normal;
   }
 
@@ -3003,9 +3003,9 @@
 
   .note-tag {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   /* ── Metadata ────────────────────────────────────────────── */
@@ -3031,9 +3031,9 @@
 
   .meta-row span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .meta-row strong,

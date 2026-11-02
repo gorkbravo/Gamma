@@ -14,12 +14,14 @@
 
 /* ── Eyebrow ──────────────────────────────────────────────────────────────
    The category label above a panel title. Chrome, not data, so it takes
-   --font-label from tokens.css. Never larger than --text-2xs. */
+   --font-label from tokens.css. A B′ label: 11px, weight 500, sentence
+   case, no tracking. */
 .eyebrow {
   margin: 0;
   color: var(--text-2);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.12em;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0;
   text-transform: var(--label-case);
 }
 
@@ -232,16 +234,16 @@
 .header-top .title {
   color: var(--text-0);
   font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  font-weight: 700;
+  font-size: var(--text-md);
+  font-weight: 600;
   text-transform: var(--label-case);
-  letter-spacing: 0.1em;
+  letter-spacing: 0;
 }
 
 .header-top .subtitle {
   color: var(--text-2);
   font-size: var(--text-xs);
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   min-width: 0;
 }
 
@@ -277,9 +279,10 @@
 .header-kpi span {
   color: var(--text-2);
   font-family: var(--font-label);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
+  font-weight: 500;
   text-transform: var(--label-case);
-  letter-spacing: 0.1em;
+  letter-spacing: 0;
   line-height: 1.1;
 }
 
@@ -297,29 +300,30 @@
 .header-kpi strong.warning { color: var(--warning); }
 
 /* ── Panel title ──────────────────────────────────────────────────────────
-   The single 26px row that heads a panel whose body is a table or a chart:
-   the title on the left, counts or units opposite it in .header-meta. One
-   row of chrome in place of an eyebrow, title and subtitle stacked above
-   the first data row. Commodities and Risk each carried their own copy. */
+   The single row that heads a panel whose body is a table or a chart: the
+   title on the left, counts or units opposite it in .header-meta. One row
+   of chrome in place of an eyebrow, title and subtitle stacked above the
+   first data row. B′: 30px, 12.5px at weight 600, no rule beneath; the
+   table's tinted header band or the chart starts the body. */
 .panel-title {
-  min-height: 26px;
-  padding: var(--space-2) var(--space-5);
-  border-bottom: 1px solid var(--divider);
+  min-height: 30px;
+  padding: var(--space-1) var(--space-5);
+  border-bottom: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   color: var(--text-1);
   text-transform: var(--label-case);
-  letter-spacing: 0.08em;
-  font-size: var(--text-xs);
+  letter-spacing: 0;
+  font-size: var(--text-title);
   font-weight: 600;
 }
 
 .panel-title .header-meta {
   color: var(--text-2);
   font-weight: 400;
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   text-transform: none;
   letter-spacing: 0;
 }
@@ -365,10 +369,10 @@
 
 .data-table th {
   color: var(--text-2);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: var(--label-case);
-  letter-spacing: 0.08em;
-  font-size: var(--text-2xs);
+  letter-spacing: 0;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 
@@ -495,7 +499,6 @@
 
 .data-table:where(.is-grid) th {
   background: var(--tint);
-  letter-spacing: 0.06em;
 }
 
 /* Figure comparisons: the first column names the row, every other column is
@@ -746,8 +749,9 @@ textarea.form-control {
 .stat span {
   color: var(--text-2);
   text-transform: var(--label-case);
-  letter-spacing: 0.1em;
-  font-size: var(--text-2xs);
+  letter-spacing: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
 }
 
 /* Value spacing is padding, not margin: views reset `strong { margin: 0 }`

@@ -299,9 +299,9 @@
   }
 
   .hover-label {
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .hover-header,
@@ -341,8 +341,8 @@
 
   .hover-grid span {
     font-size: var(--text-xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .legend {
@@ -419,8 +419,8 @@
     height: 100%;
     border: 1px solid var(--divider);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 

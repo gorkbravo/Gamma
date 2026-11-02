@@ -186,7 +186,7 @@
               {workspace.detail.script.status}
             </span>
           {/if}
-          <span class:dirty={draftIsDirty} class="status">{draftIsDirty ? "UNSAVED" : "BOUND"}</span>
+          <span class:dirty={draftIsDirty} class="status">{draftIsDirty ? "Unsaved" : "Bound"}</span>
         </div>
       </div>
 
@@ -753,8 +753,8 @@
   .safety-panel h2 {
     color: var(--warning);
     font-size: var(--text-lg);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .safety-panel > p,
@@ -785,9 +785,9 @@
   .file-output > span,
   .artifact-preview > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   label {
@@ -842,9 +842,9 @@
     border: 1px solid var(--panel-strong);
     color: var(--positive);
     padding: var(--space-2) var(--space-3);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     white-space: nowrap;
   }
 
@@ -970,7 +970,7 @@
     color: var(--warning);
     font-family: var(--font-num);
     font-size: var(--text-xs);
-    text-transform: uppercase;
+    text-transform: var(--label-case);
   }
 
   .compact-stack { gap: 0; }
@@ -1007,9 +1007,9 @@
     align-items: center;
     gap: var(--space-3);
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .input-divider::after {
@@ -1070,7 +1070,7 @@
 
   .run-list { gap: var(--space-2); }
   .run-list button { display: grid; gap: var(--space-2); text-align: left; padding: var(--space-3); }
-  .run-list button span { text-transform: uppercase; font-size: var(--text-xs); }
+  .run-list button span { text-transform: var(--label-case); font-size: var(--text-xs); }
 
   .message-panel p:last-child { color: var(--text-1); line-height: 1.45; }
   .message-panel.error-state p:last-child { color: var(--negative); }

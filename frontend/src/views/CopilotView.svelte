@@ -1007,9 +1007,9 @@
     align-items: center;
     gap: var(--space-3);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .archived-toggle input {
@@ -1069,9 +1069,9 @@
 
   .session-meta {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .session-actions,
@@ -1105,9 +1105,9 @@
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
   }
 
@@ -1144,8 +1144,8 @@
   .sidebar-empty,
   .context-empty {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
     padding: var(--space-4);
     margin: 0;
@@ -1204,9 +1204,9 @@
 
   .context-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .context-value {
@@ -1342,9 +1342,9 @@
 
   .handoff-chip {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     border: 1px solid var(--divider);
     padding: var(--space-1) var(--space-3);
   }
@@ -1380,9 +1380,9 @@
     align-items: center;
     gap: var(--space-3);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .effort-select select {
@@ -1459,9 +1459,9 @@
 
   .role-tag {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .assistant-body {
@@ -1531,9 +1531,9 @@
 
   .run-provisional-note {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .run-tools {
@@ -1546,9 +1546,9 @@
     border: 1px solid var(--panel-strong);
     padding: 1px var(--space-3);
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .run-tool.done {
@@ -1623,8 +1623,8 @@
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
     white-space: nowrap;
   }
@@ -1724,9 +1724,9 @@
     padding: var(--space-1) var(--space-3);
     border: 1px solid color-mix(in srgb, var(--warning) 52%, var(--panel-strong));
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .storage-summary p {
@@ -1756,9 +1756,9 @@
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
   }
 
@@ -1792,9 +1792,9 @@
 
   .storage-detail-label {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
   }
 

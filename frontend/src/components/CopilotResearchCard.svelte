@@ -505,9 +505,9 @@
     background: var(--tint);
     color: var(--text-2);
     padding: var(--space-2) var(--space-4);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     white-space: nowrap;
     border-radius: var(--radius-pill);
   }
@@ -644,9 +644,9 @@
     align-items: center;
     gap: var(--space-2);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .effort-select select {
@@ -677,8 +677,8 @@
   .generate-btn {
     padding: var(--space-3) var(--space-5);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     background: var(--accent-soft);
     color: var(--accent);
@@ -702,9 +702,9 @@
 
   .scope-row-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .context-picker {

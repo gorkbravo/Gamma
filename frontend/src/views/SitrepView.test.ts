@@ -51,11 +51,11 @@ describe("SitrepView", () => {
       },
     });
 
-    expect(body).toContain("CHG (3M)");
-    expect(body).toContain("%CHG (3M)");
+    expect(body).toContain("Chg (3M)");
+    expect(body).toContain("% chg (3M)");
     expect(body).toContain("Move (3M)");
-    expect(body).toContain("CHG (1D)");
-    expect(body).toContain("%CHG (1D)");
+    expect(body).toContain("Chg (1D)");
+    expect(body).toContain("% chg (1D)");
   });
 
   it("renders macro events in the Events & Markets panel with a follow-up affordance", () => {
@@ -82,7 +82,7 @@ describe("SitrepView", () => {
     expect(body).toContain("CPI release");
     expect(body).toContain("Save as follow-up");
     expect(body).toContain("Follow-Ups");
-    expect(body).toContain("NO SAVED FOLLOW-UPS — STAR A TRIAGE ROW TO TRACK IT.");
+    expect(body).toContain("No saved follow-ups — star a triage row to track it.");
     // Panel captions restating the column/source structure were cut.
     expect(body).not.toContain("macro focus / calendar / prediction markets / commodities");
     expect(body).not.toContain("star triage rows to save them");
@@ -110,12 +110,12 @@ describe("SitrepView", () => {
 
     expect(body).toContain("Domain");
     expect(body).toContain("Indices");
-    expect(body).toContain("HISTORICAL");
+    expect(body).toContain("Historical");
     expect(body).toContain("FX / Rates");
-    expect(body).toContain("3M WINDOW");
+    expect(body).toContain("3m window");
     expect(body).toContain("Predictions");
-    expect(body).toContain("NOT LOADED");
-    expect(body).toContain("OLDEST INDICES");
+    expect(body).toContain("Not loaded");
+    expect(body).toContain("Oldest indices");
     // The column headers carry the structure the caption used to spell out.
     expect(body).not.toContain("source / freshness / as of / age");
   });
@@ -148,12 +148,12 @@ describe("SitrepView", () => {
 
     // Indices ya está pintado; el resto espera o falló por separado.
     expect(body).toContain("EWJ / Jun 26");
-    expect(body).toMatch(/>Predictions<\/th>[\s\S]*?state-text[^>]*>LOADING</);
-    expect(body).toMatch(/>News<\/th>[\s\S]*?state-text[^>]*>LOADING</);
-    expect(body).toMatch(/>FX \/ Rates<\/th>[\s\S]*?state-text[^>]*>FAILED</);
-    expect(body).not.toContain("NOT LOADED");
+    expect(body).toMatch(/>Predictions<\/th>[\s\S]*?state-text[^>]*>Loading</);
+    expect(body).toMatch(/>News<\/th>[\s\S]*?state-text[^>]*>Loading</);
+    expect(body).toMatch(/>FX \/ Rates<\/th>[\s\S]*?state-text[^>]*>Failed</);
+    expect(body).not.toContain("Not loaded");
     // La edad por sección y la sección más antigua siguen funcionando.
-    expect(body).toContain("OLDEST INDICES");
+    expect(body).toContain("Oldest indices");
   });
 
   it("renders backend follow-ups with notes, resolved state, and triage actions", () => {
@@ -269,7 +269,7 @@ describe("SitrepView", () => {
     // feed-level state is stated once, in Provider Status.
     expect(body).not.toContain("provenance-badge");
     expect(body).not.toContain("OUTLET");
-    expect(body.match(/>DELAYED</g) ?? []).toHaveLength(1);
+    expect(body.match(/>Delayed</g) ?? []).toHaveLength(1);
   });
 });
 

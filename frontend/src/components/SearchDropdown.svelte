@@ -18,7 +18,7 @@
   export let ariaLabel = "Search";
   export let emptyLabel = "No matches";
   export let loading = false;
-  export let loadingLabel = "LOADING...";
+  export let loadingLabel = "Loading…";
   export let stale = false;
   export let staleLabel = "STALE RESULTS | REFRESHING";
   export let results: SearchDropdownItem[] = [];
@@ -221,9 +221,9 @@
     padding: var(--space-2) var(--space-3);
     color: var(--warning);
     border-bottom: 1px solid var(--divider);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .search-result,
@@ -281,11 +281,11 @@
   .search-empty {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .result-state,
   .search-empty {
-    text-transform: uppercase;
+    text-transform: var(--label-case);
   }
 </style>

@@ -256,7 +256,7 @@
         {#if loadError}
           <p class="notice warning" role="alert">Gamma could not read its setup status: {loadError}</p>
         {:else}
-          <p class="muted" aria-live="polite">{loading ? "LOADING..." : "Waiting for the backend."}</p>
+          <p class="muted" aria-live="polite">{loading ? "Loading…" : "Waiting for the backend."}</p>
         {/if}
       {:else if step === "mode"}
         <fieldset class="modes" disabled={modeLocked}>
@@ -607,9 +607,9 @@
   caption {
     color: var(--text-2);
     font-family: var(--font-label);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   h2 {

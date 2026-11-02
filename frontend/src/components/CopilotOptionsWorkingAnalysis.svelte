@@ -239,9 +239,9 @@
   .boundary-grid span {
     color: var(--text-2);
     font-family: var(--font-label);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .temporary-label {
@@ -296,8 +296,8 @@
     border-radius: 999px;
     color: var(--text-1);
     font-family: var(--font-ui);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
   }
 
   .status-tag[data-status="ok"] {

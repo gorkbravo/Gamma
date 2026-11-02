@@ -171,14 +171,14 @@
   h2 {
     font-size: var(--text-xl);
     line-height: 1.1;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .descriptor {
     color: var(--text-2);
     font-family: var(--font-ui);
     font-size: var(--text-sm);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .conn {
@@ -193,8 +193,8 @@
     font-family: var(--font-ui);
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .conn.live strong {
@@ -232,9 +232,9 @@
   dt {
     color: var(--text-2);
     font-family: var(--font-label);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   dd {

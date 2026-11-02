@@ -252,9 +252,9 @@
 
   .asset-chip span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     white-space: nowrap;
   }
 
@@ -315,15 +315,15 @@
   h1 strong {
     font-size: var(--text-base);
     font-weight: 600;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
     color: var(--text-0);
-    text-transform: uppercase;
+    text-transform: var(--label-case);
   }
 
   h1 span {
     font-size: var(--text-sm);
     font-weight: 400;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
     color: var(--text-2);
   }
 

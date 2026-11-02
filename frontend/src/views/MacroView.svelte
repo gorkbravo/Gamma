@@ -400,9 +400,9 @@
   .headline-kpi-label {
     display: block;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: 1.1;
     white-space: nowrap;
   }
@@ -440,9 +440,9 @@
   }
 
   .next-event-label {
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     color: var(--text-2);
   }
 
@@ -454,9 +454,9 @@
 
   /* ── Loading pill ── */
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid transparent;
     background: var(--accent-soft);
@@ -480,9 +480,9 @@
 
   .context-bar label > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     font-weight: 500;
   }
 

@@ -183,10 +183,12 @@
      card and the Setup dialog. */
   --scrim: rgba(0, 0, 0, 0.45);
 
-  /* ── Label case ── the chrome labels in primitives.css (eyebrows, view and
-     panel titles, column headers, stat and KPI labels, tags) take their
-     case from here. Labels styled inside a view still set their own. */
-  --label-case: uppercase;
+  /* ── Label case ── every chrome label (eyebrows, view and panel titles,
+     column headers, stat, KPI and field labels, tags) takes its case from
+     here, in primitives.css and in views. B′ labels are sentence case, so
+     the copy carries its own capitals. Identifiers and codes that must stay
+     upper case (tenors, venue codes, tickers) set uppercase themselves. */
+  --label-case: none;
 
   /* ── Chart series ── */
   --chart-primary: #7d9df2;
@@ -314,7 +316,7 @@ body,
    width as it ticks just like one in a table. */
 body {
   font-size: 13.5px;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased;

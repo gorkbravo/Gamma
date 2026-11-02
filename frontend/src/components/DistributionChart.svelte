@@ -188,8 +188,8 @@
     inset: 0;
     display: grid;
     place-items: center;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .tooltip rect {

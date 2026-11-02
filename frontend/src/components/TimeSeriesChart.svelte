@@ -420,8 +420,8 @@
     place-items: center;
     color: var(--text-2);
     background: var(--bg-0);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 </style>

@@ -1355,6 +1355,12 @@
       .toUpperCase();
   }
 
+  /** Status codes (LIVE, MOCKED, N/A) read in sentence case in the labels; N/A stays. */
+  function sentenceCase(value: string) {
+    if (!value || value === "N/A") return value;
+    return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+  }
+
   /** Provider labels are written for prose; the status table needs the identity only. */
   function shortProviderLabel(value: string | null | undefined) {
     return (value ?? "")
@@ -1523,8 +1529,8 @@
           ? "Some boards returned no rows. Reload the affected panel or check Provider Status."
           : "Every board loaded with no open provider incidents.";
   $: oldestSectionLabel = oldestSection
-    ? `OLDEST ${oldestSection.label.toUpperCase()} ${formatSitrepSectionAge(oldestSection.retrievedAt).toUpperCase()}`
-    : "OLDEST N/A";
+    ? `Oldest ${oldestSection.label.toLowerCase()} ${formatSitrepSectionAge(oldestSection.retrievedAt)}`
+    : "Oldest N/A";
   $: oldestSectionDetail = oldestSection
     ? `${oldestSection.label} is the least recently refreshed board on this page, retrieved ${formatDateTimeWithZone(oldestSection.retrievedAt)}.`
     : "No board has reported a retrieval timestamp yet.";
@@ -1540,7 +1546,7 @@
 <section class="view">
   <article class="panel tape-header-strip">
     <div class="header-identity">
-      <span class="title">SITREP</span>
+      <span class="title">Sitrep</span>
     </div>
     <div class="equity-strip" aria-label="US equity tape">
       {#if equityRows.length}
@@ -1568,18 +1574,18 @@
     <div class="status-line">
       <span class="status-cell">
         <Tooltip heading="Sitrep state" text={sitrepStateDetail} placement="bottom" hint>
-          <b class:warning={sitrepState !== "LIVE"}>{sitrepState}</b>
+          <b class:warning={sitrepState !== "LIVE"}>{sentenceCase(sitrepState)}</b>
         </Tooltip>
       </span>
       <span class="status-cell">
         <Tooltip heading="Market data" text={providerModeDetail} placement="bottom" hint>
-          <b>{providerMode}</b>
+          <b>{sentenceCase(providerMode)}</b>
         </Tooltip>
       </span>
       {#if warnings.length > 0}
         <span class="status-cell">
           <Tooltip heading="Open provider incidents" placement="bottom" hint maxWidth="30rem">
-            <b class="warning">{warnings.length} WARN</b>
+            <b class="warning">{warnings.length} {warnings.length === 1 ? "warning" : "warnings"}</b>
             <svelte:fragment slot="content">
               <ul class="tooltip-list warning-items">
                 {#each warnings as warning}
@@ -1624,7 +1630,7 @@
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
+          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("Chg", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("% chg", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1650,7 +1656,7 @@
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="Chg (1D)" pctChangeLabel="% chg (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
@@ -1877,7 +1883,7 @@
               {/if}
             {/each}
           {:else}
-            <p class="empty-state">NO SAVED FOLLOW-UPS — STAR A TRIAGE ROW TO TRACK IT.</p>
+            <p class="empty-state">No saved follow-ups — star a triage row to track it.</p>
           {/if}
         </div>
       </article>
@@ -1911,7 +1917,7 @@
                 <td class="status-state" class:warning={row.warn}>
                   {#if row.warnings.length}
                     <Tooltip heading={`${row.domain} incidents`} maxWidth="28rem">
-                      <span class="state-text">{row.freshness}</span>
+                      <span class="state-text">{sentenceCase(row.freshness)}</span>
                       <span class="warn-flag">!{row.warnings.length}</span>
                       <svelte:fragment slot="content">
                         <ul class="tooltip-list warning-items">
@@ -1922,7 +1928,7 @@
                       </svelte:fragment>
                     </Tooltip>
                   {:else}
-                    <span class="state-text">{row.freshness}</span>
+                    <span class="state-text">{sentenceCase(row.freshness)}</span>
                   {/if}
                 </td>
                 <td class="right" class:warning={row.warn}>
@@ -1939,7 +1945,7 @@
                 class="status-state"
                 class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}
               >
-                <span class="state-text">{tvStatus}</span>
+                <span class="state-text">{sentenceCase(tvStatus)}</span>
               </td>
               <td class="right">external</td>
             </tr>
@@ -1990,17 +1996,17 @@
   }
 
   .table-title span {
-    font-size: var(--text-xs);
+    font-size: var(--text-title);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
     white-space: nowrap;
   }
 
   .table-title small {
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2089,10 +2095,10 @@
 
   .header-identity .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   p {
@@ -2175,7 +2181,7 @@
     padding: var(--space-4) var(--space-5);
     color: var(--text-2);
     font-size: var(--text-sm);
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
   }
 
   @keyframes strip-scroll {
@@ -2195,8 +2201,8 @@
     gap: 0;
     color: var(--text-2);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     white-space: nowrap;
   }
 
@@ -2230,9 +2236,9 @@
 
   .tape-row span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .tape-row small {
@@ -2343,8 +2349,8 @@
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     padding: var(--space-1) var(--space-3);
     cursor: pointer;
   }
@@ -2446,7 +2452,7 @@
   .video-state strong {
     color: var(--text-0);
     font-size: var(--text-xs);
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
   }
 
   .video-state span {
@@ -2534,8 +2540,8 @@
   .news-empty {
     padding: var(--space-5);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
     margin: 0;
   }
@@ -2569,10 +2575,10 @@
 
   .status-table thead th {
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .status-table tbody tr:last-child th,
@@ -2583,8 +2589,8 @@
   .status-table tbody th {
     color: var(--text-1);
     font-weight: 400;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2617,8 +2623,8 @@
   }
 
   .status-table .state-text {
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .status-table .warn-flag {
@@ -2632,8 +2638,8 @@
     margin: 0;
     padding: var(--space-4) var(--space-5);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 
