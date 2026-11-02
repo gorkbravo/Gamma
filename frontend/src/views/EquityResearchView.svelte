@@ -2170,7 +2170,7 @@
     letter-spacing: 0.12em;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }

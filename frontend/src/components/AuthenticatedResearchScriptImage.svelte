@@ -49,7 +49,7 @@
   }
 
   .image-state {
-    color: var(--text-3);
+    color: var(--text-2);
     font-size: var(--text-xs);
   }
 </style>

@@ -1032,11 +1032,11 @@
 
   .session-row:hover,
   .session-row.active {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
   }
 
   .session-row.active {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .session-row.active .session-title {
@@ -1249,7 +1249,7 @@
   }
 
   .context-option:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
   }
 
   .context-option:disabled {
@@ -1369,12 +1369,12 @@
   }
 
   .role-tabs button:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
     color: var(--text-0);
   }
 
   .role-tabs button.active {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
     color: var(--accent);
   }
 
@@ -1447,7 +1447,7 @@
     padding: var(--space-4) var(--space-5);
     border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
     border-radius: 6px;
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--accent-soft);
     color: var(--text-0);
     font-size: var(--text-base);
     line-height: 1.5;

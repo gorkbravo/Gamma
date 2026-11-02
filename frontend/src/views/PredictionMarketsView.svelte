@@ -2599,7 +2599,7 @@
 
   .ghost-button.selected {
     border-color: color-mix(in srgb, var(--accent) 36%, transparent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .filter-row {
@@ -2672,7 +2672,7 @@
 
   .segmented button.selected {
     color: var(--text-0);
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
   }
 
   label.inline {
@@ -2752,7 +2752,7 @@
 
   .venue-picker button.selected {
     border-color: color-mix(in srgb, var(--accent) 36%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
   }
 
   .venue-picker button.selected.fresh strong {
@@ -2787,7 +2787,7 @@
 
   .side-toggle button.selected {
     color: var(--text-0);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .strategy-actions {
@@ -2809,7 +2809,7 @@
   .badge-stack span,
   .tag-chip {
     border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    background: var(--accent-soft);
     color: var(--text-1);
     padding: var(--space-1) var(--space-3);
     text-transform: uppercase;
@@ -3077,25 +3077,25 @@
   .badge-stack span.fresh,
   .tag-chip.fresh {
     border-color: color-mix(in srgb, var(--positive) 35%, transparent);
-    background: color-mix(in srgb, var(--positive) 8%, transparent);
+    background: var(--positive-soft);
   }
 
   .badge-stack span.stale,
   .tag-chip.stale {
     border-color: color-mix(in srgb, var(--warning) 35%, transparent);
-    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    background: var(--warning-soft);
   }
 
   .badge-stack span.delayed,
   .tag-chip.delayed {
     border-color: color-mix(in srgb, var(--accent) 36%, transparent);
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--accent-soft);
   }
 
   .badge-stack span.broken,
   .tag-chip.broken {
     border-color: color-mix(in srgb, var(--negative) 35%, transparent);
-    background: color-mix(in srgb, var(--negative) 12%, transparent);
+    background: var(--negative-soft);
   }
 
   .venue-label {

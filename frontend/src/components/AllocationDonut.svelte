@@ -401,7 +401,7 @@
   }
 
   .legend-row.active {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
   }
 
   .positive {

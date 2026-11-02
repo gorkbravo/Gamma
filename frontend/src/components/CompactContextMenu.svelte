@@ -105,7 +105,7 @@
 
   .compact-context-menu button:hover,
   .compact-context-menu button:focus-visible {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
     color: var(--text-0);
     outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
     outline-offset: -1px;

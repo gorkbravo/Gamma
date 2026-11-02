@@ -291,7 +291,7 @@
   }
 
   .focus-card:hover {
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    background: var(--hover-bg);
     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
   }
 
@@ -362,7 +362,7 @@
     transition: background 120ms ease;
   }
 
-  .snapshot-row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .snapshot-row:hover { background: var(--hover-bg); }
 
   .snapshot-row:focus-visible {
     outline: 1px solid var(--accent);
@@ -536,7 +536,7 @@
     padding: var(--space-3) 0;
   }
 
-  .list-row.interactive:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .list-row.interactive:hover { background: var(--hover-bg); }
   .list-row.interactive:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .list-row.interactive:last-child { border-bottom: 0; }
 

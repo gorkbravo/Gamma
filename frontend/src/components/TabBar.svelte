@@ -359,7 +359,7 @@
 
   .tab-button.selected,
   .tab-row.selected .tab-button {
-    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    background: var(--active-bg);
     border-color: color-mix(in srgb, var(--accent) 32%, transparent);
     box-shadow: inset 2px 0 0 var(--accent);
     color: var(--text-0);

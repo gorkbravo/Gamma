@@ -570,7 +570,7 @@
     display: grid;
     place-items: center;
     padding: var(--space-6);
-    background: color-mix(in srgb, var(--bg-0) 78%, transparent);
+    background: var(--scrim);
   }
 
   /* Superficie de overlay: el único caso en que el modelo de planos admite sombra. */
@@ -750,7 +750,7 @@
 
   .mode.selected {
     border-color: color-mix(in srgb, var(--accent) 60%, var(--panel-strong));
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
   }
 
   .modes:disabled .mode {

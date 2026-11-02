@@ -1755,13 +1755,13 @@
   tbody tr.handoff-row:focus-visible td {
     outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
     outline-offset: -1px;
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
   }
 
   tr.atm td,
   th.atm-strike {
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--accent-soft);
   }
 
   /* Option chain: calls left, strike center, puts right. */
@@ -1776,7 +1776,7 @@
 
   /* In-the-money side shaded blue (call side when strike < spot, put side when strike > spot). */
   .chain-table td.itm {
-    background: color-mix(in srgb, var(--accent) 11%, transparent);
+    background: var(--accent-soft);
   }
 
   /* ATM row in accent amber, overriding ITM shading. */
@@ -1922,7 +1922,7 @@
   }
 
   .surface-table td.cross {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
   }
 
   .surface-table td.cell-hi {

@@ -569,7 +569,7 @@
     gap: var(--space-2);
     padding: var(--space-3);
     border-left: 2px solid var(--warning);
-    background: color-mix(in srgb, var(--warning) 4%, transparent);
+    background: var(--warning-soft);
   }
 
   .copilot-error > strong {

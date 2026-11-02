@@ -2483,7 +2483,7 @@
   }
 
   .scenario-card.selected-scenario {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
     color: var(--accent);
   }
 
@@ -2511,7 +2511,7 @@
     letter-spacing: 0.12em;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }
@@ -2519,7 +2519,7 @@
   .secondary-pill {
     color: var(--warning);
     border-color: color-mix(in srgb, var(--warning) 28%, transparent);
-    background: color-mix(in srgb, var(--warning) 6%, transparent);
+    background: var(--warning-soft);
   }
 
   label,
@@ -3159,7 +3159,7 @@
 
   .selected-col,
   .selected-cell {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
   }
 
   .selected-cell .heat-cell {
@@ -3214,7 +3214,7 @@
   }
 
   .overridden-cell {
-    background: color-mix(in srgb, var(--warning) 7%, transparent);
+    background: var(--warning-soft);
   }
 
   .positive {

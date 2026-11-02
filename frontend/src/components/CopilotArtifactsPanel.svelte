@@ -542,7 +542,7 @@
 
   .artifact-list > button:hover,
   .artifact-list > button.active {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .artifact-list > button.active .artifact-type {
@@ -565,7 +565,7 @@
 
   .mode-tabs button.active {
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .mode-tabs span {

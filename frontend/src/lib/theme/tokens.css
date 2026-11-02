@@ -71,100 +71,105 @@
   --motion-base: 180ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
-  /* ── Background layers (shifted to true neutral) ──
-     --canvas is the page behind the panels; in the dark theme it is the
-     panel colour itself, so only borders and the dot grid separate them. */
-  --bg-0: #070809;
-  --bg-1: #0b0d10;
-  --bg-2: #0f1114;
-  --bg-3: #131618;
+  /* ── Background layers (B′ dark) ──
+     --canvas is the page behind the panels; --bg-0 is the sheet a panel
+     paints on it and --bg-1 the tint (fields, header bands, stat blocks).
+     --bg-2 and --bg-3 are the rule and line steps above the tint. */
+  --bg-0: #151a20;
+  --bg-1: #1b2129;
+  --bg-2: #212830;
+  --bg-3: #232a33;
 
-  /* ── Surfaces (solid, same-temperature as bg-0 — plane model) ── */
-  --surface-0: #0a0b0c;
-  --surface-1: #0b0d10;
-  --surface-2: #141719;
-  --surface-soft: rgba(10, 12, 14, 0.62);
+  /* ── Surfaces (solid, same temperature as the sheet) ──
+     --surface-0 is a step above the sheet, for overlays and inset cards. */
+  --surface-0: #181d24;
+  --surface-1: #1b2129;
+  --surface-2: #222933;
+  --surface-soft: rgba(27, 33, 41, 0.72);
   --panel-bg: var(--bg-0);
-  --canvas: var(--bg-0);
-  /* The quiet fill for fields and a tinted table header band; today the
-     control background. */
+  --canvas: #0b0e12;
+  /* The quiet fill for fields, the table header band and KPI blocks. */
   --tint: var(--bg-1);
 
-  /* ── Borders & dividers ── */
-  --panel-border: #2f3641;
-  --panel-strong: #46505e;
-  --divider: rgba(70, 80, 94, 0.55);
+  /* ── Borders & dividers ── line (overlay and control edges), line strong,
+     and the rule between rows and inner sections. */
+  --panel-border: #232a33;
+  --panel-strong: #343d49;
+  --divider: #212830;
 
   /* ── Text ── */
-  --text-0: #f0f2f5;
-  --text-1: #c2c8d0;
-  --text-2: #8a919a;
+  --text-0: #edf1f6;
+  --text-1: #b8c1cc;
+  --text-2: #808b99;
   /* Text on a heat-map fill (treemap tiles, payoff and IV grids): neutral,
      because the fill carries the tone and the sign the direction. A tone or
      muted colour on a strong fill falls below WCAG AA. */
   --heat-text: var(--text-0);
 
-  /* ── Interactive accent (blue stays for interactive elements) ── */
-  --accent: #7aa6c8;
+  /* ── Interactive accent (interaction and the primary series) ── */
+  --accent: #7d9df2;
   /* The accent's channels, for translucent gradient stops written
      rgba(var(--accent-rgb), α): exact, where a color-mix() stop is not. */
-  --accent-rgb: 122, 166, 200;
-  --accent-2: #c49a5a;
+  --accent-rgb: 125, 157, 242;
+  /* The context gold: comparison series, context tags. Equals --warning. */
+  --accent-2: #e0aa50;
 
   /* ── Semantic: status ── */
-  --positive: #4bb474;
-  --negative: #d97a70;
-  --warning: #c49a5a;
+  --positive: #45c48b;
+  --negative: #f2806f;
+  --warning: #e0aa50;
   /* The red that soft negative fills, outlines and heat maps mix from, a
      shade darker than --negative so a filled cell does not shout. */
-  --negative-muted: #c66b61;
+  --negative-muted: #dc7465;
 
   /* ── Soft fills ──
      A semantic colour mixed into transparent, for tag and chip fills, stale
-     and conflict cells and heat maps. The strengths are the tinted tag's;
-     a view that needs another strength mixes the base token inline, e.g.
-     color-mix(in srgb, var(--accent) 10%, transparent). */
-  --accent-soft: color-mix(in srgb, var(--accent) 6%, transparent);
-  --positive-soft: color-mix(in srgb, var(--positive) 6%, transparent);
-  --negative-soft: color-mix(in srgb, var(--negative-muted) 8%, transparent);
-  --warning-soft: color-mix(in srgb, var(--warning) 8%, transparent);
+     and conflict cells and selected rows: 14% in dark, 9% (accent) and 13%
+     (semantic) in light. Hover and selection have their own tokens below. A
+     view that encodes magnitude (a heat map) mixes the base token inline at
+     graded strengths. */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --positive-soft: color-mix(in srgb, var(--positive) 14%, transparent);
+  --negative-soft: color-mix(in srgb, var(--negative-muted) 14%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
 
   /* ── Categorical (unordered classes: vessel types, sectors, venues) ──
-     Intensity tokens encode magnitude; these encode identity. Kept in the
-     same muted register and at similar luminance so no class shouts. */
-  --cat-1: #7aa6c8;   /* blue */
-  --cat-2: #4bb474;   /* green */
-  --cat-3: #c49a5a;   /* gold */
-  --cat-4: #d97a70;   /* red */
+     Intensity tokens encode magnitude; these encode identity. The first
+     four follow the accent and semantic colours; all reach 3:1 on the
+     sheet. */
+  --cat-1: #7d9df2;   /* blue */
+  --cat-2: #45c48b;   /* green */
+  --cat-3: #e0aa50;   /* gold */
+  --cat-4: #f2806f;   /* red */
   --cat-5: #5fa89c;   /* teal */
   --cat-6: #9a8ac4;   /* violet */
   --cat-7: #8595a8;   /* slate */
   --cat-8: #9aae7a;   /* sage */
 
   /* ── Semantic: data intensity ── */
-  --data-hot: #4bb474;
-  --data-warm: #c49a5a;
+  --data-hot: #45c48b;
+  --data-warm: #e0aa50;
   --data-cool: #6ba3c4;
-  --data-cold: #8a919a;
+  --data-cold: #808b99;
   --data-elevated: #d4a054;
   --data-extreme: #d66868;
 
   /* ── Legacy values ──
-     Colours that views use but no role token carries yet. Each keeps the
-     exact value its rules had, so moving the rules onto tokens changed no
-     pixel. */
-  --rule-navy: #2e3c4a;   /* rules and outlines in the Macro and Copilot cards, chart axes */
-  --track: #273544;       /* the unfilled part of bar, gauge and band tracks */
-  --chart-halo: #070b10;  /* tooltip backing and dot outlines in the SVG charts */
+     Colours that views use but no role token carries yet, restated on the
+     B′ neutrals. */
+  --rule-navy: #343d49;   /* rules and outlines in the Macro and Copilot cards, chart axes */
+  --track: #2b333e;       /* the unfilled part of bar, gauge and band tracks */
+  --chart-halo: #151a20;  /* tooltip backing and dot outlines in the SVG charts */
   --chart-history: rgba(244, 247, 251, 0.94);       /* the FanChart history line */
   --chart-history-halo: rgba(244, 247, 251, 0.12);  /* and its halo */
-  --popover-bg: rgba(8, 13, 18, 0.98);              /* the Settings popover */
+  --popover-bg: rgba(21, 26, 32, 0.98);             /* the Settings popover */
 
   /* ── Shadows and scrim ── every shadow mixes from --shadow-ink. */
   --shadow-ink: #000;
   --shadow: color-mix(in srgb, var(--shadow-ink) 24%, transparent);
-  /* Dims the workspace behind the navigation drawer. */
-  --scrim: color-mix(in srgb, var(--bg-0) 45%, transparent);
+  /* Dims the workspace behind overlays: the navigation drawer, the Copilot
+     card and the Setup dialog. */
+  --scrim: rgba(0, 0, 0, 0.45);
 
   /* ── Label case ── the chrome labels in primitives.css (eyebrows, view and
      panel titles, column headers, stat and KPI labels, tags) take their
@@ -172,44 +177,40 @@
   --label-case: uppercase;
 
   /* ── Chart series ── */
-  --chart-primary: #7aa6c8;
-  --chart-secondary: #c49a5a;
-  --chart-negative: #cc6f64;
+  --chart-primary: #7d9df2;
+  --chart-secondary: #e0aa50;
+  --chart-negative: #dc7465;
 
   /* ── Value flash ── the colour a ticking value flashes before it fades.
      Written out rather than mixed from --positive, --negative and
      --accent-2: an animated colour interpolates in floating point, so a
      mixed start colour would land one level off. */
-  --flash-up: rgba(75, 180, 116, 0.22);
-  --flash-down: rgba(217, 122, 112, 0.22);
-  --flash-neutral: rgba(196, 154, 90, 0.18);
+  --flash-up: rgba(69, 196, 139, 0.22);
+  --flash-down: rgba(242, 128, 111, 0.22);
+  --flash-neutral: rgba(224, 170, 80, 0.18);
   --flash-duration: 800ms;
-
-  /* ── Canvas dot ── the accent at 7%, written out: a color-mix() stop in a
-     gradient interpolates in floating point and moves edge pixels by one
-     level, where a flat fill paints identically. */
-  --canvas-dot: rgba(122, 166, 200, 0.07);
 
   /* ── Table stripe ── */
   --table-stripe: color-mix(in srgb, var(--accent) 1.8%, transparent);
 
-  /* ── Interaction states ── */
+  /* ── Interaction states ── B′: hover 6% and selection 14% of the accent
+     in dark (4% and 9% in light); a solid focus ring, 3:1 on the sheet and
+     on the tint. */
   --hover-bg: color-mix(in srgb, var(--accent) 6%, transparent);
-  --active-bg: color-mix(in srgb, var(--accent) 12%, transparent);
-  /* 60%, not the earlier 55%, to reach 3:1 on the panel (WCAG focus). */
-  --focus-ring: color-mix(in srgb, var(--accent) 60%, transparent);
+  --active-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+  --focus-ring: var(--accent);
 }
 
 /* ── Theme: light ──
    data-theme="light" on <html> (src/lib/stores/appearance.ts) layers these
-   values over the dark block above. Colours follow the B′ light palette in
+   values over the dark block above. Both blocks follow the B′ palette in
    docs/visual_refresh_plan.md, a shade darker where the contrast test
-   needed it (--text-2, the semantic colours on their 13% fills); the
-   structure (borders, mono figures, uppercase labels) stays until V4. Tokens that script reads (--divider,
-   --accent, the chart, semantic, text and surface colours) stay literal hex,
-   as in the dark block. Derived tokens (--panel-bg, --tint, the soft fills,
-   --scrim, --table-stripe) follow their bases unless restated here. The
-   contrast test (contrast.test.ts) checks WCAG AA for both blocks. */
+   needed it (--text-2, the semantic colours on their 13% fills). Tokens that
+   script reads (--divider, --accent, the chart, semantic, text and surface
+   colours) stay literal hex, as in the dark block. Derived tokens
+   (--panel-bg, --tint, the soft fills, --table-stripe) follow their bases
+   unless restated here. The contrast test (contrast.test.ts) checks WCAG AA
+   for both blocks. */
 :root[data-theme="light"] {
   color-scheme: light;
 
@@ -224,11 +225,10 @@
   --surface-2: #e9edf2;
   --surface-soft: rgba(244, 246, 249, 0.72);
 
-  /* Edges: slightly stronger than B′'s lines, because V3 keeps the panel
-     borders that B′ removes. */
-  --panel-border: #dce1e8;
-  --panel-strong: #c3cbd6;
-  --divider: #e1e6ec;
+  /* Edges: B′ line, line strong and rule. */
+  --panel-border: #e3e7ec;
+  --panel-strong: #cfd6df;
+  --divider: #eef1f4;
 
   --text-0: #0f1720;
   --text-1: #3b4655;
@@ -285,9 +285,6 @@
   --flash-down: rgba(184, 51, 41, 0.16);
   --flash-neutral: rgba(138, 90, 0, 0.14);
 
-  /* B′ drops the dot grid. */
-  --canvas-dot: transparent;
-
   /* B′ hover 4% and selection 9% of the accent; a solid focus ring. */
   --hover-bg: color-mix(in srgb, var(--accent) 4%, transparent);
   --active-bg: color-mix(in srgb, var(--accent) 9%, transparent);
@@ -299,12 +296,8 @@ body,
 #app {
   margin: 0;
   min-height: 100%;
+  /* A flat canvas: B′ has no texture; panels are sheets on it. */
   background-color: var(--canvas);
-  /* Canvas dot grid — the app's only texture. Panels are solid --bg-0, so
-     dots show only in seams and empty canvas. Must stay dimmer than --text-2
-     so it never competes with labels; 24px steps match --space-7. */
-  background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1px);
-  background-size: 24px 24px;
   color: var(--text-0);
 }
 
@@ -466,7 +459,7 @@ tbody tr:nth-child(even) {
 
 /* ── Table row hover (global, subtle) ── */
 tbody tr:hover {
-  background: color-mix(in srgb, var(--accent) 4.5%, transparent);
+  background: var(--hover-bg);
 }
 
 /* ── Reduced motion ──

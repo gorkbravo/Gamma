@@ -249,7 +249,7 @@
   .search-result:hover,
   .search-result.selected {
     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
     color: var(--text-0);
   }
 

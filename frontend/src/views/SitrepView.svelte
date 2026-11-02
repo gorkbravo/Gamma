@@ -2151,7 +2151,7 @@
   }
 
   .strip-item.selected {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    background: var(--active-bg);
   }
 
   .strip-item strong,

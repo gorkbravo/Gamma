@@ -382,7 +382,7 @@
     position: fixed;
     inset: 0;
     z-index: 44;
-    background: color-mix(in srgb, var(--shadow-ink) 40%, transparent);
+    background: var(--scrim);
   }
 
   .drawer {
@@ -472,7 +472,7 @@
 
   .user-bubble {
     justify-self: end;
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--accent-soft);
     border-color: color-mix(in srgb, var(--accent) 30%, transparent);
     border-top-right-radius: 2px;
   }
@@ -511,7 +511,7 @@
 
   .context-pill.active {
     border-color: color-mix(in srgb, var(--accent) 36%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
     color: var(--accent);
   }
 
@@ -634,7 +634,7 @@
 
   .role-row button.active {
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .effort-select {
