@@ -2316,4 +2316,15 @@
       border-bottom: 1px solid var(--panel-strong);
     }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .source-strip strong,
+  .metric strong,
+  .metric-list strong,
+  .smile-label,
+  .price-col,
+  .surface-table th {
+    font-family: var(--font-num);
+  }
 </style>

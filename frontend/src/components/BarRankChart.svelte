@@ -96,4 +96,10 @@ function barWidth(value: number, maxAbs: number) {
     font-size: var(--text-xs);
     padding: var(--space-4) var(--space-5);
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .head strong {
+    font-family: var(--font-num);
+  }
 </style>

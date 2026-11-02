@@ -86,4 +86,10 @@
   /* The chip is .tag.is-tinted from primitives.css; this row's warning
      outline is a shade lighter. */
   .tag.is-tinted.warning { border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .meta-stat {
+    font-family: var(--font-num);
+  }
 </style>

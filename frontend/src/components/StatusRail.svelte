@@ -3,6 +3,7 @@
   import { getWorkspaceLabel } from "../lib/navigation";
   import {
     DATA_FIGURE_FONTS,
+    DEFAULT_DATA_FIGURES_LABEL,
     dataFigureFont,
     setDataFigureFont,
     setThemePreference,
@@ -272,7 +273,7 @@
             value={$dataFigureFont}
             on:change={(event) => setDataFigureFont(event.currentTarget.value as DataFigureFont)}
           >
-            <option value="">Default</option>
+            <option value="">{DEFAULT_DATA_FIGURES_LABEL}</option>
             {#each DATA_FIGURE_FONTS as font}
               <option value={font}>{font}</option>
             {/each}

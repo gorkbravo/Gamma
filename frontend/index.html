@@ -5,6 +5,8 @@
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/gamma-mark.svg" />
+    <!-- The interface font's regular weight, so text does not first paint in a fallback (src/lib/theme/fonts.css). -->
+    <link rel="preload" href="/fonts/instrument-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <title>Gamma</title>
     <script>
       // Apply the stored theme before first paint; mirrors resolveTheme() in

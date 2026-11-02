@@ -423,4 +423,10 @@
     letter-spacing: 0.08em;
     font-size: var(--text-sm);
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .legend-value {
+    font-family: var(--font-num);
+  }
 </style>

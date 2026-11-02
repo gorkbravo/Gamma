@@ -1643,4 +1643,13 @@
       text-align: left;
     }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .headline-kpi-value,
+  .focus-value,
+  .focus-row strong,
+  .meta-row strong {
+    font-family: var(--font-num);
+  }
 </style>

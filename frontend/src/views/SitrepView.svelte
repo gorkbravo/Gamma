@@ -2684,4 +2684,11 @@
       gap: var(--space-1);
     }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .strip-item em,
+  .strip-item b {
+    font-family: var(--font-num);
+  }
 </style>

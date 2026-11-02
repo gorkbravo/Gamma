@@ -816,4 +816,10 @@
     height: 0.5rem;
     border: 1px solid var(--panel-border);
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .surface3d-legend span {
+    font-family: var(--font-num);
+  }
 </style>

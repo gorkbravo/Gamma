@@ -3619,4 +3619,12 @@
 
     .ctx-kpis { margin-left: 0; border-left: 0; border-top: 1px solid var(--divider); width: 100%; padding-top: var(--space-3); }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .inline-stats strong,
+  .ctx-kpi strong,
+  .rank-value {
+    font-family: var(--font-num);
+  }
 </style>

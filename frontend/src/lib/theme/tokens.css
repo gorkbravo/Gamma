@@ -1,3 +1,4 @@
+@import "./fonts.css";
 @import "./primitives.css";
 
 :root {
@@ -6,22 +7,25 @@
   /* ── Font roles ──
      Every font-family in the app names one of four roles, so a restyle sets
      one value per role instead of editing rules across views:
-       --font-ui     chrome, headings, buttons and prose
+       --font-ui     chrome, headings, buttons and prose; the document default
        --font-label  the small labels above data: eyebrows, column headers,
                      stat and field labels
-       --font-num    data figures, which must align in a column
+       --font-num    data figures, which must align in a column: table cells,
+                     stat and KPI values, figures in cards and charts
        --font-code   code, raw JSON and model output, the Script editor
-     Today ui and label are the sans and num and code the mono. The document
-     still defaults to --font-num, so data cells need no class. The Settings
-     "Data figures" choice overrides --font-num on the root element. */
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
+     ui, label and num are Instrument Sans (fonts.css); num differs only in
+     its tabular figures, which the body turns on for the whole document.
+     Data surfaces name --font-num explicitly, so the Settings "Data figures"
+     choice, which overrides --font-num on the root element, turns figures
+     monospace and leaves labels and prose in the interface font. */
+  --font-ui: "Instrument Sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Roboto, sans-serif;
   --font-label: var(--font-ui);
-  --font-num: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
-  --font-code: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  --font-num: "Instrument Sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Roboto, sans-serif;
+  --font-code: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas", monospace;
   /* Aliases for the old names; new rules use the roles above. */
   --app-font: var(--font-num);
   --display-font: var(--font-ui);
-  font-family: var(--font-num), monospace;
+  font-family: var(--font-ui);
 
   /* ── Radius scale (small, consistent — not consumer-app rounding) ──
      Applies to top-level surfaces and controls only. Anything nested
@@ -304,10 +308,13 @@ body,
   color: var(--text-0);
 }
 
+/* Tabular figures for the whole document, so a figure in chrome holds its
+   width as it ticks just like one in a table. */
 body {
   font-size: 13.5px;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -390,6 +397,12 @@ h4 {
 /* Column headers are labels (chrome), not data */
 thead th {
   font-family: var(--font-label);
+}
+
+/* Table cells are data: they take the figures role, so the Data figures
+   choice reaches every table. A view's scoped cell rule still wins. */
+td {
+  font-family: var(--font-num);
 }
 
 * {

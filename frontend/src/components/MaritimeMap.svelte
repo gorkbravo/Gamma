@@ -2369,4 +2369,11 @@
       width: 100%;
     }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .hud-value,
+  .coverage-chip-value {
+    font-family: var(--font-num);
+  }
 </style>

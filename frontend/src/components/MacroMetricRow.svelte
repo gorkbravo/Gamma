@@ -101,4 +101,11 @@
       flex: 1 1 45%;
     }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .metric-value,
+  .metric-delta {
+    font-family: var(--font-num);
+  }
 </style>

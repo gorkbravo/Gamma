@@ -168,11 +168,20 @@
   font-weight: 400;
 }
 
+/* ── Figure ───────────────────────────────────────────────────────────────
+   .num marks a quantity, in a table or outside one (a value in a card or a
+   rail row), and takes the figures role, so the Data figures setting reaches
+   it. Zero specificity: a column header (`thead th` in tokens.css) keeps the
+   label font, and a view's scoped rule still wins. */
+:where(.num) {
+  font-family: var(--font-num);
+}
+
 /* ── Prose ────────────────────────────────────────────────────────────────
-   Sans, because mono is for values that have to align in a column. A filing
-   summary or a provenance note is neither, and a paragraph of monospace at
-   full width is the slowest thing in the app to read. Bounded measure so
-   lines stay scannable on a wide display. */
+   The interface font even inside a data surface, because a filing summary or
+   a provenance note is not a figure, and a paragraph in a monospace Data
+   figures choice is the slowest thing in the app to read. Bounded measure
+   so lines stay scannable on a wide display. */
 .prose.prose {
   font-family: var(--font-ui);
   line-height: var(--leading-normal);
@@ -249,6 +258,7 @@
 
 .header-kpi strong {
   color: var(--text-0);
+  font-family: var(--font-num);
   font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1.15;
@@ -293,8 +303,7 @@
    key/value). A bare `th, td` rule here would also reach the few tables that
    are not data tables (the Setup grid, the Sitrep status table, the Options
    payoff heat map), so the class stays opt-in. Column headers take
-   --font-label from tokens.css (`thead th`); cells stay on --font-num with
-   tabular figures. */
+   --font-label and cells --font-num from tokens.css (`thead th`, `td`). */
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -680,6 +689,7 @@ textarea.form-control {
   display: block;
   padding: var(--space-1) 0 0.05rem;
   color: var(--text-0);
+  font-family: var(--font-num);
   font-size: var(--text-md);
   line-height: 1.2;
 }

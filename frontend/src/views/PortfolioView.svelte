@@ -1633,4 +1633,11 @@
       width: 100%;
     }
   }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .metric strong,
+  .row strong {
+    font-family: var(--font-num);
+  }
 </style>
