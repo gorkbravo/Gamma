@@ -32,3 +32,16 @@ export function normalizeChartData(points: readonly TimeValuePoint[]): TimeValue
   }
   return deduped;
 }
+
+/**
+ * Week-over-week change of a daily series as a fraction: the latest value
+ * against the one `sessions` observations earlier (five trading sessions by
+ * default). Null when the series is too short or the base is zero.
+ */
+export function weekOverWeekChange(values: ReadonlyArray<number | null | undefined>, sessions = 5): number | null {
+  const series = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (series.length <= sessions) return null;
+  const latest = series[series.length - 1];
+  const base = series[series.length - 1 - sessions];
+  return base === 0 ? null : latest / base - 1;
+}

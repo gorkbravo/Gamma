@@ -1972,7 +1972,7 @@
   }
 
   .prob-area {
-    fill: color-mix(in srgb, var(--chart-primary) 10%, transparent);
+    fill: color-mix(in srgb, var(--chart-primary) 9%, transparent);
   }
 
   .prob-selected {
@@ -1982,7 +1982,9 @@
   .prob-line {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.7;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .prob-dot {
@@ -2127,7 +2129,7 @@
   }
 
   .smile-axis {
-    stroke: var(--divider);
+    stroke: var(--panel-strong);
     stroke-width: 1;
   }
 
@@ -2139,14 +2141,15 @@
   }
 
   .smile-area {
-    fill: color-mix(in srgb, var(--chart-primary) 15%, transparent);
+    fill: color-mix(in srgb, var(--chart-primary) 9%, transparent);
     stroke: none;
   }
 
   .smile-line {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.6;
+    stroke-width: 2;
+    stroke-linecap: round;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
   }

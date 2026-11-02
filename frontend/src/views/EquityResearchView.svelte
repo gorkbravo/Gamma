@@ -1189,7 +1189,6 @@
           label: result.benchmark_symbol,
           color: "var(--chart-secondary)",
           type: "line",
-          lineStyle: "dashed",
           data: cumulativeFromReturns(benchmark)
         });
       }
@@ -1210,7 +1209,6 @@
           label: compareResult.right.label,
           color: "var(--chart-secondary)",
           type: "line" as const,
-          lineStyle: "dashed" as const,
           data: compareResult.right.normalized_nav_points.map(toChartPoint)
         }
       ]

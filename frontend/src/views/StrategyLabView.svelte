@@ -612,7 +612,6 @@
                 label: activeStrategyResult.benchmark_column ?? "Benchmark",
                 color: "var(--chart-secondary)",
                 type: "line" as const,
-                lineStyle: "dashed" as const,
                 data: activeStrategyResult.benchmark_equity_curve_points.map(toChartPoint)
               }
             ]

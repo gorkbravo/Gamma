@@ -134,7 +134,11 @@
     const measuredHeight = Math.max(container.clientHeight || height, 1);
     const computedStyle = getComputedStyle(container);
     const divider = resolveChartColor("var(--divider)", computedStyle);
+    const baseline = resolveChartColor("var(--panel-strong)", computedStyle);
     const textMuted = resolveChartColor("var(--text-2)", computedStyle);
+    // Axis and crosshair labels in the figures font. Canvas text cannot turn
+    // on tabular figures, so these are the font's proportional digits.
+    const figuresFont = computedStyle.getPropertyValue("--font-num").trim() || undefined;
     const tickLabels = buildTickLabelMap();
     chart?.remove();
     chart = createChart(container, {
@@ -142,11 +146,13 @@
       height: measuredHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: textMuted
+        textColor: textMuted,
+        fontFamily: figuresFont
       },
+      // B′: no grid, only the baseline (the time axis edge) below the plot.
       grid: {
-        vertLines: { color: colorWithAlpha(divider, 0.36) },
-        horzLines: { color: colorWithAlpha(divider, 0.36) }
+        vertLines: { visible: false, color: colorWithAlpha(divider, 0.36) },
+        horzLines: { visible: false, color: colorWithAlpha(divider, 0.36) }
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -154,6 +160,7 @@
         horzLine: { color: colorWithAlpha(textMuted, 0.18) }
       },
       rightPriceScale: {
+        borderVisible: false,
         borderColor: divider,
         minimumWidth: 60,
         entireTextOnly: true,
@@ -163,7 +170,7 @@
         }
       },
       timeScale: {
-        borderColor: divider,
+        borderColor: baseline,
         timeVisible: true,
         secondsVisible: false,
         ...(tickLabels.size
@@ -248,8 +255,8 @@
         api = chart.addSeries(AreaSeries, {
           lineColor: resolvedColor,
           priceScaleId: item.priceScaleId,
-          topColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.012) : colorWithAlpha(resolvedColor, 0.2),
-          bottomColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.2) : colorWithAlpha(resolvedColor, 0.012),
+          topColor: colorWithAlpha(resolvedColor, 0.09),
+          bottomColor: colorWithAlpha(resolvedColor, 0.09),
           invertFilledArea: item.invertFilledArea ?? false,
           lineWidth: 2,
           pointMarkersVisible: item.showPointMarkers ?? false,

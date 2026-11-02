@@ -496,7 +496,6 @@
             : performance.benchmark_symbol,
         color: "var(--chart-secondary)",
         type: "line",
-        lineStyle: "dashed",
         data: performance.benchmark_points.map((point) => ({
           time: Math.floor(new Date(point.timestamp).getTime() / 1000),
           value: point.value

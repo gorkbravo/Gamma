@@ -3,6 +3,8 @@
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import CommodityCurveHistory from "../components/CommodityCurveHistory.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import Sparkline from "../components/Sparkline.svelte";
+  import { weekOverWeekChange } from "../lib/chart-data";
   import type {
     CommodityCrossDomainLink,
     CommodityCurveSnapshot,
@@ -119,6 +121,9 @@
     ? buildRankRowsFromOverview(overview.rankings.spread_z_score_outliers, "warning", true)
     : buildSpreadZRows(workspace?.spreads ?? []);
   $: historyPointCount = selectedHistory?.points.length ?? 0;
+  // The selected market's daily closes, for the "Last" KPI's trend.
+  $: lastValues = selectedHistory?.points.map((point) => point.value) ?? [];
+  $: lastWeekChange = weekOverWeekChange(lastValues);
   $: latestHistoryDate = selectedHistory?.points.at(-1)?.timestamp ?? selectedSummary?.retrieved_at ?? workspace?.retrieved_at ?? null;
   $: providerMixLabel = formatProviderMix(workspace);
   // GUA-20261021-4: el resumen general lista conflictos de datos y referencias caducadas.
@@ -383,7 +388,6 @@
               label: curve.previous_as_of ? `Previous curve (${formatDate(curve.previous_as_of)})` : "Previous curve",
               color: "var(--chart-secondary)",
               type: "line" as const,
-              lineStyle: "dashed" as const,
               showPointMarkers: true,
               pointMarkerRadius: 3,
               data: previous
@@ -1816,7 +1820,13 @@
             </div>
             <div class="ctx-kpi">
               <span>Last</span>
-              <strong class:absent={formatNumber(selectedSummary?.latest_price, 2) === "N/A"}>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
+              <span class="kpi-value-row">
+                <strong class:absent={formatNumber(selectedSummary?.latest_price, 2) === "N/A"}>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
+                <Sparkline values={lastValues} />
+                {#if lastWeekChange != null}
+                  <small class={valueClass(lastWeekChange)} title="Change over the last five sessions">{formatPct(lastWeekChange)} w/w</small>
+                {/if}
+              </span>
             </div>
             <div class="ctx-kpi wide">
               <span>Basis</span>
@@ -2819,6 +2829,24 @@
     text-overflow: ellipsis;
     max-width: 13rem;
   }
+
+  /* The value, its 20-session sparkline and the week-over-week change on
+     one baseline, so the block keeps its height. */
+  .kpi-value-row {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    white-space: nowrap;
+  }
+
+  .kpi-value-row small {
+    font-family: var(--font-num);
+    font-size: var(--text-xs);
+    line-height: 1.15;
+  }
+
+  .kpi-value-row small.positive { color: var(--positive); }
+  .kpi-value-row small.negative { color: var(--negative); }
 
   .ctx-kpi strong.positive { color: var(--positive); }
   .ctx-kpi strong.negative { color: var(--negative); }

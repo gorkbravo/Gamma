@@ -276,7 +276,7 @@
     .filter((point): point is HeroPricePoint => point.time != null && Number.isFinite(point.close));
   $: syntheticChartSeries = syntheticPortfolio ? [
     { id: "basket", label: "Synthetic basket", color: "var(--chart-primary)", type: "area", data: syntheticPortfolio.portfolio_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) },
-    { id: "benchmark", label: syntheticPortfolio.benchmark_label, color: "var(--chart-secondary)", type: "line", lineStyle: "dashed", data: syntheticPortfolio.benchmark_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) }
+    { id: "benchmark", label: syntheticPortfolio.benchmark_label, color: "var(--chart-secondary)", type: "line", data: syntheticPortfolio.benchmark_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) }
   ] : [];
   $: activeHeroSeries = heroCanvas === "basket" && syntheticChartSeries.length ? syntheticChartSeries : tokenChartSeries;
   $: if (heroCanvas === "basket" && syntheticPortfolio?.lookback_days && syntheticPortfolio.lookback_days !== heroLookbackDays) {
