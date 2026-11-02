@@ -278,8 +278,8 @@
   }
 
   .focus-card {
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 35%, transparent);
-    background: var(--surface-soft);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: inherit;
     font: inherit;
     padding: var(--space-5);
@@ -288,6 +288,7 @@
     text-align: left;
     cursor: pointer;
     transition: background 120ms ease, border-color 120ms ease;
+    border-radius: var(--panel-radius);
   }
 
   .focus-card:hover {

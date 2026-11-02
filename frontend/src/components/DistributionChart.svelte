@@ -149,8 +149,8 @@
 
 <style>
   .shell {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     position: relative;
     overflow: hidden;
   }

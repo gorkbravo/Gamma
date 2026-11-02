@@ -103,17 +103,18 @@
     position: relative;
     min-height: 26rem;
     aspect-ratio: 16 / 9;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: hidden;
   }
 
   .treemap-section {
     position: absolute;
-    border: 1px solid color-mix(in srgb, var(--panel-strong) 72%, var(--divider));
+    border: 0;
     background: color-mix(in srgb, var(--surface-0) 76%, transparent);
     min-width: 0;
     overflow: hidden;
+    border-radius: var(--panel-radius);
   }
 
   .section-head {
@@ -151,12 +152,13 @@
 
   .treemap-tile {
     position: absolute;
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     padding: var(--space-3) var(--space-3);
     text-align: left;
     min-width: 0;
     color: var(--text-0);
     overflow: hidden;
+    border-radius: 3px;
   }
 
   .treemap-tile.selected {

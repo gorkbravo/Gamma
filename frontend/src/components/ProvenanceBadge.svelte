@@ -34,14 +34,17 @@
     {#if label}<span class="dot-label">{label}</span>{/if}
     {#if warnings.length}<span class="warn-count">!{warnings.length}</span>{/if}
   {:else}
+    <!-- A soft pill read left to right: ● state · provider · quality · time
+         · warnings. The separators are decoration and stay out of the
+         accessible name. -->
     <span class="provenance-badge">
       {#if label}<span class="context-label">{label}</span>{/if}
-      <span class="state {tone}">{stateText}</span>
-      {#if data?.provider}<span class="provider">{data.provider}</span>{/if}
-      {#if data?.qualityLabel}<span class="quality">{data.qualityLabel}</span>{/if}
-      {#if timeText}<span class="time">{timeText}</span>{/if}
+      <span class="state {tone}"><span class="state-dot" aria-hidden="true"></span>{stateText}</span>
+      {#if data?.provider}<span class="sep" aria-hidden="true">·</span><span class="provider">{data.provider}</span>{/if}
+      {#if data?.qualityLabel}<span class="sep" aria-hidden="true">·</span><span class="quality">{data.qualityLabel}</span>{/if}
+      {#if timeText}<span class="sep" aria-hidden="true">·</span><span class="time">{timeText}</span>{/if}
       {#if data?.transformationNote}<span class="transform" aria-label="Transformed value">ƒ</span>{/if}
-      {#if warnings.length}<span class="warn-count">!{warnings.length}</span>{/if}
+      {#if warnings.length}<span class="sep" aria-hidden="true">·</span><span class="warn-count">{warnings.length} {warnings.length === 1 ? "warning" : "warnings"}</span>{/if}
     </span>
   {/if}
 
@@ -68,22 +71,31 @@
 </Tooltip>
 
 <style>
+  /* B′ soft pill on the tint: the state carries its tone through a dot and
+     its text; the rest reads quietly after middle dots. */
   .provenance-badge {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-3);
-    height: 18px;
+    gap: var(--space-2);
+    height: 20px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-pill);
+    background: var(--tint);
     font-size: var(--text-xs);
     line-height: 1;
     white-space: nowrap;
     cursor: default;
   }
 
+  .sep {
+    color: var(--text-2);
+  }
+
   .provenance-dot {
     width: 7px;
     height: 7px;
     flex-shrink: 0;
-    border-radius: var(--radius-sm);
+    border-radius: 50%;
     background: var(--text-2);
   }
 
@@ -115,33 +127,38 @@
   }
 
   .state {
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-weight: 600;
     color: var(--text-1);
   }
 
+  .state-dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
   .state.positive {
     color: var(--positive);
-    border-color: color-mix(in srgb, var(--positive) 45%, transparent);
   }
 
   .state.warning {
     color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 45%, transparent);
   }
 
   .state.negative {
     color: var(--negative);
-    border-color: color-mix(in srgb, var(--negative-muted) 45%, transparent);
   }
 
   .provider {
     color: var(--text-1);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .time {
@@ -165,6 +182,12 @@
     color: var(--warning);
     font-size: var(--text-2xs);
     font-weight: 700;
+  }
+
+  .provenance-badge .warn-count {
+    margin-left: 0;
+    font-size: var(--text-xs);
+    font-weight: 600;
   }
 
   .provenance-detail {

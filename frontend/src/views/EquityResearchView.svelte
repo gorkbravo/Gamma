@@ -2193,8 +2193,8 @@
   .ctrl-group {
     display: flex;
     align-items: center;
-    border: 1px solid var(--panel-border);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
   }
 
   .ctrl-select {
@@ -2262,17 +2262,18 @@
     min-width: 0;
     min-height: 42rem;
     aspect-ratio: 16 / 9;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: hidden;
   }
 
   .treemap-section {
     position: absolute;
-    border: 1px solid color-mix(in srgb, var(--panel-strong) 72%, var(--divider));
+    border: 0;
     background: color-mix(in srgb, var(--surface-0) 76%, transparent);
     min-width: 0;
     overflow: hidden;
+    border-radius: var(--panel-radius);
   }
 
   .treemap-section-head {
@@ -2318,12 +2319,13 @@
     min-height: 0;
     min-width: 0;
     padding: var(--space-3) var(--space-3);
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     color: var(--text-0);
     text-align: left;
     overflow: hidden;
     width: auto;
     transition: border-color 120ms ease, filter 120ms ease;
+    border-radius: 3px;
   }
 
   .treemap-tile:hover,
@@ -2439,14 +2441,12 @@
     max-width: 18rem;
     padding: var(--space-4) var(--space-5) var(--space-5);
     background: color-mix(in srgb, var(--bg-1) 96%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-    box-shadow:
-      0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent) inset,
-      0 12px 28px color-mix(in srgb, var(--shadow-ink) 55%, transparent),
-      0 2px 6px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--overlay-shadow);
     color: var(--text-0);
     z-index: 20;
     backdrop-filter: blur(6px);
+    border-radius: var(--overlay-radius);
   }
 
   .treemap-tooltip-head {
@@ -2792,8 +2792,8 @@
   /* ── Tables ── */
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     max-height: 28rem;
   }
 
@@ -2851,17 +2851,18 @@
   }
 
   .pill-list span {
-    border: 1px solid var(--divider);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-1);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-xs);
     text-transform: none;
     letter-spacing: normal;
+    border-radius: var(--radius-pill);
   }
 
   .pill-list span.short-pill {
-    border-color: var(--negative);
+    border-color: color-mix(in srgb, var(--negative) 45%, transparent);
     color: var(--negative);
   }
 

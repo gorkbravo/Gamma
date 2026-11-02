@@ -258,9 +258,10 @@
     min-width: 174px;
     gap: var(--space-3);
     padding: var(--space-4);
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--surface-0);
+    box-shadow: var(--overlay-shadow);
   }
 
   .settings-title {
@@ -280,9 +281,9 @@
 
   button {
     min-height: 25px;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--tint);
     color: var(--text-1);
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
@@ -292,7 +293,7 @@
 
   button:hover:not(:disabled),
   button.active {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     color: var(--text-0);
   }
 

@@ -371,8 +371,8 @@
   .chart-shell {
     position: relative;
     width: 100%;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: hidden;
   }
 

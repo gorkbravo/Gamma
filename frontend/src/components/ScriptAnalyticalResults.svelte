@@ -141,7 +141,7 @@
 </article>
 
 <style>
-  .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); padding: var(--space-5); min-width: 0; display: grid; gap: var(--space-4); }
+  .panel { background: var(--panel-bg); border: 0; border-radius: var(--panel-radius); padding: var(--space-5); min-width: 0; display: grid; gap: var(--space-4); }
   h3, h4, summary, button { font-family: var(--font-ui); }
   h3, h4, p { margin: 0; }
   h3 { font-size: var(--text-md); } h4 { font-size: var(--text-sm); }

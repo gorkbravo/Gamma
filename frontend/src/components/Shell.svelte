@@ -195,9 +195,9 @@
     align-items: center;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-5);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-md);
-    background: var(--bg-0);
+    border: 0;
+    border-radius: var(--panel-radius);
+    background: transparent;
   }
 
   .brand-mark {
@@ -207,9 +207,9 @@
     width: 1.15rem;
     height: 1.15rem;
     flex-shrink: 0;
-    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent) 12%, var(--bg-0));
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+    border-radius: var(--radius-control);
+    background: var(--accent-soft);
     color: var(--accent);
     font-family: var(--font-ui);
     font-size: var(--text-sm);
@@ -244,9 +244,9 @@
     white-space: nowrap;
     height: 1.75rem;
     padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--panel-border));
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent) 7%, var(--bg-0));
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--accent-soft);
     color: var(--text-1);
   }
 
@@ -294,7 +294,7 @@
     color: var(--text-1);
     padding: var(--space-2);
     cursor: pointer;
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     transition: color 120ms ease, border-color 120ms ease;
   }
 
@@ -329,14 +329,14 @@
 
   .copilot-trigger {
     background: transparent;
-    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--panel-border));
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-strong));
     color: var(--accent);
     font-size: var(--text-sm);
     font-weight: 500;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     padding: var(--space-1) var(--space-4);
     cursor: pointer;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-control);
     transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
   }
 

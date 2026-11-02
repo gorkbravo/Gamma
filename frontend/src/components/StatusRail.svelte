@@ -334,9 +334,9 @@
   select,
   button,
   .settings-toggle {
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--tint);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-0);
     padding: var(--space-2) var(--space-4);
     font: inherit;
@@ -402,7 +402,8 @@
   }
 
   .accent {
-    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
     color: var(--accent);
   }
 
@@ -437,10 +438,10 @@
     display: grid;
     gap: var(--space-5);
     padding: var(--space-6);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--popover-bg);
-    box-shadow: 0 18px 40px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    box-shadow: var(--overlay-shadow);
   }
 
   .settings-section {

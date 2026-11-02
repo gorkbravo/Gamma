@@ -160,7 +160,7 @@
 </article>
 
 <style>
-  .history-panel { min-width: 0; font-family: var(--font-ui); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); }
+  .history-panel { min-width: 0; font-family: var(--font-ui); background: var(--panel-bg); border: 0; border-radius: var(--panel-radius); }
   header, .controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); padding: var(--space-5); }
   header { align-items: center; border-bottom: 1px solid var(--divider); }
   h3 { font-size: var(--text-md); margin: 0 auto 0 0; } h4 { font-size: var(--text-sm); margin: 0; padding: var(--space-5); border-top: 1px solid var(--divider); }

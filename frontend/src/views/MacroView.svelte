@@ -458,11 +458,12 @@
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    border: 1px solid transparent;
     background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
     animation: pulse-opacity 1.6s ease-in-out infinite;
+    border-radius: var(--radius-pill);
   }
 
   @keyframes pulse-opacity {

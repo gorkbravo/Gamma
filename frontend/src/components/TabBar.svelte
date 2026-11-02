@@ -197,15 +197,17 @@
 
   .sidebar {
     position: fixed;
-    top: 0;
-    left: 0;
+    top: var(--space-4);
+    left: var(--space-4);
     z-index: 50;
     width: 248px;
-    height: 100vh;
-    background: color-mix(in srgb, var(--bg-0) 98%, var(--accent) 2%);
-    border-right: 1px solid var(--panel-strong);
-    box-shadow: 16px 0 48px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
-    transform: translateX(-100%);
+    height: calc(100vh - 2 * var(--space-4));
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
+    overflow: hidden;
+    transform: translateX(calc(-100% - 2 * var(--space-4)));
     transition: transform 180ms ease;
     display: flex;
     flex-direction: column;
@@ -231,7 +233,6 @@
     justify-content: space-between;
     gap: var(--space-5);
     padding: var(--space-5);
-    border-bottom: 1px solid var(--panel-border);
   }
 
   .sidebar-title {
@@ -359,10 +360,10 @@
 
   .tab-button.selected,
   .tab-row.selected .tab-button {
-    background: var(--active-bg);
-    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
-    box-shadow: inset 2px 0 0 var(--accent);
+    background: var(--tint);
+    border-color: transparent;
     color: var(--text-0);
+    font-weight: 600;
   }
 
   .tab-label {

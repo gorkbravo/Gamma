@@ -27,27 +27,39 @@
   --display-font: var(--font-ui);
   font-family: var(--font-ui);
 
-  /* ── Radius scale (small, consistent — not consumer-app rounding) ──
-     Applies to top-level surfaces and controls only. Anything nested
-     inside a bordered surface (chart shells, sub-tables, inner boxes)
-     is square — radius belongs to the outer edge, not the inside. */
+  /* ── Radius scale (B′) ──
+     Controls 5px, panels and KPI blocks 6px, floating overlays 12px, and a
+     full pill for tags and the provenance badge only. --radius-sm and
+     --radius-md remain for small inner marks (bar ends, swatches, heat
+     cells). Anything nested inside a panel (chart shells, sub-tables) is
+     square: radius belongs to the outer edge, not the inside. */
   --radius-sm: 2px;
   --radius-md: 4px;
+  --radius-control: 5px;
+  --radius-pill: 999px;
 
-  /* ── Panel shape ── the bordered panel's corner and edge. */
-  --panel-radius: var(--radius-md);
-  --panel-border-width: 1px;
+  /* ── Panel shape ── a borderless sheet on the canvas. */
+  --panel-radius: 6px;
+  --panel-border-width: 0px;
 
-  /* ── Type scale (7 steps — every font-size in the app resolves here) ──
+  /* ── Overlays ── the drawer, dialogs, menus, tooltips and the Copilot
+     shelf float above the plane: the only surfaces with a shadow. */
+  --overlay-radius: 12px;
+  --overlay-shadow: 0 12px 40px color-mix(in srgb, var(--shadow-ink) 32%, transparent);
+
+  /* ── Type scale (every font-size in the app resolves here) ──
      Do not introduce sizes outside this ramp. Hierarchy is weight-first,
      size-second; these steps exist so unrelated views share one rhythm. */
   --text-2xs: 10px;   /* category labels, eyebrows, table column headers */
   --text-xs: 11px;    /* secondary labels, metadata, timestamps */
   --text-sm: 12px;    /* compact data, dense controls, sub-labels */
   --text-base: 13.5px;/* body / data text — matches the global body size */
-  --text-md: 15px;    /* section headers (H3), panel titles */
+  --text-md: 15px;    /* section headers (H3), view titles */
   --text-lg: 16px;    /* tab-level titles (H2) */
   --text-xl: 18px;    /* hero identifiers — the ceiling inside tab content */
+  /* Two B′ steps between the ramp's: the panel title row and KPI values. */
+  --text-title: 12.5px;
+  --text-kpi: 14px;
 
   /* ── Line-height scale ── */
   --leading-tight: 1.2;   /* single-line labels, values, table cells */
@@ -190,9 +202,6 @@
   --flash-neutral: rgba(224, 170, 80, 0.18);
   --flash-duration: 800ms;
 
-  /* ── Table stripe ── */
-  --table-stripe: color-mix(in srgb, var(--accent) 1.8%, transparent);
-
   /* ── Interaction states ── B′: hover 6% and selection 14% of the accent
      in dark (4% and 9% in light); a solid focus ring, 3:1 on the sheet and
      on the tint. */
@@ -208,7 +217,7 @@
    needed it (--text-2, the semantic colours on their 13% fills). Tokens that
    script reads (--divider, --accent, the chart, semantic, text and surface
    colours) stay literal hex, as in the dark block. Derived tokens
-   (--panel-bg, --tint, the soft fills, --table-stripe) follow their bases
+   (--panel-bg, --tint, the soft fills) follow their bases
    unless restated here. The contrast test (contrast.test.ts) checks WCAG AA
    for both blocks. */
 :root[data-theme="light"] {
@@ -320,14 +329,14 @@ input,
 select,
 textarea {
   font: inherit;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   accent-color: var(--accent);
 }
 
 button {
   font: inherit;
   font-family: var(--font-ui);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
 }
 
 /* <small> defaults to 0.83em (11.25px) — pull it back onto the type ramp */
@@ -346,8 +355,7 @@ small {
 
 .mode-bar,
 .canvas-toggle {
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+  border-radius: var(--panel-radius);
 }
 
 /* Nested containers are square — radius is for outer surface edges only */
@@ -450,11 +458,6 @@ td {
 
 .flash-neutral {
   animation: flash-neutral var(--flash-duration) ease-out;
-}
-
-/* ── Table striping (global) ── */
-tbody tr:nth-child(even) {
-  background: var(--table-stripe);
 }
 
 /* ── Table row hover (global, subtle) ── */

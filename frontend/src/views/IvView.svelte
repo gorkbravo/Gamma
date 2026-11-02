@@ -1607,7 +1607,7 @@
   }
 
   .mode-row {
-    align-items: stretch;
+    align-items: center;
     flex-wrap: wrap;
   }
 
@@ -1689,7 +1689,7 @@
   }
 
   .source-strip > div {
-    min-width: 5.8rem;
+    min-width: 5rem;
     display: grid;
     gap: 0.08rem;
     text-align: right;
@@ -1702,20 +1702,23 @@
   }
 
   .kpi-panel {
-    padding: 0;
+    padding: var(--space-3);
   }
 
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--space-3);
   }
 
   .metric {
     min-width: 0;
-    padding: var(--space-4) var(--space-5);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-2) calc(var(--space-4) + var(--space-1));
+    border-right: 0;
     display: grid;
     gap: var(--space-1);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .metric:last-child {

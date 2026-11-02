@@ -2952,7 +2952,7 @@
   }
 
   .empty-panel {
-    border: 1px solid var(--divider);
+    border: 0;
     color: var(--text-2);
     font-size: var(--text-sm);
     min-height: 5rem;
@@ -2960,6 +2960,8 @@
     place-items: center;
     text-align: center;
     padding: var(--space-4);
+    background: var(--tint);
+    border-radius: var(--panel-radius);
   }
 
   .decision-gate {
@@ -3066,8 +3068,8 @@
   /* Stat cells are .stat.is-large from primitives.css. */
 
   .table-wrap {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: auto;
     max-height: 30rem;
   }

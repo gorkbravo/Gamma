@@ -2778,18 +2778,19 @@
 
   .ctx-kpis {
     display: flex;
-    gap: 0;
+    gap: var(--space-3);
     margin-left: auto;
-    border-left: 1px solid var(--divider);
     flex-wrap: wrap;
   }
 
   .ctx-kpi {
     display: grid;
     gap: 0.05rem;
-    padding: var(--space-1) var(--space-5);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-right: 0;
     min-width: 4.5rem;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .ctx-kpi.wide {
@@ -2806,7 +2807,7 @@
 
   .ctx-kpi strong {
     color: var(--text-0);
-    font-size: var(--text-sm);
+    font-size: var(--text-kpi);
     font-weight: 600;
     line-height: 1.15;
     white-space: nowrap;
@@ -2949,7 +2950,6 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
-    border-bottom: 1px solid var(--divider);
   }
 
   .inline-stats > div {
@@ -2958,7 +2958,6 @@
     gap: var(--space-3);
     min-width: 0;
     padding: var(--space-3) var(--space-5);
-    border-right: 1px solid var(--divider);
   }
 
   .inline-stats > div:last-child { border-right: 0; }
@@ -2973,7 +2972,7 @@
   .inline-stats strong {
     color: var(--text-0);
     font-weight: 600;
-    font-size: var(--text-sm);
+    font-size: var(--text-kpi);
     line-height: 1.15;
   }
 
@@ -3102,8 +3101,8 @@
 
   .scatter-shell {
     position: relative;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
   }
 
   .scatter-shell svg {

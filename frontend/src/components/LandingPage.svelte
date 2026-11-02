@@ -126,10 +126,10 @@
     display: grid;
     gap: var(--space-6);
     padding: var(--space-7);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--surface-0);
-    box-shadow: 0 24px 56px var(--shadow);
+    box-shadow: var(--overlay-shadow);
   }
 
   .identity {

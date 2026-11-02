@@ -1544,7 +1544,7 @@
             <span class="eyebrow">Strategy Handoff</span>
           </div>
           <div class="strategy-actions">
-            <div class="side-toggle" aria-label="Strategy Lab contract side">
+            <div class="side-toggle segmented" aria-label="Strategy Lab contract side">
               <button type="button" class="btn is-ghost" class:selected={strategySide === "long_yes"} on:click={() => (strategySide = "long_yes")}
                 >YES</button
               >
@@ -2649,8 +2649,6 @@
 
   .segmented {
     display: inline-flex;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
   }
 
   .segmented button {
@@ -2658,8 +2656,6 @@
     min-width: 2.6rem;
     min-height: 1.6rem;
     border: 0;
-    border-right: 1px solid var(--divider);
-    background: transparent;
     color: var(--text-2);
     font-size: var(--text-xs);
     letter-spacing: 0.06em;
@@ -2672,7 +2668,6 @@
 
   .segmented button.selected {
     color: var(--text-0);
-    background: var(--active-bg);
   }
 
   label.inline {
@@ -2765,8 +2760,6 @@
 
   .side-toggle {
     display: inline-flex;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
   }
 
   .side-toggle button {
@@ -2774,8 +2767,6 @@
     min-height: 1.7rem;
     width: auto;
     border: 0;
-    border-right: 1px solid var(--divider);
-    background: transparent;
     color: var(--text-2);
     font-size: var(--text-xs);
     letter-spacing: 0.08em;
@@ -2787,7 +2778,6 @@
 
   .side-toggle button.selected {
     color: var(--text-0);
-    background: var(--active-bg);
   }
 
   .strategy-actions {
@@ -2808,13 +2798,14 @@
 
   .badge-stack span,
   .tag-chip {
-    border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid transparent;
     background: var(--accent-soft);
     color: var(--text-1);
     padding: var(--space-1) var(--space-3);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: var(--text-xs);
+    border-radius: var(--radius-pill);
   }
 
   .tag-list {
@@ -2972,11 +2963,12 @@
   /* ── Notes ───────────────────────────────────────────────── */
 
   .description-box {
-    border: 1px solid var(--divider);
-    background: var(--surface-soft);
+    border: 0;
+    background: var(--tint);
     padding: var(--space-4);
     display: grid;
     gap: var(--space-2);
+    border-radius: var(--panel-radius);
   }
 
   .note-row {
@@ -3076,25 +3068,25 @@
 
   .badge-stack span.fresh,
   .tag-chip.fresh {
-    border-color: color-mix(in srgb, var(--positive) 35%, transparent);
+    border-color: transparent;
     background: var(--positive-soft);
   }
 
   .badge-stack span.stale,
   .tag-chip.stale {
-    border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+    border-color: transparent;
     background: var(--warning-soft);
   }
 
   .badge-stack span.delayed,
   .tag-chip.delayed {
-    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+    border-color: transparent;
     background: var(--accent-soft);
   }
 
   .badge-stack span.broken,
   .tag-chip.broken {
-    border-color: color-mix(in srgb, var(--negative) 35%, transparent);
+    border-color: transparent;
     background: var(--negative-soft);
   }
 

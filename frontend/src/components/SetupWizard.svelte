@@ -579,10 +579,10 @@
     max-height: calc(100vh - 2 * var(--space-6));
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr) auto;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--surface-0);
-    box-shadow: 0 24px 56px var(--shadow);
+    box-shadow: var(--overlay-shadow);
     outline: none;
   }
 

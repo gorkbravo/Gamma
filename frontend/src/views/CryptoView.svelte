@@ -1234,12 +1234,13 @@
   }
 
   .badge-stack span {
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-1);
     padding: var(--space-1) var(--space-4);
     font-size: var(--text-sm);
     white-space: nowrap;
+    border-radius: var(--radius-pill);
   }
 
   /* Buttons are .btn from primitives.css (secondary actions add .is-ghost)
@@ -1316,7 +1317,7 @@
   }
 
   .header-panel .headline-strip {
-    border-left: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .header-panel .headline-kpi {
@@ -1350,9 +1351,11 @@
   .header-panel .headline-kpi-value .headline-kpi-meta.warning { color: var(--warning); }
 
   .headline-kpi {
-    padding: var(--space-1) var(--space-5) var(--space-2) var(--space-5);
-    border-left: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-left: 0;
     text-align: right;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .headline-kpi:first-child {
@@ -1361,7 +1364,7 @@
 
   .headline-kpi-value {
     display: block;
-    font-size: var(--text-md);
+    font-size: var(--text-kpi);
     line-height: 1.2;
   }
 
@@ -1527,8 +1530,8 @@
 
   .basket-card {
     font-family: var(--font-num), monospace;
-    border: 1px solid var(--divider);
-    background: transparent;
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-0);
     cursor: pointer;
     padding: var(--space-4);
@@ -1546,22 +1549,24 @@
   }
 
   .tag-chip {
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     padding: var(--space-2) var(--space-4);
     color: var(--text-1);
-    background: var(--surface-0);
+    background: var(--tint);
     font-size: var(--text-sm);
     white-space: nowrap;
+    border-radius: var(--radius-pill);
   }
 
   .accent-chip {
     color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--divider));
+    border-color: transparent;
+    background: var(--accent-soft);
   }
 
   .table-wrap {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: auto;
     max-height: 29rem;
   }
