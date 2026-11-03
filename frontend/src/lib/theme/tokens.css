@@ -106,6 +106,10 @@
   --canvas: #0b0e12;
   /* The quiet fill for fields, the table header band and KPI blocks. */
   --tint: var(--bg-1);
+  /* A button's fill, one tonal step above the tint: the text colour at 8%,
+     about 1.2:1 on the sheet and on the canvas in both themes, so an action
+     reads as a button without an edge. Ghost buttons take the tint. */
+  --button-bg: color-mix(in srgb, var(--text-0) 8%, transparent);
 
   /* ── Borders & dividers ── line (overlay and control edges), line strong,
      and the rule between rows and inner sections. */

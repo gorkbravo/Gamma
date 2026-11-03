@@ -619,8 +619,9 @@
 
 /* ── Button ───────────────────────────────────────────────────────────────
    Opt in with class="btn" on a <button>. The default is the 28px data
-   button (4px × 8px): B′ tints it and drops the edge, which turns on as an
-   accent line on hover. Size and emphasis are modifiers. Navigation chrome
+   button (4px × 8px): B′ fills it one step above the tint (--button-bg) and
+   drops the edge, which turns on as an accent line on hover. Size and
+   emphasis are modifiers. Navigation chrome
    (top bar, drawer, mode bars, tabs) keeps its own rules.
 
    Buttons take --font-ui from the global button rule in tokens.css. A view
@@ -637,7 +638,7 @@
   padding: var(--space-2) var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--tint);
+  background: var(--button-bg);
   color: var(--text-0);
   font-weight: 500;
   cursor: pointer;
@@ -669,11 +670,12 @@
 }
 
 /* Emphasis: ghost for secondary actions, primary for the one action a
-   panel exists for, danger for destructive or stopping actions. Primary
-   stays an accent tint, never a solid fill (a research tool, not an order
-   ticket). */
+   panel exists for, danger for destructive or stopping actions. Ghost
+   keeps the quieter tint rather than no fill: without an edge, a
+   transparent ghost reads as plain text. Primary stays an accent tint,
+   never a solid fill (a research tool, not an order ticket). */
 .btn.is-ghost {
-  background: transparent;
+  background: var(--tint);
   color: var(--text-1);
 }
 

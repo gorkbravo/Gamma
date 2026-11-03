@@ -346,6 +346,12 @@
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }
 
+  /* Buttons sit a step above the field tint, as .btn does. */
+  button,
+  .settings-toggle {
+    background: var(--button-bg);
+  }
+
   button:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-strong));
   }
@@ -397,8 +403,10 @@
     min-width: 5.8rem;
   }
 
+  /* Secondary actions keep the tint: with no edge, a transparent ghost
+     reads as plain text on the canvas. */
   .ghost {
-    background: transparent;
+    background: var(--tint);
   }
 
   .accent {

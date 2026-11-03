@@ -99,8 +99,14 @@ const TEXT_ON_FILL: Array<[string, string[]]> = [
   ["--text-2", ["--panel-bg", "--active-bg"]],
   ["--text-0", ["--canvas"]],
   ["--text-1", ["--canvas"]],
-  ["--accent", ["--canvas"]]
+  ["--accent", ["--canvas"]],
+  ["--text-0", ["--panel-bg", "--button-bg"]],
+  ["--text-0", ["--canvas", "--button-bg"]],
+  ["--text-1", ["--canvas", "--tint"]]
 ];
+// Edgeless buttons need a fill that still shows against what they sit on:
+// the button fill a clear step (1.15:1), the ghost tint at least a trace.
+const BUTTON_FILLS: Array<[string, number]> = [["--button-bg", 1.15], ["--tint", 1.05]];
 const GRAPHICS = [
   "--chart-primary", "--chart-secondary", "--chart-negative",
   "--cat-1", "--cat-2", "--cat-3", "--cat-4", "--cat-5", "--cat-6", "--cat-7", "--cat-8",
@@ -121,6 +127,13 @@ for (const [theme, tokens] of [["dark", DARK], ["light", LIGHT]] as const) {
       const failures = TEXT_ON_FILL.map(([fg, bg]) => [fg, bg.join(" + "), contrast(fg, bg, tokens)] as const)
         .filter(([, , ratio]) => ratio < 4.5)
         .map(([fg, bg, ratio]) => `${fg} on ${bg}: ${ratio.toFixed(2)}`);
+      expect(failures).toEqual([]);
+    });
+
+    it("keeps button fills visible on the sheet and the canvas", () => {
+      const failures = BUTTON_FILLS.flatMap(([fill, min]) => ["--panel-bg", "--canvas"].map((base) => [fill, base, min, contrast(fill, [base], tokens)] as const))
+        .filter(([, , min, ratio]) => ratio < min)
+        .map(([fill, base, min, ratio]) => `${fill} on ${base}: ${ratio.toFixed(3)} < ${min}`);
       expect(failures).toEqual([]);
     });
 
