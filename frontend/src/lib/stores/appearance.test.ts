@@ -16,10 +16,19 @@ import {
 } from "./appearance";
 
 describe("theme preference", () => {
-  it("defaults to dark until the light theme is complete", () => {
-    expect(DEFAULT_THEME_PREFERENCE).toBe("dark");
-    expect(parseThemePreference(null)).toBe("dark");
-    expect(parseThemePreference("sepia")).toBe("dark");
+  it("defaults to System and keeps an explicit choice over it", () => {
+    expect(DEFAULT_THEME_PREFERENCE).toBe("system");
+    expect(parseThemePreference(null)).toBe("system");
+    expect(parseThemePreference("sepia")).toBe("system");
+    expect(parseThemePreference("dark")).toBe("dark");
+  });
+
+  it("applies the same default in the pre-paint scripts", () => {
+    for (const page of ["index.html", "keybindings.html"]) {
+      const html = readFileSync(fileURLToPath(new URL(`../../../${page}`, import.meta.url)), "utf8");
+      expect(html).toContain('var preference = "system";');
+      expect(html).toContain('stored === "light" || stored === "dark" || stored === "system"');
+    }
   });
 
   it("keeps a stored choice", () => {
@@ -48,7 +57,7 @@ describe("changes from another window", () => {
     expect(get(themePreference)).toBe("light");
 
     applyStoredChange("gamma.theme", null);
-    expect(get(themePreference)).toBe("dark");
+    expect(get(themePreference)).toBe("system");
   });
 });
 

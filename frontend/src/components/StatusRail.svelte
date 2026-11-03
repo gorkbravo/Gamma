@@ -260,9 +260,9 @@
             value={$themePreference}
             on:change={(event) => setThemePreference(event.currentTarget.value as ThemePreference)}
           >
-            <option value="dark">Dark (Default)</option>
+            <option value="system">System (Default)</option>
             <option value="light">Light</option>
-            <option value="system">System</option>
+            <option value="dark">Dark</option>
           </select>
           <small>System follows the operating system's light or dark setting.</small>
         </div>

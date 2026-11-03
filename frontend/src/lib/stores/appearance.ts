@@ -14,9 +14,9 @@ export type ResolvedTheme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "gamma.theme";
 
-// Dark stays the default until the light theme is complete (V4); the plan's
-// target default is System.
-export const DEFAULT_THEME_PREFERENCE: ThemePreference = "dark";
+// System follows the operating system's light or dark setting (V4). A
+// stored Light or Dark choice is kept.
+export const DEFAULT_THEME_PREFERENCE: ThemePreference = "system";
 
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
