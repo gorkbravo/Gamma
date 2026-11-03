@@ -1,8 +1,11 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Gamma UI primitives
 
-   These implement the component contracts in docs/design_principles.md §8.
-   Before this file existed each view wrote its own copy of every primitive
+   These implement the component contracts in docs/design_principles.md §8
+   and the surface contracts in §5, in the B′ look: borderless tonal sheets,
+   tinted fields and filled buttons. Every value is a token from tokens.css,
+   so each primitive follows the light and dark themes without its own
+   rules. Before this file existed each view wrote its own copy of every primitive
    in scoped CSS, so they drifted apart silently — .eyebrow alone had twelve
    different definitions across nineteen files.
 
@@ -392,8 +395,9 @@
   background: var(--tint);
 }
 
-/* Quantities right-align; .mono is a muted fixed-width column such as an
-   observation date. */
+/* Quantities right-align; .mono is a muted figure column such as an
+   observation date. Despite the name it is not monospace: tabular figures
+   in the figures font, like every cell. */
 .data-table th.num,
 .data-table td.num {
   text-align: right;
