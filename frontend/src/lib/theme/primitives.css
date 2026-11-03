@@ -79,6 +79,17 @@
   background: var(--tint);
 }
 
+/* On a narrow window the track scrolls sideways within its container
+   instead of widening the panel (and the page) or clipping its last
+   modes out of reach. */
+.mode-bar,
+.canvas-toggle {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .mode-bar .mode-btn,
 .canvas-toggle .mode-btn,
 .segmented > button {
