@@ -490,9 +490,10 @@
   }
 
   .message-card {
-    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
-    background: var(--surface-soft);
+    border: 1px solid transparent;
+    background: var(--tint);
     padding: var(--space-5);
+    border-radius: var(--panel-radius);
   }
 
   .empty-state p {

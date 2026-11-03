@@ -1247,7 +1247,7 @@
   }
 
   .segmented button.active {
-    color: var(--accent);
+    color: var(--text-0);
   }
 
 
