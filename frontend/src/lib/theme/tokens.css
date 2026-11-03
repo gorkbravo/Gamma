@@ -17,7 +17,11 @@
      its tabular figures, which the body turns on for the whole document.
      Data surfaces name --font-num explicitly, so the Settings "Data figures"
      choice, which overrides --font-num on the root element, turns figures
-     monospace and leaves labels and prose in the interface font. */
+     monospace and leaves labels and prose in the interface font.
+     Identifiers (tickers, contract codes such as CLZ26, option symbols) and
+     ISO dates stay on --font-num too: the V4 gate compared them at 12px in
+     Instrument Sans and in a monospace on real mock data and kept the sans
+     (2026-11-03), so there is no separate identifier role. */
   --font-ui: "Instrument Sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Roboto, sans-serif;
   --font-label: var(--font-ui);
   --font-num: "Instrument Sans", "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Roboto, sans-serif;
