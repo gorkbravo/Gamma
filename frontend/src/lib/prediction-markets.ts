@@ -76,7 +76,7 @@ export const CALIBRATION_SAMPLE_CHOICES: readonly number[] = [20, 40, 80, 120];
 
 /** `null` means "let the backend pick a resolution from the window span". */
 export const RESOLUTION_CHOICES: readonly { id: number | null; label: string }[] = [
-  { id: null, label: "AUTO" },
+  { id: null, label: "Auto" },
   { id: 5, label: "5M" },
   { id: 15, label: "15M" },
   { id: 60, label: "1H" },
@@ -361,7 +361,7 @@ export function describeCalibrationMethod(summary: PredictionCalibrationSummary 
     return "No calibration loaded";
   }
   if (summary.method !== "lead_time_history") {
-    return "UNVALIDATED - settlement print only, no curve measured";
+    return "Unvalidated - settlement print only, no curve measured";
   }
   const leads = summary.curves.map((curve) => curve.label).join(" / ") || "no lead time";
   const plottable = summary.curves.filter((curve) => curve.is_plottable).length;

@@ -8,23 +8,23 @@ import type {
 
 export const WORKSPACE_TAB_DEFINITIONS = {
   portfolio: [
-    { id: "portfolio", label: "PORTFOLIO", pinned: true, defaultIndex: 0 },
-    { id: "risk", label: "RISK", pinned: false, defaultIndex: 1 },
-    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 2 },
+    { id: "portfolio", label: "Portfolio", pinned: true, defaultIndex: 0 },
+    { id: "risk", label: "Risk", pinned: false, defaultIndex: 1 },
+    { id: "iv", label: "Options", pinned: false, defaultIndex: 2 },
   ],
   research: [
-    { id: "sitrep", label: "SITREP", pinned: true, defaultIndex: 0 },
-    { id: "equity_research", label: "EQUITY RESEARCH", pinned: false, defaultIndex: 1 },
-    { id: "strategy_lab", label: "STRATEGY LAB", pinned: false, defaultIndex: 2 },
-    { id: "macro", label: "MACRO", pinned: false, defaultIndex: 3 },
-    { id: "prediction_markets", label: "PREDICTION MARKETS", pinned: false, defaultIndex: 4 },
-    { id: "crypto", label: "CRYPTO", pinned: false, defaultIndex: 5 },
-    { id: "fundamentals", label: "FUNDAMENTALS", pinned: false, defaultIndex: 6 },
-    { id: "commodities", label: "COMMODITIES", pinned: false, defaultIndex: 7 },
-    { id: "maritime", label: "SEALANES", pinned: false, defaultIndex: 8 },
-    { id: "copilot", label: "COPILOT", pinned: false, defaultIndex: 9 },
-    { id: "risk", label: "RISK", pinned: false, defaultIndex: 10 },
-    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 11 },
+    { id: "sitrep", label: "Sitrep", pinned: true, defaultIndex: 0 },
+    { id: "equity_research", label: "Equity Research", pinned: false, defaultIndex: 1 },
+    { id: "strategy_lab", label: "Strategy Lab", pinned: false, defaultIndex: 2 },
+    { id: "macro", label: "Macro", pinned: false, defaultIndex: 3 },
+    { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 4 },
+    { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 5 },
+    { id: "fundamentals", label: "Fundamentals", pinned: false, defaultIndex: 6 },
+    { id: "commodities", label: "Commodities", pinned: false, defaultIndex: 7 },
+    { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 8 },
+    { id: "copilot", label: "Copilot", pinned: false, defaultIndex: 9 },
+    { id: "risk", label: "Risk", pinned: false, defaultIndex: 10 },
+    { id: "iv", label: "Options", pinned: false, defaultIndex: 11 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 

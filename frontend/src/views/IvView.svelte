@@ -680,7 +680,7 @@
   <article class="panel header-panel">
     <div class="header-top">
       <div>
-        <span class="eyebrow">OPTIONS WORKSPACE</span>
+        <span class="eyebrow">Options workspace</span>
         <h2>{displayedSymbol}</h2>
       </div>
       <div class="header-actions">
@@ -703,11 +703,11 @@
           />
         </label>
         <button type="button" class="btn is-primary" on:click={loadMaxSurface} disabled={loading || sessionLoading || !requestSymbol}>
-          {loading ? "LOADING..." : result ? "Reload Max Surface" : "Load Max Surface"}
+          {loading ? "Loading…" : result ? "Reload Max Surface" : "Load Max Surface"}
         </button>
         {#if session?.running}
           <button type="button" class="btn" on:click={stopSession} disabled={sessionLoading}>
-            {sessionLoading ? "STOPPING..." : "Stop Stream"}
+            {sessionLoading ? "Stopping…" : "Stop Stream"}
           </button>
         {/if}
         <!-- Nombre propio para no colisionar con el botón Copilot de la cabecera (GUA-20261021-16). -->
@@ -1592,8 +1592,8 @@
   .template-label {
     color: var(--text-2);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .template-button {
@@ -1607,7 +1607,7 @@
   }
 
   .mode-row {
-    align-items: stretch;
+    align-items: center;
     flex-wrap: wrap;
   }
 
@@ -1640,13 +1640,13 @@
   }
 
   h3 {
-    font-size: var(--text-base);
+    font-size: var(--text-title);
   }
 
   h4 {
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   strong {
@@ -1675,7 +1675,7 @@
 
   .symbol-control span {
     font-size: var(--text-xs);
-    text-transform: uppercase;
+    text-transform: var(--label-case);
   }
 
   .symbol-control input {
@@ -1689,7 +1689,7 @@
   }
 
   .source-strip > div {
-    min-width: 5.8rem;
+    min-width: 5rem;
     display: grid;
     gap: 0.08rem;
     text-align: right;
@@ -1698,24 +1698,27 @@
   .source-strip span,
   .metric span {
     font-size: var(--text-xs);
-    text-transform: uppercase;
+    text-transform: var(--label-case);
   }
 
   .kpi-panel {
-    padding: 0;
+    padding: var(--space-3);
   }
 
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--space-3);
   }
 
   .metric {
     min-width: 0;
-    padding: var(--space-4) var(--space-5);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-2) calc(var(--space-4) + var(--space-1));
+    border-right: 0;
     display: grid;
     gap: var(--space-1);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .metric:last-child {
@@ -1755,13 +1758,13 @@
   tbody tr.handoff-row:focus-visible td {
     outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
     outline-offset: -1px;
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
   }
 
   tr.atm td,
   th.atm-strike {
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--accent-soft);
   }
 
   /* Option chain: calls left, strike center, puts right. */
@@ -1776,7 +1779,7 @@
 
   /* In-the-money side shaded blue (call side when strike < spot, put side when strike > spot). */
   .chain-table td.itm {
-    background: color-mix(in srgb, var(--accent) 11%, transparent);
+    background: var(--accent-soft);
   }
 
   /* ATM row in accent amber, overriding ITM shading. */
@@ -1809,18 +1812,18 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--accent);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .surface-readout em {
     margin-left: var(--space-2);
     color: var(--text-2);
     font-family: var(--font-num);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-style: normal;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   /* Fitted cells stay italic so they never pass as quotes; their colour is
@@ -1839,9 +1842,9 @@
     gap: var(--space-2);
     color: var(--text-2);
     font-family: var(--font-num);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .contracts-field input {
@@ -1852,9 +1855,9 @@
     margin: 0 0 var(--space-2);
     color: var(--text-2);
     font-family: var(--font-num);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .sizing-warnings {
@@ -1922,7 +1925,7 @@
   }
 
   .surface-table td.cross {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
   }
 
   .surface-table td.cell-hi {
@@ -1969,7 +1972,7 @@
   }
 
   .prob-area {
-    fill: color-mix(in srgb, var(--chart-primary) 10%, transparent);
+    fill: color-mix(in srgb, var(--chart-primary) 9%, transparent);
   }
 
   .prob-selected {
@@ -1979,7 +1982,9 @@
   .prob-line {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.7;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .prob-dot {
@@ -2033,9 +2038,9 @@
   }
 
   .payoff-meta {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -2124,7 +2129,7 @@
   }
 
   .smile-axis {
-    stroke: var(--divider);
+    stroke: var(--panel-strong);
     stroke-width: 1;
   }
 
@@ -2136,14 +2141,15 @@
   }
 
   .smile-area {
-    fill: color-mix(in srgb, var(--chart-primary) 15%, transparent);
+    fill: color-mix(in srgb, var(--chart-primary) 9%, transparent);
     stroke: none;
   }
 
   .smile-line {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.6;
+    stroke-width: 2;
+    stroke-linecap: round;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
   }
@@ -2186,7 +2192,7 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--accent);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
     margin-left: var(--space-3);
   }
 
@@ -2224,10 +2230,10 @@
     margin-left: var(--space-3);
     color: var(--text-2);
     font-family: var(--font-num);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .fit-legend i {
@@ -2315,5 +2321,16 @@
       border-right: 0;
       border-bottom: 1px solid var(--panel-strong);
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .source-strip strong,
+  .metric strong,
+  .metric-list strong,
+  .smile-label,
+  .price-col,
+  .surface-table th {
+    font-family: var(--font-num);
   }
 </style>

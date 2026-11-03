@@ -612,7 +612,6 @@
                 label: activeStrategyResult.benchmark_column ?? "Benchmark",
                 color: "var(--chart-secondary)",
                 type: "line" as const,
-                lineStyle: "dashed" as const,
                 data: activeStrategyResult.benchmark_equity_curve_points.map(toChartPoint)
               }
             ]
@@ -1483,16 +1482,16 @@
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .header-panel .subtitle {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .performance-panel,
@@ -1505,12 +1504,12 @@
   /* ── Header panel internals ── */
 
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }
@@ -1562,9 +1561,9 @@
 
   .subchart-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     margin-top: var(--space-1);
   }
 
@@ -1587,9 +1586,9 @@
   /* ── Typography ── */
   label > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   h2 {
@@ -1599,8 +1598,8 @@
   }
 
   h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
     color: var(--text-0);
   }
 
@@ -1644,8 +1643,8 @@
   .row span {
     color: var(--text-2);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .row strong {
@@ -1796,8 +1795,8 @@
 
   .source-cell span {
     color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
     flex-shrink: 0;
   }
@@ -1919,9 +1918,9 @@
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-title);
     font-weight: 600;
   }
 
@@ -1952,8 +1951,8 @@
 
   .attached-context-row span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
   }
 
@@ -1999,9 +1998,9 @@
 
   .handoff-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     white-space: nowrap;
   }
 
@@ -2036,8 +2035,8 @@
 
   .stale-handoff-head strong {
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -2121,9 +2120,9 @@
 
   .note-tag {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .note-row.info .note-tag,
@@ -2203,5 +2202,11 @@
       grid-template-columns: 1fr;
       gap: var(--space-2);
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .row strong {
+    font-family: var(--font-num);
   }
 </style>

@@ -247,9 +247,9 @@
   h3,
   dt {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   header strong {
@@ -365,10 +365,10 @@
 
   .temporary-label {
     color: var(--accent);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   code {

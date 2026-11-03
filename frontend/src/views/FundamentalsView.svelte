@@ -2267,9 +2267,9 @@
   .working-analysis-banner span,
   .working-analysis-banner small {
     color: var(--accent);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .working-analysis-banner strong {
@@ -2367,16 +2367,16 @@
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .header-panel .subtitle {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   /* Sub-panel headers: collapse eyebrow + h3 stack into a single 26px row.
@@ -2395,8 +2395,8 @@
   }
 
   .panel:not(.header-panel) > .panel-header h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
     letter-spacing: 0;
   }
 
@@ -2483,7 +2483,7 @@
   }
 
   .scenario-card.selected-scenario {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
     color: var(--accent);
   }
 
@@ -2506,12 +2506,12 @@
   }
 
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }
@@ -2519,7 +2519,7 @@
   .secondary-pill {
     color: var(--warning);
     border-color: color-mix(in srgb, var(--warning) 28%, transparent);
-    background: color-mix(in srgb, var(--warning) 6%, transparent);
+    background: var(--warning-soft);
   }
 
   label,
@@ -2539,9 +2539,9 @@
 
   .search-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .search-heading {
@@ -2553,9 +2553,9 @@
 
   .search-state {
     color: var(--warning);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     white-space: nowrap;
   }
 
@@ -2786,16 +2786,16 @@
   .focus-label,
   label > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .headline-kpi-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: 1.1;
   }
 
@@ -2807,8 +2807,8 @@
   }
 
   h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
   }
 
   .headline-strip {
@@ -2932,8 +2932,8 @@
   }
 
   .summary-source-row span {
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .summary-source-row strong {
@@ -2952,7 +2952,7 @@
   }
 
   .empty-panel {
-    border: 1px solid var(--divider);
+    border: 0;
     color: var(--text-2);
     font-size: var(--text-sm);
     min-height: 5rem;
@@ -2960,6 +2960,8 @@
     place-items: center;
     text-align: center;
     padding: var(--space-4);
+    background: var(--tint);
+    border-radius: var(--panel-radius);
   }
 
   .decision-gate {
@@ -3049,9 +3051,9 @@
 
   .terminal-framing span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .terminal-framing p {
@@ -3066,8 +3068,8 @@
   /* Stat cells are .stat.is-large from primitives.css. */
 
   .table-wrap {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: auto;
     max-height: 30rem;
   }
@@ -3152,14 +3154,14 @@
 
   .family-cell {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .selected-col,
   .selected-cell {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
   }
 
   .selected-cell .heat-cell {
@@ -3214,7 +3216,7 @@
   }
 
   .overridden-cell {
-    background: color-mix(in srgb, var(--warning) 7%, transparent);
+    background: var(--warning-soft);
   }
 
   .positive {

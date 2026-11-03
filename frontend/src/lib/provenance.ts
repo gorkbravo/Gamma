@@ -107,17 +107,17 @@ export function provenanceTone(state: ProvenanceState): ProvenanceTone {
 }
 
 const STATE_LABELS: Record<ProvenanceState, string> = {
-  live: "LIVE",
-  delayed: "DELAYED",
-  cached: "CACHED",
-  stale: "STALE",
-  historical: "HIST",
-  sample: "SAMPLE",
-  synthetic: "SYNTH",
-  derived: "DERIVED",
-  model: "MODEL",
+  live: "Live",
+  delayed: "Delayed",
+  cached: "Cached",
+  stale: "Stale",
+  historical: "Historical",
+  sample: "Sample",
+  synthetic: "Synthetic",
+  derived: "Derived",
+  model: "Model",
   unavailable: "N/A",
-  unknown: "UNKNOWN"
+  unknown: "Unknown"
 };
 
 export function provenanceStateLabel(state: ProvenanceState): string {

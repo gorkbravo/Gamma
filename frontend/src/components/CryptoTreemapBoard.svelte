@@ -103,17 +103,18 @@
     position: relative;
     min-height: 26rem;
     aspect-ratio: 16 / 9;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: hidden;
   }
 
   .treemap-section {
     position: absolute;
-    border: 1px solid color-mix(in srgb, var(--panel-strong) 72%, var(--divider));
+    border: 0;
     background: color-mix(in srgb, var(--surface-0) 76%, transparent);
     min-width: 0;
     overflow: hidden;
+    border-radius: var(--panel-radius);
   }
 
   .section-head {
@@ -133,9 +134,9 @@
 
   .section-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .section-head small {
@@ -151,12 +152,13 @@
 
   .treemap-tile {
     position: absolute;
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     padding: var(--space-3) var(--space-3);
     text-align: left;
     min-width: 0;
     color: var(--text-0);
     overflow: hidden;
+    border-radius: 3px;
   }
 
   .treemap-tile.selected {
@@ -250,7 +252,7 @@
 
   .treemap-tile.micro .tile-symbol {
     font-size: var(--text-2xs);
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
   }
 
   .positive {
@@ -300,5 +302,12 @@
     .treemap-tile.minor .tile-bottomline {
       display: none;
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .tile-move,
+  .tile-bottomline small {
+    font-family: var(--font-num);
   }
 </style>

@@ -91,9 +91,15 @@ function barWidth(value: number, maxAbs: number) {
   }
 
   .empty {
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
     padding: var(--space-4) var(--space-5);
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .head strong {
+    font-family: var(--font-num);
   }
 </style>

@@ -299,9 +299,9 @@
   }
 
   .hover-label {
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .hover-header,
@@ -341,8 +341,8 @@
 
   .hover-grid span {
     font-size: var(--text-xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .legend {
@@ -401,7 +401,7 @@
   }
 
   .legend-row.active {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: var(--active-bg);
   }
 
   .positive {
@@ -419,8 +419,14 @@
     height: 100%;
     border: 1px solid var(--divider);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .legend-value {
+    font-family: var(--font-num);
   }
 </style>

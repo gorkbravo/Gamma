@@ -316,9 +316,9 @@
 
   .coherence-stat {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   /* ── Reaction grid ── */
@@ -337,9 +337,9 @@
   }
 
   .reaction-role {
-    font-size: var(--text-2xs);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     color: var(--text-2);
   }
 
@@ -408,9 +408,9 @@
 
   .date-group-header {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
     border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 20%, transparent);

@@ -94,7 +94,12 @@ const TEXT_ON_FILL: Array<[string, string[]]> = [
   ["--positive", ["--panel-bg", "--positive-soft"]],
   ["--negative", ["--panel-bg", "--negative-soft"]],
   ["--warning", ["--panel-bg", "--warning-soft"]],
-  ["--text-0", ["--panel-bg", "--hover-bg"]]
+  ["--text-0", ["--panel-bg", "--hover-bg"]],
+  ["--text-2", ["--panel-bg", "--hover-bg"]],
+  ["--text-2", ["--panel-bg", "--active-bg"]],
+  ["--text-0", ["--canvas"]],
+  ["--text-1", ["--canvas"]],
+  ["--accent", ["--canvas"]]
 ];
 const GRAPHICS = [
   "--chart-primary", "--chart-secondary", "--chart-negative",

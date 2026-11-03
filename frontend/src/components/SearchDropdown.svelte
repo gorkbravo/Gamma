@@ -18,7 +18,7 @@
   export let ariaLabel = "Search";
   export let emptyLabel = "No matches";
   export let loading = false;
-  export let loadingLabel = "LOADING...";
+  export let loadingLabel = "Loading…";
   export let stale = false;
   export let staleLabel = "STALE RESULTS | REFRESHING";
   export let results: SearchDropdownItem[] = [];
@@ -164,15 +164,15 @@
     gap: var(--space-4);
     width: 100%;
     padding: var(--space-2) var(--space-4);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     transition: border-color 120ms ease;
-    background: color-mix(in srgb, var(--bg-0) 70%, transparent);
+    background: var(--tint);
     color: var(--text-1);
   }
 
   .search-input:focus-within {
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-border));
+    border-color: var(--accent);
     color: var(--text-0);
   }
 
@@ -207,10 +207,10 @@
     display: grid;
     gap: var(--space-2);
     padding: var(--space-3);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--surface-0);
-    box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    box-shadow: var(--overlay-shadow);
   }
 
   .search-results.stale {
@@ -221,9 +221,9 @@
     padding: var(--space-2) var(--space-3);
     color: var(--warning);
     border-bottom: 1px solid var(--divider);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .search-result,
@@ -234,7 +234,7 @@
     gap: var(--space-5);
     width: 100%;
     padding: var(--space-4) var(--space-4);
-    border-radius: 3px;
+    border-radius: var(--radius-control);
     font-size: var(--text-sm);
   }
 
@@ -248,8 +248,8 @@
 
   .search-result:hover,
   .search-result.selected {
-    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: transparent;
+    background: var(--active-bg);
     color: var(--text-0);
   }
 
@@ -281,11 +281,11 @@
   .search-empty {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .result-state,
   .search-empty {
-    text-transform: uppercase;
+    text-transform: var(--label-case);
   }
 </style>

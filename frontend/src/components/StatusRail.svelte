@@ -3,6 +3,7 @@
   import { getWorkspaceLabel } from "../lib/navigation";
   import {
     DATA_FIGURE_FONTS,
+    DEFAULT_DATA_FIGURES_LABEL,
     dataFigureFont,
     setDataFigureFont,
     setThemePreference,
@@ -259,9 +260,9 @@
             value={$themePreference}
             on:change={(event) => setThemePreference(event.currentTarget.value as ThemePreference)}
           >
-            <option value="dark">Dark (Default)</option>
+            <option value="system">System (Default)</option>
             <option value="light">Light</option>
-            <option value="system">System</option>
+            <option value="dark">Dark</option>
           </select>
           <small>System follows the operating system's light or dark setting.</small>
         </div>
@@ -272,7 +273,7 @@
             value={$dataFigureFont}
             on:change={(event) => setDataFigureFont(event.currentTarget.value as DataFigureFont)}
           >
-            <option value="">Default</option>
+            <option value="">{DEFAULT_DATA_FIGURES_LABEL}</option>
             {#each DATA_FIGURE_FONTS as font}
               <option value={font}>{font}</option>
             {/each}
@@ -308,9 +309,9 @@
   .label {
     display: block;
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   strong {
@@ -333,9 +334,9 @@
   select,
   button,
   .settings-toggle {
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--tint);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-0);
     padding: var(--space-2) var(--space-4);
     font: inherit;
@@ -383,8 +384,8 @@
     font-family: var(--font-label);
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .conn-label.mock {
@@ -401,7 +402,8 @@
   }
 
   .accent {
-    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
     color: var(--accent);
   }
 
@@ -436,10 +438,10 @@
     display: grid;
     gap: var(--space-5);
     padding: var(--space-6);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--popover-bg);
-    box-shadow: 0 18px 40px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    box-shadow: var(--overlay-shadow);
   }
 
   .settings-section {
@@ -542,8 +544,8 @@
 
   .health-row span {
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .health-row small {
@@ -568,7 +570,7 @@
     gap: var(--space-2);
     padding: var(--space-3);
     border-left: 2px solid var(--warning);
-    background: color-mix(in srgb, var(--warning) 4%, transparent);
+    background: var(--warning-soft);
   }
 
   .copilot-error > strong {

@@ -61,9 +61,9 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: var(--leading-tight);
     min-height: calc(2em * 1.2);
     overflow: hidden;
@@ -100,5 +100,12 @@
       border-left: 0;
       flex: 1 1 45%;
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .metric-value,
+  .metric-delta {
+    font-family: var(--font-num);
   }
 </style>

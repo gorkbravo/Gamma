@@ -287,7 +287,7 @@ describe("portfolio view model helpers", () => {
       })
     });
 
-    expect(readiness.modeLabel).toBe("LIVE / IBKR");
+    expect(readiness.modeLabel).toBe("Live / IBKR");
     expect(JSON.stringify(readiness)).not.toContain("DU123456");
     expect(readiness.rows).toEqual(
       expect.arrayContaining([

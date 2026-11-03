@@ -496,7 +496,6 @@
             : performance.benchmark_symbol,
         color: "var(--chart-secondary)",
         type: "line",
-        lineStyle: "dashed",
         data: performance.benchmark_points.map((point) => ({
           time: Math.floor(new Date(point.timestamp).getTime() / 1000),
           value: point.value
@@ -1084,8 +1083,8 @@
   }
 
   h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
   }
 
   /* Buttons are .btn from primitives.css: secondary actions add
@@ -1135,12 +1134,14 @@
 
   .source-line span,
   .quality-label {
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     color: var(--text-2);
     padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    background: var(--tint);
+    border-radius: var(--radius-pill);
   }
 
   .notice,
@@ -1150,10 +1151,11 @@
     justify-content: space-between;
     align-items: center;
     gap: var(--space-4);
-    border: 1px solid var(--panel-border);
+    border: 0;
     background: var(--panel-bg);
     padding: var(--space-3) var(--space-5);
     color: var(--text-1);
+    border-radius: var(--panel-radius);
   }
 
   .notice > div {
@@ -1208,10 +1210,10 @@
 
   .control-group > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   /* Fields are .form-control from primitives.css and keep the view's font. */
@@ -1233,14 +1235,11 @@
 
   .segmented {
     display: inline-flex;
-    border: 1px solid var(--panel-strong);
   }
 
   .segmented button {
     min-height: 26px;
     border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
   }
 
   .segmented button:last-child {
@@ -1248,8 +1247,7 @@
   }
 
   .segmented button.active {
-    background: var(--active-bg);
-    color: var(--accent);
+    color: var(--text-0);
   }
 
 
@@ -1280,13 +1278,15 @@
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    border-block: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .metric {
     min-width: 0;
-    padding: var(--space-3) var(--space-4);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-2) calc(var(--space-4) + var(--space-1));
+    border-right: 0;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .metric:last-child {
@@ -1295,16 +1295,16 @@
 
   .metric > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .metric strong {
     display: block;
     margin: var(--space-1) 0;
-    font-size: var(--text-md);
+    font-size: var(--text-kpi);
     line-height: var(--leading-tight);
     overflow-wrap: anywhere;
   }
@@ -1390,9 +1390,9 @@
 
   .message-tag {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .message-error p,
@@ -1481,10 +1481,10 @@
 
   .group-label,
   .provenance-list span {
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   .pill-list {
@@ -1495,10 +1495,12 @@
   }
 
   .pill-list span {
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     color: var(--text-1);
     font-size: var(--text-xs);
     padding: var(--space-1) var(--space-3);
+    background: var(--tint);
+    border-radius: var(--radius-pill);
   }
 
   .provenance-list > div {
@@ -1632,5 +1634,12 @@
     .dialog-actions button {
       width: 100%;
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .metric strong,
+  .row strong {
+    font-family: var(--font-num);
   }
 </style>

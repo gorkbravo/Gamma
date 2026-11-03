@@ -263,7 +263,7 @@
   </div>
 
   <footer class="composer">
-    <div class="role-row" role="tablist" aria-label="Copilot role">
+    <div class="role-row segmented" role="tablist" aria-label="Copilot role">
       <button type="button" role="tab" aria-selected={roleMode === "agent"} disabled={loading} class:active={roleMode === "agent"} on:click={() => setRoleMode("agent")}>
         Research Agent
       </button>
@@ -382,23 +382,25 @@
     position: fixed;
     inset: 0;
     z-index: 44;
-    background: color-mix(in srgb, var(--shadow-ink) 40%, transparent);
+    background: var(--scrim);
   }
 
   .drawer {
     position: fixed;
-    top: 0;
-    left: 0;
+    top: var(--space-4);
+    left: var(--space-4);
     z-index: 55;
     width: clamp(24rem, 38vw, 46rem);
-    max-width: calc(100vw - 1rem);
-    height: 100vh;
+    max-width: calc(100vw - 2 * var(--space-4));
+    height: calc(100vh - 2 * var(--space-4));
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
     background: var(--surface-0);
-    border-right: 1px solid var(--panel-border);
-    box-shadow: 28px 0 72px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
-    transform: translateX(-100%);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
+    overflow: hidden;
+    transform: translateX(calc(-100% - 2 * var(--space-4)));
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -422,11 +424,11 @@
     display: flex;
     justify-content: space-between;
     gap: var(--space-6);
-    border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
+    border-bottom: 0;
   }
 
   .composer {
-    border-top: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
+    border-top: 0;
     display: grid;
     gap: var(--space-4);
   }
@@ -472,9 +474,9 @@
 
   .user-bubble {
     justify-self: end;
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-    border-top-right-radius: 2px;
+    background: var(--accent-soft);
+    border-color: transparent;
+    border-top-right-radius: 4px;
   }
 
   .user-bubble p {
@@ -488,9 +490,10 @@
   }
 
   .message-card {
-    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
-    background: var(--surface-soft);
+    border: 1px solid transparent;
+    background: var(--tint);
     padding: var(--space-5);
+    border-radius: var(--panel-radius);
   }
 
   .empty-state p {
@@ -499,19 +502,20 @@
   }
 
   .context-pill {
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 52%, transparent);
-    background: var(--surface-soft);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-2);
     padding: var(--space-2) var(--space-4);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     white-space: nowrap;
+    border-radius: var(--radius-pill);
   }
 
   .context-pill.active {
-    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: transparent;
+    background: var(--active-bg);
     color: var(--accent);
   }
 
@@ -537,8 +541,8 @@
   button,
   .close-btn,
   select {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-0);
     font: inherit;
   }
@@ -554,6 +558,9 @@
     min-height: 3.2rem;
     padding: var(--space-4) var(--space-5);
     font-size: var(--text-base);
+    border-color: var(--panel-border);
+    border-radius: var(--overlay-radius);
+    background: var(--panel-bg);
   }
 
   button {
@@ -573,7 +580,7 @@
 
   .close-btn:hover,
   button:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .composer-actions {
@@ -600,8 +607,8 @@
   .open-workspace {
     flex: 0 0 auto;
     padding: var(--space-3) var(--space-5);
-    border-color: color-mix(in srgb, var(--accent) 36%, var(--panel-strong));
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
     color: var(--accent);
     font-size: var(--text-sm);
   }
@@ -615,13 +622,10 @@
   .role-row {
     display: inline-flex;
     width: max-content;
-    border: 1px solid var(--panel-strong);
   }
 
   .role-row button {
     border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
     color: var(--text-1);
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
@@ -633,8 +637,7 @@
   }
 
   .role-row button.active {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--text-0);
   }
 
   .effort-select {
@@ -642,9 +645,9 @@
     align-items: center;
     gap: var(--space-2);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .effort-select select {
@@ -675,16 +678,16 @@
   .generate-btn {
     padding: var(--space-3) var(--space-5);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
     color: var(--accent);
   }
 
   .generate-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
   }
 
   .generate-btn:disabled {
@@ -700,9 +703,9 @@
 
   .scope-row-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .context-picker {

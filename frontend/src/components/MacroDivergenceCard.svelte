@@ -115,7 +115,7 @@
     min-width: 0;
   }
 
-  h3 { margin: 0; font-size: var(--text-base); }
+  h3 { margin: 0; font-size: var(--text-title); }
 
   .card-badges {
     display: inline-flex;
@@ -148,9 +148,9 @@
 
   .coherence-stat {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   /* ── Signal grid ── */
@@ -174,9 +174,9 @@
   }
 
   .signal-role {
-    font-size: var(--text-2xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
     color: var(--text-2);
   }
 
@@ -188,7 +188,7 @@
     padding: var(--space-1) var(--space-3);
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--rule-navy) 42%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     color: var(--text-1);
     font-size: var(--text-xs);
     font-weight: 600;
@@ -196,13 +196,13 @@
 
   .signal-score.positive {
     border-color: color-mix(in srgb, var(--positive) 25%, transparent);
-    background: color-mix(in srgb, var(--positive) 8%, transparent);
+    background: var(--positive-soft);
     color: var(--positive);
   }
 
   .signal-score.negative {
     border-color: color-mix(in srgb, var(--negative-muted) 30%, transparent);
-    background: color-mix(in srgb, var(--negative-muted) 10%, transparent);
+    background: var(--negative-soft);
     color: var(--negative);
   }
 
@@ -248,25 +248,25 @@
     font-weight: 600;
     border-radius: 2px;
     border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     color: var(--text-1);
   }
 
   .score-badge.high {
     border-color: color-mix(in srgb, var(--negative-muted) 35%, transparent);
-    background: color-mix(in srgb, var(--negative-muted) 10%, transparent);
+    background: var(--negative-soft);
     color: var(--negative);
   }
 
   .score-badge.moderate {
     border-color: color-mix(in srgb, var(--accent-2) 30%, transparent);
-    background: color-mix(in srgb, var(--accent-2) 8%, transparent);
+    background: var(--warning-soft);
     color: var(--accent-2);
   }
 
   .score-badge.low {
     border-color: color-mix(in srgb, var(--positive) 25%, transparent);
-    background: color-mix(in srgb, var(--positive) 6%, transparent);
+    background: var(--positive-soft);
     color: var(--positive);
   }
 </style>

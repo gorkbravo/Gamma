@@ -82,9 +82,9 @@
     min-width: 9.5rem;
     max-width: min(16rem, calc(100vw - 0.75rem));
     background: var(--surface-0);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
     padding: var(--space-1);
     display: grid;
     gap: var(--space-1);
@@ -105,7 +105,7 @@
 
   .compact-context-menu button:hover,
   .compact-context-menu button:focus-visible {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
     color: var(--text-0);
     outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
     outline-offset: -1px;

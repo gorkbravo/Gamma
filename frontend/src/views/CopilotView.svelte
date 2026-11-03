@@ -626,7 +626,7 @@
             {latestHandoff.source_tab} → {latestHandoff.intended_target_tab}
           </span>
         {/if}
-        <div class="role-tabs" role="tablist" aria-label="Copilot role">
+        <div class="role-tabs segmented" role="tablist" aria-label="Copilot role">
           <button type="button" class:active={roleMode === "agent"} on:click={() => setRoleMode("agent")}>
             Agent
           </button>
@@ -941,14 +941,15 @@
   .sidebar {
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
-    border: 1px solid var(--panel-border);
+    border: 0;
     background: var(--panel-bg);
     min-height: 0;
+    border-radius: var(--panel-radius);
   }
 
   .sidebar-head {
     padding: var(--space-4);
-    border-bottom: 1px solid var(--divider);
+    border-bottom: 0;
   }
 
   .new-chat {
@@ -958,9 +959,9 @@
     justify-content: center;
     gap: var(--space-3);
     height: 30px;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--tint);
     color: var(--text-0);
     font: inherit;
     font-family: var(--font-ui);
@@ -975,30 +976,30 @@
   }
 
   .new-chat:hover:not(:disabled) {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .sidebar-filter {
     display: grid;
     gap: var(--space-3);
     padding: var(--space-4);
-    border-bottom: 1px solid var(--divider);
+    border-bottom: 0;
   }
 
   .sidebar-filter > input {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-0);
     padding: var(--space-2) var(--space-4);
     font: inherit;
     font-size: var(--text-sm);
     min-height: 1.75rem;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-control);
   }
 
   .sidebar-filter > input:focus-visible {
     outline: none;
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-strong));
+    border-color: var(--accent);
   }
 
   .archived-toggle {
@@ -1006,9 +1007,9 @@
     align-items: center;
     gap: var(--space-3);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .archived-toggle input {
@@ -1032,11 +1033,11 @@
 
   .session-row:hover,
   .session-row.active {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
   }
 
   .session-row.active {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .session-row.active .session-title {
@@ -1068,9 +1069,9 @@
 
   .session-meta {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .session-actions,
@@ -1104,9 +1105,9 @@
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
   }
 
@@ -1143,8 +1144,8 @@
   .sidebar-empty,
   .context-empty {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-xs);
     padding: var(--space-4);
     margin: 0;
@@ -1155,10 +1156,11 @@
     display: grid;
     /* chat top (header + optional status strip) · transcript · pinned composer */
     grid-template-rows: auto minmax(0, 1fr) auto;
-    border: 1px solid var(--panel-border);
+    border: 0;
     background: var(--panel-bg);
     min-height: 0;
     min-width: 0;
+    border-radius: var(--panel-radius);
   }
 
   .chat-top {
@@ -1185,9 +1187,9 @@
     gap: var(--space-4);
     height: 28px;
     padding: 0 var(--space-4);
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--tint);
     color: var(--text-0);
     font: inherit;
     font-family: var(--font-ui);
@@ -1197,14 +1199,14 @@
 
   .context-trigger:hover,
   .context-trigger.open {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .context-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .context-value {
@@ -1249,7 +1251,7 @@
   }
 
   .context-option:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--hover-bg);
   }
 
   .context-option:disabled {
@@ -1319,8 +1321,8 @@
     gap: var(--space-2);
     height: 28px;
     padding: 0 var(--space-3);
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-1);
     font: inherit;
     font-family: var(--font-ui);
@@ -1340,22 +1342,19 @@
 
   .handoff-chip {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     border: 1px solid var(--divider);
     padding: var(--space-1) var(--space-3);
   }
 
   .role-tabs {
     display: inline-flex;
-    border: 1px solid var(--panel-strong);
   }
 
   .role-tabs button {
     border: 0;
-    border-right: 1px solid var(--panel-strong);
-    background: transparent;
     color: var(--text-1);
     padding: var(--space-2) var(--space-5);
     font: inherit;
@@ -1369,13 +1368,11 @@
   }
 
   .role-tabs button:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
     color: var(--text-0);
   }
 
   .role-tabs button.active {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
+    color: var(--text-0);
   }
 
   .effort-select {
@@ -1383,15 +1380,15 @@
     align-items: center;
     gap: var(--space-3);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .effort-select select {
     height: 28px;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-sm);
@@ -1445,9 +1442,9 @@
   .msg.user .bubble {
     max-width: 80%;
     padding: var(--space-4) var(--space-5);
-    border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 0;
+    border-radius: 12px 12px 4px 12px;
+    background: var(--accent-soft);
     color: var(--text-0);
     font-size: var(--text-base);
     line-height: 1.5;
@@ -1462,9 +1459,9 @@
 
   .role-tag {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .assistant-body {
@@ -1534,9 +1531,9 @@
 
   .run-provisional-note {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .run-tools {
@@ -1549,9 +1546,9 @@
     border: 1px solid var(--panel-strong);
     padding: 1px var(--space-3);
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .run-tool.done {
@@ -1570,7 +1567,7 @@
     display: grid;
     gap: var(--space-3);
     padding: var(--space-4);
-    border-top: 1px solid var(--divider);
+    border-top: 0;
   }
 
   .composer textarea {
@@ -1578,9 +1575,9 @@
     min-height: 2.4rem;
     max-height: 12rem;
     resize: vertical;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
+    background: var(--panel-bg);
     color: var(--text-0);
     padding: var(--space-4) var(--space-5);
     font: inherit;
@@ -1619,31 +1616,32 @@
   .composer-buttons button {
     height: 30px;
     padding: 0 var(--space-5);
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--tint);
     color: var(--text-1);
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
     white-space: nowrap;
   }
 
   .composer-buttons button:hover:not(:disabled) {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .composer-buttons button.primary {
     color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
   }
 
   .composer-buttons button.primary.stop {
     color: var(--negative);
-    border-color: color-mix(in srgb, var(--negative) 40%, var(--panel-strong));
+    border-color: color-mix(in srgb, var(--negative) 40%, transparent);
   }
 
   .composer-buttons button:disabled {
@@ -1726,9 +1724,9 @@
     padding: var(--space-1) var(--space-3);
     border: 1px solid color-mix(in srgb, var(--warning) 52%, var(--panel-strong));
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .storage-summary p {
@@ -1758,9 +1756,9 @@
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     cursor: pointer;
   }
 
@@ -1794,9 +1792,9 @@
 
   .storage-detail-label {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
   }
 
@@ -1820,8 +1818,8 @@
     gap: var(--space-2);
     height: 28px;
     padding: 0 var(--space-3);
-    border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--panel-strong));
-    background: var(--bg-1);
+    border: 1px solid color-mix(in srgb, var(--warning) 42%, transparent);
+    background: var(--tint);
     color: var(--text-1);
     font: inherit;
     font-family: var(--font-ui);

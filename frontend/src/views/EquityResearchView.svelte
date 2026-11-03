@@ -1189,7 +1189,6 @@
           label: result.benchmark_symbol,
           color: "var(--chart-secondary)",
           type: "line",
-          lineStyle: "dashed",
           data: cumulativeFromReturns(benchmark)
         });
       }
@@ -1210,7 +1209,6 @@
           label: compareResult.right.label,
           color: "var(--chart-secondary)",
           type: "line" as const,
-          lineStyle: "dashed" as const,
           data: compareResult.right.normalized_nav_points.map(toChartPoint)
         }
       ]
@@ -2139,16 +2137,16 @@
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .header-panel .subtitle {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .performance-panel,
@@ -2165,12 +2163,12 @@
   /* ── Header panel internals ── */
 
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }
@@ -2193,8 +2191,8 @@
   .ctrl-group {
     display: flex;
     align-items: center;
-    border: 1px solid var(--panel-border);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
   }
 
   .ctrl-select {
@@ -2262,17 +2260,18 @@
     min-width: 0;
     min-height: 42rem;
     aspect-ratio: 16 / 9;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: hidden;
   }
 
   .treemap-section {
     position: absolute;
-    border: 1px solid color-mix(in srgb, var(--panel-strong) 72%, var(--divider));
+    border: 0;
     background: color-mix(in srgb, var(--surface-0) 76%, transparent);
     min-width: 0;
     overflow: hidden;
+    border-radius: var(--panel-radius);
   }
 
   .treemap-section-head {
@@ -2292,9 +2291,9 @@
 
   .treemap-section-head span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2318,12 +2317,13 @@
     min-height: 0;
     min-width: 0;
     padding: var(--space-3) var(--space-3);
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     color: var(--text-0);
     text-align: left;
     overflow: hidden;
     width: auto;
     transition: border-color 120ms ease, filter 120ms ease;
+    border-radius: 3px;
   }
 
   .treemap-tile:hover,
@@ -2415,7 +2415,7 @@
 
   .treemap-tile.micro strong {
     font-size: var(--text-2xs);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .treemap-empty {
@@ -2424,8 +2424,8 @@
     display: grid;
     place-items: center;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-size: var(--text-sm);
   }
 
@@ -2439,14 +2439,12 @@
     max-width: 18rem;
     padding: var(--space-4) var(--space-5) var(--space-5);
     background: color-mix(in srgb, var(--bg-1) 96%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
-    box-shadow:
-      0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent) inset,
-      0 12px 28px color-mix(in srgb, var(--shadow-ink) 55%, transparent),
-      0 2px 6px color-mix(in srgb, var(--shadow-ink) 40%, transparent);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--overlay-shadow);
     color: var(--text-0);
     z-index: 20;
     backdrop-filter: blur(6px);
+    border-radius: var(--overlay-radius);
   }
 
   .treemap-tooltip-head {
@@ -2458,7 +2456,7 @@
 
   .treemap-tooltip-head strong {
     font-size: var(--text-md);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     color: var(--text-0);
   }
 
@@ -2495,9 +2493,9 @@
 
   .treemap-tooltip-sector {
     margin-top: var(--space-1);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -2519,9 +2517,9 @@
 
   .treemap-tooltip-metrics dt {
     margin: 0;
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
     white-space: nowrap;
     overflow: hidden;
@@ -2653,9 +2651,9 @@
   .inline-field > span,
   label > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   h2 {
@@ -2665,8 +2663,8 @@
   }
 
   h3 {
-    font-size: var(--text-base);
-    font-weight: 700;
+    font-size: var(--text-title);
+    font-weight: 600;
     color: var(--text-0);
   }
 
@@ -2674,8 +2672,8 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--text-0);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   h2,
@@ -2719,8 +2717,8 @@
   .row span {
     color: var(--text-2);
     font-size: var(--text-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .row strong {
@@ -2792,8 +2790,8 @@
   /* ── Tables ── */
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     max-height: 28rem;
   }
 
@@ -2851,17 +2849,18 @@
   }
 
   .pill-list span {
-    border: 1px solid var(--divider);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-1);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-xs);
     text-transform: none;
     letter-spacing: normal;
+    border-radius: var(--radius-pill);
   }
 
   .pill-list span.short-pill {
-    border-color: var(--negative);
+    border-color: color-mix(in srgb, var(--negative) 45%, transparent);
     color: var(--negative);
   }
 
@@ -2904,9 +2903,9 @@
 
   .note-tag {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .note-row.info .note-tag,
@@ -3003,5 +3002,12 @@
       grid-template-columns: 1fr;
       gap: var(--space-2);
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .row strong,
+  .treemap-tooltip dd {
+    font-family: var(--font-num);
   }
 </style>

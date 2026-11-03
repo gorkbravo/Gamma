@@ -373,9 +373,9 @@
   legend,
   .artifact-type {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .panel-head strong {
@@ -542,7 +542,7 @@
 
   .artifact-list > button:hover,
   .artifact-list > button.active {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .artifact-list > button.active .artifact-type {
@@ -565,15 +565,15 @@
 
   .mode-tabs button.active {
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--active-bg);
   }
 
   .mode-tabs span {
     margin-left: auto;
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .mode-tabs span.error,

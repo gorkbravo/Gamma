@@ -256,7 +256,7 @@
         {#if loadError}
           <p class="notice warning" role="alert">Gamma could not read its setup status: {loadError}</p>
         {:else}
-          <p class="muted" aria-live="polite">{loading ? "LOADING..." : "Waiting for the backend."}</p>
+          <p class="muted" aria-live="polite">{loading ? "Loading…" : "Waiting for the backend."}</p>
         {/if}
       {:else if step === "mode"}
         <fieldset class="modes" disabled={modeLocked}>
@@ -570,7 +570,7 @@
     display: grid;
     place-items: center;
     padding: var(--space-6);
-    background: color-mix(in srgb, var(--bg-0) 78%, transparent);
+    background: var(--scrim);
   }
 
   /* Superficie de overlay: el único caso en que el modelo de planos admite sombra. */
@@ -579,10 +579,10 @@
     max-height: calc(100vh - 2 * var(--space-6));
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr) auto;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
     background: var(--surface-0);
-    box-shadow: 0 24px 56px var(--shadow);
+    box-shadow: var(--overlay-shadow);
     outline: none;
   }
 
@@ -607,9 +607,9 @@
   caption {
     color: var(--text-2);
     font-family: var(--font-label);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    letter-spacing: 0;
+    text-transform: var(--label-case);
   }
 
   h2 {
@@ -750,7 +750,7 @@
 
   .mode.selected {
     border-color: color-mix(in srgb, var(--accent) 60%, var(--panel-strong));
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--active-bg);
   }
 
   .modes:disabled .mode {

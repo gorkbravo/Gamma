@@ -276,7 +276,7 @@
     .filter((point): point is HeroPricePoint => point.time != null && Number.isFinite(point.close));
   $: syntheticChartSeries = syntheticPortfolio ? [
     { id: "basket", label: "Synthetic basket", color: "var(--chart-primary)", type: "area", data: syntheticPortfolio.portfolio_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) },
-    { id: "benchmark", label: syntheticPortfolio.benchmark_label, color: "var(--chart-secondary)", type: "line", lineStyle: "dashed", data: syntheticPortfolio.benchmark_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) }
+    { id: "benchmark", label: syntheticPortfolio.benchmark_label, color: "var(--chart-secondary)", type: "line", data: syntheticPortfolio.benchmark_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) }
   ] : [];
   $: activeHeroSeries = heroCanvas === "basket" && syntheticChartSeries.length ? syntheticChartSeries : tokenChartSeries;
   $: if (heroCanvas === "basket" && syntheticPortfolio?.lookback_days && syntheticPortfolio.lookback_days !== heroLookbackDays) {
@@ -1151,16 +1151,16 @@
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-md);
+    font-weight: 600;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .header-panel .subtitle {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
 
   .table-panel {
@@ -1182,8 +1182,8 @@
   .table-header span {
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--text-2);
   }
 
@@ -1234,12 +1234,13 @@
   }
 
   .badge-stack span {
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-1);
     padding: var(--space-1) var(--space-4);
     font-size: var(--text-sm);
     white-space: nowrap;
+    border-radius: var(--radius-pill);
   }
 
   /* Buttons are .btn from primitives.css (secondary actions add .is-ghost)
@@ -1252,12 +1253,12 @@
   }
 
   .loading-pill {
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    background: var(--accent-soft);
     padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }
@@ -1265,7 +1266,7 @@
   .secondary-pill {
     color: var(--warning);
     border-color: color-mix(in srgb, var(--warning) 28%, transparent);
-    background: color-mix(in srgb, var(--warning) 6%, transparent);
+    background: var(--warning-soft);
   }
 
   /* Fields are .form-control.is-large from primitives.css. */
@@ -1291,16 +1292,16 @@
   .section-label,
   .focus-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .headline-kpi-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: 1.1;
   }
 
@@ -1312,11 +1313,11 @@
   }
 
   h3 {
-    font-size: var(--text-md);
+    font-size: var(--text-title);
   }
 
   .header-panel .headline-strip {
-    border-left: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .header-panel .headline-kpi {
@@ -1350,9 +1351,11 @@
   .header-panel .headline-kpi-value .headline-kpi-meta.warning { color: var(--warning); }
 
   .headline-kpi {
-    padding: var(--space-1) var(--space-5) var(--space-2) var(--space-5);
-    border-left: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-left: 0;
     text-align: right;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .headline-kpi:first-child {
@@ -1361,7 +1364,7 @@
 
   .headline-kpi-value {
     display: block;
-    font-size: var(--text-md);
+    font-size: var(--text-kpi);
     line-height: 1.2;
   }
 
@@ -1527,8 +1530,8 @@
 
   .basket-card {
     font-family: var(--font-num), monospace;
-    border: 1px solid var(--divider);
-    background: transparent;
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-0);
     cursor: pointer;
     padding: var(--space-4);
@@ -1546,22 +1549,24 @@
   }
 
   .tag-chip {
-    border: 1px solid var(--divider);
+    border: 1px solid transparent;
     padding: var(--space-2) var(--space-4);
     color: var(--text-1);
-    background: var(--surface-0);
+    background: var(--tint);
     font-size: var(--text-sm);
     white-space: nowrap;
+    border-radius: var(--radius-pill);
   }
 
   .accent-chip {
     color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--divider));
+    border-color: transparent;
+    background: var(--accent-soft);
   }
 
   .table-wrap {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
     overflow: auto;
     max-height: 29rem;
   }
@@ -1642,5 +1647,14 @@
     .align-right {
       text-align: left;
     }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .headline-kpi-value,
+  .focus-value,
+  .focus-row strong,
+  .meta-row strong {
+    font-family: var(--font-num);
   }
 </style>

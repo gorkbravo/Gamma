@@ -31,7 +31,7 @@
     },
     ".cm-scroller": { overflow: "auto" },
     ".cm-gutters": {
-      color: "var(--text-3)",
+      color: "var(--text-2)",
       backgroundColor: "var(--surface-1)",
       borderRight: "1px solid var(--panel-border)"
     },

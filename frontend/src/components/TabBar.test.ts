@@ -9,8 +9,8 @@ describe("TabBar", () => {
         activeTab: "prediction_markets",
         open: true,
         tabs: [
-          { id: "sitrep", label: "SITREP", pinned: true },
-          { id: "risk", label: "RISK", pinned: false },
+          { id: "sitrep", label: "Sitrep", pinned: true },
+          { id: "risk", label: "Risk", pinned: false },
           { id: "prediction_markets", label: "PREDICTION MARKETS", pinned: false },
           { id: "macro", label: "MACRO", pinned: false },
         ],
@@ -22,7 +22,7 @@ describe("TabBar", () => {
     });
 
     expect(body).toContain("Reset");
-    expect(body).toContain("SITREP");
+    expect(body).toContain("Sitrep");
     expect(body).toContain("PREDICTION MARKETS");
     expect(body).toContain("Pinned");
   });

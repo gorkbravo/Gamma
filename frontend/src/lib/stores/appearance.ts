@@ -14,9 +14,9 @@ export type ResolvedTheme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "gamma.theme";
 
-// Dark stays the default until the light theme is complete (V4); the plan's
-// target default is System.
-export const DEFAULT_THEME_PREFERENCE: ThemePreference = "dark";
+// System follows the operating system's light or dark setting (V4). A
+// stored Light or Dark choice is kept.
+export const DEFAULT_THEME_PREFERENCE: ThemePreference = "system";
 
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
@@ -71,10 +71,12 @@ export function setThemePreference(preference: ThemePreference) {
 }
 
 /* Data figures: the typeface of figures in tables, stats and charts. It
-   overrides --font-num only, so code keeps --font-code. An empty choice
-   keeps the token's own stack. */
+   overrides --font-num only, so labels keep --font-ui and code --font-code.
+   The empty choice is the default: the token's own stack, Instrument Sans
+   with tabular figures. A stored monospace stays valid. */
 export const DATA_FIGURES_STORAGE_KEY = "gamma.dataFigures";
 export const DATA_FIGURE_FONTS = ["Cascadia Mono", "Consolas", "JetBrains Mono", "IBM Plex Mono", "Courier New"] as const;
+export const DEFAULT_DATA_FIGURES_LABEL = "Instrument Sans (default)";
 export type DataFigureFont = "" | (typeof DATA_FIGURE_FONTS)[number];
 
 export function parseDataFigureFont(value: unknown): DataFigureFont {
@@ -94,7 +96,7 @@ export const dataFigureFont = writable<DataFigureFont>(readStoredDataFigures());
 function applyDataFigureFont(font: DataFigureFont) {
   if (typeof document === "undefined") return;
   if (font) {
-    document.documentElement.style.setProperty("--font-num", `"${font}"`);
+    document.documentElement.style.setProperty("--font-num", `"${font}", monospace`);
   } else {
     document.documentElement.style.removeProperty("--font-num");
   }

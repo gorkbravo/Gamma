@@ -3,6 +3,8 @@
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import CommodityCurveHistory from "../components/CommodityCurveHistory.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import Sparkline from "../components/Sparkline.svelte";
+  import { weekOverWeekChange } from "../lib/chart-data";
   import type {
     CommodityCrossDomainLink,
     CommodityCurveSnapshot,
@@ -119,6 +121,9 @@
     ? buildRankRowsFromOverview(overview.rankings.spread_z_score_outliers, "warning", true)
     : buildSpreadZRows(workspace?.spreads ?? []);
   $: historyPointCount = selectedHistory?.points.length ?? 0;
+  // The selected market's daily closes, for the "Last" KPI's trend.
+  $: lastValues = selectedHistory?.points.map((point) => point.value) ?? [];
+  $: lastWeekChange = weekOverWeekChange(lastValues);
   $: latestHistoryDate = selectedHistory?.points.at(-1)?.timestamp ?? selectedSummary?.retrieved_at ?? workspace?.retrieved_at ?? null;
   $: providerMixLabel = formatProviderMix(workspace);
   // GUA-20261021-4: el resumen general lista conflictos de datos y referencias caducadas.
@@ -383,7 +388,6 @@
               label: curve.previous_as_of ? `Previous curve (${formatDate(curve.previous_as_of)})` : "Previous curve",
               color: "var(--chart-secondary)",
               type: "line" as const,
-              lineStyle: "dashed" as const,
               showPointMarkers: true,
               pointMarkerRadius: 3,
               data: previous
@@ -850,7 +854,8 @@
   }
 
   function displayStatus(value: string | null | undefined) {
-    return humanize(value).toUpperCase();
+    const label = humanize(value);
+    return label.charAt(0).toUpperCase() + label.slice(1);
   }
 
   function valueClass(value: number | null | undefined) {
@@ -1405,7 +1410,7 @@
         </div>
       {/if}
       <button type="button" class="btn is-small refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
-        {loading ? "LOADING..." : "Refresh"}
+        {loading ? "Loading…" : "Refresh"}
       </button>
     </div>
 
@@ -1815,7 +1820,13 @@
             </div>
             <div class="ctx-kpi">
               <span>Last</span>
-              <strong class:absent={formatNumber(selectedSummary?.latest_price, 2) === "N/A"}>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
+              <span class="kpi-value-row">
+                <strong class:absent={formatNumber(selectedSummary?.latest_price, 2) === "N/A"}>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
+                <Sparkline values={lastValues} />
+                {#if lastWeekChange != null}
+                  <small class={valueClass(lastWeekChange)} title="Change over the last five sessions">{formatPct(lastWeekChange)} w/w</small>
+                {/if}
+              </span>
             </div>
             <div class="ctx-kpi wide">
               <span>Basis</span>
@@ -2700,9 +2711,9 @@
     color: var(--accent);
     border: 1px solid var(--panel-strong);
     padding: var(--space-1) var(--space-3);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .basis-strip {
@@ -2719,16 +2730,16 @@
   .basis-strip em {
     color: var(--text-2);
     font-style: normal;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     margin-right: var(--space-2);
   }
 
   .basis-strip strong {
     color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .handoff-actions {
@@ -2770,26 +2781,27 @@
 
   .control > span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     line-height: 1.1;
   }
 
   .ctx-kpis {
     display: flex;
-    gap: 0;
+    gap: var(--space-3);
     margin-left: auto;
-    border-left: 1px solid var(--divider);
     flex-wrap: wrap;
   }
 
   .ctx-kpi {
     display: grid;
     gap: 0.05rem;
-    padding: var(--space-1) var(--space-5);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-right: 0;
     min-width: 4.5rem;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .ctx-kpi.wide {
@@ -2798,15 +2810,15 @@
 
   .ctx-kpi span {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     line-height: 1.1;
   }
 
   .ctx-kpi strong {
     color: var(--text-0);
-    font-size: var(--text-sm);
+    font-size: var(--text-kpi);
     font-weight: 600;
     line-height: 1.15;
     white-space: nowrap;
@@ -2817,6 +2829,24 @@
     text-overflow: ellipsis;
     max-width: 13rem;
   }
+
+  /* The value, its 20-session sparkline and the week-over-week change on
+     one baseline, so the block keeps its height. */
+  .kpi-value-row {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    white-space: nowrap;
+  }
+
+  .kpi-value-row small {
+    font-family: var(--font-num);
+    font-size: var(--text-xs);
+    line-height: 1.15;
+  }
+
+  .kpi-value-row small.positive { color: var(--positive); }
+  .kpi-value-row small.negative { color: var(--negative); }
 
   .ctx-kpi strong.positive { color: var(--positive); }
   .ctx-kpi strong.negative { color: var(--negative); }
@@ -2949,7 +2979,6 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
-    border-bottom: 1px solid var(--divider);
   }
 
   .inline-stats > div {
@@ -2958,22 +2987,21 @@
     gap: var(--space-3);
     min-width: 0;
     padding: var(--space-3) var(--space-5);
-    border-right: 1px solid var(--divider);
   }
 
   .inline-stats > div:last-child { border-right: 0; }
 
   .inline-stats span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .inline-stats strong {
     color: var(--text-0);
     font-weight: 600;
-    font-size: var(--text-sm);
+    font-size: var(--text-kpi);
     line-height: 1.15;
   }
 
@@ -3019,9 +3047,9 @@
   .matrix-table .inventory-col { width: 14%; }
   .sector-cell {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     font-weight: 600;
     border-right: 1px solid var(--divider);
     background: color-mix(in srgb, var(--accent) 3%, transparent);
@@ -3102,8 +3130,8 @@
 
   .scatter-shell {
     position: relative;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    border: 0;
+    background: transparent;
   }
 
   .scatter-shell svg {
@@ -3190,9 +3218,9 @@
 
   .tip-row span:first-child {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
   }
 
   .tip-row span:last-child {
@@ -3217,10 +3245,10 @@
   .rank-block h3 {
     margin: 0 0 var(--space-3);
     color: var(--text-2);
-    font-size: var(--text-2xs);
+    font-size: var(--text-title);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .rank-list {
@@ -3533,9 +3561,9 @@
 
   .provenance .prov-label {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     font-weight: 600;
   }
 
@@ -3618,5 +3646,13 @@
     .inline-stats > div:last-child { border-bottom: 0; }
 
     .ctx-kpis { margin-left: 0; border-left: 0; border-top: 1px solid var(--divider); width: 100%; padding-top: var(--space-3); }
+  }
+
+  /* Figures outside tables take the data role (tokens.css), so the Data
+     figures setting reaches them while their labels stay on --font-ui. */
+  .inline-stats strong,
+  .ctx-kpi strong,
+  .rank-value {
+    font-family: var(--font-num);
   }
 </style>

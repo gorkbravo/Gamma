@@ -278,8 +278,8 @@
   }
 
   .focus-card {
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 35%, transparent);
-    background: var(--surface-soft);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: inherit;
     font: inherit;
     padding: var(--space-5);
@@ -288,10 +288,11 @@
     text-align: left;
     cursor: pointer;
     transition: background 120ms ease, border-color 120ms ease;
+    border-radius: var(--panel-radius);
   }
 
   .focus-card:hover {
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    background: var(--hover-bg);
     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
   }
 
@@ -326,9 +327,9 @@
   .focus-target {
     margin: 0;
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   /* ── Snapshot table ── */
@@ -362,7 +363,7 @@
     transition: background 120ms ease;
   }
 
-  .snapshot-row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .snapshot-row:hover { background: var(--hover-bg); }
 
   .snapshot-row:focus-visible {
     outline: 1px solid var(--accent);
@@ -430,9 +431,9 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     line-height: var(--leading-tight);
     min-height: calc(2em * 1.2);
     overflow: hidden;
@@ -486,7 +487,7 @@
     margin-left: auto;
     font-size: var(--text-base);
     color: var(--text-0);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   /* The FX pair pickers are .form-control from primitives.css and keep the
@@ -536,7 +537,7 @@
     padding: var(--space-3) 0;
   }
 
-  .list-row.interactive:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .list-row.interactive:hover { background: var(--hover-bg); }
   .list-row.interactive:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .list-row.interactive:last-child { border-bottom: 0; }
 
@@ -561,9 +562,9 @@
 
   .date-group-header {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
     border-bottom: 1px solid color-mix(in srgb, var(--rule-navy) 20%, transparent);

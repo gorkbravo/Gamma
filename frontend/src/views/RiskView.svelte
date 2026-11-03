@@ -1085,7 +1085,7 @@
   <article class="panel table-panel">
     <header class="panel-title table-panel-header">
       Historical Stress Replay
-      <span>{state === "loading" ? "LOADING..." : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
+      <span>{state === "loading" ? "Loading…" : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
     </header>
     <table class="data-table is-nowrap">
       <thead>
@@ -1127,7 +1127,7 @@
             </tr>
           {/each}
         {:else}
-          <tr class="empty-row"><td colspan="9">{state === "loading" ? "LOADING..." : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
+          <tr class="empty-row"><td colspan="9">{state === "loading" ? "Loading…" : "Compute risk, then open Scenarios to replay the episodes."}</td></tr>
         {/if}
       </tbody>
     </table>
@@ -1532,7 +1532,7 @@
     color: var(--text-2);
     font-family: var(--font-num);
     font-size: var(--text-2xs);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .source-pending {
@@ -1540,7 +1540,7 @@
     color: var(--warning);
     font-family: var(--font-num);
     font-size: var(--text-2xs);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .view,
@@ -1590,9 +1590,9 @@
 
   .control > span {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
+    font-size: var(--text-xs);
     font-weight: 500;
   }
 
@@ -1611,8 +1611,8 @@
   /* Risk's action buttons read as uppercase commands with an accent hover. */
   .action-btn {
     font-family: var(--font-ui);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
     font-weight: 600;
     padding: 0 var(--space-5);
   }
@@ -1622,7 +1622,7 @@
   /* ── Panel headers ──
      The 26px row is .panel-title from primitives.css. Table panels keep their
      row count in a plain span that stays uppercase, unlike .header-meta. */
-  .table-panel-header span { color: var(--text-2); font-weight: 400; font-size: var(--text-2xs); }
+  .table-panel-header span { color: var(--text-2); font-weight: 400; font-size: var(--text-xs); }
 
   /* Chart, heatmap, table panels: edge-to-edge content under a 26px header */
   .table-panel,
@@ -1771,9 +1771,9 @@
   .dependency-tooltip em {
     color: var(--text-2);
     font-style: normal;
-    text-transform: uppercase;
-    font-size: var(--text-2xs);
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    font-size: var(--text-xs);
+    letter-spacing: 0;
   }
 
   /* ── Heatmap ── */
@@ -1845,8 +1845,8 @@
   .sc-lbl {
     color: var(--text-2);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
   .sc-track {
     height: 0.6rem;
@@ -1869,8 +1869,8 @@
     border-top: 1px solid var(--divider);
     font-size: var(--text-xs);
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
   .sc-delta strong {
     font-variant-numeric: tabular-nums;
@@ -1972,7 +1972,7 @@
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-2xs);
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     transform: translate(-50%, -100%);
     white-space: nowrap;
     pointer-events: none;
@@ -2000,7 +2000,7 @@
   }
   .frontier-tooltip strong { color: var(--text-0); font-size: var(--text-sm); font-weight: 600; }
   .frontier-tooltip span { color: var(--text-1); display: flex; justify-content: space-between; gap: var(--space-5); }
-  .frontier-tooltip em { color: var(--text-2); font-style: normal; text-transform: uppercase; font-size: var(--text-2xs); letter-spacing: 0.08em; }
+  .frontier-tooltip em { color: var(--text-2); font-style: normal; text-transform: var(--label-case); font-size: var(--text-xs); letter-spacing: 0; }
 
   .axis-label {
     position: absolute;

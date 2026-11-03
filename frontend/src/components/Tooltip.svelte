@@ -204,9 +204,9 @@
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
     background: var(--surface-0);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-md);
-    box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
     color: var(--text-1);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
@@ -224,9 +224,9 @@
 
   .tooltip-heading {
     color: var(--text-2);
-    font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    text-transform: var(--label-case);
+    letter-spacing: 0;
   }
 
   .tooltip-text {
