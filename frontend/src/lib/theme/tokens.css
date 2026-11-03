@@ -190,9 +190,11 @@
      upper case (tenors, venue codes, tickers) set uppercase themselves. */
   --label-case: none;
 
-  /* ── Chart series ── */
+  /* ── Chart series ── the primary in the accent; comparison series (a
+     previous curve, a benchmark) in a solid grey: B′'s #4a5462 measures
+     2.3:1 on the sheet, so this is the nearest grey at 3:1 (3.3:1). */
   --chart-primary: #7d9df2;
-  --chart-secondary: #e0aa50;
+  --chart-secondary: #626c7b;
   --chart-negative: #dc7465;
 
   /* ── Value flash ── the colour a ticking value flashes before it fades.
@@ -289,7 +291,8 @@
   --scrim: rgba(18, 26, 38, 0.22);
 
   --chart-primary: #2952cc;
-  --chart-secondary: #8a5a00;
+  /* B′'s #b7bfcb measures 1.8:1 on white; the nearest grey at 3:1 (3.3:1). */
+  --chart-secondary: #868f9c;
   --chart-negative: #b83329;
 
   --flash-up: rgba(12, 112, 73, 0.16);
