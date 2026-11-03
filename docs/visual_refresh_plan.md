@@ -417,7 +417,7 @@ The baseline is the same in both themes and was measured again on the gate day (
 
 ## V5 doctrine and skills
 
-V5 ran on branch `claude/v5-doctrine` from local main ab6467c, one commit per step: 9f6f504 the doctrine rewrite, 0c29a3f token and primitive comments, 48211a3 `PRODUCT.md` and the docs index, then this section. The gamma-ui and gamma-charts skills live outside the repository and were rewritten in place after a backup (kept with the V5 handover note). No app code changed. Not merged.
+V5 ran on branch `claude/v5-doctrine` from local main ab6467c, one commit per step: 9f6f504 the doctrine rewrite, 0c29a3f token and primitive comments, 48211a3 `PRODUCT.md` and the docs index, then this section. The gamma-ui and gamma-charts skills live outside the repository and were rewritten in place after a backup (kept with the V5 handover note). The doctrine steps changed no app code; afterwards, at the user's request, one copy change renamed the brand subtitle in the top bar (`Shell.svelte`) and on the landing card (`LandingPage.svelte`) from "Research Terminal" to "Research Workspace", the wording the README already uses. Not merged.
 
 ### What changed per section
 
@@ -482,19 +482,20 @@ Clean: no off-ramp font size, no solid, green or red button fill, uppercase only
 - `gamma-ui` (`~/.claude/skills/gamma-ui/SKILL.md`): the description drops "more like a professional trading terminal" and keeps the density, polish and audit triggers (adds light/dark checks and drift scans). The body teaches the B′ plane model, the radius scale, filled buttons, sentence-case labels, font roles, KPI blocks, the flush table panel with `.panel-title`, the provenance pill, the current file map, and §3, §5, §8, §11, §12, §14 and §15 by number.
 - `gamma-charts` (`~/.claude/skills/gamma-charts/skill.md`): "Apply Gamma's terminal design philosophy" becomes "Apply Gamma's B′ chart doctrine"; the body teaches the transparent ground, no grid, the baseline, the flat 9% area, the reserved comparison grey, bands only for a difference, payload-only sparklines and both themes, and drops the retired chart themes and every hex value. It cites §3, §4, §8 (→ Charts), §9, §14 and §15.
 - Both keep their scope split (gamma-ui: panels, tables, controls, text density; gamma-charts: chart internals). Every `§N (Name)` they cite lands on that heading, their YAML frontmatter parses, and every token and path they name exists.
-- `gamma-usability-audit` was only checked: its hand-off to the two skills, "which own `docs/design_principles.md`", still holds. Its wording ("research terminal", a "terminal feel" score row) is left to the user.
+- `gamma-usability-audit`: its hand-off to the two skills, "which own `docs/design_principles.md`", still holds. At the user's request it now calls Gamma a "research workspace", its report template asks for tight, technical prose, and the score row "Visual density & terminal feel" became "Visual density & design consistency", with a note to take the Δ from the old row.
 
 ### Verification
 
 - Comment-only CSS: the comment-stripped sources are identical, and `vite build` before and after produced sha256-identical output (22 CSS files, all 72 dist files).
 - Gate on the branch: `tsc --noEmit` clean, vitest 82 files / 651 tests, `vite build` with only the four known warnings; token and path checks pass for the doctrine and both skills; "Bloomberg" appears nowhere in the doctrine, the skills, `PRODUCT.md`, the docs index or the theme CSS, and "terminal" only in the "not a terminal imitation" line.
 - Ten doctrine claims were checked against the code with file and line evidence (borderless panels, document-wide tabular figures, `--label-case`, the header band, the button fills, the chart grid and baseline, the flat area, KPI blocks, overlays and scrim, the System default); all hold.
-- Not run: the app itself. V5 changed no rendered pixel, which the identical build output proves; nothing was checked in a browser.
+- The doctrine steps changed no rendered pixel, which the identical build output proves. The later copy change was checked in the browser without a backend: the top bar reads "Gamma · Research Workspace" on one line at 1024px and at 375px with no sideways scroll, and the landing card shows the same subtitle; typecheck, tests and build were unchanged (82 files / 651 tests, the four known warnings).
 
 ### Left for V6
 
 - The drift-scan findings above.
 - `website/DESIGN.md` and `website/.impeccable/design.json` still inherit the old doctrine verbatim (the old Two-Type Rule, "Terminal Ground", uppercase tracked mono labels, the pre-V2 colours).
+- The marketing site still says "Research Terminal" under the wordmark of all four pages and "a read-only market research terminal" in the index title, meta description, Open Graph title and every page footer (`website/index.html`, `faq.html`, `keys.html`, `setup.html`).
 
 ## Doctrine rewrite map (V5)
 
