@@ -468,3 +468,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-11-03: the user reviewed the V4 screenshots and merged the branch into main as c3343b4 (not pushed). V4 is complete.
 - 2026-11-03: main pushed to origin (a1c74e2..0aace25, V3 and V4).
 - 2026-11-03: ghost buttons fixed on branch `claude/v4-ghost-buttons` from main 0aace25. A rendered audit found 39 action buttons per theme with no fill and no edge (the top bar's Change View and Settings in every view, and `.btn.is-ghost`). The user chose two tonal steps over a ghost-only tint or a hairline: `--button-bg` for buttons, the tint for ghosts. After the fix no action button is without a boundary. Not merged.
+- 2026-11-03: the user merged the button fix into main as b10e48c (not pushed).
