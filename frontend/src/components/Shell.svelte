@@ -251,7 +251,7 @@
   }
 
   .asset-chip span {
-    color: var(--text-2);
+    color: var(--text-1);
     font-size: var(--text-xs);
     text-transform: var(--label-case);
     letter-spacing: 0;
@@ -273,7 +273,7 @@
     height: 1.2rem;
     border: 1px solid transparent;
     background: transparent;
-    color: var(--text-2);
+    color: var(--text-1);
     font-size: var(--text-md);
     line-height: 1;
     padding: 0;
@@ -324,7 +324,7 @@
     font-size: var(--text-sm);
     font-weight: 400;
     letter-spacing: 0;
-    color: var(--text-2);
+    color: var(--text-1);
   }
 
   .copilot-trigger {

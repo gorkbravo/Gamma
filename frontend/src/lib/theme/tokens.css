@@ -116,7 +116,8 @@
   /* ── Text ── */
   --text-0: #edf1f6;
   --text-1: #b8c1cc;
-  --text-2: #808b99;
+  /* B′ #808b99, one step lighter: 4.5:1 on the selection and hover fills. */
+  --text-2: #8a95a3;
   /* Text on a heat-map fill (treemap tiles, payoff and IV grids): neutral,
      because the fill carries the tone and the sign the direction. A tone or
      muted colour on a strong fill falls below WCAG AA. */

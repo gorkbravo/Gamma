@@ -2799,7 +2799,7 @@
   .badge-stack span,
   .tag-chip {
     border: 1px solid transparent;
-    background: var(--accent-soft);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--panel-bg);
     color: var(--text-1);
     padding: var(--space-1) var(--space-3);
     text-transform: var(--label-case);
@@ -3069,25 +3069,25 @@
   .badge-stack span.fresh,
   .tag-chip.fresh {
     border-color: transparent;
-    background: var(--positive-soft);
+    background: linear-gradient(var(--positive-soft), var(--positive-soft)), var(--panel-bg);
   }
 
   .badge-stack span.stale,
   .tag-chip.stale {
     border-color: transparent;
-    background: var(--warning-soft);
+    background: linear-gradient(var(--warning-soft), var(--warning-soft)), var(--panel-bg);
   }
 
   .badge-stack span.delayed,
   .tag-chip.delayed {
     border-color: transparent;
-    background: var(--accent-soft);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--panel-bg);
   }
 
   .badge-stack span.broken,
   .tag-chip.broken {
     border-color: transparent;
-    background: var(--negative-soft);
+    background: linear-gradient(var(--negative-soft), var(--negative-soft)), var(--panel-bg);
   }
 
   .venue-label {

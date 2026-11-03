@@ -554,13 +554,14 @@
    A compact inline annotation: a curve state, an importance level, a stale
    flag. A B′ pill with a dot, toned by one variable: --tg is the tone
    (neutral, positive, negative, warning, accent) and --tg-fill its soft
-   fill, so a toned tag keeps the text-on-fill pairs contrast.test.ts
-   checks. Neutral text stays on --text-1. It truncates rather than widening
+   fill, painted over the sheet so a toned tag keeps the text-on-fill pairs
+   contrast.test.ts checks even inside a selected row. Neutral tags fill
+   from the tint with --text-1 text. It truncates rather than widening
    the table cell it sits in. Defined after .absent so a toned tag keeps its
    colour when its value is missing. */
 .tag {
   --tg: var(--text-2);
-  --tg-fill: color-mix(in srgb, var(--text-2) 14%, transparent);
+  --tg-fill: var(--tint);
   display: inline-block;
   max-width: 100%;
   border: 0;
@@ -575,7 +576,7 @@
   font-size: var(--text-xs);
   font-weight: 600;
   line-height: 15px;
-  background: var(--tg-fill);
+  background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg);
   color: var(--text-1);
 }
 
