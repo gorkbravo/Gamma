@@ -103,11 +103,17 @@ Hard constraints the site must preserve:
 - Voice: precise, unhedged, technical. States limits plainly rather than
   marketing around them. The README's "What Gamma Does Not Do" section is the
   voice reference.
-- Existing design doctrine: `docs/design_principles.md` — "Bloomberg Terminal's
-  information density with Linear's spatial discipline." Dark, one-plane,
-  quiet-chrome, two-type (mono for data, sans for chrome).
-- Implemented token system: `frontend/src/lib/theme/tokens.css` (bg `#070809`,
-  accent `#7aa6c8`, positive `#4bb474`, negative `#d97a70`, warning `#c49a5a`).
+- Existing design doctrine: `docs/design_principles.md`, the B′ "Tonal
+  compact" look — a research instrument, "not a terminal imitation, a generic
+  SaaS dashboard, or a data-visualization showcase." One plane of tonal
+  sheets, quiet chrome, light and dark themes (System by default), two-type
+  (Instrument Sans with tabular figures for data, the same sans for chrome,
+  mono only for code), sentence-case labels.
+- Implemented token system: `frontend/src/lib/theme/tokens.css`, a dark and a
+  light block of the B′ palette: cool neutral canvas and sheets, a blue accent
+  for interaction and the primary series, green, red and amber for data
+  meaning only. Values live in that file; `docs/visual_refresh_plan.md`
+  records them and where contrast moved them.
 - Repository: https://github.com/gorkbravo/Gamma
 
 ## Evidence on Hand
