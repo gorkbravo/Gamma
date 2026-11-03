@@ -3,11 +3,11 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
-- Last reviewed: 2026-10-30
-- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4–V6 planned.
+- Last reviewed: 2026-11-03
+- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete on branch `claude/v4-bprime` (2026-11-03), pending the user's review and merge. V5–V6 planned.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
-- Doctrine: [`design_principles.md`](./design_principles.md) stays authoritative for the current look until V5 rewrites it. Do not apply B′ values to views before V4.
+- Doctrine: [`design_principles.md`](./design_principles.md) still describes the terminal look; V5 rewrites it for B′. Until then this plan's V4 section describes what the code does.
 
 ## Decision summary
 
@@ -44,7 +44,7 @@ With 12 tabs, a top tab bar fits only 8–9 tabs at 1280px and gains no vertical
 - **Labels:** sentence case, 11px, weight 500, no letter-spacing, replacing uppercase with 0.1em tracking.
 - **Scale:** the 10–18px ramp is unchanged. View titles use `--text-md` (15px) and panel titles 12.5px.
 - **Charts:** `lightweight-charts` draws on canvas, which cannot apply `tabular-nums`. Axis labels may use proportional figures. If the crosshair price label visibly jitters, those labels switch to `--font-code`.
-- **Open decision (V4 gate):** tickers and contract codes (`BZZ6`, `CLZ6`, option symbols) and ISO dates in sans versus mono at 12px. Default to sans. If they read worse with real data, add `--font-id` (mono) for identifier cells only.
+- **Decided (V4 gate, 2026-11-03):** tickers and contract codes (`BZZ6`, `CLZ6`, option symbols) and ISO dates stay in Instrument Sans with tabular figures; there is no `--font-id`.
 
 ### Color
 
@@ -88,7 +88,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 | V1 — Shared primitives under the current look | Extend `frontend/src/lib/theme/primitives.css` (panel, header, mode bar, KPIs and eyebrow already exist) with the data table, tag, 26px panel title, inline stats, buttons, inputs and selects. Migrate the ~20 scoped `th, td` copies and 9 `.tag` copies. Keep genuine local exceptions as scoped overrides and list them. | No visual change except the deliberate convergences listed under [V1 convergences and kept exceptions](#v1-convergences-and-kept-exceptions), each reviewed on before/after screenshots of every view in mock mode (1440×900, DPR 1). `npm run typecheck`, `npm test` and `npm run build` pass without warnings from the changed files. | Done (2026-10-28), merged into main as 77d40e5 and 7867445 |
 | V2 — Token completeness and font roles | Replace the 71 raw `rgba(122, 166, 200, …)` values and 92 hex literals (18 files). Fix the ~62 `font: inherit` that pull chrome back to mono. Split `--app-font`/`--display-font` into `--font-ui`, `--font-num`, `--font-code` and `--font-label`. Add tint, soft semantic, scrim, `--panel-radius`, `--panel-border-width` and label-case tokens. Move `chart-colors.ts` and the flash keyframes onto tokens. | Values unchanged, so screenshot parity still holds. A grep gate shows no raw accent colors or hex literals in `.svelte` files outside a documented exception list. | Done (2026-10-28), merged into main as 9676017; see [V2 token completeness and font roles](#v2-token-completeness-and-font-roles) |
 | V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Done (2026-10-30), merged into main as a68ed3a; see [V3 theme infrastructure](#v3-theme-infrastructure) |
-| V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Planned |
+| V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Done on branch `claude/v4-bprime` (2026-11-03), pending review and merge; see [V4 B′ values and fonts](#v4-b-values-and-fonts) |
 | V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Planned |
 | V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Planned |
 
@@ -313,6 +313,108 @@ Categorical (`--cat-*`) and intensity (`--data-*`) colours, which B′ does not 
 - `--text-3` is still referenced in two places and defined nowhere.
 - Not verified by running it: the packaged desktop app (persistence and cross-window sync were checked in its configuration and code).
 
+## V4 B′ values and fonts
+
+V4 ran on branch `claude/v4-bprime` from local main f878592, one commit per step: 9e8f58c fold-rows guardrail script, a2e478b Instrument Sans, c6116c6 B′ token values, d355b4c B′ structure, 8a88bdc sentence-case labels, 3d43f8b chart styling and a KPI sparkline, 5103fec grey comparison series, 85ecbc9 identifier font decision, 29bf046 System default, then the gate fixes 8a30beb mode bars scroll on narrow windows, 265cfb6 Copilot shelf cards and the Portfolio picker, 106a835 rendered contrast at AA. Not merged: the user decides after reviewing the screenshots.
+
+### Fonts
+
+- Instrument Sans 400/500/600/700, latin and latin-ext `woff2` subsets from `@fontsource/instrument-sans` 5.3.0 (SIL OFL 1.1), in `frontend/public/fonts/` with `OFL.txt`, declared in `src/lib/theme/fonts.css` with `font-display: swap` and `unicode-range`. `index.html` and `keybindings.html` preload the latin regular from `/fonts/`; the build copies the files to `dist/fonts/`, which Tauri embeds.
+- The `tnum` feature was checked before wiring it: with `"tnum" 1` all ten digits advance 0.6em in every weight; the default figures are proportional (55–59px spread at 200px). The body keeps `tabular-nums` and adds `"tnum" 1`.
+- Roles: `--font-ui`, `--font-label` and `--font-num` are Instrument Sans; `--font-code` stays monospace. The document default is `--font-ui`. Data surfaces name `--font-num`: table cells (`td`), stat and header-KPI values, `.num`, and the figure slots outside tables in fifteen components. With Data Figures set to a monospace every figure turns monospace and labels, titles and prose stay in the interface font; with the default only code is monospace.
+- Data Figures offers "Instrument Sans (default)" plus the five monospaces; stored choices stay valid.
+- **Identifier font (V4 gate, decided 2026-11-03): Instrument Sans.** Tickers, contract codes, option symbols and ISO dates were compared at 12px in Instrument Sans and Cascadia Mono on Commodities curve nodes and spreads, the Options chain, Sitrep and the Fundamentals DCF harness, in both themes. The user kept the sans; there is no `--font-id`.
+- Canvas charts: lightweight-charts labels use `--font-num` with proportional figures. The crosshair price label does not jitter (its box spans the price axis and the text starts at a fixed x), so `--font-code` was not needed. The Surface3D canvas keeps its own monospace labels (V6).
+
+### Token values
+
+Both theme blocks follow the B′ table above; the dot grid and `--canvas-dot` are gone. Deviations:
+
+| Role | Theme | B′ | V4 | Why |
+|---|---|---|---|---|
+| Text 2 | light | `#697485` | `#636e7f` | 4.5:1 on the tint (V3) |
+| Text 2 | dark | `#808b99` | `#8a95a3` | 4.5:1 on the 14% selection fill (B′ measured 4.03:1) and the hover fill; found by the rendered audit |
+| Positive / negative / warning | light | `#0f7b52` / `#c4372c` / `#986000` | `#0c7049` / `#b83329` / `#8a5a00` | 4.5:1 on their 13% fills (V3) |
+| Chart secondary | light / dark | `#b7bfcb` / `#4a5462` | `#868f9c` / `#626c7b` | B′ greys measure 1.8:1 and 2.3:1 on the sheet; nearest greys at 3:1 (3.3:1), user decision 2026-11-03 |
+| Semantic soft fills | dark | 13–14% | 14% | top of the B′ range |
+| Selection (`--active-bg`) | both | = accent soft | 9% / 14% | equals accent soft |
+| Focus ring | dark | — | solid accent | 3:1 on the sheet and the tint |
+| `--negative-muted` | dark | — | `#dc7465` | kept role, a shade under `--negative` |
+| Categorical and intensity | both | — | cat-1..4, hot, warm, cold follow accent, semantic and text-2 | not in B′ |
+
+- JS-read tokens stay literal; gradient and animation colours stay literals or `rgba(var(--accent-rgb), α)`; `--accent-rgb` is `125, 157, 242` in dark.
+- 58 inline soft mixes in views moved to `--hover-bg`, `--active-bg` and the `--*-soft` tokens (chips, badges, pills, highlighted and overridden cells). Graded heat-map strengths stay inline because they encode magnitude.
+- The Copilot card and Setup backdrops use `--scrim`. The two `--text-3` uses point at `--text-2`; the token stays undefined on purpose.
+- New shape tokens: `--radius-control` 5px, `--panel-radius` 6px, `--overlay-radius` 12px, `--radius-pill`, `--panel-border-width: 0px`, `--overlay-shadow`; two type steps between the ramp's: `--text-title` 12.5px and `--text-kpi` 14px.
+
+### Structure
+
+- Panels are borderless sheets; the top bar sits on the canvas with tinted controls (as in the exploration mock).
+- Tables: 28px rows, cells 10px apart and 12px in at the outer columns, a tinted header band without a rule (sticky headers keep it), no zebra.
+- KPI blocks: header KPIs and the Options, Portfolio, Commodities and Crypto strips are tinted blocks (6px radius, 6px gap, 14px values); inline stats lose their rules.
+- Tags are pills with a dot toned by `--tg` and filled from the soft tokens (`--tg-fill`); the Crypto, Prediction Markets, Portfolio and Equity Research chips follow.
+- The shared `ProvenanceBadge` is the soft pill: `● Sample · mock · 22:58 · 2 warnings`; the dot variant keeps the compact `!2`.
+- Mode bars and a new `.segmented` track (Copilot roles in chat and shelf, Prediction Markets and Portfolio pickers): a tinted track, the selected segment on the sheet with a 1px outline at weight 600, same height as before.
+- `.btn` and `.form-control` are tinted without an edge (accent line on hover, ring on focus); primary stays an accent tint, never a solid fill.
+- Overlays float with 12px corners and the overlay shadow: the drawer (248px, pinning and drag reordering unchanged) and the Copilot shelf 8px from the window edges, tooltips, menus, the tab search, Settings, Setup, the landing card, the chart settings popover, the treemap tooltip. Modal overlays dim with `--scrim`.
+- The Copilot chat chrome converges with the shelf (the V1 exception is closed): tinted controls, segmented roles, 12px composers, no header or composer rules.
+
+### Labels
+
+- `--label-case: none`. Labels are sentence case, 11px, weight 500, no letter-spacing; view titles `--text-md` at 600; panel titles 12.5px at 600 in a 30px row without a rule.
+- 186 of the 192 scoped uppercase rules (51 files) moved to the token. Kept uppercase because they render identifiers or codes:
+
+| File | Selector | Content |
+|---|---|---|
+| `CryptoTreemapBoard.svelte` | `.tile-symbol` | token tickers |
+| `IvView.svelte` | `.payoff-heatmap th`, `.payoff-heatmap thead th` | price and tenor headers (7D … EXP) |
+| `RiskView.svelte` | `.heatmap-label, .heatmap-corner` | tickers on the correlation heat map |
+| `PortfolioView.svelte` | `.benchmark-field input` | benchmark ticker input |
+| `PredictionMarketsView.svelte` | `.venue-label` | venue codes (PM, KL) |
+
+- Copy written in capitals moved to sentence case: tab names (title case, they are names), provenance states, the Sitrep status line and freshness states, change-column labels, "Loading…", the Options eyebrow, Commodities statuses, the Portfolio mode label, Prediction Markets side, resolution and calibration labels, the Script bound state, the 3D fit key. Status codes stay codes in logic and are formatted where shown. Data values that arrive lower case (provider ids, curve states, categories) are data and stay as they are.
+
+### Charts
+
+- lightweight-charts: no grid, only the baseline (time-axis edge on `--panel-strong`); flat 9% areas; 2px primary lines. lightweight-charts has no line-cap option, so its caps are the library's.
+- Comparison series in `--chart-secondary` are solid grey: the previous curve and the Crypto, Equity Research, Portfolio and Strategy Lab benchmarks. Kept dashed on purpose: Macro's comparison region (it pairs each comparison with its primary by colour) and moving averages (derived overlays).
+- Options SVG charts: 2px rounded lines, flat 9% areas, the axis as the baseline. No new band fills: the existing ones (the FanChart distribution, the inventory seasonality range, the Options selected mass) encode a difference.
+- Sparklines and week-over-week change: `Sparkline.svelte` and `weekOverWeekChange()` on the Commodities "Last" KPI, from the price history the workspace payload already carries. Left without, because the view's payload has no history for them: the Crypto headline KPIs (history only for the selected token), Portfolio net liquidity (local history, one point in mock), the Risk header (return points only after a compute), the curve stats (no history of the stat), and the Macro, Equity Research, Strategy Lab, Prediction Markets and Fundamentals strips. No backend change.
+
+### Rows guardrail
+
+Data rows fully visible above a 780px fold at 1280px, drawer closed, `frontend/scripts/measure-fold-rows.mjs` (mock mode, median of three fresh-context runs; Risk measured in the Portfolio view after Compute Core, because the Research view has no book in mock mode):
+
+| View | Baseline (main f878592) | V4 dark | V4 light |
+|---|---:|---:|---:|
+| Sitrep | 23 | 25 | 25 |
+| Commodities › Curves & Spreads | 6 | 6 | 6 |
+| Options › Overview | 19 | 19 | 19 |
+| Risk › Overview | 10 | 10 | 10 |
+| **Total** | **58** | **60 (103%)** | **60 (103%)** |
+
+The baseline is the same in both themes and was measured again on the gate day (58). Sitrep gains rows because Instrument Sans wraps market names less than the mono did; Options briefly lost three rows in the first structure pass (a stretched mode bar and a wrapping source cell in its header), fixed before the step 3 commit. The exploration mocks' 89 is not comparable: they used different sample content.
+
+### Verification
+
+- Every commit: `tsc --noEmit` clean, vitest green (82 files; 646 → 649 tests: Data Figures default, week-over-week change, System default and pre-paint scripts), `vite build` with only the four warnings main has (IvView svg a11y, CopilotTranscriptResult `.field p.emphasis`, two Surface3D exports). `raw-colors.test.ts` and `contrast.test.ts` pass; the contrast test also checks secondary text on the hover and selection fills and text on the canvas.
+- Rendered contrast audit (`contrast-audit.cjs`, every view and mode, Setup, landing, Settings, the Copilot drawer): 0 failing texts in dark and in light after 106a835 (20 and 169 before it).
+- Visual review: all 13 views in dark and light, every mode at 1440×900 and the default mode at 1000 and 390px, plus the Copilot drawer, the Sealanes shelf, the navigation drawer, Settings, Setup, the landing page and the e2e harnesses; contact sheets and before/after pairs against main f878592 captured the same day. At 1000px only Crypto scrolls sideways, as before (1027 → 1016px). At 390px V4 made Options' mode bar push the page to 556px (before, the bar clipped its last modes); 8a30beb lets mode bars scroll within their width.
+- Narrow-width problems that predate V4 (not fixed here): at 390px Macro (629px before, 662 after) and Fundamentals (527 → 551) are wider than the window because their header rows and context bars do not wrap; Equity Research's control group overhangs by 4px; Commodities keeps its two columns at 390px, so the curve legend sits over the price axis and the market select covers the "Commodity Matrix" title; Fundamentals › Peers clips its "Save Basket" button at 1440. Crypto no longer overflows at 390px (400px before).
+- Theme switch without reload (`theme-switch.cjs`, `live-checks.cjs`): Commodities' chart and the Sealanes map repaint dark → light → dark with no page error; System follows the OS light → dark → light; an open key bindings window follows Light, Data Figures and Dark; the Script editor repaints and returns. The 3D surface repaints and returns to its exact dark frame with the data frozen (API requests aborted after load: 0 channel values differ, 0 in a no-switch control, 33,534 in light). The Risk charts are not rendered in the Research view in mock mode, as in V3.
+- Fonts offline: Playwright against `vite preview` with every non-local request aborted: Instrument Sans 400/500/600/700 loaded from `/fonts/` on the preview origin, no request to a font CDN; the only blocked request was the Bloomberg TV stream.
+- Packaged desktop build: the release shell was built with `tauri build --no-bundle` (Rust 1.94; the frontend is embedded in `gamma-shell.exe`) and run with the repository backend (`GAMMA_REPO_ROOT`) in mock mode, a throwaway WebView2 profile and app-data folder, and WebView2 remote debugging. Over CDP the main window loaded Instrument Sans 400/500/600/700 from `http://tauri.localhost/fonts/` with no external request, and again after a reload with the network emulated offline (`Network.emulateNetworkConditions`). Not done: the PyInstaller backend and the NSIS installer were not built, nothing was installed, and the machine's network was not switched off.
+
+### Kept exceptions and open items
+
+- Raw-colour gate: unchanged since V3 (FanChart grid line and tooltip edge, the MaritimeMap chevron outline, the unused MacroCoherencePanel, the eighth Risk cluster colour and the viridis end stop).
+- Uppercase: the six identifier rules in the table above.
+- Dashed lines: Macro's comparison region and the hero chart's moving averages.
+- Boxes kept on purpose: the accent edge of primary buttons, the 1px line of floating overlays, the Commodities band boxes (they encode a range), the MaritimeMap HUD, legend and controls (V6, map style), the Script editor frame (V6), the landing card's readout grid.
+- Not themed (V6): the Tauri splash screen, the Sealanes map style, the marketing site. Surface3D canvas labels keep their monospace (V6).
+- `--text-3` is gone from the code; the token was never defined and is not added.
+- V5: `design_principles.md` and the gamma-ui and gamma-charts skills still describe the terminal look.
+
 ## Doctrine rewrite map (V5)
 
 Edit sections in place and keep the numbering and the rule names. Skills and reviews cite `§14`/`§15` and named rules.
@@ -362,3 +464,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-10-29/30: V3 on branch `claude/v3-theme-infrastructure` from main a1c74e2: 175e419 theme preference, 8dc3dbc light token block and contrast test, 3ec377c charts, 3D surface and map repaint, 7d5430d chart theme retired and Data Figures, 1d36bd0 theme colours for the last dark-only literals. The user chose Dark as the default until V4. Dark stays pixel-identical in mock mode; light screenshots are with the V3 handover note. Not merged.
 - 2026-10-30: gaps closed on the same branch after the first review: 29e0b79 keeps open windows on the same theme, and a rendered contrast audit led to 8948d0a (neutral text on heat-map fills and token syntax colours in the Script editor, in both themes with the user's approval; decorative separators aria-hidden). The audit now finds no failing text in either theme.
 - 2026-10-30: the user reviewed the light screenshots and the contrast pairs and merged the branch into main as a68ed3a (not pushed). V3 is complete.
+- 2026-11-02/03: V4 on branch `claude/v4-bprime` from local main f878592: 9e8f58c fold-rows guardrail (baseline 58 rows in both themes), a2e478b Instrument Sans, c6116c6 B′ token values, d355b4c B′ structure, 8a88bdc sentence-case labels, 3d43f8b chart styling and a KPI sparkline, 5103fec grey comparison series and 85ecbc9 Instrument Sans for identifiers (both user decisions on 2026-11-03), 29bf046 System default, then the gate fixes 8a30beb, 265cfb6 and 106a835. Rows above the fold: 60 in each theme. Contrast audit: 0 failures in both themes. Screenshots, pairs and the offline-font proof are with the V4 handover note. Not merged.
