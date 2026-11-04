@@ -54,26 +54,26 @@
   /* ── Type scale (every font-size in the app resolves here) ──
      Do not introduce sizes outside this ramp. Hierarchy is weight-first,
      size-second; these steps exist so unrelated views share one rhythm. */
-  --text-2xs: 10px;   /* category labels, eyebrows, table column headers */
-  --text-xs: 11px;    /* secondary labels, metadata, timestamps */
+  --text-2xs: 10px;   /* second lines under an identifier (.meta), small notes */
+  --text-xs: 11px;    /* labels, column headers, tags, metadata, timestamps */
   --text-sm: 12px;    /* compact data, dense controls, sub-labels */
   --text-base: 13.5px;/* body / data text — matches the global body size */
   --text-md: 15px;    /* section headers (H3), view titles */
-  --text-lg: 16px;    /* tab-level titles (H2) */
+  --text-lg: 16px;    /* headline figures (.stat.is-large), h1/h2 defaults */
   --text-xl: 18px;    /* hero identifiers — the ceiling inside tab content */
   /* Two B′ steps between the ramp's: the panel title row and KPI values. */
   --text-title: 12.5px;
   --text-kpi: 14px;
 
   /* ── Line-height scale ── */
-  --leading-tight: 1.2;   /* single-line labels, values, table cells */
+  --leading-tight: 1.2;   /* single-line labels and values (table cells use 1.3) */
   --leading-snug: 1.4;    /* dense data lists */
   --leading-normal: 1.5;  /* multi-line prose (notes, tooltips) */
 
   /* ── Space scale (every padding / gap / margin snaps here) ──
      Panel gaps are --space-4 (8px). Panel padding is --space-5 (12px) to
-     --space-6 (16px). The 6px step exists because terminal-density
-     controls live between 4 and 8. Nothing off-ramp. */
+     --space-6 (16px). The 6px step exists for compact rhythms between 4
+     and 8: table cell padding, KPI block gaps. Nothing off-ramp. */
   --space-1: 2px;
   --space-2: 4px;
   --space-3: 6px;
@@ -132,7 +132,9 @@
   /* The accent's channels, for translucent gradient stops written
      rgba(var(--accent-rgb), α): exact, where a color-mix() stop is not. */
   --accent-rgb: 125, 157, 242;
-  /* The context gold: comparison series, context tags. Equals --warning. */
+  /* The context gold, for context tags that say where a reading sits.
+     Equals --warning. Not a series colour: comparison series take
+     --chart-secondary (design_principles.md §3). */
   --accent-2: #e0aa50;
 
   /* ── Semantic: status ── */
@@ -446,7 +448,8 @@ td {
   background: transparent;
 }
 
-/* ── Bloomberg-style value flash ── */
+/* ── Value flash ── a ticking value tints its cell in the direction of the
+   change, then fades (design_principles.md §10). */
 @keyframes flash-up {
   0%   { background-color: var(--flash-up); }
   100% { background-color: transparent; }

@@ -131,7 +131,7 @@
         </svg>
       </button>
       <span class="brand-mark" aria-hidden="true">Γ</span>
-      <h1><strong>Gamma</strong><span>Research Terminal</span></h1>
+      <h1><strong>Gamma</strong><span>Research Workspace</span></h1>
       <span class="topbar-divider" aria-hidden="true"></span>
       <div class="tab-search">
         <SearchDropdown

@@ -4,10 +4,10 @@ _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
 - Last reviewed: 2026-11-03
-- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete and merged into main on 2026-11-03 (c3343b4). V5–V6 planned.
+- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete and merged into main on 2026-11-03 (c3343b4). V5 complete on branch `claude/v5-doctrine` on 2026-11-03, not merged. V6 planned.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
-- Doctrine: [`design_principles.md`](./design_principles.md) still describes the terminal look; V5 rewrites it for B′. Until then this plan's V4 section describes what the code does.
+- Doctrine: [`design_principles.md`](./design_principles.md) describes B′ since V5; this plan records the decisions behind it, the kept exceptions and the drift-scan findings left for V6.
 
 ## Decision summary
 
@@ -89,7 +89,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 | V2 — Token completeness and font roles | Replace the 71 raw `rgba(122, 166, 200, …)` values and 92 hex literals (18 files). Fix the ~62 `font: inherit` that pull chrome back to mono. Split `--app-font`/`--display-font` into `--font-ui`, `--font-num`, `--font-code` and `--font-label`. Add tint, soft semantic, scrim, `--panel-radius`, `--panel-border-width` and label-case tokens. Move `chart-colors.ts` and the flash keyframes onto tokens. | Values unchanged, so screenshot parity still holds. A grep gate shows no raw accent colors or hex literals in `.svelte` files outside a documented exception list. | Done (2026-10-28), merged into main as 9676017; see [V2 token completeness and font roles](#v2-token-completeness-and-font-roles) |
 | V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Done (2026-10-30), merged into main as a68ed3a; see [V3 theme infrastructure](#v3-theme-infrastructure) |
 | V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Done (2026-11-03), merged into main as c3343b4; see [V4 B′ values and fonts](#v4-b-values-and-fonts) |
-| V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Planned |
+| V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Done (2026-11-03) on branch `claude/v5-doctrine`, not merged; see [V5 doctrine and skills](#v5-doctrine-and-skills) |
 | V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Planned |
 
 Rough effort for one developer who knows the codebase: V1 6–8, V2 3–4, V3 2–3, V4 5–8, V5 1–2 and V6 2–3 dev-days, about **19–28 dev-days** in total. These are estimates from a static read, not commitments. V1 and V2 would be needed for any restyle and also pay off without one.
@@ -413,7 +413,89 @@ The baseline is the same in both themes and was measured again on the gate day (
 - Boxes kept on purpose: the accent edge of primary buttons, the 1px line of floating overlays, the Commodities band boxes (they encode a range), the MaritimeMap HUD, legend and controls (V6, map style), the Script editor frame (V6), the landing card's readout grid.
 - Not themed (V6): the Tauri splash screen, the Sealanes map style, the marketing site. Surface3D canvas labels keep their monospace (V6).
 - `--text-3` is gone from the code; the token was never defined and is not added.
-- V5: `design_principles.md` and the gamma-ui and gamma-charts skills still describe the terminal look.
+- V5: `design_principles.md` and the gamma-ui and gamma-charts skills still describe the terminal look (closed by V5, below).
+
+## V5 doctrine and skills
+
+V5 ran on branch `claude/v5-doctrine` from local main ab6467c, one commit per step: 9f6f504 the doctrine rewrite, 0c29a3f token and primitive comments, 48211a3 `PRODUCT.md` and the docs index, then this section. The gamma-ui and gamma-charts skills live outside the repository and were rewritten in place after a backup (kept with the V5 handover note). The doctrine steps changed no app code; afterwards, at the user's request, one copy change renamed the brand subtitle in the top bar (`Shell.svelte`) and on the landing card (`LandingPage.svelte`) from "Research Terminal" to "Research Workspace", the wording the README already uses, and a second one did the same on the marketing site (below). Not merged.
+
+### What changed per section
+
+`design_principles.md` was rewritten in place following the rewrite map below. Its 46 headings are identical line for line, and the ten named rules (Data-First, One-Plane, Earned-Density, Quiet-Chrome, Two-Type, Color-Has-A-Job, Primary-Path, Table-Owns-The-Panel, Provenance-On-Demand, Stable-Geometry) and the six review tests keep their names. Values are named by token, never by hex.
+
+| § | Change |
+|---|---|
+| Opening | The lineage is the scientific instrument and the well-set statistical table instead of a trading terminal; identity is one plane of tonal sheets, one interface typeface with tabular figures, and two themes. "Not a terminal imitation, a generic SaaS dashboard, or a data-visualization showcase" stays. |
+| §1 | `primitives.css` joins the source order as the implementation of §8; `contrast.test.ts` and `raw-colors.test.ts` are named as the token gates; this plan is named as the record of decisions. |
+| §2 | One-Plane Rule: one plane of tonal sheets separated by consistent seams; regions never float; only transient overlays leave the plane. Hierarchy must hold in either theme. |
+| §3 | Color roles rebuilt around canvas, sheet, tint, button fill, lines, soft fills, overlay, `--heat-text` and `--cat-*`; `--accent-2` is the context gold. A Themes paragraph (System default, AA in both blocks, canvas repaint on `resolvedTheme`). Four font roles; the Two-Type Rule now reads "sans explains the instrument; tabular figures carry the research; mono is for code"; a Labels paragraph; the type scale gains `--text-title` and `--text-kpi` and new roles; radius is controls 5px, sheets 6px, overlays 12px, pills for tags only. |
+| §4 | Cool temperature in both themes; no ambient texture; flat area fills and difference bands as data encoding; the one-colour gradient that layers a soft fill over the sheet; literal gradient stops. |
+| §5 | Hierarchy by tonal steps; the Surface Contracts table covers sheet, tinted block, transparent chart shell, table, input, button, mode bar, inset and floating overlay. No border around sheets, cards, KPI blocks, fields or buttons; no transparent action button. |
+| §6 | `.workspace-grid` named; mode bars scroll sideways on narrow windows. |
+| §7 | Mode bars are a tinted track with the selected segment on the sheet; role toggles use `.segmented`. |
+| §8 | Panels: borderless `.panel`, `.is-flush`, the 30px `.panel-title`, `.header-panel`. KPI strips: tinted blocks on one baseline, rule-less `.stat`, sparklines only from payload history. Tables: label headers on a tinted band, `--font-num` cells, 28px rows, ruled, no zebra; the sheet's edge contains a flush table. Charts: transparent ground, no grid, baseline, 2px primary with a flat 9% area, the grey reserved for comparison, two dashed exceptions, difference bands, canvas figures, repaint on theme change. Controls: fills, accent-tint primary, red-edged danger, never solid, green or red. Tags: pill with a dot toned by `--tg`; the provenance pill. Cards: tinted, borderless. |
+| §9 | Writing is sentence case; tab names are title case; status codes are formatted where shown. |
+| §10 | `Loading…` and `Chart unavailable`; the focus ring token; the Copilot shelf is a floating overlay. |
+| §11 | Floating overlays as the elevation exception (12px, shadow, line, scrim on the drawer, the Copilot shelf and Setup; drawer and shelf 8px in); the identifier codes; the dashed series; the lines that stay; surfaces not yet restyled. |
+| §12 | Plane, Hierarchy and Access tests ask for tonal sheets, tabular figures and AA in both themes; the Drift Scan is rewritten for B′. |
+| §13 | Primitives in item 5; both themes in item 10. |
+| §14 | Rows rewritten for B′ and new rows (listed below). |
+| §15 | Plane, Panel background, Radius, Elevation, Type, Controls, Tables, Charts and Copy rows updated; a Themes row added. |
+
+Also updated: `tokens.css` and `primitives.css` comments (type-scale roles, the 6px step without "terminal-density", `--accent-2`, the value flash, the primitives header, the `.mono` column); `PRODUCT.md` (doctrine summary, no pre-V2 hex values) and the `docs/README.md` descriptions.
+
+### Rules added from V4
+
+- Labels are sentence case, 11px, weight 500, no letter-spacing. Upper case only for the six identifier rules of the V4 Labels table, which keep their own slight tracking.
+- Identifiers and ISO dates use `--font-num` (Instrument Sans, tabular figures); there is no `--font-id`.
+- Action buttons are never transparent: `.btn` on `--button-bg`, ghosts on `--tint`, primary an accent tint, never a solid, green or red fill. Navigation rows, menu items, list rows and text links are not action buttons.
+- Comparison series are solid `--chart-secondary` (3:1), and that grey is reserved for comparison: a lone series takes `--chart-primary` and categorical series `--cat-*` (user decision, 2026-11-03). Dashes only for Macro's comparison region and derived overlays; the Risk benchmark's dash is drift (user decision, 2026-11-03).
+- No zebra striping; the Macro Rates stripe kept in V1 is drift (user decision, 2026-11-03).
+- Bands only when they encode a difference; sparklines only where the payload already carries the history.
+- Floating overlays (12px, overlay shadow, scrim behind modal ones) are the only elevation; System is the default theme; AA in both themes.
+- KPI strips are tinted blocks on one baseline, replacing "one grid with gap 0 and internal dividers".
+- New §14 rows: a border around a sheet, card, block, field or button; a transparent ghost button; a solid, green or red button; `--accent-2` as a series colour; `--chart-secondary` on a lone or categorical series; uppercase or letter-spaced labels; copy written in capitals; a sparkline from too few points or from history fetched only to draw it; zebra striping, chart grid lines or a fading area gradient; a band that encodes no difference.
+
+### Drift-scan findings for V6
+
+The new §12 Drift Scan was run against the code as a review (a rule-level scan of every `.svelte` style block and `primitives.css`, then each hit read and classified). Nothing was fixed in V5. File and line references are in the V5 handover note.
+
+1. Bordered cards and boxes: Macro Cross-Asset theme cards and divergence cards, the key bindings window cards, Diagnostics, the view load state, the Setup dialog's notice, mode and facts boxes, the Equity Research signed book, the Fundamentals decision gate, the view error boundary, the FanChart shell, the AllocationDonut empty state.
+2. Bordered `.table-wrap` inside a sheet: Strategy Lab and the parameter sweep.
+3. Copilot surfaces not converged: transcript blocks, chips and confirmations, the artifacts panel, chat session and storage controls, run states, the composer field, the shelf's context trigger, the run inspector, the Strategy Lab working analysis.
+4. Script surfaces (with the Script editor): workspace status, output and candidate cards, parameter sweep boxes, analytical results.
+5. Edged controls and chips outside the primitives: the hero chart settings button, the landing button, a scoped `.btn` override in the research scope analysis, Risk dependency controls, the Equity Research tooltip chip, the Commodities loading pill, the Fundamentals dirty pill, a bordered status tag in the Copilot options analysis; the Sitrep tape controls (a V1 exception).
+6. KPI strips with internal dividers: the Crypto, Macro and Fundamentals headline strips, `MacroMetricRow`, the parameter sweep KPIs, the Sitrep tape strip, the Copilot working analyses.
+7. Overlays off the overlay tokens: both Copilot context menus (own shadow, no 12px radius), the Commodities scatter tooltip, the Risk dependency and frontier tooltips, the AllocationDonut tooltip, the Portfolio confirm dialog.
+8. Radius off the scale: raw `999px` and 2px badges in Macro, chat bubble radii, `--radius-sm` on controls (Copilot artifacts, transcript confirmations, drawer buttons, the compact context menu); the 3px heat tiles match this plan's "3px radius" for heat cells but have no token.
+9. Copy in capitals: "CHART UNAVAILABLE" (hero chart default, Commodities), "NO CURVE NODES", "NO HISTORY", "LOADING COMMODITIES", "LOADING 3D SURFACE...", the Portfolio chart messages, Prediction Markets "LOADING...", the Sitrep equity tape state and Bloomberg TV states, Copilot "OPERATOR RUN/PLAN", "IMAGE ARTIFACT", the fingerprint "UNAVAILABLE". Sitrep's state codes are already formatted.
+10. Zebra: Macro Rates.
+11. Charts: grid lines in FanChart, the Commodities scatter and the Risk frontier; the dashed Risk benchmark; `--chart-secondary` on lone series (Risk Rolling Beta, Strategy Lab Rolling Corr, Macro FX pair 2, the Prediction Markets spread), in categorical palettes (Portfolio allocation, Prediction Markets comparison, Commodities inventory groups and scatter, Macro rate and inflation series) and as the Options selected-mass highlight; Macro FX pair 3 as a lone series in `--chart-negative`.
+12. Fonts: seven `var(--font-num), monospace` stacks that restate the old intent; the key bindings window's body on `--font-num` instead of `--font-ui`.
+13. Local copies of the panel primitives: `.table-panel { padding: 0 }` in ten files instead of `.panel.is-flush`; `.table-panel-header` at 26px with a rule in Macro Country Compare and Trade Partners instead of the 30px `.panel-title` without one.
+14. Icon-only close buttons in the drawer and the Copilot shelf are transparent icons; acceptable as icons, worth a look.
+
+Clean: no off-ramp font size, no solid, green or red button fill, uppercase only in the six identifier rules, blur only on the drawer scrim and an overlay, and the canvas components repaint on a theme change.
+
+### Skills changed outside the repository
+
+- `gamma-ui` (`~/.claude/skills/gamma-ui/SKILL.md`): the description drops "more like a professional trading terminal" and keeps the density, polish and audit triggers (adds light/dark checks and drift scans). The body teaches the B′ plane model, the radius scale, filled buttons, sentence-case labels, font roles, KPI blocks, the flush table panel with `.panel-title`, the provenance pill, the current file map, and §3, §5, §8, §11, §12, §14 and §15 by number.
+- `gamma-charts` (`~/.claude/skills/gamma-charts/skill.md`): "Apply Gamma's terminal design philosophy" becomes "Apply Gamma's B′ chart doctrine"; the body teaches the transparent ground, no grid, the baseline, the flat 9% area, the reserved comparison grey, bands only for a difference, payload-only sparklines and both themes, and drops the retired chart themes and every hex value. It cites §3, §4, §8 (→ Charts), §9, §14 and §15.
+- Both keep their scope split (gamma-ui: panels, tables, controls, text density; gamma-charts: chart internals). Every `§N (Name)` they cite lands on that heading, their YAML frontmatter parses, and every token and path they name exists.
+- `gamma-usability-audit`: its hand-off to the two skills, "which own `docs/design_principles.md`", still holds. At the user's request it now calls Gamma a "research workspace", its report template asks for tight, technical prose, and the score row "Visual density & terminal feel" became "Visual density & design consistency", with a note to take the Δ from the old row.
+
+### Verification
+
+- Comment-only CSS: the comment-stripped sources are identical, and `vite build` before and after produced sha256-identical output (22 CSS files, all 72 dist files).
+- Gate on the branch: `tsc --noEmit` clean, vitest 82 files / 651 tests, `vite build` with only the four known warnings; token and path checks pass for the doctrine and both skills; "Bloomberg" appears nowhere in the doctrine, the skills, `PRODUCT.md`, the docs index or the theme CSS, and "terminal" only in the "not a terminal imitation" line.
+- Ten doctrine claims were checked against the code with file and line evidence (borderless panels, document-wide tabular figures, `--label-case`, the header band, the button fills, the chart grid and baseline, the flat area, KPI blocks, overlays and scrim, the System default); all hold.
+- The doctrine steps changed no rendered pixel, which the identical build output proves. The later copy change was checked in the browser without a backend: the top bar reads "Gamma · Research Workspace" on one line at 1024px and at 375px with no sideways scroll, and the landing card shows the same subtitle; typecheck, tests and build were unchanged (82 files / 651 tests, the four known warnings).
+
+### Left for V6
+
+- The drift-scan findings above.
+- `website/DESIGN.md` and `website/.impeccable/design.json` still inherit the old doctrine verbatim (the old Two-Type Rule, "Terminal Ground", uppercase tracked mono labels, the pre-V2 colours).
+- The marketing site's wording was changed with the app's, at the user's request: "Research Workspace" under the wordmark of all four pages, "a read-only market research workspace" in the index title, meta description, Open Graph title and every page footer, and the same words in `website/DESIGN.md` (description) and `website/.impeccable/design.json` (the topbar sample). Below 860px the site's nav is a sideways-scrolling strip by design; the longer subtitle makes it start scrolling at 724px instead of 710px, and the subtitle still hides below 620px. Left for V6: the thirteen app screenshots in `website/assets/img/screens/` predate B′ and still show "Research Terminal" and the old look, and the rest of `DESIGN.md` and `design.json` (the "Terminal Ground" colour, the old Two-Type Rule, "not a page about a terminal").
 
 ## Doctrine rewrite map (V5)
 
@@ -469,3 +551,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-11-03: main pushed to origin (a1c74e2..0aace25, V3 and V4).
 - 2026-11-03: ghost buttons fixed on branch `claude/v4-ghost-buttons` from main 0aace25. A rendered audit found 39 action buttons per theme with no fill and no edge (the top bar's Change View and Settings in every view, and `.btn.is-ghost`). The user chose two tonal steps over a ghost-only tint or a hairline: `--button-bg` for buttons, the tint for ghosts. After the fix no action button is without a boundary. Not merged.
 - 2026-11-03: the user merged the button fix into main as b10e48c (not pushed).
+- 2026-11-03: V5 on branch `claude/v5-doctrine` from local main ab6467c: 9f6f504 `design_principles.md` rewritten for B′ with the numbering, headings and named rules unchanged, 0c29a3f token and primitive comments (build output byte-identical), 48211a3 `PRODUCT.md` and the docs index, then this plan. Before the rewrite the user decided three conflicts between code and plan: no zebra, a solid Risk benchmark, and `--chart-secondary` for comparison only; the code that disagrees is listed for V6. The new Drift Scan was run as a review with fourteen groups of findings for V6. The gamma-ui and gamma-charts skills outside the repository were rewritten after a backup. Not merged.

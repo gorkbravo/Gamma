@@ -63,7 +63,7 @@
       <span class="mark" aria-hidden="true">Γ</span>
       <div class="wordmark">
         <h2>Gamma</h2>
-        <p class="descriptor">Research Terminal</p>
+        <p class="descriptor">Research Workspace</p>
       </div>
       <p class="conn" class:live={status?.connection.connected}>
         <span class="status-dot" class:connected={status?.connection.connected} aria-hidden="true"></span>
