@@ -123,6 +123,7 @@
     accent: "",
     observation: "",
     canvas: "",
+    font: "",
   };
 
   $: rows = grid.length;
@@ -193,6 +194,9 @@
     theme.accent = get("--accent");
     theme.observation = get("--text-0");
     theme.canvas = get("--bg-0");
+    // Canvas text cannot take tabular figures, but it takes the figures font,
+    // so the Data figures setting reaches the axis labels too.
+    theme.font = get("--font-num");
   }
 
   function gx(j: number) {
@@ -376,7 +380,7 @@
   function drawLabels(project: (x: number, y: number, z: number) => Projected) {
     if (!ctx || !strikes.length || !rows) return;
     ctx.fillStyle = theme.text;
-    ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.font = `10px ${theme.font || "sans-serif"}`;
     const lo = -0.45;
     const minStrike = strikes[0];
     const maxStrike = strikes[strikes.length - 1];
@@ -387,7 +391,7 @@
     ctx.fillText(`${Math.round(minStrike)}`, sxA.sx, sxA.sy + 12);
     ctx.fillText(`${Math.round(maxStrike)}`, sxB.sx, sxB.sy + 12);
     const sMid = project(0, lo, -1);
-    ctx.fillText("STRIKE", sMid.sx, sMid.sy + 23);
+    ctx.fillText("Strike", sMid.sx, sMid.sy + 23);
     // DTE axis up the right edge: nearest at the front-bottom, farthest at the back-top.
     const nearLabel = dte[0] != null ? `${dte[0]}D` : "near";
     const farLabel = dte[rows - 1] != null ? `${dte[rows - 1]}D` : "far";
@@ -402,7 +406,7 @@
     ctx.textAlign = "right";
     ctx.fillText(formatValue(vMax), ivTop.sx - 6, ivTop.sy);
     ctx.fillText(formatValue(vMin), ivBot.sx - 6, ivBot.sy);
-    ctx.fillText(valueAxisLabel.toUpperCase(), ivTop.sx - 6, ivTop.sy - 12);
+    ctx.fillText(valueAxisLabel, ivTop.sx - 6, ivTop.sy - 12);
   }
 
   function render() {
@@ -696,12 +700,12 @@
   }
 
   .gear {
-    background: transparent;
-    border: 1px solid var(--panel-strong);
+    background: var(--button-bg);
+    border: 1px solid transparent;
     color: var(--text-1);
     width: 26px;
     height: 24px;
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     cursor: pointer;
     font-size: var(--text-md);
     line-height: 1;
@@ -721,8 +725,10 @@
     gap: var(--space-4);
     padding: var(--space-4);
     min-width: 11rem;
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
+    background: var(--popover-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .surface3d-settings label {
@@ -742,13 +748,13 @@
   }
 
   .surface3d-settings select {
-    background: var(--bg-0);
-    border: 1px solid var(--panel-strong);
+    background: var(--tint);
+    border: 1px solid transparent;
     color: var(--text-0);
     font: inherit;
     font-size: var(--text-sm);
     padding: var(--space-1) var(--space-3);
-    border-radius: 2px;
+    border-radius: var(--radius-control);
   }
 
   .surface3d-settings input[type="checkbox"] {
@@ -756,14 +762,14 @@
   }
 
   .surface3d-settings .reset {
-    background: var(--bg-0);
-    border: 1px solid var(--panel-strong);
+    background: var(--button-bg);
+    border: 1px solid transparent;
     color: var(--text-1);
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-sm);
     padding: var(--space-2) var(--space-3);
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     cursor: pointer;
   }
 

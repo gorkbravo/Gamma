@@ -71,9 +71,9 @@
   .working-analysis {
     display: grid;
     gap: var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
-    background: color-mix(in srgb, var(--accent) 4%, var(--bg-1));
+    background: var(--panel-bg);
     padding: var(--space-5);
+    border-radius: var(--panel-radius);
   }
 
   header {
@@ -86,7 +86,10 @@
   h3, p { margin: 0; }
   h3 { color: var(--text-0); font-size: var(--text-title); }
   .eyebrow, small { color: var(--text-2); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0; }
-  .temporary { color: var(--accent); border: 1px solid currentColor; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0; }
+  .temporary { color: var(--accent); padding: var(--space-1) var(--space-3); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+  }
   .safety { color: var(--text-1); font-size: var(--text-sm); }
 
   /* KPI strips: tinted blocks on one baseline (§8 KPI Strips), no dividers. */

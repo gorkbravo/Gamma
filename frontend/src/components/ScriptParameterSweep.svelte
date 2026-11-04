@@ -311,7 +311,7 @@
   }
   .artifact-link { border: 0; padding: 0; min-height: auto; color: var(--accent); font-family: var(--font-num); font-size: var(--text-xs); }
   .status {
-    border: 1px solid var(--panel-strong); color: var(--text-1); padding: var(--space-2) var(--space-3);
+    color: var(--text-1); padding: var(--space-2) var(--space-3); border-radius: var(--radius-pill); background: var(--tint);
     font-size: var(--text-xs); letter-spacing: 0; text-transform: var(--label-case); white-space: nowrap;
   }
   .define-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
@@ -326,7 +326,9 @@
   progress { flex: 1; height: 6px; accent-color: var(--accent); }
   .evaluation {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--space-4); align-items: end;
-    margin: 0; padding: var(--space-4); border: 1px solid var(--divider); min-width: 0;
+    margin: 0; padding: var(--space-4); border: 0; min-width: 0;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
   .evaluation legend { padding: 0 var(--space-2); }
   .evaluation button { justify-self: start; }
@@ -356,7 +358,7 @@
   .kpi strong.negative { color: var(--negative); }
   .causal { color: var(--positive); font-size: var(--text-xs); line-height: var(--leading-normal); }
   .causal.failed { color: var(--negative); }
-  .reference { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px dashed var(--panel-strong); }
+  .reference { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--panel-radius); background: var(--tint); }
   .reference p:not(.eyebrow) { color: var(--text-1); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .reference p.muted { color: var(--text-2); }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

@@ -2038,9 +2038,9 @@
     width: 20px;
     height: 20px;
     padding: 0;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
     color: var(--text-2);
     font-size: var(--text-sm);
     line-height: 1;
@@ -2058,7 +2058,7 @@
   }
 
   .reload-button:hover:not(:disabled) {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     color: var(--accent);
   }
 
@@ -2108,8 +2108,6 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    border-left: 1px solid var(--divider);
-    border-right: 1px solid var(--divider);
     position: relative;
   }
 
@@ -2138,16 +2136,16 @@
     align-items: baseline;
     gap: var(--space-3);
     padding: var(--space-3) var(--space-5);
-    border-right: 1px solid var(--divider);
     white-space: nowrap;
     cursor: pointer;
     font: inherit;
     color: inherit;
+    border-radius: var(--radius-control);
   }
 
   .strip-item:hover,
   .strip-item:focus-visible {
-    background: var(--bg-1);
+    background: var(--hover-bg);
   }
 
   .strip-item:focus-visible {
@@ -2209,7 +2207,6 @@
     display: inline-flex;
     align-items: center;
     padding: 0 var(--space-4);
-    border-left: 1px solid var(--divider);
   }
 
   .status-line b {
@@ -2271,7 +2268,6 @@
     appearance: none;
     background: transparent;
     border: 0;
-    border-left: 1px solid var(--divider);
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
@@ -2281,11 +2277,12 @@
     cursor: pointer;
     display: grid;
     place-items: center;
+    border-radius: var(--radius-control);
   }
 
   .tape-pin:hover,
   .tape-pin:focus-visible {
-    background: var(--bg-1);
+    background: var(--hover-bg);
     color: var(--accent);
   }
 
@@ -2324,15 +2321,15 @@
     align-items: center;
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
-    background: var(--bg-1);
+    background: var(--tint);
   }
 
   .follow-up-note-editor input {
     flex: 1;
     min-width: 0;
-    background: var(--bg-0);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--panel-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-0);
     font: inherit;
     font-size: var(--text-sm);
@@ -2341,9 +2338,9 @@
 
   .follow-up-note-editor button {
     appearance: none;
-    background: transparent;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--button-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
@@ -2355,7 +2352,7 @@
   }
 
   .follow-up-note-editor button:hover {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     color: var(--accent);
   }
 
@@ -2509,9 +2506,9 @@
   .news-chip {
     height: 20px;
     padding: 0 var(--space-2);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: transparent;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
     color: var(--accent);
     font: inherit;
     font-size: var(--text-xs);
@@ -2520,7 +2517,8 @@
 
   .news-chip:hover,
   .news-chip:focus-visible {
-    border-color: var(--accent);
+    background: var(--active-bg);
+    color: var(--text-0);
   }
 
   .news-source {

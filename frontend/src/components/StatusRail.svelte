@@ -588,11 +588,11 @@
 
   .copilot-error code {
     padding: var(--space-2);
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    background: var(--tint);
     color: var(--accent);
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
+    border-radius: var(--radius-control);
   }
 
   @media (max-width: 960px) {

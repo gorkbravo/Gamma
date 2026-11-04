@@ -1133,12 +1133,13 @@
 
   .session-rename input {
     min-width: 0;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--tint);
     color: var(--text-0);
     font: inherit;
     font-size: var(--text-sm);
     padding: var(--space-2);
+    border-radius: var(--radius-control);
   }
 
   .sidebar-empty,
@@ -1347,8 +1348,9 @@
     text-transform: var(--label-case);
     letter-spacing: 0;
     font-size: var(--text-xs);
-    border: 1px solid var(--divider);
     padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-pill);
+    background: var(--tint);
   }
 
   .role-tabs {
@@ -1520,15 +1522,15 @@
   .run-provisional {
     margin: 0;
     padding: var(--space-3) var(--space-4);
-    border: 1px dashed var(--panel-strong);
-    background: var(--bg-1);
+    background: var(--tint);
     color: var(--text-1);
-    font-family: var(--font-code), monospace;
+    font-family: var(--font-code);
     font-size: var(--text-sm);
     white-space: pre-wrap;
     word-break: break-word;
     max-height: 14rem;
     overflow-y: auto;
+    border-radius: var(--panel-radius);
   }
 
   .run-provisional-note {
@@ -1545,17 +1547,18 @@
   }
 
   .run-tool {
-    border: 1px solid var(--panel-strong);
     padding: 1px var(--space-3);
     color: var(--text-2);
     font-size: var(--text-xs);
     text-transform: var(--label-case);
     letter-spacing: 0;
+    border-radius: var(--radius-pill);
+    background: var(--tint);
   }
 
   .run-tool.done {
     color: var(--text-1);
-    border-color: color-mix(in srgb, var(--accent) 36%, var(--panel-strong));
+    background: var(--accent-soft);
   }
 
   .run-status-detail {
@@ -1577,9 +1580,9 @@
     min-height: 2.4rem;
     max-height: 12rem;
     resize: vertical;
-    border: 1px solid var(--panel-border);
+    border: 1px solid transparent;
     border-radius: var(--overlay-radius);
-    background: var(--panel-bg);
+    background: var(--tint);
     color: var(--text-0);
     padding: var(--space-4) var(--space-5);
     font: inherit;
@@ -1658,7 +1661,7 @@
     display: grid;
     place-items: center;
     padding: var(--space-5);
-    background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+    background: var(--scrim);
   }
 
   .session-confirm {
@@ -1666,8 +1669,10 @@
     gap: var(--space-4);
     width: min(28rem, 100%);
     padding: var(--space-5);
-    border: 1px solid color-mix(in srgb, var(--negative) 52%, var(--panel-strong));
-    background: var(--bg-1);
+    border: 1px solid var(--panel-border);
+    background: var(--popover-bg);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .session-confirm strong {
@@ -1689,13 +1694,14 @@
 
   .session-confirm button {
     min-height: 1.8rem;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--button-bg);
     color: var(--text-1);
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-xs);
     padding: 0 var(--space-4);
+    border-radius: var(--radius-control);
   }
 
   .session-confirm .danger-confirm-button {
@@ -1724,11 +1730,12 @@
   .storage-badge {
     flex: none;
     padding: var(--space-1) var(--space-3);
-    border: 1px solid color-mix(in srgb, var(--warning) 52%, var(--panel-strong));
     color: var(--warning);
     text-transform: var(--label-case);
     letter-spacing: 0;
     font-size: var(--text-xs);
+    border-radius: var(--radius-pill);
+    background: var(--warning-soft);
   }
 
   .storage-summary p {
@@ -1753,8 +1760,8 @@
   .storage-actions button {
     min-height: 1.6rem;
     padding: 0 var(--space-3);
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--button-bg);
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
@@ -1762,10 +1769,11 @@
     text-transform: var(--label-case);
     letter-spacing: 0;
     cursor: pointer;
+    border-radius: var(--radius-control);
   }
 
   .storage-actions button:hover {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     color: var(--text-1);
   }
 
@@ -1777,7 +1785,8 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    border: 1px solid var(--divider);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .storage-details li {

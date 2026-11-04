@@ -55,8 +55,9 @@
 
   let BG0 = "";
   let TEXT2 = "";
-  /* Land is the surface, water is the void. --panel-strong separates them a
-     little more than the old navy did (1.62 vs 1.32) while staying neutral. */
+  /* Base-map colours come from the --map-* tokens, one set per theme
+     (tokens.css): in dark land is the surface and water the void; in light
+     land is the sheet and water a grey step. */
   let WATER = "";
   let LAND = "";
   let BORDER_COUNTRY = "";
@@ -78,10 +79,10 @@
   function readThemeColors() {
     BG0 = token("--bg-0");
     TEXT2 = token("--text-2");
-    WATER = token("--bg-0");
-    LAND = token("--panel-strong");
-    BORDER_COUNTRY = token("--accent");
-    BORDER_INNER = token("--text-2");
+    WATER = token("--map-water");
+    LAND = token("--map-land");
+    BORDER_COUNTRY = token("--map-border");
+    BORDER_INNER = token("--map-border-inner");
     LANE = token("--accent");
     ACCENT = token("--accent");
     TEXT0 = token("--text-0");
@@ -1747,12 +1748,12 @@
     top: 0.6rem;
     right: 0.6rem;
     z-index: 10;
-    background: color-mix(in srgb, var(--bg-0) 88%, transparent);
-    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--tint) 92%, transparent);
     padding: var(--space-3) var(--space-5);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+    border-radius: var(--panel-radius);
   }
 
   .hud-row {
@@ -1827,9 +1828,9 @@
   .map-legend {
     display: flex;
     gap: var(--space-6);
-    background: color-mix(in srgb, var(--bg-0) 90%, transparent);
-    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--tint) 92%, transparent);
     padding: var(--space-2) var(--space-5);
+    border-radius: var(--panel-radius);
   }
 
   .legend-item {
@@ -1858,7 +1859,7 @@
   .legend-item.lane::before {
     width: 18px;
     height: 5px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--accent) 72%, transparent);
     box-shadow:
       0 0 4px color-mix(in srgb, var(--accent) 72%, transparent),
@@ -1868,9 +1869,9 @@
   .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2); }
 
   .map-ctrl-btn {
-    background: color-mix(in srgb, var(--bg-0) 90%, transparent);
-    border: 1px solid var(--panel-border);
-    color: var(--text-2);
+    background: color-mix(in srgb, var(--tint) 92%, transparent);
+    border: 1px solid transparent;
+    color: var(--text-1);
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-xs);
@@ -1878,6 +1879,7 @@
     cursor: pointer;
     letter-spacing: 0;
     text-transform: var(--label-case);
+    border-radius: var(--radius-control);
   }
 
   .map-ctrl-btn:hover,
@@ -1916,16 +1918,17 @@
   .replay-panel select {
     font: inherit;
     font-family: var(--font-ui);
-    border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--bg-0) 93%, transparent);
+    border: 1px solid transparent;
+    background: color-mix(in srgb, var(--tint) 92%, transparent);
     color: var(--text-1);
+    border-radius: var(--radius-control);
   }
 
   /* Flow and event rows carry figures and dates, and the replay picker is a
      field, so they keep the map's figures font. */
   .row-button,
   .replay-panel select {
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
   }
 
   .settings-button {
@@ -1977,9 +1980,11 @@
   .settings-shelf,
   .detail-drawer,
   .replay-panel {
-    background: color-mix(in srgb, var(--bg-0) 94%, transparent);
+    background: var(--popover-bg);
     border: 1px solid var(--panel-border);
     pointer-events: auto;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   /* Aviso de handoff entrante (GUA-20261021-7): mismo lenguaje que las bandejas. */
@@ -1989,13 +1994,11 @@
     align-items: flex-start;
     gap: var(--space-4);
     padding: var(--space-4) var(--space-5);
-    background: color-mix(in srgb, var(--bg-0) 94%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
+    background: var(--popover-bg);
+    border: 1px solid var(--panel-border);
     pointer-events: auto;
-  }
-
-  .focus-notice.unresolved {
-    border-color: color-mix(in srgb, var(--warning) 50%, var(--panel-border));
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .focus-copy {
@@ -2205,23 +2208,15 @@
   .drawer-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    border: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .drawer-grid div {
     padding: var(--space-4) var(--space-4);
-    border-right: 1px solid var(--divider);
-    border-bottom: 1px solid var(--divider);
     display: grid;
     gap: var(--space-1);
-  }
-
-  .drawer-grid div:nth-child(2n) {
-    border-right: 0;
-  }
-
-  .drawer-grid div:nth-last-child(-n + 2) {
-    border-bottom: 0;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .drawer-grid span,
@@ -2280,12 +2275,12 @@
 
   /* ── MapLibre GL popup overrides ── */
   :global(.maplibregl-popup-content) {
-    background: var(--bg-1) !important;
+    background: var(--popover-bg) !important;
     border: 1px solid var(--panel-border) !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
+    border-radius: var(--overlay-radius) !important;
+    box-shadow: var(--overlay-shadow) !important;
     padding: 0 !important;
-    font-family: var(--font-num), monospace !important;
+    font-family: var(--font-num) !important;
   }
 
   :global(.maplibregl-popup-tip) {

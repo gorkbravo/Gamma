@@ -181,7 +181,7 @@
         </div>
         <div class="status-cluster">
           {#if workspace.detail}
-            <span class="status">REV {canonicalRevision?.revision_number ?? "—"}</span>
+            <span class="status">Rev {canonicalRevision?.revision_number ?? "—"}</span>
             <span class:failed={workspace.detail.script.status === "archived"} class="status">
               {workspace.detail.script.status}
             </span>
@@ -839,40 +839,46 @@
   }
 
   .status {
-    border: 1px solid var(--panel-strong);
     color: var(--positive);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-xs);
     letter-spacing: 0;
     text-transform: var(--label-case);
     white-space: nowrap;
+    border-radius: var(--radius-pill);
+    background: var(--positive-soft);
   }
 
   .status.dirty,
-  .status.failed { color: var(--warning); }
+  .status.failed { color: var(--warning);
+    background: var(--warning-soft);
+  }
 
   .state-box,
   .artifact-preview,
   .file-output {
-    border: 1px dashed var(--panel-strong);
     padding: var(--space-6);
     color: var(--text-2);
     text-align: center;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .output-card {
-    border: 1px solid var(--divider);
     padding: var(--space-4);
     display: grid;
     gap: var(--space-3);
     min-width: 0;
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .candidate-card {
-    border: 1px solid var(--panel-strong);
     padding: var(--space-4);
     display: grid;
     gap: var(--space-3);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .candidate-card > p {
@@ -896,16 +902,14 @@
     max-height: 18rem;
     margin-top: var(--space-3);
     padding: var(--space-3);
-    border: 1px solid var(--divider);
+    border-radius: var(--radius-control);
+    background: var(--panel-bg);
   }
 
   .candidate-actions {
     display: flex;
     gap: var(--space-2);
   }
-
-  .output-card.error-output,
-  .message-panel.error-state { border-color: var(--panel-strong); }
 
   pre {
     margin: 0;
@@ -997,7 +1001,6 @@
 
   .comparison-table {
     overflow: auto;
-    border: 1px solid var(--divider);
   }
 
   .comparison-table table { min-width: 24rem; }

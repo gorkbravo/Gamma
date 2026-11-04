@@ -265,6 +265,7 @@
     cursor: pointer;
     border-radius: var(--radius-control);
     transition: color 120ms ease, border-color 120ms ease;
+    background: var(--tint);
   }
 
   .header-btn {

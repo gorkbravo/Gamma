@@ -575,7 +575,8 @@
     height: 2.1rem;
     padding: 0;
     border-color: transparent;
-    background: transparent;
+    background: var(--tint);
+    border-radius: var(--radius-control);
   }
 
   .close-btn:hover,
@@ -721,8 +722,9 @@
     max-width: 100%;
     padding: 0 var(--space-4);
     font-size: var(--text-sm);
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
+    background: var(--tint);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
   }
 
   .context-trigger:hover:not(:disabled),
