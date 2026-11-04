@@ -95,7 +95,7 @@
     min-height: 1.7rem;
     padding: var(--space-2) var(--space-4);
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--text-1);
     text-align: left;

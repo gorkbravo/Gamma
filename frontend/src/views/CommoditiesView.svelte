@@ -1389,7 +1389,7 @@
       {#if workspace}
         <span class="subtitle">{workspace.coverage.provider_label} | {providerMixLabel} | as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</span>
       {/if}
-      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if loading}<span class="tag accent">Refreshing</span>{/if}
       {#if workspace && selectedInstrument}
         <div class="handoff-actions" aria-label="Strategy Lab commodity handoff actions">
           <button
@@ -1480,7 +1480,7 @@
     {#if mode === "overview"}
       <section class="overview-grid">
         <div class="overview-top">
-        <article class="panel table-panel matrix-panel matrix-cell">
+        <article class="panel is-flush table-panel matrix-panel matrix-cell">
           <header class="panel-title">
             <span>Commodity Matrix</span>
             <span class="header-meta">{overviewRows.length} markets · click row to drill</span>
@@ -1543,7 +1543,7 @@
         </article>
 
         <div class="left-stack">
-        <article class="panel chart-panel term-cell">
+        <article class="panel is-flush chart-panel term-cell">
           <header class="panel-title">
             <span>Term Structure Stack</span>
             <span class="header-meta">
@@ -1571,7 +1571,7 @@
           <TimeSeriesChart series={curveSeries} height={220} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
-        <article class="panel scatter-panel scatter-cell">
+        <article class="panel is-flush scatter-panel scatter-cell">
           <header class="panel-title">
             <span>Momentum / Roll Scatter</span>
           </header>
@@ -1623,7 +1623,7 @@
         </div>
         </div>
 
-        <article class="panel table-panel rankers-panel span-4">
+        <article class="panel is-flush table-panel rankers-panel span-4">
           <header class="panel-title">
             <span>Market Regime Ranks</span>
           </header>
@@ -1727,7 +1727,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel span-2">
+        <article class="panel is-flush table-panel span-2">
           <header class="panel-title">
             <span>Event Tape</span>
             <span class="header-meta">{workspace.events.length} events</span>
@@ -1758,7 +1758,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel span-2">
+        <article class="panel is-flush table-panel span-2">
           <header class="panel-title">
             <span>Cross-Domain Links</span>
             <span class="header-meta">{workspace.cross_domain_links.length} links</span>
@@ -1930,7 +1930,7 @@
 
     {#if mode === "energy" || mode === "metals"}
       <section class="split">
-        <article class="panel chart-panel">
+        <article class="panel is-flush chart-panel">
           <header class="panel-title">
             <span>{selectedInstrument?.name ?? "Price"} · Price History</span>
             <span class="header-meta">{historyPointCount ? `${historyPointCount} obs · ${formatDate(latestHistoryDate)}` : "—"}</span>
@@ -1941,7 +1941,7 @@
           {/if}
         </article>
 
-        <article class="panel table-panel snapshot-panel">
+        <article class="panel is-flush table-panel snapshot-panel">
           <header class="panel-title">
             <span>{mode === "metals" ? "Metals Snapshot" : "Energy Snapshot"}</span>
             <span class="header-meta">{visibleSummaries.length} markets</span>
@@ -2002,7 +2002,7 @@
     <!-- 1. Forward curve + curve nodes (top of curve-bearing modes) -->
     {#if mode === "energy" || mode === "metals" || mode === "curves_spreads"}
       <section class="split">
-        <article class="panel chart-panel">
+        <article class="panel is-flush chart-panel">
           <header class="panel-title">
             <span>{selectedInstrument?.symbol ?? "Curve"} · Forward Curve</span>
             <span class="header-meta" class:absent={selectedCurve?.shape_label == null}>{selectedCurve?.shape_label ?? "N/A"}</span>
@@ -2024,7 +2024,7 @@
           <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
-        <article class="panel table-panel curve-nodes-panel">
+        <article class="panel is-flush table-panel curve-nodes-panel">
           <header class="panel-title">
             <span>Curve Nodes</span>
             <span class="header-meta">{selectedCurve?.nodes.length ?? 0} contracts</span>
@@ -2064,7 +2064,7 @@
     <!-- 2. Energy curve-support: Crack Spread Matrix + Term Structure Heatmap -->
     {#if mode === "energy"}
       <section class="curve-support-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Crack Spread Matrix</span>
             <span class="header-meta">{crackMatrixRows.length} rows</span>
@@ -2105,7 +2105,7 @@
           </div>
         </article>
 
-        <article class="panel rows-panel">
+        <article class="panel is-flush rows-panel">
           <header class="panel-title">
             <span>Term Structure Heatmap</span>
             <span class="header-meta">{termSpreadHeatmapRows.length} legs</span>
@@ -2128,7 +2128,7 @@
         </article>
       </section>
 
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Vessel / Flow Proxy</span>
           <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
@@ -2180,7 +2180,7 @@
     <!-- 2b. Metals curve-support: Substitution Spreads + Term Structure Heatmap -->
     {#if mode === "metals"}
       <section class="curve-support-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Substitution Spreads</span>
             <span class="header-meta">{substitutionSpreadRows.length} rows</span>
@@ -2223,7 +2223,7 @@
           </div>
         </article>
 
-        <article class="panel rows-panel">
+        <article class="panel is-flush rows-panel">
           <header class="panel-title">
             <span>Term Structure Heatmap</span>
             <span class="header-meta">{termSpreadHeatmapRows.length} legs</span>
@@ -2252,7 +2252,7 @@
       {#key selectedInstrumentId}
         <CommodityCurveHistory instrumentId={selectedInstrumentId} instrument={selectedInstrument} curve={selectedCurve} coverage={workspace?.coverage ?? null} providerLoading={loading} />
       {/key}
-      <section class="panel rows-panel">
+      <section class="panel is-flush rows-panel">
         <header class="panel-title"><span>Term Structure Heatmap</span></header>
         {#if termSpreadHeatmapRows.length}
           <div class="heatmap-list">
@@ -2274,7 +2274,7 @@
 
     <!-- 3. Spreads table -->
     {#if mode === "curves_spreads" || mode === "metals" || mode === "energy"}
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Spreads</span>
           <span class="header-meta">{selectedSpreads.length} linked</span>
@@ -2323,7 +2323,7 @@
     <!-- 4. Metals macro context (parallel to where Energy's fundamentals charts go) -->
     {#if mode === "metals"}
       <section class="curve-support-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Macro Driver Correlation</span>
             <span class="header-meta">{metalsCorrelationRows.length} pairs</span>
@@ -2354,7 +2354,7 @@
           </div>
         </article>
 
-        <article class="panel rows-panel">
+        <article class="panel is-flush rows-panel">
           <header class="panel-title">
             <span>Precious Ratio Gauges</span>
             <span class="header-meta">{metalRatioGaugeRows.length} · loaded-history band</span>
@@ -2393,7 +2393,7 @@
     <!-- 5. Fundamentals charts (split by category group) -->
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
       <section class="fundamental-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>{fundamentalStackTitle(mode)}</span>
             <span class="header-meta">{fundamentalTapeRows.length} series</span>
@@ -2427,7 +2427,7 @@
         </article>
 
         {#each fundamentalGroups as group}
-          <article class="panel chart-panel">
+          <article class="panel is-flush chart-panel">
             <header class="panel-title">
               <span>{group.title}</span>
               <span class="header-meta">{group.count} · idx 100</span>
@@ -2440,7 +2440,7 @@
 
     <!-- 6. Fundamental Tape (full width, room to breathe) -->
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Fundamental Tape</span>
           <span class="header-meta">{fundamentalTapeRows.length} series</span>
@@ -2488,7 +2488,7 @@
 
     <!-- 7. Inventory vs Seasonality (energy only, box-plot redesign) -->
     {#if mode === "energy" || mode === "metals"}
-      <section class="panel rows-panel">
+      <section class="panel is-flush rows-panel">
         <header class="panel-title">
           <span>Inventory vs Seasonality</span>
           <span class="header-meta">5Y · same week-of-year band</span>
@@ -2524,7 +2524,7 @@
     {/if}
 
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Inventory Series</span>
           <span class="header-meta">{visibleInventories.length} series</span>
@@ -2572,7 +2572,7 @@
 
     {#if mode === "events_cross_domain"}
       <section class="split">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Linked Events</span>
             <span class="header-meta">{eventRows.length} events</span>
@@ -2605,7 +2605,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Cross-Domain Links</span>
             <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
@@ -2705,15 +2705,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .loading-pill {
-    color: var(--accent);
-    border: 1px solid var(--panel-strong);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
   }
 
   .basis-strip {
@@ -2880,11 +2871,6 @@
   /* .panel-title and .tag come from primitives.css. */
 
   /* Edge-to-edge panels */
-  .table-panel,
-  .chart-panel,
-  .rows-panel,
-  .scatter-panel { padding: 0; }
-
   .chart-panel { display: flex; flex-direction: column; gap: 0; }
 
   /* ── Layout grids ── */
@@ -3195,11 +3181,13 @@
     position: absolute;
     pointer-events: none;
     z-index: 20;
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
     padding: var(--space-4) var(--space-5);
     font-size: var(--text-sm);
     min-width: 11rem;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .scatter-tooltip strong {

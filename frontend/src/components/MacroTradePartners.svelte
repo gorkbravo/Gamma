@@ -195,8 +195,8 @@
       {/if}
     </article>
 
-    <article class="panel table-panel">
-      <div class="table-panel-header">Trade Partners</div>
+    <article class="panel is-flush table-panel">
+      <header class="panel-title"><span>Trade Partners</span></header>
       {#if tradePartners?.partners?.length}
         <table class="data-table is-top">
           <thead>
@@ -317,7 +317,7 @@
     width: min(100%, 680px);
     aspect-ratio: 1;
     display: block;
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
   }
 
   .rings circle {
@@ -382,19 +382,7 @@
   }
 
   .table-panel {
-    padding: 0;
     overflow: hidden;
-  }
-
-  .table-panel-header {
-    min-height: 26px;
-    padding: var(--space-2) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    color: var(--text-2);
-    font-size: var(--text-title);
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: var(--label-case);
   }
 
   /* Cells, header and row identifiers come from .data-table.is-top in primitives.css. */

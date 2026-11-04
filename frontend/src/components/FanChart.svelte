@@ -231,8 +231,7 @@
 
 <style>
   .shell {
-    border: 1px solid var(--divider);
-    background: var(--panel-bg);
+    background: transparent;
     position: relative;
     overflow: hidden;
   }

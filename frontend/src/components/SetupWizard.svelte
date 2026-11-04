@@ -684,9 +684,9 @@
 
   .notice {
     padding: var(--space-4) var(--space-5);
-    border: 1px solid var(--panel-border);
-    border-left: 2px solid var(--warning);
     font-size: var(--text-sm);
+    border-radius: var(--panel-radius);
+    background: var(--warning-soft);
   }
 
   .warning-text,
@@ -738,10 +738,11 @@
     gap: var(--space-4);
     align-items: start;
     padding: var(--space-5);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    border-radius: var(--panel-radius);
     cursor: pointer;
     transition: border-color var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);
+    background: var(--tint);
   }
 
   .mode:hover {
@@ -790,19 +791,16 @@
   .facts {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0;
+    gap: var(--space-3);
     margin: 0;
-    border: 1px solid var(--panel-border);
   }
 
   .facts div {
     display: grid;
     gap: var(--space-1);
     padding: var(--space-4) var(--space-5);
-  }
-
-  .facts div + div {
-    border-left: 1px solid var(--panel-border);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   dd {
@@ -962,11 +960,6 @@
     .fields,
     .facts {
       grid-template-columns: 1fr;
-    }
-
-    .facts div + div {
-      border-left: 0;
-      border-top: 1px solid var(--panel-border);
     }
 
     /* En móvil la tabla mantiene su semántica pero parte el texto en lugar de desbordar. */

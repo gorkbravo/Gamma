@@ -89,11 +89,12 @@
 </article>
 
 <style>
+  /* A tinted block on the sheet: the tonal step is the edge. */
   .divergence-card {
     display: grid;
     gap: var(--space-3);
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
     padding: var(--space-5);
   }
 
@@ -186,8 +187,7 @@
     justify-content: center;
     min-width: 2.8rem;
     padding: var(--space-1) var(--space-3);
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 42%, transparent);
+    border-radius: var(--radius-pill);
     background: var(--accent-soft);
     color: var(--text-1);
     font-size: var(--text-xs);
@@ -195,13 +195,11 @@
   }
 
   .signal-score.positive {
-    border-color: color-mix(in srgb, var(--positive) 25%, transparent);
     background: var(--positive-soft);
     color: var(--positive);
   }
 
   .signal-score.negative {
-    border-color: color-mix(in srgb, var(--negative-muted) 30%, transparent);
     background: var(--negative-soft);
     color: var(--negative);
   }
@@ -246,26 +244,22 @@
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-2xs);
     font-weight: 600;
-    border-radius: 2px;
-    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    border-radius: var(--radius-pill);
     background: var(--accent-soft);
     color: var(--text-1);
   }
 
   .score-badge.high {
-    border-color: color-mix(in srgb, var(--negative-muted) 35%, transparent);
     background: var(--negative-soft);
     color: var(--negative);
   }
 
   .score-badge.moderate {
-    border-color: color-mix(in srgb, var(--accent-2) 30%, transparent);
     background: var(--warning-soft);
     color: var(--accent-2);
   }
 
   .score-badge.low {
-    border-color: color-mix(in srgb, var(--positive) 25%, transparent);
     background: var(--positive-soft);
     color: var(--positive);
   }

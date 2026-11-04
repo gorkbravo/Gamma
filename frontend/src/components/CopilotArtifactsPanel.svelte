@@ -431,9 +431,9 @@
   select,
   textarea {
     width: 100%;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--tint);
     color: var(--text-0);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);

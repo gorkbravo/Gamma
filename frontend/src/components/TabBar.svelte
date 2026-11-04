@@ -263,7 +263,7 @@
   .header-btn,
   .close-btn {
     cursor: pointer;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-control);
     transition: color 120ms ease, border-color 120ms ease;
   }
 
@@ -354,7 +354,7 @@
     text-align: left;
     font-size: var(--text-base);
     font-family: var(--font-ui);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-control);
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }
 

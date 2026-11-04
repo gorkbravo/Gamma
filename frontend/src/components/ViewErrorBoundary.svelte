@@ -55,9 +55,9 @@
     gap: var(--space-2);
     justify-items: start;
     padding: var(--space-5) var(--space-6);
-    border: 1px solid color-mix(in srgb, var(--negative) 45%, var(--panel-border));
-    background: var(--surface-0);
+    background: var(--panel-bg);
     color: var(--text-2);
+    border-radius: var(--panel-radius);
   }
 
   .view-error strong {

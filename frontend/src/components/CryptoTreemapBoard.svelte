@@ -158,7 +158,7 @@
     min-width: 0;
     color: var(--text-0);
     overflow: hidden;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
   }
 
   .treemap-tile.selected {
@@ -270,7 +270,6 @@
   }
 
   .empty-inline {
-    border: 1px dashed var(--divider);
     color: var(--text-2);
     padding: var(--space-5);
     font-size: var(--text-sm);

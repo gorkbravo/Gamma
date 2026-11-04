@@ -342,6 +342,15 @@
   letter-spacing: 0;
 }
 
+/* A title that stays a heading (<h2>, <h3>) takes the row's type. The
+   doubled class outranks a view's scoped `h3 { … }` rule, which would
+   otherwise set its own size and colour on the title. */
+.panel-title.panel-title > :is(h2, h3, h4) {
+  margin: 0;
+  color: inherit;
+  font: inherit;
+}
+
 /* ── Data table ───────────────────────────────────────────────────────────
    Opt in with class="data-table" on the <table>, plus the modifiers below
    for the families that differ (sticky, relaxed, compact, grid, figures,

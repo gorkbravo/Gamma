@@ -1607,7 +1607,7 @@
   <div class="workspace-grid is-wide-rail">
     <div class="primary-column">
       <div class="market-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Worldwide Indices</span>
@@ -1620,7 +1620,7 @@
           <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>FX Pairs</span>
@@ -1633,7 +1633,7 @@
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("Chg", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("% chg", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Rates</span>
@@ -1646,7 +1646,7 @@
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Commodities</span>
@@ -1660,7 +1660,7 @@
         </article>
       </div>
 
-      <article class="panel tape-panel">
+      <article class="panel is-flush tape-panel">
         <div class="table-header">
           <div class="table-title">
             <span>What Changed</span>
@@ -1702,7 +1702,7 @@
         </div>
       </article>
 
-      <article class="panel tape-panel">
+      <article class="panel is-flush tape-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Events &amp; Markets</span>
@@ -1747,7 +1747,7 @@
     </div>
 
     <aside class="support-column">
-      <article class="panel media-panel">
+      <article class="panel is-flush media-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Bloomberg TV</span>
@@ -1772,7 +1772,7 @@
         </div>
       </article>
 
-      <article class="panel table-panel news-panel">
+      <article class="panel is-flush table-panel news-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Market News</span>
@@ -1814,7 +1814,7 @@
         </div>
       </article>
 
-      <article class="panel tape-panel follow-up-panel">
+      <article class="panel is-flush tape-panel follow-up-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Follow-Ups</span>
@@ -1888,7 +1888,7 @@
         </div>
       </article>
 
-      <article class="panel provider-panel">
+      <article class="panel is-flush provider-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Provider Status</span>
@@ -1972,7 +1972,6 @@
   .tape-panel,
   .media-panel,
   .provider-panel {
-    padding: 0;
     overflow: hidden;
     gap: 0;
   }

@@ -27,7 +27,6 @@ const RAW_COLOR_EXCEPTIONS: RawColorException[] = [
   { file: "components/FanChart.svelte", literal: "rgba(42, 56, 70, 0.26)", reason: "grid line, a one-off navy with no token" },
   { file: "components/FanChart.svelte", literal: "rgba(106, 168, 255, 0.32)", reason: "tooltip edge, a one-off blue with no token" },
   { file: "components/MaritimeMap.svelte", literal: "rgba(2, 6, 12, 0.7)", reason: "vessel chevron outline drawn on canvas, a one-off with no token" },
-  { file: "components/MacroCoherencePanel.svelte", literal: "rgba(255, 255, 255, 0.015)", reason: "component is not imported anywhere" },
   { file: "views/RiskView.svelte", literal: "rgb(87, 135, 176)", reason: "eighth cluster colour, no token" },
   { file: "views/RiskView.svelte", literal: "rgb(253,231,37)", reason: "end stop of the viridis data colormap, which encodes data rather than theme" }
 ];

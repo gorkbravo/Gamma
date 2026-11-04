@@ -172,7 +172,7 @@
   input, select { min-width: 0; width: 100%; box-sizing: border-box; }
   /* Cells come from .data-table.is-figures.is-nowrap in primitives.css; the
      last column here is a label (coverage, provider), so it reads left. */
-  .table-wrap { overflow-x: auto; } table { font-family: var(--font-num), monospace; }
+  .table-wrap { overflow-x: auto; } table { font-family: var(--font-num); }
   th:last-child, td:last-child { text-align: left; }
   small { display: block; color: var(--text-2); font-size: var(--text-xs); }
   details { padding: var(--space-4) var(--space-5); font-size: var(--text-sm); } summary { cursor: pointer; }

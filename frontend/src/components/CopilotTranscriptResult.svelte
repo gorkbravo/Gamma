@@ -919,7 +919,7 @@
 
   .sequence {
     color: var(--text-2);
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
     font-size: var(--text-xs);
   }
 
@@ -993,9 +993,9 @@
   .confirmation-actions button {
     min-height: 28px;
     padding: 0 var(--space-4);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
     color: var(--text-1);
     cursor: pointer;
     font: inherit;

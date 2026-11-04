@@ -161,8 +161,8 @@
 <style>
   :global(body) {
     margin: 0;
-    font-family: var(--font-num), monospace;
-    background: var(--bg-0);
+    font-family: var(--font-ui);
+    background: var(--canvas);
     color: var(--text-0);
   }
 
@@ -253,9 +253,9 @@
   }
 
   .workspace-card {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
+    background: var(--tint);
     padding: 0.9rem;
+    border-radius: var(--panel-radius);
   }
 
   @media (max-width: 820px) {

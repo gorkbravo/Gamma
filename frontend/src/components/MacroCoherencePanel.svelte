@@ -2,6 +2,8 @@
   import type { MacroCoherenceProfile, MacroLeadLagSignal } from "../lib/api/types";
 
   export let coherence: MacroCoherenceProfile | null | undefined = null;
+  /* Compact, for the cards it sits in, drops the summary (the card's own
+     summary already says it) and the methodology note. */
   export let compact = false;
 
   function toneClass(label: string | null | undefined): string {
@@ -11,57 +13,54 @@
     return "";
   }
 
+  function scoreTone(tone: string | null | undefined): string {
+    if (tone === "reinforcing") return "positive";
+    if (tone === "opposing") return "negative";
+    return "";
+  }
+
   function signalMeta(signal: MacroLeadLagSignal | null | undefined): string | null {
     if (!signal) return null;
-    return [signal.observed_label, signal.lag_label, signal.move_display].filter(Boolean).join(" | ") || null;
+    return [signal.observed_label, signal.lag_label, signal.move_display].filter(Boolean).join(" · ") || null;
   }
+
+  $: leadLag = [
+    { role: "Leader", signal: coherence?.lead_signal ?? null },
+    { role: "Laggard", signal: coherence?.lag_signal ?? null },
+  ].filter((row) => row.signal !== null);
 </script>
 
 {#if coherence}
   <div class:compact class="coherence-panel">
-    <div class="coherence-head">
-      <div class="coherence-tags">
-        <span class="tag is-tinted {toneClass(coherence.coherence_label)}">{coherence.coherence_label}</span>
-        <span class="coherence-counts">{coherence.supporting_signals} confirm</span>
-        <span class="coherence-counts">{coherence.opposing_signals} oppose</span>
-        {#if coherence.lag_span_display}
-          <span class="coherence-counts">{coherence.lag_span_display} spread</span>
-        {/if}
-      </div>
-      <p class="coherence-summary">{coherence.summary}</p>
+    <div class="coherence-tags">
+      <span class="tag is-tinted {toneClass(coherence.coherence_label)}">{coherence.coherence_label}</span>
+      <span class="coherence-counts">
+        {coherence.supporting_signals} confirm · {coherence.opposing_signals} oppose{#if coherence.lag_span_display} · {coherence.lag_span_display} spread{/if}
+      </span>
     </div>
 
-    {#if coherence.lead_signal || coherence.lag_signal}
-      <div class="lead-lag-grid">
-        {#if coherence.lead_signal}
-          <article class="lead-lag-card">
-            <div class="lead-lag-top">
-              <span class="lead-lag-label">Leader</span>
-              {#if coherence.lead_signal.signal_score_display}
-                <span class="lead-lag-score {coherence.lead_signal.tone}">{coherence.lead_signal.signal_score_display}</span>
-              {/if}
-            </div>
-            <strong>{coherence.lead_signal.label}</strong>
-            {#if signalMeta(coherence.lead_signal)}
-              <p class="lead-lag-meta">{signalMeta(coherence.lead_signal)}</p>
-            {/if}
-          </article>
-        {/if}
+    {#if coherence.summary && !compact}
+      <p class="coherence-summary">{coherence.summary}</p>
+    {/if}
 
-        {#if coherence.lag_signal}
-          <article class="lead-lag-card">
-            <div class="lead-lag-top">
-              <span class="lead-lag-label">Laggard</span>
-              {#if coherence.lag_signal.signal_score_display}
-                <span class="lead-lag-score {coherence.lag_signal.tone}">{coherence.lag_signal.signal_score_display}</span>
+    {#if leadLag.length}
+      <!-- Who moved first and who has not caught up: rule-less stats inside
+           the card, never a card inside a card. -->
+      <div class="lead-lag-grid">
+        {#each leadLag as row (row.role)}
+          <div class="lead-lag">
+            <span class="lead-lag-label">
+              {row.role}
+              {#if row.signal?.signal_score_display}
+                <b class="lead-lag-score {scoreTone(row.signal.tone)}">{row.signal.signal_score_display}</b>
               {/if}
-            </div>
-            <strong>{coherence.lag_signal.label}</strong>
-            {#if signalMeta(coherence.lag_signal)}
-              <p class="lead-lag-meta">{signalMeta(coherence.lag_signal)}</p>
+            </span>
+            <strong>{row.signal?.label}</strong>
+            {#if signalMeta(row.signal)}
+              <small class="lead-lag-meta">{signalMeta(row.signal)}</small>
             {/if}
-          </article>
-        {/if}
+          </div>
+        {/each}
       </div>
     {/if}
 
@@ -72,50 +71,32 @@
 {/if}
 
 <style>
+  /* Lives inside a Macro card (a tinted block), so it has no box of its own. */
   .coherence-panel {
     display: grid;
-    gap: var(--space-3);
-    padding: var(--space-4) var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 30%, transparent);
-    background: var(--surface-soft);
-  }
-
-  .coherence-panel.compact {
-    padding: var(--space-3) var(--space-4);
     gap: var(--space-2);
-  }
-
-  .coherence-head {
-    display: grid;
-    gap: var(--space-2);
+    min-width: 0;
   }
 
   .coherence-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-3);
+    gap: var(--space-2);
     align-items: center;
   }
 
-  /* The chip is .tag.is-tinted from primitives.css; this panel's copy wraps,
-     sits on a tighter line and has slightly stronger tone outlines. */
+  /* The chip is .tag.is-tinted from primitives.css; long coherence labels wrap. */
   .tag {
     line-height: 1.2;
     white-space: normal;
   }
 
-  .tag.is-tinted.positive { border-color: color-mix(in srgb, var(--positive) 28%, transparent); }
-  .tag.is-tinted.negative { border-color: color-mix(in srgb, var(--negative-muted) 35%, transparent); }
-
   .coherence-counts {
     color: var(--text-2);
     font-size: var(--text-xs);
-    letter-spacing: 0;
-    text-transform: var(--label-case);
   }
 
   .coherence-summary,
-  .lead-lag-meta,
   .methodology-note {
     margin: 0;
     color: var(--text-2);
@@ -123,56 +104,67 @@
     line-height: 1.4;
   }
 
+  .coherence-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
   .lead-lag-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-3);
+    gap: var(--space-5);
   }
 
-  .lead-lag-card {
+  .lead-lag {
     display: grid;
     gap: var(--space-1);
-    padding: var(--space-3) var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 28%, transparent);
-    background: rgba(255, 255, 255, 0.015);
-  }
-
-  .lead-lag-top {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-3);
-    align-items: center;
+    min-width: 0;
   }
 
   .lead-lag-label {
+    display: flex;
+    gap: var(--space-3);
+    align-items: baseline;
     color: var(--text-2);
+    font-family: var(--font-label);
     font-size: var(--text-xs);
-    letter-spacing: 0;
-    text-transform: var(--label-case);
+    font-weight: 500;
   }
 
-  .lead-lag-card strong {
+  .lead-lag strong {
+    color: var(--text-0);
     font-size: var(--text-sm);
+    font-weight: 600;
     line-height: 1.35;
   }
 
   .lead-lag-score {
+    color: var(--text-1);
+    font-family: var(--font-num);
     font-size: var(--text-2xs);
     font-weight: 600;
-    color: var(--text-1);
   }
 
-  .lead-lag-score.reinforcing {
+  .lead-lag-score.positive {
     color: var(--positive);
   }
 
-  .lead-lag-score.opposing {
+  .lead-lag-score.negative {
     color: var(--negative);
+  }
+
+  .lead-lag-meta {
+    color: var(--text-2);
+    font-family: var(--font-num);
+    font-size: var(--text-xs);
+    line-height: 1.35;
   }
 
   .methodology-note {
     padding-left: var(--space-4);
-    border-left: 2px solid color-mix(in srgb, var(--rule-navy) 35%, transparent);
+    border-left: 2px solid var(--divider);
   }
 
   @media (max-width: 900px) {

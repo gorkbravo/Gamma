@@ -714,7 +714,7 @@
         </div>
       </article>
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-head">
           <h3>
             Positions
@@ -820,7 +820,7 @@
         </div>
       </article>
 
-      <article class="panel messages-panel">
+      <article class="panel is-flush messages-panel">
         <div class="table-head">
           <h3>Important Warnings <span class="count">{primaryConsoleEntries.length}</span></h3>
           <button type="button" class="btn is-small is-ghost" on:click={onToggleDiagnostics}>
@@ -1064,11 +1064,6 @@
   .rail-panel {
     display: grid;
     gap: var(--space-4);
-  }
-
-  .table-panel,
-  .messages-panel {
-    padding: 0;
   }
 
   h2,
@@ -1536,16 +1531,18 @@
     display: grid;
     place-items: center;
     padding: var(--space-6);
-    background: color-mix(in srgb, var(--bg-0) 84%, transparent);
+    background: var(--scrim);
   }
 
   .confirm-dialog {
     width: min(32rem, 100%);
     display: grid;
     gap: var(--space-4);
-    border: 1px solid var(--panel-strong);
+    border: 1px solid var(--panel-border);
     background: var(--surface-0);
     padding: var(--space-6);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .confirm-dialog > p:not(.eyebrow) {

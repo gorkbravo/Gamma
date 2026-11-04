@@ -1246,7 +1246,7 @@
     <div class="header-top">
       <span class="title">Equity Research</span>
       <span class="subtitle">Market map / scope / scenarios</span>
-      {#if loading || overviewLoading || compareLoading || savedLoading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if loading || overviewLoading || compareLoading || savedLoading}<span class="tag accent">Refreshing</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -1621,11 +1621,11 @@
         </article>
       </div>
 
-      <article class="panel table-panel">
-        <div class="panel-header tight-head">
+      <article class="panel is-flush table-panel">
+        <header class="panel-title">
           <h3>Constituent Detail</h3>
-          <small>{constituentRows.length} rows</small>
-        </div>
+          <span class="header-meta">{constituentRows.length} rows</span>
+        </header>
 
         <div class="table-wrap">
           <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
@@ -1976,8 +1976,8 @@
           </article>
         </div>
 
-        <article class="panel table-panel">
-          <div class="panel-header tight-head"><h3>Side-by-Side Metrics</h3></div>
+        <article class="panel is-flush table-panel">
+          <header class="panel-title"><h3>Side-by-Side Metrics</h3></header>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead><tr><th>Metric</th><th>{compareResult?.left.label ?? "Left"}</th><th>{compareResult?.right.label ?? "Right"}</th></tr></thead>
@@ -2001,8 +2001,8 @@
         </article>
 
         {#if mode === "comparables"}
-          <article class="panel table-panel">
-            <div class="panel-header tight-head"><h3>Constituent Comparison</h3><small>{constituentRows.length} rows</small></div>
+          <article class="panel is-flush table-panel">
+            <header class="panel-title"><h3>Constituent Comparison</h3><span class="header-meta">{constituentRows.length} rows</span></header>
             <div class="table-wrap compact-table">
               <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr><th>Symbol</th><th>Weight</th><th>Return</th><th>Vol</th></tr></thead>
@@ -2042,11 +2042,11 @@
   {:else if savedModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
-        <article class="panel table-panel">
-          <div class="panel-header tight-head">
+        <article class="panel is-flush table-panel">
+          <header class="panel-title">
             <h3>Saved Research Objects</h3>
             <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
-          </div>
+          </header>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
@@ -2161,17 +2161,6 @@
   }
 
   /* ── Header panel internals ── */
-
-  .loading-pill {
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: var(--accent-soft);
-    padding: var(--space-2) var(--space-4);
-    white-space: nowrap;
-  }
 
   /* ── Mode bar (Risk pattern) ── */
 
@@ -2312,7 +2301,7 @@
 
   /* Tiles carry tickers and figures, so they keep the figures font. */
   .treemap-tile {
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
     position: absolute;
     min-height: 0;
     min-width: 0;
@@ -2323,7 +2312,7 @@
     overflow: hidden;
     width: auto;
     transition: border-color 120ms ease, filter 120ms ease;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
   }
 
   .treemap-tile:hover,
@@ -2464,20 +2453,18 @@
     font-size: var(--text-sm);
     font-weight: 700;
     padding: 0.08rem var(--space-3);
-    border: 1px solid var(--divider);
-    background: color-mix(in srgb, var(--surface-0) 78%, transparent);
+    background: var(--tint);
+    border-radius: var(--radius-pill);
   }
 
   .treemap-tooltip-chip.positive {
     color: var(--positive);
-    border-color: color-mix(in srgb, var(--positive) 40%, transparent);
-    background: color-mix(in srgb, var(--positive) 12%, var(--surface-0));
+    background: var(--positive-soft);
   }
 
   .treemap-tooltip-chip.negative {
     color: var(--negative);
-    border-color: color-mix(in srgb, var(--negative) 40%, transparent);
-    background: color-mix(in srgb, var(--negative) 12%, var(--surface-0));
+    background: var(--negative-soft);
   }
 
   .treemap-tooltip-chip.neutral {
@@ -2592,20 +2579,17 @@
     align-items: flex-start;
   }
 
-  .tight-head {
-    align-items: center;
-  }
-
-  .tight-head small {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    white-space: nowrap;
-  }
-
   .inline-refresh {
     width: auto;
     min-height: 1.65rem;
     padding: var(--space-2) var(--space-4);
+  }
+
+  /* A control in a .panel-title row keeps the control type; buttons inherit
+     font, so it would otherwise take the title's 12.5px at weight 600. */
+  .panel-title > .inline-refresh {
+    font-size: var(--text-base);
+    font-weight: 500;
   }
 
   .title-block {
@@ -2806,20 +2790,8 @@
   /* Table panels: the panel is the table — zero padding, each section
      carries its own inset so the table itself runs edge-to-edge. */
   .table-panel {
-    padding: 0;
     gap: 0;
     overflow: hidden;
-  }
-
-  .table-panel > .panel-header {
-    padding: var(--space-3) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    align-items: center;
-  }
-
-  .table-panel > .table-wrap {
-    border: 0;
-    background: transparent;
   }
 
   /* Cells, rules and hover come from .data-table and its is-sticky,
@@ -2865,10 +2837,10 @@
   }
 
   .signed-book {
-    border: 1px solid var(--divider);
-    background: var(--surface-0);
+    background: var(--tint);
     padding: var(--space-4) var(--space-4);
     margin-top: var(--space-4);
+    border-radius: var(--panel-radius);
   }
 
   .focal-hint {

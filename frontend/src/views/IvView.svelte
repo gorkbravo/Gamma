@@ -915,7 +915,7 @@
     </div>
   {:else if mode === "chain"}
     <div class="workspace-grid">
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <h3>Options Chain</h3>
           <select class="form-control" value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
@@ -1037,7 +1037,7 @@
           {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <h3>Surface Grid</h3>
             {#if hoveredSurface && result}
@@ -1163,7 +1163,7 @@
     </div>
   {:else if mode === "realized_implied"}
     <div class="workspace-grid">
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <h3>Realized vs IV</h3>
           <span class="tenor-note">
@@ -1733,7 +1733,6 @@
   }
 
   .table-panel {
-    padding: 0;
     overflow: hidden;
   }
 

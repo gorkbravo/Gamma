@@ -1224,9 +1224,11 @@
     left: 0;
     z-index: 20;
     min-width: 15rem;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    border: 1px solid var(--panel-border);
+    background: var(--surface-0);
+    box-shadow: var(--overlay-shadow);
+    border-radius: var(--overlay-radius);
+    padding: var(--space-1);
   }
 
   .context-option {
@@ -1443,7 +1445,7 @@
     max-width: 80%;
     padding: var(--space-4) var(--space-5);
     border: 0;
-    border-radius: 12px 12px 4px 12px;
+    border-radius: var(--panel-radius) var(--panel-radius) var(--radius-sm) var(--panel-radius);
     background: var(--accent-soft);
     color: var(--text-0);
     font-size: var(--text-base);

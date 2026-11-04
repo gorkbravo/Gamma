@@ -476,7 +476,7 @@
     justify-self: end;
     background: var(--accent-soft);
     border-color: transparent;
-    border-top-right-radius: 4px;
+    border-top-right-radius: var(--radius-sm);
   }
 
   .user-bubble p {
@@ -486,7 +486,7 @@
 
   .assistant-bubble {
     justify-self: start;
-    border-top-left-radius: 2px;
+    border-top-left-radius: var(--radius-sm);
   }
 
   .message-card {
@@ -750,9 +750,11 @@
     width: min(22rem, calc(100vw - 2rem));
     max-height: min(22rem, 50vh);
     overflow-y: auto;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    border: 1px solid var(--panel-border);
+    background: var(--surface-0);
+    box-shadow: var(--overlay-shadow);
+    border-radius: var(--overlay-radius);
+    padding: var(--space-1);
   }
 
   .context-option {

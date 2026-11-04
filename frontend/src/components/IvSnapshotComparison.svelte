@@ -116,7 +116,7 @@
   h3 { margin: 0; font-size: var(--text-title); margin-right: auto; }
   /* Controls are .btn and .form-control from primitives.css. */
   label { display: grid; gap: var(--space-2); flex: 1 1 260px; min-width: 0; font-family: var(--font-label); font-size: var(--text-sm); }
-  select { width: 100%; min-width: 0; font-family: var(--font-num), monospace; }
+  select { width: 100%; min-width: 0; font-family: var(--font-num); }
   p { margin: 0; padding: var(--space-3) var(--space-5); color: var(--text-1); font-size: var(--text-sm); overflow-wrap: anywhere; }
   .table-scroll { overflow-x: auto; }
   /* Cells come from .data-table.is-figures.is-nowrap in primitives.css. */

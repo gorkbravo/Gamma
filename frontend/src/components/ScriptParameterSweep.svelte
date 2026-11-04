@@ -336,7 +336,7 @@
   .timing-note, .warning { color: var(--warning); border-left: 2px solid var(--warning); }
   .row-meta { display: flex; flex-wrap: wrap; gap: var(--space-5); font-size: var(--text-xs); color: var(--text-2); }
   .row-meta strong { color: var(--text-1); font-family: var(--font-num); font-weight: 500; }
-  .table-wrap { overflow: auto; border: 1px solid var(--divider); }
+  .table-wrap { overflow: auto; }
   /* Cells and header come from .data-table.is-compact.is-nowrap in primitives.css;
      script results keep 11px mono figures. */
   table { min-width: 36rem; }
@@ -346,8 +346,9 @@
   .positive { color: var(--positive); }
   .negative { color: var(--negative); }
   td.warn { color: var(--warning); }
-  .kpis { display: flex; flex-wrap: wrap; border-left: 1px solid var(--divider); }
-  .kpi { display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-5); border-right: 1px solid var(--divider); min-width: 7rem; }
+  /* KPI strip: tinted blocks on one baseline (§8 KPI Strips), no dividers. */
+  .kpis { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+  .kpi { display: grid; gap: var(--space-1); padding: var(--space-1) calc(var(--space-4) + var(--space-1)); min-width: 7rem; border-radius: var(--panel-radius); background: var(--tint); }
   .kpi span { color: var(--text-2); font-size: var(--text-xs); letter-spacing: 0; text-transform: var(--label-case); }
   .kpi strong { color: var(--text-0); font-family: var(--font-num); font-size: var(--text-md); font-weight: 600; }
   .kpi.primary strong { font-size: var(--text-lg); }

@@ -230,9 +230,9 @@
     width: 25px;
     height: 25px;
     place-items: center;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
     color: var(--text-1);
     font-size: var(--text-sm);
     line-height: 1;

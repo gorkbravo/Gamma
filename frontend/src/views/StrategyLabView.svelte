@@ -677,7 +677,7 @@
     <div class="header-top">
       <span class="title">Strategy Lab</span>
       <span class="subtitle">Composer / scripts / backtests / saved runs</span>
-      {#if strategyLoading || savedLoading || handoffLoading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if strategyLoading || savedLoading || handoffLoading}<span class="tag accent">Refreshing</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -799,8 +799,8 @@
             <CopilotStrategyLabWorkingAnalysis analysis={workingAnalysis} />
           {/if}
 
-          <article class="panel table-panel">
-            <div class="panel-header tight-head">
+          <article class="panel is-flush table-panel">
+            <header class="panel-title">
               <h3>Portfolio Composer</h3>
               <div class="builder-actions compact">
                 <button type="button" class="btn is-large is-ghost" on:click={addPortfolioDraftLeg}>Add Leg</button>
@@ -811,7 +811,7 @@
                   {strategyLoading || composePending ? "Composing..." : "Compose Portfolio"}
                 </button>
               </div>
-            </div>
+            </header>
 
             {#if runNotice}<p role="status">{runNotice}</p>{/if}
             {#if errorMessage}<p class="warning" role="alert">{errorMessage}</p>{/if}
@@ -1049,8 +1049,8 @@
             {/if}
           </article>
 
-          <article class="panel table-panel">
-            <div class="table-panel-header">Reusable Gamma Objects</div>
+          <article class="panel is-flush table-panel">
+            <header class="panel-title"><h3>Reusable Gamma Objects</h3></header>
             <div class="table-wrap compact-table">
               <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead>
@@ -1211,11 +1211,11 @@
         </article>
 
         {#if mode === "imports"}
-          <article class="panel table-panel">
-            <div class="panel-header tight-head">
+          <article class="panel is-flush table-panel">
+            <header class="panel-title">
               <h3>Parsed CSV Rows</h3>
-              <small>{parsedStrategyCsv.rows.length} rows / {parsedStrategyCsv.columns.length} columns</small>
-            </div>
+              <span class="header-meta">{parsedStrategyCsv.rows.length} rows / {parsedStrategyCsv.columns.length} columns</span>
+            </header>
             <div class="table-wrap compact-table">
               <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr>{#each parsedStrategyCsv.columns.slice(0, 5) as column}<th>{column}</th>{/each}</tr></thead>
@@ -1235,14 +1235,14 @@
 
         {#if mode === "regime_stress"}
           {#if rollingRiskSeries.length}
-            <article class="panel">
-              <div class="table-panel-header">Rolling Beta &amp; Correlation &middot; {rollingWindowLabel(activeStrategyResult)}</div>
+            <article class="panel is-flush">
+              <header class="panel-title"><h3>Rolling Beta &amp; Correlation</h3><span class="header-meta">{rollingWindowLabel(activeStrategyResult)}</span></header>
               <TimeSeriesChart series={rollingRiskSeries} height={200} showLegend emptyMessage="Analyze a benchmarked stream to populate rolling regime risk." />
             </article>
           {/if}
           <div class="detail-split">
-            <article class="panel table-panel">
-              <div class="panel-header tight-head"><h3>Worst Drawdowns</h3><small>{stressDrawdownRows.length} points</small></div>
+            <article class="panel is-flush table-panel">
+              <header class="panel-title"><h3>Worst Drawdowns</h3><span class="header-meta">{stressDrawdownRows.length} points</span></header>
               <div class="table-wrap compact-table">
                 <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                   <thead><tr><th>Date</th><th class="num-cell">Drawdown</th></tr></thead>
@@ -1259,11 +1259,11 @@
               </div>
             </article>
 
-            <article class="panel table-panel">
-              <div class="panel-header tight-head">
+            <article class="panel is-flush table-panel">
+              <header class="panel-title">
                 <h3>Recent Regime Read</h3>
-                <small>{rollingStressRows.length} windows &middot; {rollingWindowLabel(activeStrategyResult)}</small>
-              </div>
+                <span class="header-meta">{rollingStressRows.length} windows &middot; {rollingWindowLabel(activeStrategyResult)}</span>
+              </header>
               <div class="table-wrap compact-table">
                 <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                   <thead><tr>
@@ -1294,8 +1294,8 @@
           </div>
         {:else}
         <div class="detail-split">
-          <article class="panel table-panel">
-            <div class="panel-header tight-head"><h3>Monthly Returns</h3><small>{activeStrategyResult?.monthly_returns.length ?? 0} periods</small></div>
+          <article class="panel is-flush table-panel">
+            <header class="panel-title"><h3>Monthly Returns</h3><span class="header-meta">{activeStrategyResult?.monthly_returns.length ?? 0} periods</span></header>
             <div class="table-wrap compact-table">
               <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr><th>Period</th><th class="num-cell">Return</th></tr></thead>
@@ -1312,8 +1312,8 @@
             </div>
           </article>
 
-          <article class="panel table-panel">
-            <div class="panel-header tight-head"><h3>Annual Returns</h3><small>{activeStrategyResult?.annual_returns.length ?? 0} periods</small></div>
+          <article class="panel is-flush table-panel">
+            <header class="panel-title"><h3>Annual Returns</h3><span class="header-meta">{activeStrategyResult?.annual_returns.length ?? 0} periods</span></header>
             <div class="table-wrap compact-table">
               <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
                 <thead><tr><th>Period</th><th class="num-cell">Return</th></tr></thead>
@@ -1401,11 +1401,11 @@
   {:else if savedModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
-        <article class="panel table-panel">
-          <div class="panel-header tight-head">
+        <article class="panel is-flush table-panel">
+          <header class="panel-title">
             <h3>Saved Strategy Runs</h3>
             <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
-          </div>
+          </header>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
               <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
@@ -1503,17 +1503,6 @@
 
   /* ── Header panel internals ── */
 
-  .loading-pill {
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: var(--accent-soft);
-    padding: var(--space-2) var(--space-4);
-    white-space: nowrap;
-  }
-
   /* ── Mode bar (Risk pattern) ── */
 
   /* ── Workspace ── */
@@ -1543,20 +1532,18 @@
     align-items: flex-start;
   }
 
-  .tight-head {
-    align-items: center;
-  }
-
-  .tight-head small {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    white-space: nowrap;
-  }
-
   .inline-refresh {
     width: auto;
     min-height: 1.65rem;
     padding: var(--space-2) var(--space-4);
+  }
+
+  /* Controls in a .panel-title row keep the control type; buttons inherit
+     font, so they would otherwise take the title's 12.5px at weight 600. */
+  .panel-title > .builder-actions,
+  .panel-title > .inline-refresh {
+    font-size: var(--text-base);
+    font-weight: 500;
   }
 
   .subchart-label {
@@ -1706,8 +1693,6 @@
   /* ── Tables ── */
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
     max-height: 28rem;
   }
 
@@ -1715,26 +1700,14 @@
     max-height: 20rem;
   }
 
-  /* Table panels: the panel is the table — zero padding, each section
+  /* Table panels: the panel is the table (.panel.is-flush), each section
      carries its own inset so the table itself runs edge-to-edge. */
   .table-panel {
-    padding: 0;
     gap: 0;
     overflow: hidden;
   }
 
-  .table-panel > .panel-header {
-    padding: var(--space-3) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    align-items: center;
-  }
-
-  .table-panel > .table-wrap {
-    border: 0;
-    background: transparent;
-  }
-
-  .table-panel > :not(.panel-header):not(.table-panel-header) + .table-wrap {
+  .table-panel > :not(.panel-title) + .table-wrap {
     border-top: 1px solid var(--divider);
   }
 
@@ -1912,16 +1885,6 @@
 
   .muted-warnings span {
     color: var(--text-2);
-  }
-
-  .table-panel-header {
-    padding: var(--space-3) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    color: var(--text-2);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    font-size: var(--text-title);
-    font-weight: 600;
   }
 
   .compact-warning-list {

@@ -854,23 +854,23 @@
         <div class="primary-column">
         {#if result?.monte_carlo?.fan_percentiles}
           <div class="two-col">
-            <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={240} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
-            <article class="panel chart-panel">{@render PanelTitle("Forward Path Envelope")}<FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={240} emptyMessage="Monte Carlo fan chart unavailable" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={240} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("Forward Path Envelope")}<FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={240} emptyMessage="Monte Carlo fan chart unavailable" /></article>
           </div>
         {:else}
-          <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
         {/if}
         <div class="two-col">
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need at least 21 observations" /></article>
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Beta")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Need benchmark overlap for selected beta window" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need at least 21 observations" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Beta")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Need benchmark overlap for selected beta window" /></article>
         </div>
         {#if result?.monte_carlo?.terminal_returns}
           <div class="two-col">
-            <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={200} emptyMessage="Drawdown history unavailable" /></article>
-            <article class="panel chart-panel">{@render PanelTitle("MC Terminal Distribution")}<DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={200} emptyMessage="Monte Carlo distribution unavailable" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={200} emptyMessage="Drawdown history unavailable" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("MC Terminal Distribution")}<DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={200} emptyMessage="Monte Carlo distribution unavailable" /></article>
           </div>
         {:else}
-          <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
         {/if}
         {@render RiskContributorsTable(workspace.riskContributors, workspace.contributionTailDays)}
         </div>
@@ -902,11 +902,11 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
-        <article class="panel chart-panel">{@render PanelTitle("Portfolio Equity Curve")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate equity curve" /></article>
-        <article class="panel chart-panel">{@render PanelTitle("Underwater Chart vs Benchmark")}<TimeSeriesChart series={drawdownChart} height={240} emptyMessage="Drawdown curve unavailable" /></article>
+        <article class="panel is-flush chart-panel">{@render PanelTitle("Portfolio Equity Curve")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate equity curve" /></article>
+        <article class="panel is-flush chart-panel">{@render PanelTitle("Underwater Chart vs Benchmark")}<TimeSeriesChart series={drawdownChart} height={240} emptyMessage="Drawdown curve unavailable" /></article>
         <div class="two-col">
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Downside Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need enough observations" /></article>
-          <article class="panel chart-panel">{@render PanelTitle("Return Distribution")}<DistributionChart values={realizedReturns} markers={realizedMarkers} height={220} emptyMessage="Return distribution unavailable" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Downside Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need enough observations" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Return Distribution")}<DistributionChart values={realizedReturns} markers={realizedMarkers} height={220} emptyMessage="Return distribution unavailable" /></article>
         </div>
         {@render DrawdownTable(workspace.drawdownEpisodes)}
         </div>
@@ -922,9 +922,9 @@
       <div class="workspace-grid">
         <div class="primary-column">
         <article class="panel dependency-panel">{@render PanelTitle("Dependency Network")}{@render DependencyNetwork(workspace.dependencyNetwork)}</article>
-        <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
+        <article class="panel is-flush heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
         <div class="two-col">
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
           <article class="panel">{@render PanelTitle("Normal vs Stress Correlation")}{@render StressCompare(stressCorrelation)}</article>
         </div>
         {@render SimpleTable("Highest Correlated Pairs", ["Pair", "Corr", "Read"], workspace.correlatedPairs)}
@@ -962,7 +962,7 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
-          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot, workspace.frontierMessage)}</article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot, workspace.frontierMessage)}</article>
           {@render RankPanel("Weight Changes Before / After", optimizationBars)}
           {@render CandidateTable(workspace.candidates)}
         </div>
@@ -1007,7 +1007,7 @@
 {/snippet}
 
 {#snippet SimpleTable(title: string, headers: string[], rows: RiskTableRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">{title}<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr>{#each headers as header}<th>{header}</th>{/each}</tr></thead>
@@ -1025,7 +1025,7 @@
 {/snippet}
 
 {#snippet HoldingsTable(rows: HoldingRiskRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Holdings<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Symbol</th><th>Name</th><th>Asset class</th><th>Weight</th><th>Market value</th><th>P&L</th><th>Vol</th><th>Beta</th><th>Risk contribution</th><th>Flag</th></tr></thead>
@@ -1039,7 +1039,7 @@
 {/snippet}
 
 {#snippet RiskContributorsTable(rows: RiskContributionRow[], tailDays: number | null)}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">
       Contribution Detail
       <span>{rows.length} rows{tailDays ? ` · ES over ${tailDays} worst days` : ""}</span>
@@ -1062,7 +1062,7 @@
 {/snippet}
 
 {#snippet ExposureTable(rows: ExposureBreakdownRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Sector/category</th><th>Weight</th><th>Vol contribution</th><th>Benchmark</th><th>Active</th><th>Label</th></tr></thead>
@@ -1072,7 +1072,7 @@
 {/snippet}
 
 {#snippet DrawdownTable(rows: DrawdownEpisode[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Start</th><th>Trough</th><th>Recovery</th><th>Depth</th><th>Duration</th><th>Benchmark DD</th><th>Main contributors</th></tr></thead>
@@ -1082,7 +1082,7 @@
 {/snippet}
 
 {#snippet StressEpisodeTable(rows: StressEpisodeRow[], selected: StressEpisodeRow | null, state: "idle" | "loading" | "ready", summary: string | null)}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">
       Historical Stress Replay
       <span>{state === "loading" ? "Loading…" : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
@@ -1135,7 +1135,7 @@
 {/snippet}
 
 {#snippet StressLegTable(rows: StressLegRow[], selected: StressEpisodeRow | null)}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
     <table class="data-table is-nowrap">
       <!-- Con patas compensadas el reparto es del P&L bruto, no de un neto ≈ 0 (GUA-20261027-6). -->
@@ -1161,7 +1161,7 @@
 {/snippet}
 
 {#snippet CandidateTable(rows: CandidateAllocationRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Symbol</th><th>Current weight</th><th>Proposed weight</th><th>Delta</th><th>Current risk</th><th>Proposed risk</th><th>Constraint</th></tr></thead>
@@ -1624,10 +1624,8 @@
      row count in a plain span that stays uppercase, unlike .header-meta. */
   .table-panel-header span { color: var(--text-2); font-weight: 400; font-size: var(--text-xs); }
 
-  /* Chart, heatmap, table panels: edge-to-edge content under a 26px header */
-  .table-panel,
-  .chart-panel,
-  .heatmap-panel { padding: 0; }
+  /* Chart, heatmap, table panels (.panel.is-flush): edge-to-edge content
+     under the 30px .panel-title */
   .table-panel { overflow: auto; }
   .chart-panel { gap: 0; }
 
@@ -1675,16 +1673,16 @@
     right: 0.5rem;
     display: flex;
     align-items: center;
-    gap: 1px;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    gap: var(--space-1);
+    background: var(--tint);
+    padding: var(--space-1);
+    border-radius: var(--panel-radius);
   }
   .dependency-controls button {
     width: 28px;
     height: 25px;
     border: 0;
-    border-right: 1px solid var(--divider);
-    border-radius: 0;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--text-1);
     font-size: var(--text-xs);
@@ -1693,14 +1691,12 @@
   }
   .dependency-controls button:last-child {
     width: 34px;
-    border-right: 0;
     font-size: var(--text-2xs);
   }
   .dependency-controls button:hover,
   .dependency-controls button:focus-visible {
-    background: var(--bg-3);
+    background: var(--hover-bg);
     color: var(--text-0);
-    outline: none;
   }
   .dependency-edge {
     stroke: var(--chart-primary);
@@ -1748,14 +1744,16 @@
   .dependency-tooltip {
     position: absolute;
     pointer-events: none;
-    background: var(--surface-2);
-    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
     padding: var(--space-3) var(--space-4);
     display: grid;
     gap: var(--space-1);
     min-width: 150px;
     font-size: var(--text-xs);
     z-index: 2;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
   .dependency-tooltip strong {
     color: var(--text-0);
@@ -1989,14 +1987,16 @@
   .frontier-tooltip {
     position: absolute;
     pointer-events: none;
-    background: var(--surface-2);
-    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
     padding: var(--space-3) var(--space-4);
     display: grid;
     gap: var(--space-1);
     min-width: 150px;
     font-size: var(--text-xs);
     z-index: 2;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
   .frontier-tooltip strong { color: var(--text-0); font-size: var(--text-sm); font-weight: 600; }
   .frontier-tooltip span { color: var(--text-1); display: flex; justify-content: space-between; gap: var(--space-5); }

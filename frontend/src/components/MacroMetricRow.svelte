@@ -37,19 +37,13 @@
   .metric-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 0;
+    gap: 0 var(--space-5);
   }
 
   .metric {
-    padding: var(--space-3) var(--space-4);
-    border-left: 1px solid color-mix(in srgb, var(--rule-navy) 42%, transparent);
+    padding: var(--space-3) 0;
     min-width: 0;
     flex: 1 1 5.75rem;
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
   }
 
   .metric-label {
@@ -96,8 +90,6 @@
 
   @media (max-width: 640px) {
     .metric {
-      padding: var(--space-3) 0;
-      border-left: 0;
       flex: 1 1 45%;
     }
   }

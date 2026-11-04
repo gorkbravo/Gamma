@@ -112,7 +112,7 @@
 
 <!-- Snapshot Theme Table -->
 {#if (snapshot?.snapshot_cards ?? []).length}
-  <article class="panel snapshot-table-panel">
+  <article class="panel is-flush snapshot-table-panel">
     <div class="table-wrap">
       <table class="data-table is-sticky is-relaxed is-body-text is-top is-open-end snapshot-table">
         <thead>
@@ -334,7 +334,6 @@
 
   /* ── Snapshot table ── */
   .snapshot-table-panel {
-    padding: 0;
     overflow: hidden;
   }
 
