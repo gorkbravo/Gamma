@@ -417,7 +417,7 @@ The baseline is the same in both themes and was measured again on the gate day (
 
 ## V5 doctrine and skills
 
-V5 ran on branch `claude/v5-doctrine` from local main ab6467c, one commit per step: 9f6f504 the doctrine rewrite, 0c29a3f token and primitive comments, 48211a3 `PRODUCT.md` and the docs index, then this section. The gamma-ui and gamma-charts skills live outside the repository and were rewritten in place after a backup (kept with the V5 handover note). The doctrine steps changed no app code; afterwards, at the user's request, one copy change renamed the brand subtitle in the top bar (`Shell.svelte`) and on the landing card (`LandingPage.svelte`) from "Research Terminal" to "Research Workspace", the wording the README already uses. Not merged.
+V5 ran on branch `claude/v5-doctrine` from local main ab6467c, one commit per step: 9f6f504 the doctrine rewrite, 0c29a3f token and primitive comments, 48211a3 `PRODUCT.md` and the docs index, then this section. The gamma-ui and gamma-charts skills live outside the repository and were rewritten in place after a backup (kept with the V5 handover note). The doctrine steps changed no app code; afterwards, at the user's request, one copy change renamed the brand subtitle in the top bar (`Shell.svelte`) and on the landing card (`LandingPage.svelte`) from "Research Terminal" to "Research Workspace", the wording the README already uses, and a second one did the same on the marketing site (below). Not merged.
 
 ### What changed per section
 
@@ -495,7 +495,7 @@ Clean: no off-ramp font size, no solid, green or red button fill, uppercase only
 
 - The drift-scan findings above.
 - `website/DESIGN.md` and `website/.impeccable/design.json` still inherit the old doctrine verbatim (the old Two-Type Rule, "Terminal Ground", uppercase tracked mono labels, the pre-V2 colours).
-- The marketing site still says "Research Terminal" under the wordmark of all four pages and "a read-only market research terminal" in the index title, meta description, Open Graph title and every page footer (`website/index.html`, `faq.html`, `keys.html`, `setup.html`).
+- The marketing site's wording was changed with the app's, at the user's request: "Research Workspace" under the wordmark of all four pages, "a read-only market research workspace" in the index title, meta description, Open Graph title and every page footer, and the same words in `website/DESIGN.md` (description) and `website/.impeccable/design.json` (the topbar sample). Below 860px the site's nav is a sideways-scrolling strip by design; the longer subtitle makes it start scrolling at 724px instead of 710px, and the subtitle still hides below 620px. Left for V6: the thirteen app screenshots in `website/assets/img/screens/` predate B′ and still show "Research Terminal" and the old look, and the rest of `DESIGN.md` and `design.json` (the "Terminal Ground" colour, the old Two-Type Rule, "not a page about a terminal").
 
 ## Doctrine rewrite map (V5)
 

@@ -1,6 +1,6 @@
 ---
 name: Gamma Website
-description: The marketing surface for Gamma — a read-only research terminal that shows its work, documented as one instrument plane on a ruled ground.
+description: The marketing surface for Gamma — a read-only research workspace that shows its work, documented as one instrument plane on a ruled ground.
 colors:
   bg-0: "#070809"
   bg-1: "#0b0d10"
