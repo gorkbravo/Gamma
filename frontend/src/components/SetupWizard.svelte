@@ -339,7 +339,7 @@
         <p class="note">Change the address with IB_HOST, IB_PORT and IB_CLIENT_ID in the environment or .env file.</p>
         {#if report.data_mode.current === "live" && report.ibkr.status !== "connected"}
           <button type="button" class="btn is-ghost" disabled={connectionBusy} on:click={() => void onTestConnection()}>
-            {connectionBusy ? "Connecting..." : "Test connection"}
+            {connectionBusy ? "Connecting…" : "Test connection"}
           </button>
         {/if}
       {:else if step === "preferences"}
@@ -549,7 +549,7 @@
         </div>
         {#if isLast}
           <button type="button" class="btn is-primary" on:click={() => void finish()} disabled={saving}>
-            {saving ? "Saving..." : "Finish setup"}
+            {saving ? "Saving…" : "Finish setup"}
           </button>
         {:else}
           <button type="button" class="btn is-primary" on:click={() => void goTo(stepIndex + 1)} disabled={!canAdvance}>

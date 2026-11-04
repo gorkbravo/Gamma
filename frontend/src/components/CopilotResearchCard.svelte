@@ -35,7 +35,7 @@
   export let onCancelRun: () => Promise<unknown> | void = () => {};
   export let onConfirmMutation: ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown) | null = null;
   export let onRejectMutation: ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown) | null = null;
-  export let placeholder = "Optional angle or research question...";
+  export let placeholder = "Optional angle or research question…";
   export let scopeOptions: CopilotGroundingScopeOption[] = [];
   export let selectedScopeDomains: CopilotBaseDomain[] = [];
   export let selectionMessage: string | null = null;
@@ -178,13 +178,13 @@
         : "Ctrl+Enter to start a thread";
   $: composerPlaceholder = available
     ? hasThread
-      ? "Ask a follow-up grounded in this context scope..."
+      ? "Ask a follow-up grounded in this context scope…"
       : placeholder
     : guidance;
   $: composerButtonLabel = loading
     ? roleMode === "operator"
-      ? "Running..."
-      : "Generating..."
+      ? "Running…"
+      : "Generating…"
     : roleMode === "operator"
       ? "Run Operator"
       : hasThread

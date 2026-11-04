@@ -127,7 +127,7 @@ describe("StrategyScriptWorkspace", () => {
     expect(body).toContain("Generated summary");
     expect(body).toContain("Source bytes");
     expect(body).toContain("executed");
-    expect(body).toContain("IMAGE ARTIFACT");
+    expect(body).toContain("Image artifact");
     expect(body).toContain("preview.svg");
     expect(body).toContain("manifest.json");
     expect(body).toContain("Mock warning");

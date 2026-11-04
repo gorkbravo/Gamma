@@ -31,10 +31,10 @@
     </div>
 
     <div class="actions">
-      <button class="btn" on:click={onRunDiagnostics} disabled={actionLoading}>{actionLoading ? "Working..." : "Run Diagnostics"}</button>
+      <button class="btn" on:click={onRunDiagnostics} disabled={actionLoading}>{actionLoading ? "Working…" : "Run Diagnostics"}</button>
       <button class="btn" on:click={onForceSubscribe} disabled={actionLoading}>Force Subscribe</button>
       <button class="btn" on:click={onClearHistory} disabled={actionLoading}>Clear History</button>
-      <button class="btn" on:click={onRefresh} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button>
+      <button class="btn" on:click={onRefresh} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button>
     </div>
   </div>
 

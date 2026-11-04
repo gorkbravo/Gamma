@@ -324,7 +324,7 @@
             <section class:error-output={output.kind === "error"} class="output-card">
               <div class="output-head">
                 <span>{output.kind}</span>
-                <small>{output.generated ? "GENERATED / DERIVED" : "SOURCE"} · {output.media_type} · {output.byte_size.toLocaleString()} B</small>
+                <small>{output.generated ? "Generated / derived" : "Source"} · {output.media_type} · {output.byte_size.toLocaleString()} B</small>
               </div>
 
               {#if output.kind === "metric"}
@@ -358,7 +358,7 @@
                       alt={output.alt_text ?? "Generated research chart"}
                     />
                   {/if}
-                  <span>IMAGE ARTIFACT</span>
+                  <span>Image artifact</span>
                   <strong>{output.filename ?? output.output_id}</strong>
                   <small>{output.alt_text ?? "Gamma-retained generated image"}</small>
                 </div>
@@ -492,7 +492,7 @@
       <article class="panel candidate-panel">
         <div class="rail-header">
           <div><p class="eyebrow">Operator candidate</p><h3>Staged source diff</h3></div>
-          <span class="status dirty">REVIEW</span>
+          <span class="status dirty">Review</span>
         </div>
         <p class="muted">
           Canonical editor source is unchanged. Accept only after reviewing the candidate and parent hash.

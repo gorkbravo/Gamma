@@ -49,7 +49,7 @@ describe("FundamentalsView", () => {
       }
     });
 
-    expect(body).toContain("Search Refresh");
+    expect(body).toContain("Refreshing search…");
     expect(body).toContain("Stale results");
     expect(body).not.toContain("Refreshing</span><span");
   });

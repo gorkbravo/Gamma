@@ -1034,7 +1034,7 @@
             modelLoading={loading}
             onSurfaceModelChange={chooseSurfaceModel}
           />
-          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
+          {:else}<div class="chart-empty">Loading 3D surface…</div>{/if}
         </article>
 
         <article class="panel is-flush table-panel">
@@ -1230,7 +1230,7 @@
             formatValue={densityPct}
             emptyMessage="Load a max-depth surface to render the implied probability surface."
           />
-          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
+          {:else}<div class="chart-empty">Loading 3D surface…</div>{/if}
         </article>
 
         <article class="panel probability-slice-panel">
@@ -1974,8 +1974,10 @@
     fill: color-mix(in srgb, var(--chart-primary) 9%, transparent);
   }
 
+  /* The selected range is a band of the same distribution, so it stays in
+     the primary hue at a stronger fill. */
   .prob-selected {
-    fill: color-mix(in srgb, var(--chart-secondary) 38%, transparent);
+    fill: color-mix(in srgb, var(--chart-primary) 24%, transparent);
   }
 
   .prob-line {

@@ -174,9 +174,9 @@
     return Math.abs(value) > 0.55 ? "var(--text-0)" : "var(--text-1)";
   }
 
-  /* Cluster identity colours. The eighth has no token and stays a literal
-     (listed in the raw-colour exceptions). */
-  const CLUSTER_COLORS = ["--cat-1", "--cat-3", "--cat-2", "--negative-muted", "--data-cool", "--text-2", "--data-elevated", "rgb(87, 135, 176)"];
+  /* Cluster identity colours: clusters are categories, so the categorical
+     ramp (3:1 on the sheet in both themes). */
+  const CLUSTER_COLORS = ["--cat-1", "--cat-3", "--cat-2", "--cat-4", "--cat-5", "--cat-6", "--cat-7", "--cat-8"];
 
   function clusterColor(clusterId: number, alpha = 1) {
     const color = CLUSTER_COLORS[Math.abs(clusterId) % CLUSTER_COLORS.length];
@@ -680,7 +680,7 @@
   $: cumulativeChart = (() => {
     const rows: ChartSeries[] = [];
     const portfolio = cumulativeSeries(result?.portfolio_return_points ?? [], "portfolio", "Portfolio", "var(--chart-primary)");
-    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkLabel, "var(--chart-secondary)", "dashed");
+    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkLabel, "var(--chart-secondary)");
     if (portfolio) rows.push(portfolio);
     if (benchmark) rows.push(benchmark);
     return rows;
@@ -693,19 +693,19 @@
 
   $: rollingBetaChart = (() => {
     const data = rollingBeta(result?.portfolio_return_points ?? [], result?.benchmark_return_points ?? [], betaWindow);
-    return data.length ? [{ id: "rolling-beta", label: "Rolling Beta", color: "var(--chart-secondary)", type: "line", data }] : [];
+    return data.length ? [{ id: "rolling-beta", label: "Rolling Beta", color: "var(--chart-primary)", type: "line", data }] : [];
   })();
 
   $: drawdownChart = drawdownSeries(result?.portfolio_return_points ?? []);
   $: realizedReturns = result?.portfolio_return_points?.map((point) => point.value) ?? [];
 
   $: realizedMarkers = [
-    { label: "Hist VaR", value: riskBaseValue() ? -(result?.metrics.historical_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
-    { label: "Hist ES", value: riskBaseValue() ? -(result?.metrics.historical_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-secondary)" },
+    { label: "Hist VaR", value: riskBaseValue() ? -(result?.metrics.historical_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--warning)" },
+    { label: "Hist ES", value: riskBaseValue() ? -(result?.metrics.historical_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
   ];
 
   $: monteCarloMarkers = [
-    { label: "MC VaR", value: riskBaseValue() ? -(result?.metrics.monte_carlo_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-primary)" },
+    { label: "MC VaR", value: riskBaseValue() ? -(result?.metrics.monte_carlo_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--warning)" },
     { label: "MC ES", value: riskBaseValue() ? -(result?.metrics.monte_carlo_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
   ];
 
@@ -1401,10 +1401,6 @@
             <rect x={FRONTIER_PAD.l} y={FRONTIER_PAD.t} width={plotW} height={plotH} />
           </clipPath>
         </defs>
-        {#each [0.25, 0.5, 0.75] as t}
-          <line class="grid" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t + t * plotH} x2={frontierW - FRONTIER_PAD.r} y2={FRONTIER_PAD.t + t * plotH} />
-          <line class="grid" x1={FRONTIER_PAD.l + t * plotW} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l + t * plotW} y2={frontierH - FRONTIER_PAD.b} />
-        {/each}
         {#if zeroReturnY != null}
           <line class="zero-return-line"
             x1={FRONTIER_PAD.l} y1={zeroReturnY}
@@ -1893,12 +1889,6 @@
     inset: 0;
     pointer-events: none;
   }
-  .grid {
-    stroke: var(--divider);
-    stroke-opacity: 0.36;
-    stroke-width: 1;
-    shape-rendering: crispEdges;
-  }
   .axis {
     stroke: var(--divider);
     stroke-width: 1;
@@ -1974,15 +1964,15 @@
     transform: translate(-50%, -100%);
     white-space: nowrap;
     pointer-events: none;
-    background: var(--bg-1);
-    border: 1px solid var(--divider);
+    background: var(--tint);
+    border-radius: var(--radius-control);
   }
-  .frontier-label.current { color: var(--chart-secondary); border-color: color-mix(in srgb, var(--chart-secondary) 40%, transparent); }
-  .frontier-label.candidate { color: var(--chart-primary); border-color: color-mix(in srgb, var(--chart-primary) 40%, transparent); }
-  .frontier-label.universe_candidate { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 40%, transparent); }
-  .frontier-label.cached_equity_candidate { color: var(--text-1); border-color: var(--divider); }
-  .frontier-label.risk_free { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 40%, transparent); }
-  .frontier-label.cached_equity_frontier { color: var(--chart-primary); border-color: color-mix(in srgb, var(--chart-primary) 40%, transparent); }
+  .frontier-label.current { color: var(--text-1); }
+  .frontier-label.candidate { color: var(--chart-primary); }
+  .frontier-label.universe_candidate { color: var(--positive); }
+  .frontier-label.cached_equity_candidate { color: var(--text-1); }
+  .frontier-label.risk_free { color: var(--positive); }
+  .frontier-label.cached_equity_frontier { color: var(--chart-primary); }
 
   .frontier-tooltip {
     position: absolute;

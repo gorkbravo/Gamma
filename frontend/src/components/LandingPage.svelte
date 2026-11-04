@@ -94,7 +94,7 @@
         on:click={onConnect}
         disabled={busy || !status?.connection.action_enabled}
       >
-        {busy ? "Working..." : connectionActionLabel(status)}
+        {busy ? "Working…" : connectionActionLabel(status)}
       </button>
       <button class="secondary" on:click={onEnterResearch}>
         Research View

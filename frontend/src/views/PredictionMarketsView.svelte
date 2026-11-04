@@ -777,7 +777,7 @@
       {
         id: "spread",
         label: "Spread",
-        color: "var(--chart-secondary)",
+        color: "var(--chart-primary)",
         type: "area" as const,
         data: pair.spread_series
           .map((point) => ({
@@ -803,7 +803,7 @@
     <div class="header-top">
       <span class="title">Prediction Markets</span>
       <span class="subtitle">{activeVenueLabel} · {statusLabel}</span>
-      {#if loading || historyLoading || compareLoading}<span class="loading-flag">LOADING...</span>{/if}
+      {#if loading || historyLoading || compareLoading}<span class="loading-flag">Loading…</span>{/if}
     </div>
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Prediction Markets modes">
@@ -843,7 +843,7 @@
         <div class="filter-row">
           <label class="grow">
             <span>Search</span>
-            <input class="form-control" bind:value={query} placeholder="Fed, election, inflation, semis..." on:keydown={handleSearchKeydown} />
+            <input class="form-control" bind:value={query} placeholder="Fed, election, inflation, semis…" on:keydown={handleSearchKeydown} />
           </label>
           <label>
             <span>Status</span>
@@ -1040,7 +1040,7 @@
         <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Watchlist</span>
-            <small>{watchlist.length}/{savedResearch?.watchlist_limit ?? 0} saved{savedLoading ? " | SAVING..." : ""}</small>
+            <small>{watchlist.length}/{savedResearch?.watchlist_limit ?? 0} saved{savedLoading ? " · Saving…" : ""}</small>
           </div>
           {#if watchlist.length}
             <table class="data-table is-sticky is-nowrap is-compact is-body-text">
@@ -1852,7 +1852,7 @@
       <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Saved Sets</span>
-          <small>{namedSets.length}/{savedResearch?.comparison_set_limit ?? 0}{savedLoading ? " | SAVING..." : ""}</small>
+          <small>{namedSets.length}/{savedResearch?.comparison_set_limit ?? 0}{savedLoading ? " · Saving…" : ""}</small>
         </div>
         <div class="save-row">
           <input class="form-control"

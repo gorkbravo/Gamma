@@ -1028,7 +1028,7 @@
         domain: definition.domain,
         label: definition.label,
         contextLabel: definition.unavailableLabel,
-        fingerprintLabel: "UNAVAILABLE",
+        fingerprintLabel: "Unavailable",
         freshnessLabel: null,
         warningLabel: definition.domain == null ? "Not wired" : "Context required",
         supported: false,

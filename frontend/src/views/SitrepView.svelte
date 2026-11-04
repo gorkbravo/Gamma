@@ -1537,10 +1537,10 @@
   $: equityTapeState = equityRows.length
     ? ""
     : overview
-      ? `US EQUITY TAPE N/A / ${overview.freshness_label.toUpperCase()}`
+      ? `US equity tape N/A · ${sentenceCase(overview.freshness_label)}`
       : loading
-        ? "US EQUITY TAPE LOADING"
-        : "US EQUITY TAPE NOT LOADED";
+        ? "Loading US equity tape…"
+        : "US equity tape not loaded";
 </script>
 
 <section class="view">
@@ -1762,7 +1762,7 @@
           <video bind:this={bloombergVideo} title="Bloomberg Television live stream" controls muted playsinline preload="metadata"></video>
           {#if bloombergPlaybackStatus !== "ready"}
             <div class="video-state">
-              <strong>{bloombergPlaybackStatus === "loading" ? "LOADING BLOOMBERG TV" : "BLOOMBERG TV PLAYER UNAVAILABLE"}</strong>
+              <strong>{bloombergPlaybackStatus === "loading" ? "Loading Bloomberg TV…" : "Bloomberg TV player unavailable"}</strong>
               <span>{bloombergPlaybackMessage}</span>
               {#if bloombergPlaybackStatus !== "loading"}
                 <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Open Bloomberg Live</a>

@@ -348,13 +348,13 @@
               <h3>Layer Treemap</h3>
             </div>
             <div class="panel-actions">
-              <button type="button" class="btn" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
+              <button type="button" class="btn" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading…" : "Run Screen"}</button>
               <button type="button" class="btn is-ghost" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
             </div>
           </div>
 
           <div class="screener-strip">
-            <label class="search-field filter-wide"><span>Search</span><input class="form-control is-large" bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
+            <label class="search-field filter-wide"><span>Search</span><input class="form-control is-large" bind:value={query} placeholder="bitcoin, solana, ai, defi…" on:keydown={handleSearchKeydown} /></label>
             <label><span>Narrative</span><select class="form-control is-large" bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
             <label><span>Sort</span><select class="form-control is-large" bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
             <label><span>Min Mcap</span><input class="form-control is-large" bind:value={minMarketCap} placeholder="1B" /></label>
@@ -991,7 +991,7 @@
 
             <div class="builder-actions">
               <button type="button" class="btn" on:click={normalizeSynthetic}>Normalize</button>
-              <button type="button" class="btn is-ghost" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
+              <button type="button" class="btn is-ghost" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building…" : "Build Basket"}</button>
               <button type="button" class="btn is-ghost" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
             </div>
 

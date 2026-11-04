@@ -145,24 +145,6 @@
           <stop offset="100%" style="stop-color: rgba(var(--accent-rgb), 0)" />
         </linearGradient>
       </defs>
-      {#each [0.2, 0.4, 0.6, 0.8] as ratio}
-        <line
-          class="grid-line"
-          x1={padding.left}
-          y1={padding.top + (height - padding.top - padding.bottom) * ratio}
-          x2={width - padding.right}
-          y2={padding.top + (height - padding.top - padding.bottom) * ratio}
-        />
-      {/each}
-      {#each [0.25, 0.5, 0.75] as ratio}
-        <line
-          class="grid-line"
-          x1={padding.left + (width - padding.left - padding.right) * ratio}
-          y1={padding.top}
-          x2={padding.left + (width - padding.left - padding.right) * ratio}
-          y2={height - padding.bottom}
-        />
-      {/each}
       {#if centerPath.length > 1}
         <path d={areaPath(centerPath)} class="path-fill" fill="url(#fan-path-fill)" />
       {/if}
@@ -242,14 +224,11 @@
     display: block;
   }
 
-  .grid-line {
-    stroke: rgba(42, 56, 70, 0.26);
-    stroke-width: 1;
-  }
-
+  /* No grid (§8 Charts): the axis is the baseline; the start-value line is a
+     dashed reference mark. */
   .axis,
   .baseline {
-    stroke: color-mix(in srgb, var(--rule-navy) 58%, transparent);
+    stroke: var(--panel-strong);
     stroke-width: 1;
   }
 
@@ -348,7 +327,7 @@
 
   .tooltip rect {
     fill: color-mix(in srgb, var(--chart-halo) 96%, transparent);
-    stroke: rgba(106, 168, 255, 0.32);
+    stroke: var(--panel-border);
   }
 
   .tooltip text {

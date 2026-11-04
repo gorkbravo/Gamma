@@ -650,7 +650,7 @@
       series.push({ id: "rolling_beta", label: "Rolling Beta", color: "var(--chart-primary)", type: "line" as const, data: betaData });
     }
     if (corrData.length) {
-      series.push({ id: "rolling_corr", label: "Rolling Corr", color: "var(--chart-secondary)", type: "line" as const, lineStyle: "dashed" as const, data: corrData });
+      series.push({ id: "rolling_corr", label: "Rolling Corr", color: "var(--cat-5)", type: "line" as const, data: corrData });
     }
     return series;
   })();
@@ -720,7 +720,7 @@
                     {showHandoffReview ? "Hide" : "Review"}
                   </button>
                   <button type="button" class="btn is-large is-ghost" on:click={() => onResolveStrategyLabHandoffs?.()} disabled={handoffLoading}>
-                    {handoffLoading ? "Resolving..." : "Resolve"}
+                    {handoffLoading ? "Resolving…" : "Resolve"}
                   </button>
                   <button type="button" class="btn is-large" on:click={acceptResolvedStrategyHandoffs} disabled={handoffLoading}>
                     Accept All
@@ -805,10 +805,10 @@
               <div class="builder-actions compact">
                 <button type="button" class="btn is-large is-ghost" on:click={addPortfolioDraftLeg}>Add Leg</button>
                 <button type="button" class="btn is-large is-ghost" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
-                  {bookValidationLoading ? "Validating..." : "Validate Book"}
+                  {bookValidationLoading ? "Validating…" : "Validate Book"}
                 </button>
                 <button type="button" class="btn is-large" on:click={composePortfolioDraft} disabled={strategyLoading || composePending}>
-                  {strategyLoading || composePending ? "Composing..." : "Compose Portfolio"}
+                  {strategyLoading || composePending ? "Composing…" : "Compose Portfolio"}
                 </button>
               </div>
             </header>
@@ -1077,7 +1077,7 @@
             </div>
             <div class="builder-actions compact object-compose-actions">
               <button type="button" class="btn is-large is-ghost" on:click={composeSelectedObjects} disabled={strategyLoading || !selectedComposerLegs.length}>
-                {strategyLoading ? "Composing..." : "Compose Selected Objects"}
+                {strategyLoading ? "Composing…" : "Compose Selected Objects"}
               </button>
             </div>
           </article>
@@ -1092,7 +1092,7 @@
                   <small>{strategyComposition.returns_points.length} return points</small>
                   <button type="button" class="btn is-large is-ghost" on:click={saveStrategyRun} disabled={savedLoading || composePending}>Save Experiment</button>
                   <button type="button" class="btn is-large is-ghost" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading}>
-                    {riskHandoffLoading ? "Opening..." : "Open In Risk"}
+                    {riskHandoffLoading ? "Opening…" : "Open In Risk"}
                   </button>
                 </div>
               </div>
@@ -1353,7 +1353,7 @@
           <div class="field-grid">
             <label><span>Benchmark</span><select class="form-control is-large" bind:value={strategyBenchmarkColumn}><option value="">None</option>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
             <label><span>Bench Kind</span><select class="form-control is-large" bind:value={strategyBenchmarkValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
-            <div class="builder-actions compact"><button type="button" class="btn is-large" on:click={analyzeStrategy} disabled={strategyLoading}>{strategyLoading ? "Analyzing..." : "Analyze"}</button></div>
+            <div class="builder-actions compact"><button type="button" class="btn is-large" on:click={analyzeStrategy} disabled={strategyLoading}>{strategyLoading ? "Analyzing…" : "Analyze"}</button></div>
           </div>
 
           {#if strategyInputWarning || parsedStrategyCsv.warnings.length}
@@ -1404,7 +1404,7 @@
         <article class="panel is-flush table-panel">
           <header class="panel-title">
             <h3>Saved Strategy Runs</h3>
-            <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
+            <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading…" : "Refresh"}</button>
           </header>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">

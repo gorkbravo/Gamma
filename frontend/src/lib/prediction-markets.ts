@@ -237,13 +237,14 @@ export function describeHistoryCoverage(history: PredictionProbabilityHistoryRes
   return `${history.points.length} pts | ${spanLabel} | ${formatResolution(history.effective_resolution_minutes)} bars`;
 }
 
+/* Compared markets are categories: the categorical ramp. */
 const COMPARISON_COLORS = [
-  "var(--chart-primary)",
-  "var(--chart-secondary)",
-  "var(--positive)",
-  "var(--chart-negative)",
-  "var(--text-1)",
-  "var(--warning)"
+  "var(--cat-1)",
+  "var(--cat-5)",
+  "var(--cat-6)",
+  "var(--cat-3)",
+  "var(--cat-7)",
+  "var(--cat-8)"
 ];
 
 export function comparisonColor(index: number): string {

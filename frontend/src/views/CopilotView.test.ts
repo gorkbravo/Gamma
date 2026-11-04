@@ -446,8 +446,8 @@ describe("CopilotView", () => {
         }
       })
     });
-    // Antes la misma ejecución se pintaba como turno del hilo y otra vez como "OPERATOR RUN".
-    expect(body).not.toContain("OPERATOR RUN");
+    // Antes la misma ejecución se pintaba como turno del hilo y otra vez como "Operator run".
+    expect(body).not.toContain("Operator run");
     expect(body.match(/Research Operator synthesized the requested conclusion\./g) ?? []).toHaveLength(1);
   });
 });

@@ -661,7 +661,7 @@
         aria-label="Copilot storage recovery"
       >
         <div class="storage-summary">
-          <span class="storage-badge" aria-hidden="true">RECOVERY</span>
+          <span class="storage-badge" aria-hidden="true">Recovery</span>
           <p>
             <strong>{storageRecovery.headline}.</strong>
             {storageRecovery.explanation}
@@ -723,7 +723,7 @@
               </div>
             {/if}
             <div class="msg assistant">
-              <div class="role-tag">GAMMA</div>
+              <div class="role-tag">Gamma</div>
               <div class="assistant-body">
                 <!-- Retry/Continue en la propia tarjeta del último turno (GUA-20261021-6). -->
                 <CopilotTranscriptResult
@@ -753,7 +753,7 @@
             </div>
           {:else if roleMode === "operator" && operatorPlan}
             <div class="msg assistant">
-              <div class="role-tag">OPERATOR PLAN</div>
+              <div class="role-tag">Operator plan</div>
               <div class="assistant-body">
                 <CopilotTranscriptResult
                   result={operatorResultInThread ? null : operatorResult}
@@ -766,7 +766,7 @@
             </div>
           {:else if roleMode === "operator" && operatorResult && !operatorResultInThread}
             <div class="msg assistant">
-              <div class="role-tag">OPERATOR RUN</div>
+              <div class="role-tag">Operator run</div>
               <div class="assistant-body">
                 <CopilotTranscriptResult
                   result={operatorResult}
@@ -785,7 +785,7 @@
           {/if}
           {#if runStreaming && activeRun}
             <div class="msg assistant">
-              <div class="role-tag">GAMMA</div>
+              <div class="role-tag">Gamma</div>
               <div class="assistant-body">
                 {#if activeRun.toolNotes.length}
                   <div class="run-tools">
@@ -814,7 +814,7 @@
             </div>
           {:else if loading}
             <div class="msg assistant">
-              <div class="role-tag">GAMMA</div>
+              <div class="role-tag">Gamma</div>
               <div class="assistant-body">
                 <div class="thinking" aria-label="Generating">
                   <span></span><span></span><span></span>

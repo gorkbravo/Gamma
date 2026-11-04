@@ -64,13 +64,15 @@
   export let onForceSubscribe: () => unknown | Promise<unknown> = () => undefined;
   export let onClearHistory: () => unknown | Promise<unknown> = () => undefined;
 
+  /* Allocation slices are categories: the categorical ramp, not the
+     comparison grey or text colours. */
   const allocationPalette = [
-    "var(--chart-primary)",
-    "var(--text-1)",
-    "var(--chart-secondary)",
-    "var(--data-cool)",
-    "var(--data-warm)",
-    "var(--text-2)"
+    "var(--cat-1)",
+    "var(--cat-5)",
+    "var(--cat-6)",
+    "var(--cat-3)",
+    "var(--cat-7)",
+    "var(--cat-8)"
   ];
   const accountSummaryPriority = [
     { label: "Buying Power", matches: ["BuyingPower"] },
@@ -168,7 +170,7 @@
   ) {
     if (actionInProgress || diagnosticsActionLoading) return;
     actionInProgress = label;
-    actionFeedback = { tone: "info", message: `${label} in progress...` };
+    actionFeedback = { tone: "info", message: `${label} in progress…` };
     try {
       const result = await action();
       if (
@@ -507,15 +509,15 @@
   $: chartEmptyMessage =
     chartMode === "value"
       ? $portfolioHistoryRequestState.status === "failed"
-        ? "LOCAL HISTORY UNAVAILABLE"
+        ? "Local history unavailable"
         : historyPoints.length < 2
-          ? "TWO LOCAL SNAPSHOTS REQUIRED"
-          : "NO LOCAL HISTORY"
+          ? "Two local snapshots required"
+          : "No local history"
       : $portfolioPerformanceRequestState.status === "failed"
-        ? "PERFORMANCE CALCULATION FAILED"
+        ? "Performance calculation failed"
         : $portfolioPerformanceRequestState.status === "unavailable"
-          ? "PERFORMANCE UNAVAILABLE"
-          : "NO PERFORMANCE SERIES";
+          ? "Performance unavailable"
+          : "No performance series";
 </script>
 
 <section class="view" aria-label="Portfolio monitor">
@@ -524,13 +526,13 @@
       <section class="notice-stack" aria-label="Portfolio status" aria-live="polite">
         {#if snapshotBusy && snapshot}
           <div class="refresh-strip" role="status">
-            <span>REFRESHING SNAPSHOT...</span>
+            <span>Refreshing snapshot…</span>
             <small>Last successful data remains visible.</small>
           </div>
         {/if}
         {#if performanceBusy && performance}
           <div class="refresh-strip" role="status">
-            <span>RECALCULATING PERFORMANCE...</span>
+            <span>Recalculating performance…</span>
             <small>The current chart remains visible.</small>
           </div>
         {/if}
@@ -552,7 +554,7 @@
                 on:click={() => executeNoticeAction(notice.action!)}
               >
                 {actionInProgress && notice.actionLabel?.toLowerCase().includes(actionInProgress.toLowerCase())
-                  ? "WORKING..."
+                  ? "Working…"
                   : notice.actionLabel}
               </button>
             {/if}
@@ -882,7 +884,7 @@
             on:click={() =>
               runAction("Snapshot refresh", onRefreshSnapshot, "Portfolio snapshot refresh completed.")}
           >
-            {snapshotBusy ? "REFRESHING..." : "Refresh"}
+            {snapshotBusy ? "Refreshing…" : "Refresh"}
           </button>
         </div>
         <div class="readiness-list">
@@ -1045,7 +1047,7 @@
             disabled={Boolean(actionInProgress)}
             on:click={confirmClearHistory}
           >
-            {actionInProgress === "History clear" ? "Clearing..." : "Confirm Clear"}
+            {actionInProgress === "History clear" ? "Clearing…" : "Confirm Clear"}
           </button>
         </div>
       </div>

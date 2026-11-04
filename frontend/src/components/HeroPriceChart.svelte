@@ -101,7 +101,7 @@
   export let chartKey: string;
   export let points: HeroPricePoint[] = [];
   export let height = 320;
-  export let emptyMessage = "CHART UNAVAILABLE";
+  export let emptyMessage = "Chart unavailable";
   export let showLegend = true;
 
   let settings: HeroPriceChartSettings = normalizeHeroPriceChartSettings(defaultHeroPriceChartSettings);

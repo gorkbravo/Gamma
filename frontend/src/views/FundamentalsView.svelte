@@ -718,7 +718,7 @@
       {/if}
       {#if loading}<span class="tag accent">Refreshing</span>{/if}
       {#if searchLoading}
-        <span class="tag {searchHasStaleResults ? 'warning' : 'accent'}">{searchHasStaleResults ? "Search Refresh" : "Searching"}</span>
+        <span class="tag {searchHasStaleResults ? 'warning' : 'accent'}">{searchHasStaleResults ? "Refreshing search…" : "Searching…"}</span>
       {/if}
       {#if saving}<span class="tag warning">Saving</span>{/if}
     </div>
@@ -762,7 +762,7 @@
           </div>
           <SearchDropdown
             bind:value={searchQuery}
-            placeholder="AAPL, Microsoft, NVDA..."
+            placeholder="AAPL, Microsoft, NVDA…"
             ariaLabel="Company search"
             emptyLabel={searchEmptyLabel}
             loading={searchLoading}
@@ -773,7 +773,7 @@
             on:select={(event) => chooseCompany(String(event.detail.id))}
           />
         </div>
-        <button type="button" class="btn" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching..." : "Run Search"}</button>
+        <button type="button" class="btn" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching…" : "Run Search"}</button>
         <button type="button" class="btn is-ghost" on:click={() => runSearch(true)} disabled={loading || searchLoading}>Refresh Search</button>
         {#if currentCompany}
           <button type="button" class="btn is-ghost" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
@@ -970,7 +970,7 @@
               </button>
             </div>
             <button type="button" class="btn is-ghost" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
-              {saving ? "Saving..." : "Save Basket"}
+              {saving ? "Saving…" : "Save Basket"}
             </button>
           </div>
 
@@ -1131,7 +1131,7 @@
               </button>
             </div>
             <button type="button" class="btn is-ghost" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
-              {saving ? "Saving..." : "Save Basket"}
+              {saving ? "Saving…" : "Save Basket"}
             </button>
           </div>
         </div>
@@ -1488,7 +1488,7 @@
           </div>
           <div class="panel-actions">
             {#if dcfDirty}<span class="tag warning">Pending recalculation</span>{/if}
-            <button type="button" class="btn" on:click={saveDcfDraft} disabled={!dcfDirty || saving || !dcfModel}>{saving ? "Saving..." : "Recalculate + Save"}</button>
+            <button type="button" class="btn" on:click={saveDcfDraft} disabled={!dcfDirty || saving || !dcfModel}>{saving ? "Saving…" : "Recalculate + Save"}</button>
           </div>
         </div>
 
@@ -1687,7 +1687,7 @@
           </div>
           <div class="panel-actions snapshot-actions">
             <input class="form-control" bind:value={snapshotName} placeholder="Snapshot name" aria-label="DCF snapshot name" />
-            <button type="button" class="btn is-ghost" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving..." : "Save Snapshot"}</button>
+            <button type="button" class="btn is-ghost" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving…" : "Save Snapshot"}</button>
           </div>
         </div>
 

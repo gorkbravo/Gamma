@@ -61,7 +61,6 @@
 
   let selectedInstrumentId = "wti";
   const scatterBounds = { left: 22, right: 342, top: 9, bottom: 92 };
-  const scatterGridFractions = [0.25, 0.5, 0.75];
   const macroDriverSeries = ["us-dollar-broad", "us-real-10y-yield"];
   const requestedMacroDrivers = new Set<string>();
 
@@ -350,7 +349,7 @@
   }
 
   function priceHistoryEmptyMessage(history: CommodityPriceHistory | null) {
-    return history?.warnings?.[0] ?? "CHART UNAVAILABLE";
+    return history?.warnings?.[0] ?? "Chart unavailable";
   }
 
   function buildCurveSeries(curve: CommodityCurveSnapshot | null): ChartSeries[] {
@@ -527,7 +526,7 @@
       { id: "supply", title: "Supply", categories: ["production", "imports", "refinery"], color: "var(--positive)" },
       { id: "demand", title: "Demand", categories: ["demand", "exports"], color: "var(--warning)" }
     ];
-    const colorPalette = ["var(--chart-primary)", "var(--chart-secondary)", "var(--positive)", "var(--warning)", "var(--negative)"];
+    const colorPalette = ["var(--cat-1)", "var(--cat-5)", "var(--cat-6)", "var(--cat-3)", "var(--cat-7)"];
     return buckets
       .map((bucket) => {
         const inBucket = seriesRows.filter((series) =>
@@ -1314,14 +1313,6 @@
       });
   }
 
-  function scatterGridX(fraction: number) {
-    return scatterBounds.left + (scatterBounds.right - scatterBounds.left) * fraction;
-  }
-
-  function scatterGridY(fraction: number) {
-    return scatterBounds.top + (scatterBounds.bottom - scatterBounds.top) * fraction;
-  }
-
   function curveTone(value: string | null | undefined) {
     const normalized = (value ?? "").toLowerCase();
     if (normalized.includes("backward")) return "positive";
@@ -1568,7 +1559,7 @@
               <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={220} emptyMessage="NO CURVE NODES" showLegend={true} />
+          <TimeSeriesChart series={curveSeries} height={220} emptyMessage="No curve nodes" showLegend={true} />
         </article>
 
         <article class="panel is-flush scatter-panel scatter-cell">
@@ -1581,10 +1572,6 @@
                  on:mousemove={handleScatterMouseMove}
                  on:mouseleave={() => tooltipPoint = null}>
               <svg viewBox="0 0 360 110" preserveAspectRatio="none" role="img" aria-label="Commodity momentum versus roll yield scatter plot">
-                {#each scatterGridFractions as fraction}
-                  <line class="grid-line" x1={scatterGridX(fraction)} x2={scatterGridX(fraction)} y1={scatterBounds.top} y2={scatterBounds.bottom} />
-                  <line class="grid-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterGridY(fraction)} y2={scatterGridY(fraction)} />
-                {/each}
                 <line class="axis-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterState.zeroY} y2={scatterState.zeroY} />
                 <line class="axis-line" x1={scatterState.zeroX} x2={scatterState.zeroX} y1={scatterBounds.top} y2={scatterBounds.bottom} />
                 <text class="quadrant-label" x="20" y="14">Carry / weak momentum</text>
@@ -2021,7 +2008,7 @@
               <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
+          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="No curve nodes" showLegend={true} />
         </article>
 
         <article class="panel is-flush table-panel curve-nodes-panel">
@@ -2432,7 +2419,7 @@
               <span>{group.title}</span>
               <span class="header-meta">{group.count} · idx 100</span>
             </header>
-            <TimeSeriesChart series={group.series} height={180} emptyMessage="NO HISTORY" showLegend={true} />
+            <TimeSeriesChart series={group.series} height={180} emptyMessage="No history" showLegend={true} />
           </article>
         {/each}
       </section>
@@ -2668,7 +2655,7 @@
     </footer>
   {:else}
     <article class="panel empty-state">
-      <h2>{loading ? "LOADING COMMODITIES" : "Commodities unavailable"}</h2>
+      <h2>{loading ? "Loading commodities…" : "Commodities unavailable"}</h2>
       <p>{loading ? "Gamma is preparing the commodities workspace." : "No commodities payload is loaded yet."}</p>
     </article>
   {/if}
@@ -3131,12 +3118,6 @@
     stroke-width: 0.5;
   }
 
-  .grid-line {
-    stroke: var(--divider);
-    stroke-width: 0.35;
-    opacity: 0.5;
-  }
-
   .axis-label,
   .quadrant-label {
     fill: var(--text-2);
@@ -3162,7 +3143,7 @@
   }
 
   .scatter-point.metals circle {
-    fill: var(--chart-secondary);
+    fill: var(--cat-3);
   }
 
   .scatter-point.hovered circle {

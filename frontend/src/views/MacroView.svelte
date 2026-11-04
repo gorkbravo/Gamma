@@ -210,8 +210,8 @@
 
   /* ── Chart reactives ── */
   $: chartContext = { region: $macroContext.region, timeframe: $macroContext.timeframe, comparisonRegion: $macroContext.comparisonRegion } satisfies MacroChartContext;
-  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--chart-secondary)"]);
-  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--chart-secondary)"]);
+  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--cat-5)"]);
+  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--cat-5)"]);
 
   /* ── FX reactives ── */
   $: fxPair0SeriesId = fxPairOptions.find((p) => p.id === fxPair0)?.seriesId ?? "fx-eurusd";
@@ -220,8 +220,8 @@
   $: fxSeriesIds = Array.from(new Set([fxPair0SeriesId, fxPair1SeriesId, fxPair2SeriesId]));
   $: if ($macroContext.mode === "snapshot") { void ensureSeries(fxSeriesIds); }
   $: fxChart1 = chartFromSeries(histories, chartContext, fxPair0SeriesId, "var(--chart-primary)");
-  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "var(--chart-secondary)");
-  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "var(--chart-negative)");
+  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "var(--chart-primary)");
+  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "var(--chart-primary)");
   $: fxLast0 = fxLastPrice(fxChart1);
   $: fxLast1 = fxLastPrice(fxChart2);
   $: fxLast2 = fxLastPrice(fxChart3);

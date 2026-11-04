@@ -1091,7 +1091,7 @@
             {
               id: "price",
               label: result.primary_symbol ?? "Price",
-              color: "var(--chart-secondary)",
+              color: "var(--chart-primary)",
               type: "line",
               data: prices.map(toChartPoint)
             }
@@ -1139,7 +1139,7 @@
             {
               id: chartMode,
               label: chartMode === "rolling_beta" ? "Rolling Beta" : "Rolling Corr",
-              color: "var(--chart-secondary)",
+              color: "var(--chart-primary)",
               type: "line",
               data: betaSeries
             }
@@ -1304,7 +1304,7 @@
               </div>
               <div class="builder-actions compact">
                 <button type="button" class="btn is-large is-ghost" on:click={() => void loadOverview({ forceRefresh: true })} disabled={overviewLoading}>
-                  {overviewLoading ? "Loading..." : "Refresh"}
+                  {overviewLoading ? "Loading…" : "Refresh"}
                 </button>
                 <button type="button" class="btn is-large" on:click={() => inspectOverviewNodeInScope(selectedOverviewNode)} disabled={!selectedOverviewNode?.symbol}>
                   Inspect Scope
@@ -1361,7 +1361,7 @@
                 </section>
               {/each}
             {:else}
-              <div class="treemap-empty">{overviewLoading ? "Loading overview..." : "No overview history available."}</div>
+              <div class="treemap-empty">{overviewLoading ? "Loading overview…" : "No overview history available."}</div>
             {/if}
             {#if treemapTooltip}
               {@const tipColorValue = treemapTooltip.tile.colorValue}
@@ -1761,7 +1761,7 @@
         {/if}
 
         <div class="builder-actions">
-          <button class="btn is-large" on:click={submit} disabled={loading}>{loading ? "Running..." : "Run Analysis"}</button>
+          <button class="btn is-large" on:click={submit} disabled={loading}>{loading ? "Running…" : "Run Analysis"}</button>
           <button type="button" class="btn is-large is-ghost" on:click={resetBuilder}>Reset Builder</button>
           {#if scopeType === "single_ticker"}
             <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>
@@ -1891,7 +1891,7 @@
 
         <div class="builder-actions">
           <button type="button" class="btn is-large" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
-            {riskHandoffLoading ? "Opening..." : "Open In Risk"}
+            {riskHandoffLoading ? "Opening…" : "Open In Risk"}
           </button>
           <button type="button" class="btn is-large is-ghost" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
           <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>+ Strategy</button>
@@ -1944,7 +1944,7 @@
               </div>
               <div class="builder-actions compact">
                 <button type="button" class="btn is-large" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
-                  {riskHandoffLoading ? "Opening..." : "Risk"}
+                  {riskHandoffLoading ? "Opening…" : "Risk"}
                 </button>
                 <button type="button" class="btn is-large is-ghost" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Options</button>
                 <button type="button" class="btn is-large is-ghost" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
@@ -1996,7 +1996,7 @@
           <div class="rail-header"><div><p class="eyebrow">{mode === "scenario_context" ? "Scenario Objects" : "Comparable Objects"}</p><h3>Select Streams</h3></div><strong>{compareOptions.length} available</strong></div>
           <label><span>Left</span><select class="form-control is-large" bind:value={compareLeftSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
           <label><span>Right</span><select class="form-control is-large" bind:value={compareRightSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
-          <div class="builder-actions"><button type="button" class="btn is-large" on:click={runComparison} disabled={compareLoading || compareOptions.length < 2}>{compareLoading ? "Comparing..." : "Run Compare"}</button></div>
+          <div class="builder-actions"><button type="button" class="btn is-large" on:click={runComparison} disabled={compareLoading || compareOptions.length < 2}>{compareLoading ? "Comparing…" : "Run Compare"}</button></div>
           {#if compareWarning}<p class="warning">{compareWarning}</p>{/if}
         </article>
 
@@ -2045,7 +2045,7 @@
         <article class="panel is-flush table-panel">
           <header class="panel-title">
             <h3>Saved Research Objects</h3>
-            <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
+            <button type="button" class="btn is-large is-ghost inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading…" : "Refresh"}</button>
           </header>
           <div class="table-wrap">
             <table class="data-table is-sticky is-relaxed is-body-text is-nowrap is-open-end">
