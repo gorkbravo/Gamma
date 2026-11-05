@@ -1409,9 +1409,12 @@
     padding-top: var(--space-4);
   }
 
+  /* The track is minmax(0, 1fr) so an input's intrinsic width (about 190px)
+     does not hold a shrunken label open past the strip's edge (V6 gate). */
   .screener-strip label {
     flex: 1 1 7rem;
     min-width: 5rem;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .screener-strip .filter-wide {

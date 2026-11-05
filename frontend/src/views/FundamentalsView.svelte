@@ -2296,6 +2296,9 @@
      .panel-title geometry: 30px and no rule beneath. */
   .panel.table-panel,
   .panel:has(> .panel-header + .table-wrap:last-child) {
+    /* One explicit shrinkable track: the implicit auto column took the
+       header's min-content and held the sheet open past a phone window. */
+    grid-template-columns: minmax(0, 1fr);
     padding: 0;
     gap: 0;
   }
@@ -3189,6 +3192,7 @@
     .header-top,
     .mode-kpi-row,
     .panel-header,
+    .panel-actions,
     .search-actions,
     .search-strip {
       flex-direction: column;
