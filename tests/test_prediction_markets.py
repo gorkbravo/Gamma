@@ -3825,3 +3825,32 @@ def test_polymarket_wallet_summary_degrades_when_the_data_api_fails(tmp_path):
     assert wallet.concentration_hhi is None
     assert any("trades request failed" in warning and "410" in warning for warning in wallet.warnings)
     assert any("holders request failed" in warning for warning in wallet.warnings)
+
+
+def test_open_screener_hides_resolved_and_closed_markets():
+    # A venue search with a query also returns settled markets; an "open" screen
+    # must not pass them on (GUA-20261105-2).
+    open_row = _fed_market_record()
+    resolved_row = _fed_market_record(market_id="polymarket:fed-dec-2025", provider_market_id="fed-dec-2025", status="resolved")
+    closed_row = _fed_market_record(market_id="polymarket:fed-dec-2024", provider_market_id="fed-dec-2024", status="closed")
+    rows = [open_row, resolved_row, closed_row]
+
+    class _SearchAdapter:
+        provider = "polymarket"
+
+        def list_markets(self, *, status: str = "open", limit: int = 50, force_refresh: bool = False, query: str = "", category: str | None = None):
+            return list(rows)
+
+        def get_market(self, provider_market_id: str):
+            return next((row for row in rows if row.provider_market_id == provider_market_id), None)
+
+        def get_history(self, market: PredictionMarketRecord):
+            return []
+
+    service = PredictionMarketService(adapters={"polymarket": _SearchAdapter()})
+
+    opened = service.screener(PredictionMarketScreenerRequest(status="open", query="Fed December", limit=10)).markets
+    everything = service.screener(PredictionMarketScreenerRequest(status="all", query="Fed December", limit=10)).markets
+
+    assert [row.market_id for row in opened] == ["polymarket:fed-dec"]
+    assert {row.market_id for row in everything} == {"polymarket:fed-dec", "polymarket:fed-dec-2025", "polymarket:fed-dec-2024"}
