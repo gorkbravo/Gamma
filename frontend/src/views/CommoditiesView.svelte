@@ -60,7 +60,18 @@
   ];
 
   let selectedInstrumentId = "wti";
-  const scatterBounds = { left: 22, right: 342, top: 9, bottom: 92 };
+  // The scatter is drawn in pixels of its shell (measured below), so text keeps
+  // its token size. It used a fixed 360x110 viewBox stretched with
+  // preserveAspectRatio="none", which distorted every label and clipped the
+  // vertical axis title at wide windows (V6 live audit).
+  let scatterWidth = 360;
+  let scatterHeight = 220;
+  $: scatterBounds = {
+    left: 30,
+    right: Math.max(scatterWidth - 12, 60),
+    top: 22,
+    bottom: Math.max(scatterHeight - 28, 50)
+  };
   const macroDriverSeries = ["us-dollar-broad", "us-real-10y-yield"];
   const requestedMacroDrivers = new Set<string>();
 
@@ -106,7 +117,7 @@
   $: largestMover = findLargestMover(workspace?.market_summaries ?? []);
   $: strongestRoll = findStrongestRoll(workspace?.curves ?? [], workspace?.market_summaries ?? []);
   $: inventoryOutlier = findInventoryOutlier(workspace?.inventories ?? []);
-  $: scatterState = buildScatterState(workspace);
+  $: scatterState = buildScatterState(workspace, scatterBounds);
   $: backwardationRows = overview?.rankings
     ? buildRankRowsFromOverview(overview.rankings.strongest_backwardation, "positive")
     : buildBackwardationRows(workspace?.curves ?? [], workspace?.market_summaries ?? []);
@@ -1103,7 +1114,7 @@
       .sort((left, right) => Math.abs((right.seasonal_percentile ?? 50) - 50) - Math.abs((left.seasonal_percentile ?? 50) - 50))[0] ?? null;
   }
 
-  function buildScatterState(data: CommodityWorkspaceResponse | null) {
+  function buildScatterState(data: CommodityWorkspaceResponse | null, bounds: typeof scatterBounds) {
     const backendPoints = data?.overview?.scatter?.points ?? [];
     if (backendPoints.length) {
       return scaleScatterPoints(
@@ -1114,7 +1125,8 @@
           family: point.family,
           x: point.x_value,
           y: point.y_value
-        }))
+        })),
+        bounds
       );
     }
     const summaries = data?.market_summaries ?? [];
@@ -1141,10 +1153,10 @@
       })
       .filter((point): point is { id: string; symbol: string; name: string; family: string; x: number; y: number } => point != null);
 
-    return scaleScatterPoints(raw);
+    return scaleScatterPoints(raw, bounds);
   }
 
-  function scaleScatterPoints(raw: Array<{ id: string; symbol: string; name: string; family: string; x: number; y: number }>) {
+  function scaleScatterPoints(raw: Array<{ id: string; symbol: string; name: string; family: string; x: number; y: number }>, bounds: typeof scatterBounds) {
     if (!raw.length) {
       return { points: [], zeroX: 50, zeroY: 50, xMin: -1, xMax: 1, yMin: -1, yMax: 1 };
     }
@@ -1157,7 +1169,7 @@
     const xMax = xExtent;
     const yMin = -yExtent;
     const yMax = yExtent;
-    const { left, right, top, bottom } = scatterBounds;
+    const { left, right, top, bottom } = bounds;
     const scaleX = (value: number) => left + ((value - xMin) / (xMax - xMin || 1)) * (right - left);
     const scaleY = (value: number) => bottom - ((value - yMin) / (yMax - yMin || 1)) * (bottom - top);
     return {
@@ -1568,18 +1580,20 @@
           </header>
           {#if scatterState.points.length}
             <div class="scatter-shell" bind:this={scatterShellEl}
+                 bind:clientWidth={scatterWidth}
+                 bind:clientHeight={scatterHeight}
                  role="presentation"
                  on:mousemove={handleScatterMouseMove}
                  on:mouseleave={() => tooltipPoint = null}>
-              <svg viewBox="0 0 360 110" preserveAspectRatio="none" role="img" aria-label="Commodity momentum versus roll yield scatter plot">
+              <svg viewBox={`0 0 ${scatterWidth} ${scatterHeight}`} role="img" aria-label="Commodity momentum versus roll yield scatter plot">
                 <line class="axis-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterState.zeroY} y2={scatterState.zeroY} />
                 <line class="axis-line" x1={scatterState.zeroX} x2={scatterState.zeroX} y1={scatterBounds.top} y2={scatterBounds.bottom} />
-                <text class="quadrant-label" x="20" y="14">Carry / weak momentum</text>
-                <text class="quadrant-label" x="340" y="14" text-anchor="end">Backwardation + momentum</text>
-                <text class="quadrant-label" x="20" y="89">Contango / weak</text>
-                <text class="quadrant-label" x="340" y="89" text-anchor="end">Momentum / carry drag</text>
-                <text class="axis-label" x="180" y="107">{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"}</text>
-                <text class="axis-label vertical" x="-55" y="6">{overview?.scatter?.y_methodology_label ?? "Roll proxy"}</text>
+                <text class="quadrant-label" x={scatterBounds.left + 4} y={scatterBounds.top - 8}>Carry / weak momentum</text>
+                <text class="quadrant-label" x={scatterBounds.right} y={scatterBounds.top - 8} text-anchor="end">Backwardation + momentum</text>
+                <text class="quadrant-label" x={scatterBounds.left + 4} y={scatterBounds.bottom - 6}>Contango / weak</text>
+                <text class="quadrant-label" x={scatterBounds.right} y={scatterBounds.bottom - 6} text-anchor="end">Momentum / carry drag</text>
+                <text class="axis-label" x={(scatterBounds.left + scatterBounds.right) / 2} y={scatterHeight - 8}>{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"}</text>
+                <text class="axis-label" transform={`translate(12, ${(scatterBounds.top + scatterBounds.bottom) / 2}) rotate(-90)`}>{overview?.scatter?.y_methodology_label ?? "Roll proxy"}</text>
                 {#each scatterState.points as point}
                   {@const hovered = tooltipPoint?.id === point.id}
                   <g class="scatter-point {point.family}"
@@ -3106,19 +3120,24 @@
 
   .scatter-shell {
     position: relative;
+    min-height: 12rem;
     border: 0;
     background: transparent;
   }
 
+  /* Absolute, so the drawing never feeds the shell's height back into the
+     measurement that sizes it. */
   .scatter-shell svg {
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
   }
 
   .axis-line {
     stroke: var(--panel-strong);
-    stroke-width: 0.5;
+    stroke-width: 1;
   }
 
   .axis-label,
@@ -3130,10 +3149,6 @@
 
   .axis-label {
     text-anchor: middle;
-  }
-
-  .vertical {
-    transform: rotate(-90deg);
   }
 
   .scatter-point {
