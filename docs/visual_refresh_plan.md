@@ -585,11 +585,11 @@ Found and fixed on the branch:
 - Risk › Largest Movers toned flat rows (cash at 0 P&L) as gains (e70d6e4).
 - The Macro FX charts read "Loading FX data" for good when the IBKR history comes back empty (d296f6f).
 
-Found and not fixed, because they are backend changes that need the user's decision:
+Found as backend defects and, with the user's go-ahead, fixed the same day (5f01681, e94fe62):
 
 - P1 (GUA-20261105-1): a Copilot run with Prediction Markets in its context hangs at "Plan / Stop". The context builder calls the wallet summary, Polymarket's trades endpoint answers 410 Gone, and the agent thread catches only `ValueError`, so it dies without a failed event.
 - P1 (GUA-20261105-2): Macro › Rates & Policy reads "Market bias Easier, avg probability 67%" and "diverging" from three resolved Polymarket contracts (the December 2025 and January 2026 FOMC cut markets), although the service asks the screener for open markets. The open December 2026 contract priced a 25 bp hike at 78%. The same read feeds Sitrep's What Changed.
-- P2 (GUA-20261105-4): the Polymarket wallet summary returns 500 on the same 410.
+- P2 (GUA-20261105-4): the Polymarket wallet summary returns 500 on the same 410. Polymarket had retired Data API v1; the summary now reads v2 and degrades to a warning.
 
 Also open, frontend, from the report: the contract page keeps an old detail after a screener Refresh (GUA-20261105-5), the Meeting Ladder allocates the whole 2Y gap to two meetings (GUA-20261105-6), and Copilot's Sitrep context seems to omit the Rates table (GUA-20261105-7).
 
@@ -605,7 +605,7 @@ Also open, frontend, from the report: the contract page keeps an old detail afte
 
 ### Left after V6
 
-- The three backend findings above, and the three frontend ones from the report.
+- The three frontend findings from the report, and the contract status in the Copilot context (GUA-20261105-2).
 - Options in session: both audit blocks were outside US market hours.
 - Risk's simple tables tone whole rows, so identifiers and rule text take the signal colour; the MC VaR and ES labels overlap in the terminal distribution.
 - Equity Research and Strategy Lab show little in demo mode (an N/A treemap, an empty composer result), so their site captures are thin; the page does not use them.
@@ -668,4 +668,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-11-03/04: after the report, at the user's request, 7b36ac3 renamed the brand subtitle in the app from "Research Terminal" to "Research Workspace" (and the gamma-usability-audit skill's wording), and 694bb07 did the same on the marketing site.
 - 2026-11-04: the user merged V5 into main as 9192e29 (not pushed). V5 is complete.
 - 2026-11-04: main pushed to origin (fast-forward from ab6467c), V5.
-- 2026-11-04/05: V6 on branch `claude/v6-hardening` from main 4b60e16: 5bf2ffb V6a primitives, c134206 V6b copy and charts, 6d943d1 V6c special surfaces, fe13f68 V6d narrow widths, 5294bfa gate (visual baselines, two contrast fixes) and 87333e4 (the last narrow overflows); 0697257, 499642c, e70d6e4 and d296f6f from the live audit session; 369e51c the website on B′ with captures the user approved. Contrast audit 0 failures and 74 fold rows in each theme. The live audit stopped when TWS closed and resumed at 14:03 after the user reopened it; its report found no new P0/P1 visual finding and left two backend P1s for the user. Not merged, not pushed.
+- 2026-11-04/05: V6 on branch `claude/v6-hardening` from main 4b60e16: 5bf2ffb V6a primitives, c134206 V6b copy and charts, 6d943d1 V6c special surfaces, fe13f68 V6d narrow widths, 5294bfa gate (visual baselines, two contrast fixes) and 87333e4 (the last narrow overflows); 0697257, 499642c, e70d6e4 and d296f6f from the live audit session; 369e51c the website on B′ with captures the user approved. Contrast audit 0 failures and 74 fold rows in each theme. The live audit stopped when TWS closed and resumed at 14:03 after the user reopened it; its report found no new P0/P1 visual finding, and the two backend P1s it found were fixed with the user's go-ahead (5f01681, e94fe62). Not merged, not pushed.

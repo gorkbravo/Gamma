@@ -96,17 +96,19 @@ Thesis 1 as a trade:
    - Run 1 (14:12) stayed "running" with "Plan / Stop" for more than 300 s.
    - The backend log shows `_build_prediction_market_context` calling `get_wallet_summary`, which raised `HTTPError 410: Gone` from Polymarket's trades endpoint. `_execute_agent_run` catches only `ValueError` around the context builder, so the thread died without a failed event.
    - Acceptance: any provider error in a context builder fails the run within seconds with a message, and the wallet summary degrades to "unavailable" with a warning.
-   - Status: Open (backend).
+   - Root cause: Polymarket retired Data API v1 ("Data API v1 has been retired"); v2 answers on `/v2/trades` and `/v2/holders` filtered by `condition`.
+   - Status: Fixed in `5f01681` (with the user's go-ahead, the same day). Any context-builder error now ends the run with a failed terminal event, the agent and operator workers run under a guard, and the wallet summary uses Data API v2 and degrades to a warning. Live after the fix: the same Prediction Markets card completed in 15 s with wallet flow.
 2. **P1 — GUA-20261105-2: Macro's policy read uses resolved contracts** (Thesis 1, step 1).
    - `rates_policy.linked_markets` held polymarket:705689, 705688 (December 2025 FOMC cut markets, end 2025-12-12) and 1179306 (January 2026, end 2026-01-28), all `status: "resolved"`, although `_linked_prediction_markets_for_theme` asks the screener for `status="open"`.
    - They produce "Market bias Easier · Avg probability 67%", the "Policy expectations · diverging" card in Macro, and the same line in Sitrep's What Changed. Meanwhile the open December 2026 contract priced +25 bp at 78%.
    - Acceptance: only open, unexpired contracts for upcoming meetings, and the contract status carried into the Copilot context.
-   - Status: Open (backend).
+   - Root cause: the screener never filtered an "open" screen by status, and the US policy query "Fed FOMC rates cut hike policy" matched only settled FOMC markets (18 of 22, none open).
+   - Status: Fixed in `e94fe62`. An "open" screen drops resolved and closed rows, Macro links only open contracts before their end time, the US query is "Fed interest rates", and "increase/decrease" count as tighter/easier. Live after the fix: the December 2026 meeting markets (+25 bp 78%, no change 21%, +50 bp 0.8%), "Market bias Tighter", overlay "aligned". Still open: the contract status in the Copilot context.
 3. **P1 — GUA-20261105-3: Sitrep's Rates Prior column repeated the current value** on policy rows ("Feds Funds 3.88% · +0.25 pp · Prior 3.88%"; 2s10s "34 bps · −13 bps · Prior 34 bps") (Thesis 1, step 2).
    - Status: Fixed in `0697257` (3.63%, 47 bps; "Fed Funds"), with a test.
 4. **P2 — GUA-20261105-4: the Polymarket wallet summary returns 500** when the trades endpoint answers 410 Gone. The browser reports it as a CORS error (Thesis 1, step 4). Same root cause as GUA-20261105-1.
    - Acceptance: a 200 with an "unavailable" summary and a warning.
-   - Status: Open (backend).
+   - Status: Fixed in `5f01681`: the route returns 200 with Data API v2 data (37 trades, 10 participants for the December 2026 market), and a failed request degrades to a warning.
 5. **P2 — GUA-20261105-5: the contract page ignores a screener Refresh** and shows an 11-hour-old detail (24H volume 529,567 against 209,440 in the refreshed row; "Retrieved 3:13:36 AM" at 14:07) (Thesis 1, step 4).
    - Acceptance: the contract refreshes with the screener, or offers its own refresh, and the two agree.
    - Status: Open.
@@ -162,21 +164,21 @@ Thesis 1 as a trade:
 | Data breadth | 7/10 | = | Same providers; the missing meeting-dated futures curve is the gap that mattered this run. |
 | Data depth / drill-down | 7/10 | = | Event Book, book depth, per-leg windows and dated cracks are strong; the contract page serves an old detail after a refresh. |
 | Analytical tooling (DCF, risk, scenarios, CSV) | 7/10 | = | A signed ETF book replayed over eight episodes in a minute; no conditioning on macro series or policy events. |
-| Copilot usefulness | 6/10 | −1 | Grounded and honest when it runs, but it hangs with Prediction Markets in scope. |
-| Cross-tab workflow / state continuity | 6/10 | −1 | Strategy Lab → Risk carries cleanly; Macro and Sitrep contradict Prediction Markets on the policy path. |
+| Copilot usefulness | 6/10 | −1 | Grounded and honest when it runs, but it hung with Prediction Markets in scope (fixed afterwards in `5f01681`). |
+| Cross-tab workflow / state continuity | 6/10 | −1 | Strategy Lab → Risk carries cleanly; Macro and Sitrep contradicted Prediction Markets on the policy path (fixed afterwards in `e94fe62`). |
 | Visual density & design consistency | 8/10 | +1 | B′ holds in every Research tab in both themes; the four visual defects found were P2 and are fixed. |
 | Speed to insight | 6/10 | = | Macro Rates & Policy loads within 15 s warm but was still loading after 33 s cold; a cold Sitrep was complete by 58 s. |
-| Overall (gestalt, not an average) | 6/10 | −1 | The B′ surfaces read well and the research loop works, but two backend defects mislead or stall exactly the policy question this run asked. |
+| Overall (gestalt, not an average) | 6/10 | −1 | The B′ surfaces read well and the research loop works, but two backend defects misled or stalled exactly the policy question this run asked. Scores are as observed during the run, before the same-day fixes. |
 
 ## Prioritized Follow-Up
 
 **P1**
-1. **GUA-20261105-1** — fail Copilot runs on any context-builder error and degrade the wallet summary. Status: Open (backend; needs the user's go-ahead).
-2. **GUA-20261105-2** — open, unexpired linked contracts only, with their status in the Copilot context. Status: Open (backend; needs the user's go-ahead).
+1. **GUA-20261105-1** — fail Copilot runs on any context-builder error and degrade the wallet summary. Status: Fixed (`5f01681`).
+2. **GUA-20261105-2** — open, unexpired linked contracts only, with their status in the Copilot context. Status: Fixed (`e94fe62`) except the status in the Copilot context.
 3. **GUA-20261105-3** — the Sitrep Prior column. Status: Fixed (`0697257`).
 
 **P2**
-4. **GUA-20261105-4** — wallet summary 410 → unavailable with a warning. Status: Open (backend).
+4. **GUA-20261105-4** — wallet summary 410 → unavailable with a warning. Status: Fixed (`5f01681`, Data API v2).
 5. **GUA-20261105-5** — contract detail refresh. Status: Open.
 6. **GUA-20261105-6** — ladder methodology. Status: Open.
 7. **GUA-20261105-7** — the Rates table in Copilot's Sitrep context. Status: Open.
