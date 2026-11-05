@@ -456,7 +456,8 @@ function buildLargestMovers(holdings: HoldingRiskRow[]): RiskTableRow[] {
     .filter((row) => row.pnl != null)
     .sort((left, right) => Math.abs(right.pnl ?? 0) - Math.abs(left.pnl ?? 0))
     .slice(0, 6)
-    .map((row) => ({ cells: [row.symbol, formatCurrency(row.pnl), formatPercent(row.weight), row.qualityFlag], tone: row.pnl == null ? "" : row.pnl >= 0 ? "positive" : "negative" }));
+    // A flat row (cash at 0 P&L) is neutral, not a gain (V6 live audit).
+    .map((row) => ({ cells: [row.symbol, formatCurrency(row.pnl), formatPercent(row.weight), row.qualityFlag], tone: row.pnl == null || row.pnl === 0 ? "" : row.pnl > 0 ? "positive" : "negative" }));
 }
 
 function buildConcentrationFlags(holdings: HoldingRiskRow[], breakdown: ExposureBreakdownRow[]): RiskTableRow[] {
