@@ -8,8 +8,8 @@
 
 <div class="workspace-grid">
   <div class="primary-column">
-    <article class="panel table-panel">
-      <div class="table-panel-header">Country Compare</div>
+    <article class="panel is-flush table-panel">
+      <header class="panel-title"><span>Country Compare</span></header>
       {#if countryCompare?.rows?.length}
         <table class="data-table is-top">
           <thead>
@@ -71,19 +71,7 @@
 <style>
 
   .table-panel {
-    padding: 0;
     overflow: hidden;
-  }
-
-  .table-panel-header {
-    min-height: 26px;
-    padding: var(--space-2) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    color: var(--text-2);
-    font-size: var(--text-title);
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: var(--label-case);
   }
 
   /* Cells, header and row identifiers come from .data-table.is-top in primitives.css. */

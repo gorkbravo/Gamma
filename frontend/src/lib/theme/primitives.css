@@ -234,6 +234,11 @@
    Markets had no header panel at all — its mode bar sat bare on the canvas,
    which is why that tab never looked like the others. */
 .header-panel {
+  /* One column that may shrink below its content: otherwise the mode bar's
+     min-content width (every mode on one line) sizes the column, and the
+     header rows, context bar and page grow wider than a narrow window
+     instead of the bar scrolling within it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
 }
@@ -340,6 +345,15 @@
   font-size: var(--text-xs);
   text-transform: none;
   letter-spacing: 0;
+}
+
+/* A title that stays a heading (<h2>, <h3>) takes the row's type. The
+   doubled class outranks a view's scoped `h3 { … }` rule, which would
+   otherwise set its own size and colour on the title. */
+.panel-title.panel-title > :is(h2, h3, h4) {
+  margin: 0;
+  color: inherit;
+  font: inherit;
 }
 
 /* ── Data table ───────────────────────────────────────────────────────────

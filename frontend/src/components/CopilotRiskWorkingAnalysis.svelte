@@ -208,21 +208,20 @@
     font-weight: 600;
   }
 
+  /* KPI strip: tinted blocks on one baseline (§8 KPI Strips), no dividers. */
   .temporary-summary {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    border-bottom: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .temporary-summary > div {
     display: grid;
     gap: var(--space-1);
-    padding-right: var(--space-4);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
-
-  .temporary-summary > div:not(:first-child) { padding-left: var(--space-4); }
-  .temporary-summary > div:last-child { border-right: 0; }
   .temporary-summary span { color: var(--text-2); font-size: var(--text-2xs); }
   .temporary-summary strong { color: var(--text-0); font-size: var(--text-sm); font-weight: 600; }
 
@@ -252,8 +251,6 @@
 
   @media (max-width: 980px) {
     .temporary-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-    .temporary-summary > div,
-    .temporary-summary > div:not(:first-child) { padding: 0; border-right: 0; }
     .temporary-grid { grid-template-columns: 1fr; }
   }
 </style>

@@ -35,7 +35,7 @@
   export let onCancelRun: () => Promise<unknown> | void = () => {};
   export let onConfirmMutation: ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown) | null = null;
   export let onRejectMutation: ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown) | null = null;
-  export let placeholder = "Optional angle or research question...";
+  export let placeholder = "Optional angle or research question…";
   export let scopeOptions: CopilotGroundingScopeOption[] = [];
   export let selectedScopeDomains: CopilotBaseDomain[] = [];
   export let selectionMessage: string | null = null;
@@ -178,13 +178,13 @@
         : "Ctrl+Enter to start a thread";
   $: composerPlaceholder = available
     ? hasThread
-      ? "Ask a follow-up grounded in this context scope..."
+      ? "Ask a follow-up grounded in this context scope…"
       : placeholder
     : guidance;
   $: composerButtonLabel = loading
     ? roleMode === "operator"
-      ? "Running..."
-      : "Generating..."
+      ? "Running…"
+      : "Generating…"
     : roleMode === "operator"
       ? "Run Operator"
       : hasThread
@@ -476,7 +476,7 @@
     justify-self: end;
     background: var(--accent-soft);
     border-color: transparent;
-    border-top-right-radius: 4px;
+    border-top-right-radius: var(--radius-sm);
   }
 
   .user-bubble p {
@@ -486,7 +486,7 @@
 
   .assistant-bubble {
     justify-self: start;
-    border-top-left-radius: 2px;
+    border-top-left-radius: var(--radius-sm);
   }
 
   .message-card {
@@ -575,7 +575,8 @@
     height: 2.1rem;
     padding: 0;
     border-color: transparent;
-    background: transparent;
+    background: var(--tint);
+    border-radius: var(--radius-control);
   }
 
   .close-btn:hover,
@@ -721,8 +722,9 @@
     max-width: 100%;
     padding: 0 var(--space-4);
     font-size: var(--text-sm);
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
+    background: var(--tint);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
   }
 
   .context-trigger:hover:not(:disabled),
@@ -750,9 +752,11 @@
     width: min(22rem, calc(100vw - 2rem));
     max-height: min(22rem, 50vh);
     overflow-y: auto;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--shadow-ink) 45%, transparent);
+    border: 1px solid var(--panel-border);
+    background: var(--surface-0);
+    box-shadow: var(--overlay-shadow);
+    border-radius: var(--overlay-radius);
+    padding: var(--space-1);
   }
 
   .context-option {

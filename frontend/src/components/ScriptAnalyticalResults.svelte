@@ -149,11 +149,11 @@
   section { display: grid; gap: var(--space-4); border-top: 1px solid var(--divider); padding-top: var(--space-4); }
   details { min-width: 0; } summary { cursor: pointer; font-size: var(--text-xs); }
   pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-xs); }
-  .book { display: grid; gap: var(--space-3); border: 1px solid var(--panel-strong); padding: var(--space-4); min-width: 0; }
+  .book { display: grid; gap: var(--space-3); padding: var(--space-4); min-width: 0; border-radius: var(--panel-radius); background: var(--tint); }
   .book-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: var(--space-3); align-items: end; }
   .book-options label { display: grid; gap: var(--space-2); min-width: 0; }
   .book-options span, dt { color: var(--text-2); font-size: var(--text-xs); letter-spacing: 0; text-transform: var(--label-case); }
-  .book-options input { width: 100%; min-height: 28px; border: 1px solid var(--panel-strong); background: var(--bg-1); color: var(--text-0); padding: var(--space-2); font-family: var(--font-num); font-size: var(--text-xs); }
+  .book-options input { width: 100%; min-height: 28px; border: 1px solid transparent; background: var(--panel-bg); color: var(--text-0); padding: var(--space-2); font-family: var(--font-num); font-size: var(--text-xs); border-radius: var(--radius-control); }
   .book-summary { display: grid; gap: 0; margin: 0; }
   .book-summary div { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--divider); }
   dd { margin: 0; color: var(--text-1); font-family: var(--font-num); font-size: var(--text-xs); text-align: right; overflow-wrap: anywhere; }

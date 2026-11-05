@@ -1,5 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="10" fill="#0b0d10"/>
-  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="9.25" fill="none" stroke="#2f3641" stroke-width="1.5"/>
-  <path d="M18 14H50V25H30V50H18V14Z" fill="#d6e3ee"/>
+  <!-- The app's B′ mark: an accent-tinted tile with an accent edge and an
+       accent glyph, in the dark and the light theme (values from tokens.css). -->
+  <style>
+    .sheet { fill: #151a20; }
+    .soft { fill: #7d9df2; fill-opacity: 0.14; }
+    .edge { fill: none; stroke: #7d9df2; stroke-opacity: 0.42; }
+    .glyph { fill: #7d9df2; }
+    @media (prefers-color-scheme: light) {
+      .sheet { fill: #ffffff; }
+      .soft { fill: #2952cc; fill-opacity: 0.09; }
+      .edge { stroke: #2952cc; }
+      .glyph { fill: #2952cc; }
+    }
+  </style>
+  <rect class="sheet" width="64" height="64" rx="10"/>
+  <rect class="soft" width="64" height="64" rx="10"/>
+  <rect class="edge" x="0.75" y="0.75" width="62.5" height="62.5" rx="9.25" stroke-width="1.5"/>
+  <path class="glyph" d="M18 14H50V25H30V50H18V14Z"/>
 </svg>

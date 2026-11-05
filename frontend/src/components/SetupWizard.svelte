@@ -339,7 +339,7 @@
         <p class="note">Change the address with IB_HOST, IB_PORT and IB_CLIENT_ID in the environment or .env file.</p>
         {#if report.data_mode.current === "live" && report.ibkr.status !== "connected"}
           <button type="button" class="btn is-ghost" disabled={connectionBusy} on:click={() => void onTestConnection()}>
-            {connectionBusy ? "Connecting..." : "Test connection"}
+            {connectionBusy ? "Connecting…" : "Test connection"}
           </button>
         {/if}
       {:else if step === "preferences"}
@@ -549,7 +549,7 @@
         </div>
         {#if isLast}
           <button type="button" class="btn is-primary" on:click={() => void finish()} disabled={saving}>
-            {saving ? "Saving..." : "Finish setup"}
+            {saving ? "Saving…" : "Finish setup"}
           </button>
         {:else}
           <button type="button" class="btn is-primary" on:click={() => void goTo(stepIndex + 1)} disabled={!canAdvance}>
@@ -684,9 +684,9 @@
 
   .notice {
     padding: var(--space-4) var(--space-5);
-    border: 1px solid var(--panel-border);
-    border-left: 2px solid var(--warning);
     font-size: var(--text-sm);
+    border-radius: var(--panel-radius);
+    background: var(--warning-soft);
   }
 
   .warning-text,
@@ -738,10 +738,11 @@
     gap: var(--space-4);
     align-items: start;
     padding: var(--space-5);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    border-radius: var(--panel-radius);
     cursor: pointer;
     transition: border-color var(--motion-fast) var(--ease), background var(--motion-fast) var(--ease);
+    background: var(--tint);
   }
 
   .mode:hover {
@@ -790,19 +791,16 @@
   .facts {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0;
+    gap: var(--space-3);
     margin: 0;
-    border: 1px solid var(--panel-border);
   }
 
   .facts div {
     display: grid;
     gap: var(--space-1);
     padding: var(--space-4) var(--space-5);
-  }
-
-  .facts div + div {
-    border-left: 1px solid var(--panel-border);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   dd {
@@ -962,11 +960,6 @@
     .fields,
     .facts {
       grid-template-columns: 1fr;
-    }
-
-    .facts div + div {
-      border-left: 0;
-      border-top: 1px solid var(--panel-border);
     }
 
     /* En móvil la tabla mantiene su semántica pero parte el texto en lugar de desbordar. */

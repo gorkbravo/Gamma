@@ -89,7 +89,7 @@
       <span class="conn-label" class:mock={status?.mock_mode}>{status?.mock_mode ? "Demo" : "Live"}</span>
     </div>
     <button class="ghost" on:click={onChangeView}>Change View</button>
-    <button class="accent" on:click={onRefresh} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
+    <button class="accent" on:click={onRefresh} disabled={busy}>{busy ? "Refreshing…" : "Refresh"}</button>
     <div class="settings-menu">
       <button
         type="button"
@@ -110,7 +110,7 @@
           </div>
           <small>{status?.connection.active_account ?? "No active account"}</small>
           <button class="ghost wide" on:click={onToggleConnection} disabled={busy || !status?.connection.action_enabled}>
-            {busy ? "Working..." : status?.connection.action_text ?? "Connect"}
+            {busy ? "Working…" : status?.connection.action_text ?? "Connect"}
           </button>
         </div>
 
@@ -588,11 +588,11 @@
 
   .copilot-error code {
     padding: var(--space-2);
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    background: var(--tint);
     color: var(--accent);
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
+    border-radius: var(--radius-control);
   }
 
   @media (max-width: 960px) {

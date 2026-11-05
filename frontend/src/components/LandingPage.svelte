@@ -94,7 +94,7 @@
         on:click={onConnect}
         disabled={busy || !status?.connection.action_enabled}
       >
-        {busy ? "Working..." : connectionActionLabel(status)}
+        {busy ? "Working…" : connectionActionLabel(status)}
       </button>
       <button class="secondary" on:click={onEnterResearch}>
         Research View
@@ -270,9 +270,9 @@
     justify-items: start;
     text-align: left;
     min-height: 2.5rem;
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--button-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-0);
     padding: var(--space-5) var(--space-6);
     font: inherit;
@@ -283,14 +283,13 @@
   }
 
   button small {
-    color: var(--text-2);
+    color: var(--text-1);
     font-size: var(--text-xs);
     font-weight: 400;
   }
 
   button:hover:enabled {
-    border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-strong));
-    background: var(--hover-bg);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   button:disabled {
@@ -303,7 +302,7 @@
     justify-items: center;
     text-align: center;
     border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    background: var(--accent-soft);
   }
 
   .boundary {
@@ -323,8 +322,8 @@
     align-items: center;
     min-height: 1.75rem;
     padding: 0 var(--space-4);
-    background: transparent;
-    border-color: var(--panel-border);
+    background: var(--tint);
+    border-color: transparent;
     color: var(--text-1);
     font-size: var(--text-xs);
   }

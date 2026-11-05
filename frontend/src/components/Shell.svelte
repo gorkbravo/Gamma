@@ -328,7 +328,7 @@
   }
 
   .copilot-trigger {
-    background: transparent;
+    background: var(--accent-soft);
     border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-strong));
     color: var(--accent);
     font-size: var(--text-sm);

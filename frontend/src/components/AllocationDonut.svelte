@@ -268,6 +268,8 @@
     padding: var(--space-5) var(--space-6);
     border: 1px solid var(--panel-border);
     background: var(--surface-0);
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .hover-tooltip::before {
@@ -379,7 +381,7 @@
   .swatch {
     width: 0.6rem;
     height: 0.6rem;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     flex: 0 0 auto;
   }
 
@@ -417,7 +419,6 @@
     place-items: center;
     width: 100%;
     height: 100%;
-    border: 1px solid var(--divider);
     color: var(--text-2);
     text-transform: var(--label-case);
     letter-spacing: 0;

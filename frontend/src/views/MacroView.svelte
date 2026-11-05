@@ -210,8 +210,8 @@
 
   /* ── Chart reactives ── */
   $: chartContext = { region: $macroContext.region, timeframe: $macroContext.timeframe, comparisonRegion: $macroContext.comparisonRegion } satisfies MacroChartContext;
-  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--chart-secondary)"]);
-  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--chart-secondary)"]);
+  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--cat-5)"]);
+  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--cat-5)"]);
 
   /* ── FX reactives ── */
   $: fxPair0SeriesId = fxPairOptions.find((p) => p.id === fxPair0)?.seriesId ?? "fx-eurusd";
@@ -220,11 +220,21 @@
   $: fxSeriesIds = Array.from(new Set([fxPair0SeriesId, fxPair1SeriesId, fxPair2SeriesId]));
   $: if ($macroContext.mode === "snapshot") { void ensureSeries(fxSeriesIds); }
   $: fxChart1 = chartFromSeries(histories, chartContext, fxPair0SeriesId, "var(--chart-primary)");
-  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "var(--chart-secondary)");
-  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "var(--chart-negative)");
+  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "var(--chart-primary)");
+  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "var(--chart-primary)");
   $: fxLast0 = fxLastPrice(fxChart1);
   $: fxLast1 = fxLastPrice(fxChart2);
   $: fxLast2 = fxLastPrice(fxChart3);
+  $: fxEmpty1 = fxEmptyMessage(histories, chartContext, fxPair0SeriesId);
+  $: fxEmpty2 = fxEmptyMessage(histories, chartContext, fxPair1SeriesId);
+  $: fxEmpty3 = fxEmptyMessage(histories, chartContext, fxPair2SeriesId);
+
+  // A history that came back without points is unavailable, not still loading.
+  // The pairs come from IBKR; without TWS they return empty and the charts read
+  // "Loading FX data" for good (V6 live audit, 2026-11-05).
+  function fxEmptyMessage(seriesMap: Record<string, MacroSeriesHistory>, context: MacroChartContext, seriesId: string): string {
+    return seriesMap[historyKey(seriesId, context.timeframe, context.region)] ? "FX history unavailable" : "Loading FX data";
+  }
 
   /* ── Headline KPI strip ── */
   const headlineSeriesUS = ["us-cpi-yoy", "us-fed-funds", "us-2s10s-slope", "us-dollar-broad"];
@@ -258,7 +268,7 @@
     <div class="header-top">
       <span class="title">Macro Research</span>
       <span class="subtitle">{$macroContext.region} · {$macroContext.timeframe} · {themeLabels[$macroContext.theme] ?? $macroContext.theme}</span>
-      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if loading}<span class="tag accent">Refreshing</span>{/if}
       <div class="handoff-actions" aria-label="Strategy Lab macro lens actions">
         <button
           type="button"
@@ -294,11 +304,11 @@
         {/each}
       </div>
       {#if headlineKPIs.length}
-        <div class="headline-strip">
+        <div class="header-kpis">
           {#each headlineKPIs as kpi}
-            <div class="headline-kpi">
-              <span class="headline-kpi-label">{kpi.label}</span>
-              <strong class="headline-kpi-value">{kpi.displayValue}{#if kpi.delta} <small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>{/if}</strong>
+            <div class="header-kpi">
+              <span>{kpi.label}</span>
+              <strong>{kpi.displayValue}{#if kpi.delta} <small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>{/if}</strong>
             </div>
           {/each}
         </div>
@@ -341,6 +351,7 @@
       {snapshot} {events} {loading}
       {fxChart1} {fxChart2} {fxChart3}
       {fxLast0} {fxLast1} {fxLast2}
+      {fxEmpty1} {fxEmpty2} {fxEmpty3}
       {fxPairOptions}
       bind:fxPair0 bind:fxPair1 bind:fxPair2
       {maxSnapshotMetrics}
@@ -385,34 +396,9 @@
     white-space: nowrap;
   }
 
-  /* ── Headline KPI strip ── */
-  .headline-strip { display: flex; gap: 0; border-left: 1px solid var(--divider); }
-
-  .headline-kpi {
-    display: grid;
-    gap: 0.05rem;
-    padding: var(--space-1) var(--space-5);
-    border-right: 1px solid var(--divider);
-    min-width: 5.5rem;
-    text-align: left;
-  }
-
-  .headline-kpi-label {
-    display: block;
-    color: var(--text-2);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    font-size: var(--text-xs);
-    line-height: 1.1;
-    white-space: nowrap;
-  }
-
-  .headline-kpi-value {
-    display: block;
-    color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    line-height: 1.15;
+  /* ── Headline KPI strip ── .header-kpis / .header-kpi from primitives.css;
+     the inline delta after a value stays local. */
+  .header-kpi span {
     white-space: nowrap;
   }
 
@@ -453,19 +439,6 @@
   .next-event-date::before { content: "·"; margin-right: var(--space-3); opacity: 0.5; }
 
   /* ── Loading pill ── */
-  .loading-pill {
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    color: var(--accent);
-    border: 1px solid transparent;
-    background: var(--accent-soft);
-    padding: var(--space-2) var(--space-4);
-    white-space: nowrap;
-    animation: pulse-opacity 1.6s ease-in-out infinite;
-    border-radius: var(--radius-pill);
-  }
-
   @keyframes pulse-opacity {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
@@ -523,6 +496,6 @@
     .context-bar select { width: 100%; }
 
     .header-top { flex-direction: column; gap: var(--space-3); }
-    .headline-strip, .next-event { display: none; }
+    .header-kpis, .next-event { display: none; }
   }
 </style>

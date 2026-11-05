@@ -48,7 +48,7 @@
     var ticks = rail.querySelector('.rail-ticks');
     var sweep = rail.querySelector('.rail-sweep');
 
-    // Divisions are evenly spaced, like a graticule. Position on the rail
+    // Divisions are evenly spaced, like an instrument scale. Position on the rail
     // encodes order in the session, not raw document offset.
     var marks = moments.map(function (m, i) {
       var el = document.createElement('a');
@@ -102,7 +102,7 @@
     var root = document.querySelector('[data-term]');
     if (!root) return;
 
-    // Synthetic demonstration data. Labelled MOCK on the surface itself,
+    // Synthetic demonstration data. Labelled Mock on the surface itself,
     // exactly as the application labels its own sample provider.
     var boards = {
       sitrep: {
@@ -117,18 +117,18 @@
           ['WTI', 74.18, 0.62, 0.84]
         ],
         prov: [['Source', 'yfinance'], ['Origin', 'provider'], ['Cache', '300 s'], ['Retrieved', null]],
-        note: 'SITREP composes one operating picture from Equity Research, Macro, Commodities, Prediction Markets and News. Each panel carries its own freshness and can degrade alone.'
+        note: 'Sitrep composes one operating picture from Equity Research, Macro, Commodities, Prediction Markets and News. Each panel carries its own freshness and can degrade alone.'
       },
       macro: {
         head: ['Series', 'Level', 'Δ 3M', 'Signal'],
         rows: [
-          ['Headline CPI YoY', 3.54, 0.22, 'INFLATION'],
-          ['Core CPI YoY', 2.79, 0.11, 'INFLATION'],
-          ['Fed Funds Rate', 3.63, 0.01, 'POLICY'],
-          ['US 10Y Real Yield', 2.45, 0.38, 'POLICY'],
-          ['2s10s Slope', 40, -2, 'CURVE'],
-          ['Unemployment', 4.10, -0.20, 'GROWTH'],
-          ['HY OAS', 2.66, -0.06, 'CREDIT']
+          ['Headline CPI YoY', 3.54, 0.22, 'Inflation'],
+          ['Core CPI YoY', 2.79, 0.11, 'Inflation'],
+          ['Fed Funds Rate', 3.63, 0.01, 'Policy'],
+          ['US 10Y Real Yield', 2.45, 0.38, 'Policy'],
+          ['2s10s Slope', 40, -2, 'Curve'],
+          ['Unemployment', 4.10, -0.20, 'Growth'],
+          ['HY OAS', 2.66, -0.06, 'Credit']
         ],
         prov: [['Source', 'FRED'], ['Origin', 'derived'], ['Transform', 'YoY from index'], ['Retrieved', null]],
         note: 'Divergence score is the strongest positive signal minus the strongest negative one. The label — coherent, narrow, fractured — is a Gamma heuristic, and says so on screen.'
@@ -148,13 +148,13 @@
       commodities: {
         head: ['Contract', 'Last', 'Spread', 'Shape'],
         rows: [
-          ['WTI M1', 74.18, null, 'BACKWARDATION'],
+          ['WTI M1', 74.18, null, 'Backwardation'],
           ['WTI M2', 73.62, -0.56, null],
           ['WTI M3', 73.15, -0.47, null],
-          ['Brent M1', 78.44, null, 'BACKWARDATION'],
-          ['Henry Hub M1', 2.87, null, 'CONTANGO'],
-          ['Gold M1', 2412.30, null, 'CONTANGO'],
-          ['Copper M1', 4.412, null, 'FLAT']
+          ['Brent M1', 78.44, null, 'Backwardation'],
+          ['Henry Hub M1', 2.87, null, 'Contango'],
+          ['Gold M1', 2412.30, null, 'Contango'],
+          ['Copper M1', 4.412, null, 'Flat']
         ],
         prov: [['Source', 'EIA + FRED'], ['Origin', 'derived'], ['Transform', 'front-spread proxy'], ['Retrieved', null]],
         note: 'Roll-yield, spread z-scores and seasonal inventory context are Gamma heuristics built on official but partial, release-lagged data.'
@@ -214,8 +214,12 @@
             td.className = 'sym';
             td.textContent = cell;
           } else if (typeof cell === 'string') {
-            td.className = cell === 'BACKWARDATION' ? 'pos' : cell === 'CONTANGO' ? 'warn' : 'dim';
-            td.textContent = cell;
+            var tag = document.createElement('span');
+            tag.className = 'badge ' + (cell === 'Backwardation' ? 'pos'
+              : cell === 'Contango' ? 'warn'
+              : key === 'macro' ? 'badge-accent' : '');
+            tag.textContent = cell;
+            td.appendChild(tag);
           } else if (key === 'options') {
             td.textContent = fmt(cell, i === 2 ? 3 : i === 4 ? 1 : 1) + (i === 1 || i === 3 || i === 4 ? '%' : '');
           } else if (i >= 2) {
@@ -271,9 +275,9 @@
       var dp = (cell.textContent.split('.')[1] || '').replace('%', '').length || 2;
       cell.textContent = next.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp }) +
         (cell.textContent.indexOf('%') > -1 ? '%' : '');
-      cell.classList.remove('flash');
+      cell.classList.remove('flash-up', 'flash-down');
       void cell.offsetWidth;
-      cell.classList.add('flash');
+      cell.classList.add(drift >= 0 ? 'flash-up' : 'flash-down');
 
       root.querySelectorAll('[data-clock]').forEach(function (n) { n.textContent = stamp(); });
     }

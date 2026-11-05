@@ -101,7 +101,7 @@
   export let chartKey: string;
   export let points: HeroPricePoint[] = [];
   export let height = 320;
-  export let emptyMessage = "CHART UNAVAILABLE";
+  export let emptyMessage = "Chart unavailable";
   export let showLegend = true;
 
   let settings: HeroPriceChartSettings = normalizeHeroPriceChartSettings(defaultHeroPriceChartSettings);
@@ -230,9 +230,9 @@
     width: 25px;
     height: 25px;
     place-items: center;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
     color: var(--text-1);
     font-size: var(--text-sm);
     line-height: 1;

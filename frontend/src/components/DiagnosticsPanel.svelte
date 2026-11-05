@@ -31,10 +31,10 @@
     </div>
 
     <div class="actions">
-      <button class="btn" on:click={onRunDiagnostics} disabled={actionLoading}>{actionLoading ? "Working..." : "Run Diagnostics"}</button>
+      <button class="btn" on:click={onRunDiagnostics} disabled={actionLoading}>{actionLoading ? "Working…" : "Run Diagnostics"}</button>
       <button class="btn" on:click={onForceSubscribe} disabled={actionLoading}>Force Subscribe</button>
       <button class="btn" on:click={onClearHistory} disabled={actionLoading}>Clear History</button>
-      <button class="btn" on:click={onRefresh} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button>
+      <button class="btn" on:click={onRefresh} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button>
     </div>
   </div>
 
@@ -97,9 +97,9 @@
     gap: var(--space-6);
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 17.5rem;
-    border: 1px solid var(--panel-border);
     background: var(--panel-bg);
     padding: var(--space-6) var(--space-6) var(--space-6);
+    border-radius: var(--panel-radius);
   }
 
   .header {
@@ -137,9 +137,9 @@
   }
 
   .summary article {
-    border: 1px solid var(--divider);
-    background: var(--surface-soft);
+    background: var(--tint);
     padding: var(--space-5) var(--space-5);
+    border-radius: var(--panel-radius);
   }
 
   strong {
@@ -150,8 +150,8 @@
 
   .console-body {
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: var(--surface-0);
+    background: var(--tint);
+    border-radius: var(--panel-radius);
   }
 
   .line {

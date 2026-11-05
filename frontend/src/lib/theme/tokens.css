@@ -187,6 +187,15 @@
   --chart-history-halo: rgba(244, 247, 251, 0.12);  /* and its halo */
   --popover-bg: rgba(21, 26, 32, 0.98);             /* the Settings popover */
 
+  /* ── Map ── the Sealanes base map, which MaritimeMap recolours from these
+     tokens (the CARTO style's own colours never show). Script reads them, so
+     each names a literal token. Dark: land is the surface, water the void,
+     country borders in the accent. */
+  --map-water: var(--bg-0);
+  --map-land: var(--panel-strong);
+  --map-border: var(--accent);
+  --map-border-inner: var(--text-2);
+
   /* ── Shadows and scrim ── every shadow mixes from --shadow-ink. */
   --shadow-ink: #000;
   --shadow: color-mix(in srgb, var(--shadow-ink) 24%, transparent);
@@ -296,6 +305,13 @@
   --chart-history: rgba(15, 23, 32, 0.88);
   --chart-history-halo: rgba(15, 23, 32, 0.1);
   --popover-bg: rgba(255, 255, 255, 0.98);
+
+  /* Light map: the roles turn over, as on a printed chart: land is the
+     sheet, water a cool grey step, borders quiet (user decision, V6). */
+  --map-water: var(--bg-3);
+  --map-land: var(--bg-0);
+  --map-border: var(--text-2);
+  --map-border-inner: var(--panel-strong);
 
   /* Shadows lighter than on the dark canvas; B′ scrim. */
   --shadow-ink: rgba(15, 23, 32, 0.4);

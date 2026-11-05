@@ -21,7 +21,9 @@
     "&": {
       height: "100%",
       color: "var(--text-1)",
-      backgroundColor: "var(--surface-0)",
+      // B′: the editor is a tinted inset like a field (the syntax colours
+      // are AA on the tint, contrast.test.ts).
+      backgroundColor: "var(--tint)",
       fontSize: "var(--text-sm)"
     },
     ".cm-content": {
@@ -32,8 +34,8 @@
     ".cm-scroller": { overflow: "auto" },
     ".cm-gutters": {
       color: "var(--text-2)",
-      backgroundColor: "var(--surface-1)",
-      borderRight: "1px solid var(--panel-border)"
+      backgroundColor: "var(--tint)",
+      borderRight: "1px solid var(--divider)"
     },
     // The hover tint: 6% of the accent in dark, 4% in light, so comments
     // keep 4.5:1 on the active line.
@@ -43,7 +45,7 @@
     ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
       backgroundColor: "color-mix(in srgb, var(--accent) 24%, transparent) !important"
     },
-    "&.cm-focused": { outline: "2px solid color-mix(in srgb, var(--accent) 55%, transparent)" }
+    "&.cm-focused": { outline: "1px solid var(--accent)", outlineOffset: "-1px" }
   });
 
   /* Syntax colours come from the tokens, so they follow the theme and reach
@@ -109,9 +111,10 @@
   .code-editor {
     min-height: 24rem;
     height: min(58vh, 46rem);
-    border: 1px solid var(--panel-border);
-    background: var(--surface-0);
+    border: 1px solid transparent;
+    background: var(--tint);
     overflow: hidden;
+    border-radius: var(--panel-radius);
   }
 
   .code-editor.disabled {

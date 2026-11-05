@@ -221,6 +221,23 @@ describe("risk workspace view-model", () => {
     expect(model.alerts.some((alert) => alert.includes("Missing/stale data"))).toBe(true);
   });
 
+  it("keeps a flat largest-mover row neutral", () => {
+    const flat = {
+      ...snapshot,
+      positions: snapshot.positions.map((position) => (position.sec_type === "CASH" ? { ...position, unrealized_pnl: 0 } : position)),
+    };
+    const model = buildRiskWorkspaceModel(flat, riskResult, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+    const tones = Object.fromEntries(model.largestMovers.map((row) => [String(row.cells[0]), row.tone]));
+
+    expect(tones["AAPL"]).toBe("positive");
+    expect(tones["MSFT"]).toBe("negative");
+    expect(Object.entries(tones).filter(([symbol]) => symbol !== "AAPL" && symbol !== "MSFT").map(([, tone]) => tone)).toEqual([""]);
+  });
+
   it("splits the historical expected shortfall across positions", () => {
     const withEs: RiskResult = {
       ...riskResult,

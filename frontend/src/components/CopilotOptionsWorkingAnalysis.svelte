@@ -176,7 +176,7 @@
               >{pct(row.volatilityPremium)}</td>
               <td class:absent={row.impliedToHistoricalRatio == null}>{decimal(row.impliedToHistoricalRatio)}×</td>
               <td class:absent={row.impliedMovePct == null}>{pct(row.impliedMovePct)}</td>
-              <td><span class="status-tag" data-status={row.status}>{statusLabel(row.status)}</span></td>
+              <td><span class="tag" class:positive={row.status === "ok"}>{statusLabel(row.status)}</span></td>
             </tr>
           {:else}
             <tr><td colspan="8" class="empty">No comparable expiry rows were retained.</td></tr>
@@ -262,21 +262,20 @@
     font-size: var(--text-base);
   }
 
+  /* KPI strip: tinted blocks on one baseline (§8 KPI Strips), no dividers. */
   .temporary-summary {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    border-bottom: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .temporary-summary > div {
     display: grid;
     gap: var(--space-1);
-    padding-right: var(--space-4);
-    border-right: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
-
-  .temporary-summary > div:not(:first-child) { padding-left: var(--space-4); }
-  .temporary-summary > div:last-child { border-right: 0; }
 
   .comparison-table {
     overflow: auto;
@@ -287,22 +286,6 @@
   td.empty {
     color: var(--text-2);
     text-align: center;
-  }
-
-  .status-tag {
-    display: inline-block;
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--divider);
-    border-radius: 999px;
-    color: var(--text-1);
-    font-family: var(--font-ui);
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-  }
-
-  .status-tag[data-status="ok"] {
-    color: var(--positive);
-    border-color: color-mix(in srgb, var(--positive) 45%, transparent);
   }
 
   .positive { color: var(--positive) !important; }
@@ -342,12 +325,6 @@
     .boundary-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: var(--space-3);
-    }
-
-    .temporary-summary > div,
-    .temporary-summary > div:not(:first-child) {
-      padding: 0;
-      border-right: 0;
     }
   }
 

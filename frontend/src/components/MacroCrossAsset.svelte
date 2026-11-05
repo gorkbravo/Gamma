@@ -1,4 +1,5 @@
 <script lang="ts">
+  import MacroCoherencePanel from "./MacroCoherencePanel.svelte";
   import MacroDivergenceCard from "./MacroDivergenceCard.svelte";
   import MacroLinkedMarketRow from "./MacroLinkedMarketRow.svelte";
   import MacroMetricRow from "./MacroMetricRow.svelte";
@@ -23,13 +24,6 @@
   $: crossAssetCards = theme === "all"
     ? snapshot?.cross_asset ?? []
     : (snapshot?.cross_asset ?? []).filter((row) => row.theme === theme);
-
-  function coherenceTone(label: string | null | undefined): string {
-    if (label === "coherent") return "positive";
-    if (label === "fractured") return "negative";
-    if (label === "narrow") return "warning";
-    return "";
-  }
 
   function toneClass(tone: string | null | undefined): string {
     if (tone === "reinforcing") return "positive";
@@ -66,15 +60,7 @@
 
             <p class="card-summary">{card.summary}</p>
 
-            {#if card.coherence}
-              <div class="coherence-inline">
-                <span class="tag is-tinted {coherenceTone(card.coherence.coherence_label)}">{card.coherence.coherence_label}</span>
-                <span class="coherence-stat">{card.coherence.supporting_signals} confirm · {card.coherence.opposing_signals} oppose</span>
-                {#if card.coherence.lag_span_display}
-                  <span class="coherence-stat">· {card.coherence.lag_span_display} spread</span>
-                {/if}
-              </div>
-            {/if}
+            <MacroCoherencePanel coherence={card.coherence} compact />
 
             {#if card.primary_driver || card.counter_signal}
               <div class="signal-grid">
@@ -169,11 +155,12 @@
     gap: var(--space-4);
   }
 
+  /* A tinted block on the sheet: the tonal step is the edge. */
   .theme-card {
     display: grid;
     gap: var(--space-3);
-    border: 1px solid var(--panel-border);
-    background: var(--surface-soft);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
     padding: var(--space-5);
   }
 
@@ -209,20 +196,6 @@
   }
 
   /* ── Coherence inline ── */
-  .coherence-inline {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    align-items: center;
-  }
-
-  .coherence-stat {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    letter-spacing: 0;
-    text-transform: var(--label-case);
-  }
-
   /* ── Signal grid ── */
   .signal-grid {
     display: grid;
@@ -256,23 +229,21 @@
     justify-content: center;
     min-width: 2.6rem;
     padding: var(--space-1) var(--space-2);
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--rule-navy) 42%, transparent);
-    background: var(--accent-soft);
+    border-radius: var(--radius-pill);
+    --pill-fill: var(--accent-soft);
     color: var(--text-1);
     font-size: var(--text-2xs);
     font-weight: 600;
+    background: linear-gradient(var(--pill-fill), var(--pill-fill)), var(--panel-bg);
   }
 
   .signal-score.positive {
-    border-color: color-mix(in srgb, var(--positive) 25%, transparent);
-    background: var(--positive-soft);
+    --pill-fill: var(--positive-soft);
     color: var(--positive);
   }
 
   .signal-score.negative {
-    border-color: color-mix(in srgb, var(--negative-muted) 30%, transparent);
-    background: var(--negative-soft);
+    --pill-fill: var(--negative-soft);
     color: var(--negative);
   }
 
@@ -330,27 +301,24 @@
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-2xs);
     font-weight: 600;
-    border-radius: 2px;
-    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
-    background: var(--accent-soft);
+    border-radius: var(--radius-pill);
+    --pill-fill: var(--accent-soft);
     color: var(--text-1);
+    background: linear-gradient(var(--pill-fill), var(--pill-fill)), var(--panel-bg);
   }
 
   .score-badge.high {
-    border-color: color-mix(in srgb, var(--negative-muted) 35%, transparent);
-    background: var(--negative-soft);
+    --pill-fill: var(--negative-soft);
     color: var(--negative);
   }
 
   .score-badge.moderate {
-    border-color: color-mix(in srgb, var(--accent-2) 30%, transparent);
-    background: var(--warning-soft);
+    --pill-fill: var(--warning-soft);
     color: var(--accent-2);
   }
 
   .score-badge.low {
-    border-color: color-mix(in srgb, var(--positive) 25%, transparent);
-    background: var(--positive-soft);
+    --pill-fill: var(--positive-soft);
     color: var(--positive);
   }
 

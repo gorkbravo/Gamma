@@ -649,11 +649,28 @@
   function cleanYieldLabel(label: string): string {
     return label
       .replace(/^(US|EU)\s+/i, "")
-      .replace(/\bFed\s+Funds\s+Rate\b/i, "Feds Funds")
+      .replace(/\bFed\s+Funds\s+Rate\b/i, "Fed Funds")
       .replace(/\bTreasury\s*/gi, "")
       .replace(/\bYield\b/gi, "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  // The Prior column of a policy row is the value one window ago (value minus
+  // the window delta) in the metric's unit. It used to repeat the current
+  // value: "Fed Funds 3.88% · +0.25 pp · prior 3.88%" (live audit 2026-11-05).
+  function policyPriorDisplay(metric: MacroMetric): string {
+    if (metric.value == null || metric.delta_value == null) {
+      return "";
+    }
+    const prior = metric.value - metric.delta_value;
+    if (metric.unit === "bps") {
+      return `${Math.round(prior)} bps`;
+    }
+    if (metric.unit === "pct") {
+      return `${prior.toFixed(2)}%`;
+    }
+    return formatNumber(prior);
   }
 
   function buildYieldRows(data: MacroSnapshot | null): SitrepMarketRow[] {
@@ -678,7 +695,7 @@
         ...metricRow(m),
         label: cleanYieldLabel(m.label),
         group: "",
-        secondary: m.display_value ?? "",
+        secondary: policyPriorDisplay(m),
         source: ""
       }));
     return [...curveRows, ...policyRows].slice(0, 10).map((row) => ({
@@ -1537,10 +1554,10 @@
   $: equityTapeState = equityRows.length
     ? ""
     : overview
-      ? `US EQUITY TAPE N/A / ${overview.freshness_label.toUpperCase()}`
+      ? `US equity tape N/A · ${sentenceCase(overview.freshness_label)}`
       : loading
-        ? "US EQUITY TAPE LOADING"
-        : "US EQUITY TAPE NOT LOADED";
+        ? "Loading US equity tape…"
+        : "US equity tape not loaded";
 </script>
 
 <section class="view">
@@ -1607,7 +1624,7 @@
   <div class="workspace-grid is-wide-rail">
     <div class="primary-column">
       <div class="market-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Worldwide Indices</span>
@@ -1620,7 +1637,7 @@
           <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>FX Pairs</span>
@@ -1633,7 +1650,7 @@
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("Chg", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("% chg", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Rates</span>
@@ -1646,7 +1663,7 @@
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Commodities</span>
@@ -1660,7 +1677,7 @@
         </article>
       </div>
 
-      <article class="panel tape-panel">
+      <article class="panel is-flush tape-panel">
         <div class="table-header">
           <div class="table-title">
             <span>What Changed</span>
@@ -1697,12 +1714,12 @@
               </div>
             {/each}
           {:else}
-            <p class="empty-state">LOAD MARKET CONTEXT TO POPULATE CHANGE TRIAGE.</p>
+            <p class="empty-state">Load market context to populate change triage.</p>
           {/if}
         </div>
       </article>
 
-      <article class="panel tape-panel">
+      <article class="panel is-flush tape-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Events &amp; Markets</span>
@@ -1739,7 +1756,7 @@
               </div>
             {/each}
           {:else}
-            <p class="empty-state">LOAD MACRO / PREDICTION / COMMODITY CONTEXT TO POPULATE EVENTS.</p>
+            <p class="empty-state">Load macro, prediction or commodity context to populate events.</p>
           {/if}
         </div>
       </article>
@@ -1747,7 +1764,7 @@
     </div>
 
     <aside class="support-column">
-      <article class="panel media-panel">
+      <article class="panel is-flush media-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Bloomberg TV</span>
@@ -1762,7 +1779,7 @@
           <video bind:this={bloombergVideo} title="Bloomberg Television live stream" controls muted playsinline preload="metadata"></video>
           {#if bloombergPlaybackStatus !== "ready"}
             <div class="video-state">
-              <strong>{bloombergPlaybackStatus === "loading" ? "LOADING BLOOMBERG TV" : "BLOOMBERG TV PLAYER UNAVAILABLE"}</strong>
+              <strong>{bloombergPlaybackStatus === "loading" ? "Loading Bloomberg TV…" : "Bloomberg TV player unavailable"}</strong>
               <span>{bloombergPlaybackMessage}</span>
               {#if bloombergPlaybackStatus !== "loading"}
                 <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Open Bloomberg Live</a>
@@ -1772,7 +1789,7 @@
         </div>
       </article>
 
-      <article class="panel table-panel news-panel">
+      <article class="panel is-flush table-panel news-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Market News</span>
@@ -1809,12 +1826,12 @@
               </div>
             {/each}
           {:else}
-            <p class="news-empty">NO NEWS LOADED.</p>
+            <p class="news-empty">No news loaded.</p>
           {/if}
         </div>
       </article>
 
-      <article class="panel tape-panel follow-up-panel">
+      <article class="panel is-flush tape-panel follow-up-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Follow-Ups</span>
@@ -1888,7 +1905,7 @@
         </div>
       </article>
 
-      <article class="panel provider-panel">
+      <article class="panel is-flush provider-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Provider Status</span>
@@ -1972,7 +1989,6 @@
   .tape-panel,
   .media-panel,
   .provider-panel {
-    padding: 0;
     overflow: hidden;
     gap: 0;
   }
@@ -2039,9 +2055,9 @@
     width: 20px;
     height: 20px;
     padding: 0;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
     color: var(--text-2);
     font-size: var(--text-sm);
     line-height: 1;
@@ -2059,7 +2075,7 @@
   }
 
   .reload-button:hover:not(:disabled) {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     color: var(--accent);
   }
 
@@ -2109,8 +2125,6 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    border-left: 1px solid var(--divider);
-    border-right: 1px solid var(--divider);
     position: relative;
   }
 
@@ -2139,16 +2153,16 @@
     align-items: baseline;
     gap: var(--space-3);
     padding: var(--space-3) var(--space-5);
-    border-right: 1px solid var(--divider);
     white-space: nowrap;
     cursor: pointer;
     font: inherit;
     color: inherit;
+    border-radius: var(--radius-control);
   }
 
   .strip-item:hover,
   .strip-item:focus-visible {
-    background: var(--bg-1);
+    background: var(--hover-bg);
   }
 
   .strip-item:focus-visible {
@@ -2210,7 +2224,6 @@
     display: inline-flex;
     align-items: center;
     padding: 0 var(--space-4);
-    border-left: 1px solid var(--divider);
   }
 
   .status-line b {
@@ -2272,7 +2285,6 @@
     appearance: none;
     background: transparent;
     border: 0;
-    border-left: 1px solid var(--divider);
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
@@ -2282,11 +2294,12 @@
     cursor: pointer;
     display: grid;
     place-items: center;
+    border-radius: var(--radius-control);
   }
 
   .tape-pin:hover,
   .tape-pin:focus-visible {
-    background: var(--bg-1);
+    background: var(--hover-bg);
     color: var(--accent);
   }
 
@@ -2325,15 +2338,15 @@
     align-items: center;
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
-    background: var(--bg-1);
+    background: var(--tint);
   }
 
   .follow-up-note-editor input {
     flex: 1;
     min-width: 0;
-    background: var(--bg-0);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--panel-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-0);
     font: inherit;
     font-size: var(--text-sm);
@@ -2342,9 +2355,9 @@
 
   .follow-up-note-editor button {
     appearance: none;
-    background: transparent;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
+    background: var(--button-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
     color: var(--text-2);
     font: inherit;
     font-family: var(--font-ui);
@@ -2356,7 +2369,7 @@
   }
 
   .follow-up-note-editor button:hover {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     color: var(--accent);
   }
 
@@ -2510,9 +2523,9 @@
   .news-chip {
     height: 20px;
     padding: 0 var(--space-2);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: transparent;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
     color: var(--accent);
     font: inherit;
     font-size: var(--text-xs);
@@ -2521,7 +2534,8 @@
 
   .news-chip:hover,
   .news-chip:focus-visible {
-    border-color: var(--accent);
+    background: var(--active-bg);
+    color: var(--text-0);
   }
 
   .news-source {

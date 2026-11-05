@@ -9,38 +9,36 @@
 <meta property="og:description" content="Thirteen research surfaces on one plane. Every value carries its source, and none of them can place an order.">
 <meta property="og:type" content="website">
 <link rel="icon" href="assets/img/mark.svg" type="image/svg+xml">
-<link rel="preload" href="assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="assets/fonts/jetbrainsmono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/instrument-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/instrument-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/css/site.css">
 </head>
 <body class="has-rail">
 <!--
   THESIS: Gamma's landing page is one research morning, timestamped on a ruled
   axis, refusing the category-default hero-plus-feature-cards arrangement.
-  OWN-WORLD: Gamma's own instrument palette (#070809 ground, #7aa6c8 accent,
-  semantic green/red/amber), Archivo condensed instrument caps for chrome,
-  JetBrains Mono for every number, hairline seams, square nested geometry, no
-  fill without a job.
+  OWN-WORLD: Gamma's own B′ "Tonal compact" look (see DESIGN.md): borderless
+  tonal sheets on a cool canvas, light and dark from the OS, one accent,
+  semantic green/red/amber for data only, Instrument Sans with tabular figures,
+  sentence-case labels, mono for code only, no fill without a job.
   STORY: A researcher sees the same day they would have had, hour by hour,
   proven by real screens; understands that breadth here is joined, not siloed;
   believes it because every value is stamped; clones the repo.
-  FIRST VIEWPORT: Ruled graticule ground; upper-left the thesis at display
-  scale with the primary action directly beneath; below it a live board that
-  actually ticks and shows its own provenance, MOCK badge honest in the bar.
+  FIRST VIEWPORT: A flat canvas; upper-left the thesis at display scale with
+  the primary action directly beneath; below it a live board on its own sheet
+  that actually ticks and shows its own provenance, Mock tag honest in the bar.
   FORM: The desk session — candidate 4 of my grounded list; seed 47a2e177.
   FINISH: unreviewed and undocumented is unfinished; this build ends with the
   finish review, the verdict, and DESIGN.md
 -->
 <a class="skip" href="#session">Skip to the session</a>
-<div class="graticule" aria-hidden="true"></div>
-<div class="grain" aria-hidden="true"></div>
 
 <header class="topbar">
   <a class="brand" href="index.html">
     <span class="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+      <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="currentColor"/></svg>
     </span>
-    <span class="brand-name">GAMMA</span>
+    <span class="brand-name">Gamma</span>
     <span class="brand-sub">Research Workspace</span>
   </a>
   <nav class="topnav" aria-label="Primary">
@@ -135,10 +133,13 @@
     <div class="sec-head reveal">
       <h2>One morning, tab by tab</h2>
       <p>
-        Every screen below is the real application running in mock mode — the same layout,
-        density and provenance you get with your own keys attached. Sample data is labelled
-        <span class="badge badge-mock">Mock</span> because Gamma never quietly swaps sample rows
-        in for a provider it could not reach.
+        Every screen below is the real application, captured on 5 November 2026. Macro,
+        Prediction Markets and Sealanes ran on live public data with no broker connected. The
+        rest ran in demo mode, because account data and licensed prices are not ours to
+        publish — though Sitrep and Fundamentals still read public rates and SEC filings. Each
+        figure is badged <span class="badge badge-live">Live</span> or
+        <span class="badge badge-mock">Mock</span>, as the app labels its own data: Gamma never
+        quietly swaps sample rows in for a provider it could not reach.
       </p>
     </div>
 
@@ -149,7 +150,7 @@
           <p class="moment-time"><b>07:02</b><span class="tabname">Sitrep</span></p>
           <h3>What moved while I was asleep?</h3>
           <p>
-            SITREP is the pinned Research home. One backend request composes equities, FX, yields,
+            Sitrep is the pinned Research home. One backend request composes equities, FX, yields,
             commodities, events, prediction markets and news into a single triage picture, and each
             panel keeps <strong>its own freshness, provenance and failure state</strong> — one dead
             provider degrades one panel, not the screen.
@@ -176,9 +177,9 @@
               <span class="right"><span class="badge badge-mock">Mock</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/sitrep.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's SITREP tab showing worldwide indices, FX pairs, rates, commodities, a what-changed panel, provider status table and follow-ups.">
-              <span class="mark-pt" style="left:83%;top:74%">1</span>
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/sitrep-light.png"><img src="assets/img/screens/sitrep.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Sitrep tab showing worldwide indices, FX pairs, rates, commodities, market news, a what-changed panel, follow-ups and a provider status table."></picture>
+              <span class="mark-pt" style="left:81%;top:63%">1</span>
             </div>
             <ul class="shot-legend">
               <li><b>1</b> Provider, state and age, per domain</li>
@@ -220,14 +221,14 @@
           <figure class="shot">
             <figcaption class="shot-bar">
               <span>Research · Macro · Snapshot</span>
-              <span class="right"><span class="badge badge-mock">Mock</span></span>
+              <span class="right"><span class="badge badge-live">Live</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/macro.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Macro tab: a what-matters-now row naming the biggest disagreement, policy expectations and next catalyst, above themed rows for growth, inflation, policy, curve shape, real yields, dollar and credit — each with coherence labels.">
-              <span class="mark-pt" style="left:30.5%;top:25%">1</span>
-              <span class="mark-pt" style="left:62.5%;top:25%">2</span>
-              <span class="mark-pt" style="left:11.5%;top:59%">3</span>
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/macro-light.png"><img src="assets/img/screens/macro.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Macro tab: a what-matters-now row naming the biggest disagreement, policy expectations and next catalyst, above themed rows for growth, inflation, policy, curve shape, real yields, dollar and credit — each with coherence labels."></picture>
+              <span class="mark-pt" style="left:34%;top:20.6%">1</span>
+              <span class="mark-pt" style="left:61%;top:20.8%">2</span>
+              <span class="mark-pt" style="left:16%;top:46.4%">3</span>
             </div>
             <ul class="shot-legend">
               <li><b>1</b> Coherence label — a Gamma heuristic, marked as one</li>
@@ -270,11 +271,11 @@
           <figure class="shot">
             <figcaption class="shot-bar">
               <span>Research · Commodities</span>
-              <span class="right"><span class="badge">EIA + FRED</span></span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/commodities.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Commodities tab with a KPI strip for price, curve shape, front spread, roll-yield proxy and inventory signal, alongside curve charts and market snapshot tables for energy and metals.">
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/commodities-light.png"><img src="assets/img/screens/commodities.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Commodities overview: a WTI term-structure chart against the previous curve, a momentum versus roll-yield scatter, a commodity matrix of energy and metals with curve state and basis, and regime rank bars."></picture>
             </div>
           </figure>
         </div>
@@ -308,11 +309,11 @@
           <figure class="shot">
             <figcaption class="shot-bar">
               <span>Research · Prediction Markets</span>
-              <span class="right"><span class="badge badge-mock">Mock</span></span>
+              <span class="right"><span class="badge badge-live">Live</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/prediction-markets.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Prediction Markets screener listing normalised contracts across Polymarket and Kalshi with probabilities, volume, liquidity, freshness state and Gamma research rank.">
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/prediction-markets-light.png"><img src="assets/img/screens/prediction-markets.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Prediction Markets screener listing normalised contracts across Polymarket and Kalshi with probabilities, volume, liquidity, freshness state and Gamma research rank."></picture>
             </div>
           </figure>
         </div>
@@ -353,8 +354,8 @@
               <span class="right"><span class="badge badge-mock">Mock</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/fundamentals.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Fundamentals tab showing a company overview with headline KPIs, filing provenance, peer basket and peer heatmap.">
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/fundamentals-light.png"><img src="assets/img/screens/fundamentals.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Fundamentals tab on Apple: the SEC profile with filing provenance, a price and valuation chart, a peer basket, a Bear, Base and Bull scenario summary and a peer heatmap."></picture>
             </div>
           </figure>
         </div>
@@ -389,14 +390,14 @@
           <figure class="shot">
             <figcaption class="shot-bar">
               <span>Portfolio · Options · Overview</span>
-              <span class="right"><span class="badge badge-mock">Sample</span></span>
+              <span class="right"><span class="badge badge-mock">Mock</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/options.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Options workspace for SPY: front ATM IV, back ATM IV, ATM strike, put/call open interest, implied move and max pain, above a front expiry chain, a payoff heatmap by price and remaining days, a front IV smile chart and a data-and-source panel.">
-              <span class="mark-pt" style="left:91.5%;top:13.6%">1</span>
-              <span class="mark-pt" style="left:33%;top:64%">2</span>
-              <span class="mark-pt" style="left:83%;top:32%">3</span>
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/options-light.png"><img src="assets/img/screens/options.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Options workspace for SPY: front ATM IV, back ATM IV, ATM strike, put/call open interest, implied move and max pain, above a front expiry chain, a payoff heatmap by price and remaining days, a front IV smile chart and a data-and-source panel."></picture>
+              <span class="mark-pt" style="left:86%;top:11.3%">1</span>
+              <span class="mark-pt" style="left:33%;top:57%">2</span>
+              <span class="mark-pt" style="left:78%;top:25%">3</span>
             </div>
             <ul class="shot-legend">
               <li><b>1</b> Provider named, never assumed</li>
@@ -433,12 +434,12 @@
         <div class="reveal">
           <figure class="shot">
             <figcaption class="shot-bar">
-              <span>Research · Risk · Overview</span>
+              <span>Portfolio · Risk · Overview</span>
               <span class="right"><span class="badge badge-mock">Mock</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/risk.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Risk workspace showing historical and parametric VaR, CVaR, annualised volatility, drawdown and contribution-to-risk tables for the active book.">
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/risk-light.png"><img src="assets/img/screens/risk.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Risk workspace on the demo book: cumulative return against the benchmark, a Monte Carlo path envelope and terminal distribution, rolling volatility, a drawdown strip, top risk contributors, concentration flags and a contribution table."></picture>
             </div>
           </figure>
         </div>
@@ -475,8 +476,8 @@
               <span class="right"><span class="badge badge-mock">Mock</span></span>
             </figcaption>
             <div class="shot-frame">
-              <img src="assets/img/screens/copilot.png" width="1920" height="1200" loading="lazy" decoding="async"
-                   alt="Gamma's Copilot tab as a chat workspace with a session sidebar, transcript and composer, plus a multi-select context picker for which loaded Gamma domains to ground on.">
+              <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/copilot-light.png"><img src="assets/img/screens/copilot.png" width="1920" height="1200" loading="lazy" decoding="async"
+                   alt="Gamma's Copilot tab as a chat workspace with a session sidebar, transcript and composer, plus a multi-select context picker for which loaded Gamma domains to ground on."></picture>
             </div>
           </figure>
         </div>
@@ -492,8 +493,8 @@
       <h2>The rest of the plane</h2>
       <p>
         Thirteen surfaces across two workspaces, reorderable, each with its own registered modes.
-        <code style="color:var(--accent-2)">Ctrl</code>+<code style="color:var(--accent-2)">1…N</code>
-        switches tabs; <code style="color:var(--accent-2)">Shift</code>+<code style="color:var(--accent-2)">1…N</code>
+        <code>Ctrl</code>+<code>1…N</code>
+        switches tabs; <code>Shift</code>+<code>1…N</code>
         switches modes inside one.
       </p>
     </div>
@@ -566,19 +567,19 @@
     <figure class="shot reveal" style="margin-top:var(--s8)">
       <figcaption class="shot-bar">
         <span>Research · Sealanes · Live Map</span>
-        <span class="right"><span class="badge">MapLibre + AISstream</span></span>
+        <span class="right"><span class="badge badge-live">Live</span></span>
       </figcaption>
       <div class="shot-frame">
-        <img src="assets/img/screens/sealanes.png" width="1920" height="1200" loading="lazy" decoding="async"
-             alt="Gamma's Sealanes live map: shipping lanes drawn across the Atlantic and Indian oceans with labelled chokepoints at the Suez Canal, Panama Canal and Bab el-Mandeb, and coloured vessel markers by type.">
-        <span class="mark-pt" style="left:87%;top:27.5%">1</span>
-        <span class="mark-pt" style="left:7.5%;top:53%">2</span>
-        <span class="mark-pt" style="left:94%;top:49.5%">3</span>
+        <picture><source media="(prefers-color-scheme: light)" srcset="assets/img/screens/sealanes-light.png"><img src="assets/img/screens/sealanes.png" width="1920" height="1200" loading="lazy" decoding="async"
+             alt="Gamma's Sealanes live map at zoom 3: shipping lanes across the Atlantic with labelled chokepoints at the Suez Canal, Panama Canal and Bab el-Mandeb, major ports, and a live AIS counter that draws vessels from zoom 4."></picture>
+        <span class="mark-pt" style="left:81%;top:30%">1</span>
+        <span class="mark-pt" style="left:14.6%;top:52%">2</span>
+        <span class="mark-pt" style="left:88.5%;top:7.9%">3</span>
       </div>
       <ul class="shot-legend">
         <li><b>1</b> Suez Canal chokepoint</li>
         <li><b>2</b> Panama Canal chokepoint</li>
-        <li><b>3</b> Tanker position from the live AIS sample</li>
+        <li><b>3</b> Live AIS counter; vessels draw from zoom 4</li>
       </ul>
     </figure>
   </div>
@@ -591,7 +592,7 @@
       <h2>The boundary is the product</h2>
       <p>
         Gamma is a research environment, not an execution platform. The read-only contract is exposed
-        by the API itself at <code style="color:var(--accent-2)">/system/read-only-boundary</code>,
+        by the API itself at <code>/system/read-only-boundary</code>,
         covering both the TWS operator lock and the app-side refusal to execute.
       </p>
     </div>
@@ -718,9 +719,9 @@
       <div>
         <a class="brand" href="index.html" style="margin-bottom:var(--s6)">
           <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="#d6e3ee"/></svg>
+            <svg viewBox="0 0 96 64" fill="none"><path d="M30 6H84V22H46V58H30V6Z" fill="currentColor"/></svg>
           </span>
-          <span class="brand-name">GAMMA</span>
+          <span class="brand-name">Gamma</span>
         </a>
         <p class="foot-blurb">
           A read-only market research workspace. Built as a FastAPI backend, a Svelte frontend and a
@@ -757,7 +758,7 @@
     </div>
     <div class="foot-legal">
       <span>Gamma is research software. It is not investment advice, and it does not execute trades.</span>
-      <span>Screens captured from the app in mock mode.</span>
+      <span>Screens captured from the app on 5 November 2026: live public data where badged Live, demo mode elsewhere.</span>
     </div>
   </div>
 </footer>

@@ -2,7 +2,23 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-10-21
+Last updated: 2026-11-05
+
+### Official guidance reviewed 2026-11-05 — Runs that die while assembling context (GUA-20261105-1)
+
+Fetched the current official [running agents](https://developers.openai.com/api/docs/guides/agents/running-agents) and [function calling](https://developers.openai.com/api/docs/guides/function-calling) guides directly (no Developer Docs connector was available in this session). Review date: **2026-11-05**. Relevant points:
+
+- Running agents names runtime and validation failures (max turns, guardrail exceptions, tool errors) as outcomes of a run and asks the application to wait for a stream to finish before treating a run as settled. It does not cover failures before the first model call; the application owns state, persistence and retries.
+- Function calling: the application executes calls and returns results, and the output string's format (including error codes) is the application's choice.
+
+Defect, found live on 2026-11-05: a Research Agent run with Prediction Markets in its context stayed "running" for good. The context builder called the wallet summary, Polymarket's retired Data API v1 answered 410 Gone, and `_execute_agent_run` caught only `ValueError` around the builder, so the worker thread died before any provider call and no terminal event was written.
+
+Decision: a context-assembly failure is an application outcome of the run, not a model or tool event.
+
+- Any exception from the builder ends the run with a `failed` terminal event and a message that names the domain and the error type. A `ValueError` keeps its own wording, as Gamma's explanation. The synchronous research-card path returns the same error result instead of a 500.
+- The agent and operator worker threads run under a guard that appends a `failed` terminal event if the worker ever dies unexpectedly; it is a no-op once the run is terminal.
+- Provider gaps inside a context degrade to warnings. The Polymarket wallet summary moves to Data API v2 (`/v2/trades`, `/v2/holders`, filtered by `condition`), and a failed trades or holders request leaves that half of the summary empty with a warning.
+- No change to Responses or Agents SDK responsibilities, tools, models, permissions or the read-only boundary. Covered by `tests/test_copilot.py` (stream failure, synchronous error, worker guard) and `tests/test_prediction_markets.py` (v2 parsing, degrade on 410). Live after the fix: the same Prediction Markets card completed in 15 s with wallet flow.
 
 ### Official guidance reviewed 2026-10-21 — Output budget, incomplete responses and trace hygiene (GUA-20261021-6, GUA-20261021-13)
 

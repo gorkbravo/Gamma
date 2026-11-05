@@ -685,8 +685,8 @@
   .block,
   .evidence,
   .event-row {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
+    background: var(--tint);
+    border-radius: var(--panel-radius);
   }
 
   .block {
@@ -797,12 +797,13 @@
   .metric-row span {
     min-height: 1.5rem;
     padding: 0 var(--space-2);
-    border: 1px solid var(--panel-border);
-    background: var(--surface-1);
+    border: 0;
+    background: var(--button-bg);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-xs);
     line-height: 1.45rem;
+    border-radius: var(--radius-pill);
   }
 
   .source-links button,
@@ -813,8 +814,8 @@
 
   .source-links button:hover,
   .evidence-title button:hover {
-    border-color: var(--accent);
     color: var(--text-0);
+    background: var(--active-bg);
   }
 
   .unresolved,
@@ -848,7 +849,6 @@
 
   .decision-list {
     display: grid;
-    border: 1px solid var(--divider);
   }
 
   .decision-list > div {
@@ -876,17 +876,17 @@
     display: grid;
     gap: var(--space-2);
     padding: var(--space-3);
-    border-left: 2px solid var(--panel-border);
-    background: var(--surface-1);
+    background: var(--panel-bg);
+    border-radius: var(--panel-radius);
   }
 
   .notice.warning,
   .confirmation {
-    border-left-color: var(--warning);
+    background: var(--warning-soft);
   }
 
   .notice.resolved {
-    border-left-color: var(--positive);
+    background: var(--positive-soft);
   }
 
   .notice.resolved strong {
@@ -919,7 +919,7 @@
 
   .sequence {
     color: var(--text-2);
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
     font-size: var(--text-xs);
   }
 
@@ -930,11 +930,7 @@
 
   .event-row.warning,
   .event-row.confirmation-needed {
-    border-left: 2px solid var(--warning);
-  }
-
-  .event-row.artifact {
-    border-left: 2px solid var(--accent);
+    background: var(--warning-soft);
   }
 
   details summary {
@@ -948,18 +944,17 @@
     margin: var(--space-2) 0 0;
     padding: var(--space-2);
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: var(--surface-0);
+    background: var(--panel-bg);
     color: var(--text-1);
     font: var(--text-xs)/var(--leading-normal) var(--font-code), monospace;
     white-space: pre-wrap;
+    border-radius: var(--radius-control);
   }
 
   dl {
     display: grid;
     grid-template-columns: minmax(8rem, 0.3fr) 1fr;
     margin: 0;
-    border: 1px solid var(--divider);
   }
 
   dt,
@@ -993,9 +988,9 @@
   .confirmation-actions button {
     min-height: 28px;
     padding: 0 var(--space-4);
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--button-bg);
     color: var(--text-1);
     cursor: pointer;
     font: inherit;
@@ -1004,12 +999,13 @@
   }
 
   .confirmation-actions .confirm-action {
-    background: var(--active-bg);
-    color: var(--text-0);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
   .confirmation-actions button:not(:disabled):hover {
-    background: var(--hover-bg);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
 
   .confirmation-actions button:disabled {
@@ -1030,16 +1026,6 @@
     margin-top: var(--space-2);
   }
 
-  .result-state {
-    border-left: 2px solid var(--panel-strong);
-  }
-
-  .result-state.error,
-  .result-state.provider_error,
-  .result-state.failed {
-    border-left-color: var(--negative);
-  }
-
   .result-state.error p,
   .result-state.provider_error p,
   .result-state.failed p {
@@ -1052,7 +1038,7 @@
   .result-state.cancelled,
   .result-state.timeout,
   .result-state.degraded {
-    border-left-color: var(--warning);
+    background: var(--warning-soft);
   }
 
   .evidence {
@@ -1109,11 +1095,12 @@
   .evidence-title button {
     min-height: 1.5rem;
     padding: 0 var(--space-2);
-    border: 1px solid var(--panel-border);
-    background: transparent;
+    border: 1px solid transparent;
+    background: var(--button-bg);
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-xs);
+    border-radius: var(--radius-control);
   }
 
   .provenance {

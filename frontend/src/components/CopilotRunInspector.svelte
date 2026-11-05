@@ -220,8 +220,8 @@
     min-width: 0;
     min-height: 0;
     overflow-y: auto;
-    border: 1px solid var(--panel-border);
     background: var(--panel-bg);
+    border-radius: var(--panel-radius);
   }
 
   header {
@@ -332,8 +332,8 @@
 
   .working-analysis {
     padding: var(--space-3);
-    border: 1px solid var(--panel-strong);
-    background: transparent;
+    background: var(--tint);
+    border-radius: var(--panel-radius);
   }
 
   .working-analysis.inactive {
@@ -374,10 +374,10 @@
   code {
     display: block;
     padding: var(--space-3);
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    background: var(--tint);
     color: var(--accent);
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
+    border-radius: var(--radius-control);
   }
 </style>

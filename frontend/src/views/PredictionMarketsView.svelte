@@ -777,7 +777,7 @@
       {
         id: "spread",
         label: "Spread",
-        color: "var(--chart-secondary)",
+        color: "var(--chart-primary)",
         type: "area" as const,
         data: pair.spread_series
           .map((point) => ({
@@ -803,7 +803,7 @@
     <div class="header-top">
       <span class="title">Prediction Markets</span>
       <span class="subtitle">{activeVenueLabel} · {statusLabel}</span>
-      {#if loading || historyLoading || compareLoading}<span class="loading-flag">LOADING...</span>{/if}
+      {#if loading || historyLoading || compareLoading}<span class="loading-flag">Loading…</span>{/if}
     </div>
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Prediction Markets modes">
@@ -843,7 +843,7 @@
         <div class="filter-row">
           <label class="grow">
             <span>Search</span>
-            <input class="form-control" bind:value={query} placeholder="Fed, election, inflation, semis..." on:keydown={handleSearchKeydown} />
+            <input class="form-control" bind:value={query} placeholder="Fed, election, inflation, semis…" on:keydown={handleSearchKeydown} />
           </label>
           <label>
             <span>Status</span>
@@ -939,7 +939,7 @@
         </div>
       </article>
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-scroll tall fills-viewport">
           <table class="data-table is-sticky is-nowrap is-compact is-body-text screener-table">
             <thead>
@@ -1037,10 +1037,10 @@
       </article>
 
       <div class="screener-foot">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Watchlist</span>
-            <small>{watchlist.length}/{savedResearch?.watchlist_limit ?? 0} saved{savedLoading ? " | SAVING..." : ""}</small>
+            <small>{watchlist.length}/{savedResearch?.watchlist_limit ?? 0} saved{savedLoading ? " · Saving…" : ""}</small>
           </div>
           {#if watchlist.length}
             <table class="data-table is-sticky is-nowrap is-compact is-body-text">
@@ -1085,7 +1085,7 @@
           {/if}
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Venue Status</span>
             <small>{screener?.warnings?.length ?? 0} notes</small>
@@ -1127,7 +1127,7 @@
   {:else if mode === "contract"}
     <div class="workspace-grid">
       <div class="primary-column">
-        <article class="panel chart-panel">
+        <article class="panel is-flush chart-panel">
           <div class="panel-header top-line">
             <div class="title-block">
               <p class="eyebrow">{detail?.event_title ?? "Prediction Markets"}</p>
@@ -1281,7 +1281,7 @@
         </article>
 
         {#if outcomeLadder.length > 1}
-          <article class="panel table-panel">
+          <article class="panel is-flush table-panel">
             <div class="table-header">
               <span>Outcome Ladder</span>
               <small>{outcomeLadder.length} outcomes</small>
@@ -1326,7 +1326,7 @@
         {/if}
 
         {#if eventBook && eventBook.legs.length > 1}
-          <article class="panel table-panel">
+          <article class="panel is-flush table-panel">
             <div class="table-header">
               <span>Event Book</span>
               <small>
@@ -1468,7 +1468,7 @@
           </article>
         {/if}
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Participant Flow</span>
             <small>{wallet?.participants.length ?? 0} rows</small>
@@ -1561,7 +1561,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Send To</span>
             <small>{crossDomainHandoffs.length} resolved targets</small>
@@ -1638,7 +1638,7 @@
           {/if}
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Book Depth</span>
             <small>read-only | ±{pct(depth?.depth_band ?? 0.05, 0)} band</small>
@@ -1704,7 +1704,7 @@
           {/if}
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Related</span>
             <small>{related?.related.length ?? 0} links</small>
@@ -1787,7 +1787,7 @@
       </article>
     {/if}
     <div class="compare-grid">
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Comparison Basket</span>
           <div class="header-actions">
@@ -1849,10 +1849,10 @@
       </article>
 
       {#if !workingAnalysis}
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Saved Sets</span>
-          <small>{namedSets.length}/{savedResearch?.comparison_set_limit ?? 0}{savedLoading ? " | SAVING..." : ""}</small>
+          <small>{namedSets.length}/{savedResearch?.comparison_set_limit ?? 0}{savedLoading ? " · Saving…" : ""}</small>
         </div>
         <div class="save-row">
           <input class="form-control"
@@ -1903,7 +1903,7 @@
 
       {/if}
 
-      <article class="panel chart-panel">
+      <article class="panel is-flush chart-panel">
         <div class="panel-header top-line">
           <div class="title-block">
             <p class="eyebrow">Aligned Probability</p>
@@ -1937,7 +1937,7 @@
       </article>
 
       {#if activeComparison?.basket}
-        <article class="panel basket-panel">
+        <article class="panel is-flush basket-panel">
           <div class="kpi-grid four">
             <article class="stat is-compact">
               <span>Legs</span>
@@ -1972,7 +1972,7 @@
         </article>
       {/if}
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Pair Analytics</span>
           <small>ranked by current dislocation</small>
@@ -2032,7 +2032,7 @@
       </article>
 
       {#if spreadSeries.length}
-        <article class="panel chart-panel">
+        <article class="panel is-flush chart-panel">
           <div class="panel-header">
             <span class="eyebrow">Widest Pair Spread</span>
             <small>{formatResolution(activeComparison?.effective_resolution_minutes)} bars</small>
@@ -2121,7 +2121,7 @@
         </div>
       </article>
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Reliability by Bucket</span>
           <small>{activeCurve?.label ?? "N/A"} | n={activeCurve?.sample_size ?? 0}</small>
@@ -2178,7 +2178,7 @@
         {/if}
       </article>
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Lead Times</span>
           <small>settlement price excluded</small>
@@ -2217,7 +2217,7 @@
         {/if}
       </article>
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <span>Sampled Contracts</span>
           <small
@@ -2407,11 +2407,6 @@
     gap: var(--space-4);
   }
 
-  .basket-panel,
-  .chart-panel {
-    padding: 0;
-  }
-
   .basket-panel .notes-list,
   .chart-panel .notes-list {
     padding: 0 var(--space-5) var(--space-5);
@@ -2435,7 +2430,6 @@
   .table-panel {
     display: grid;
     gap: 0;
-    padding: 0;
     align-content: start;
   }
 

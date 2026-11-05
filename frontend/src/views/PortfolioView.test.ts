@@ -244,9 +244,9 @@ describe("PortfolioView", () => {
       systemStatus: makeSystemStatus()
     });
 
-    expect(body).toContain("REFRESHING SNAPSHOT...");
+    expect(body).toContain("Refreshing snapshot…");
     expect(body).toContain("Last successful data remains visible.");
-    expect(body).toContain("RECALCULATING PERFORMANCE...");
+    expect(body).toContain("Recalculating performance…");
     expect(body).toContain("The current chart remains visible.");
     expect(body).toContain("123,456 USD");
     expect(body).toContain("AAPL");

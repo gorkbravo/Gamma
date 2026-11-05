@@ -20,7 +20,7 @@
   export let loading = false;
   export let loadingLabel = "Loading…";
   export let stale = false;
-  export let staleLabel = "STALE RESULTS | REFRESHING";
+  export let staleLabel = "Stale results · refreshing…";
   export let results: SearchDropdownItem[] = [];
   export let enterBehavior: "select-first" | "submit" = "submit";
   export let clearOnEscape = false;

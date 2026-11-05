@@ -346,8 +346,8 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    border: 1px solid var(--panel-border);
     background: var(--panel-bg);
+    border-radius: var(--panel-radius);
   }
 
   .panel-head,
@@ -400,12 +400,13 @@
   .artifact-actions button,
   .confirmation button,
   .text-action {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    background: var(--button-bg);
     color: var(--text-1);
     min-height: 1.75rem;
     padding: 0 var(--space-3);
     font-size: var(--text-xs);
+    border-radius: var(--radius-control);
   }
 
   .icon-button {
@@ -431,9 +432,9 @@
   select,
   textarea {
     width: 100%;
-    border: 1px solid var(--panel-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--tint);
     color: var(--text-0);
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
@@ -469,7 +470,8 @@
   .turn-list {
     max-height: 7rem;
     overflow-y: auto;
-    border: 1px solid var(--divider);
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .turn-option {
@@ -603,7 +605,7 @@
     margin: 0;
     color: var(--text-1);
     font: inherit;
-    font-family: var(--font-code), monospace;
+    font-family: var(--font-code);
     font-size: var(--text-sm);
     line-height: var(--leading-normal);
     white-space: pre-wrap;
@@ -624,8 +626,8 @@
     display: grid;
     gap: var(--space-3);
     padding: var(--space-3);
-    border: 1px solid var(--warning);
-    background: var(--bg-1);
+    background: var(--warning-soft);
+    border-radius: var(--panel-radius);
   }
 
   .confirmation p,

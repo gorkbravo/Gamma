@@ -1028,7 +1028,7 @@
         domain: definition.domain,
         label: definition.label,
         contextLabel: definition.unavailableLabel,
-        fingerprintLabel: "UNAVAILABLE",
+        fingerprintLabel: "Unavailable",
         freshnessLabel: null,
         warningLabel: definition.domain == null ? "Not wired" : "Context required",
         supported: false,
@@ -3443,9 +3443,9 @@
     min-height: 12rem;
     align-content: center;
     padding: var(--space-6);
-    border: 1px solid var(--panel-border);
-    background: var(--surface-0);
+    background: var(--panel-bg);
     color: var(--text-2);
+    border-radius: var(--panel-radius);
   }
 
   .view-load-state strong {

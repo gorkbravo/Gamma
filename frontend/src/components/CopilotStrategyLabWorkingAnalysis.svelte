@@ -71,9 +71,9 @@
   .working-analysis {
     display: grid;
     gap: var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
-    background: color-mix(in srgb, var(--accent) 4%, var(--bg-1));
+    background: var(--panel-bg);
     padding: var(--space-5);
+    border-radius: var(--panel-radius);
   }
 
   header {
@@ -86,23 +86,27 @@
   h3, p { margin: 0; }
   h3 { color: var(--text-0); font-size: var(--text-title); }
   .eyebrow, small { color: var(--text-2); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0; }
-  .temporary { color: var(--accent); border: 1px solid currentColor; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0; }
+  .temporary { color: var(--accent); padding: var(--space-1) var(--space-3); font-size: var(--text-xs); text-transform: var(--label-case); letter-spacing: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+  }
   .safety { color: var(--text-1); font-size: var(--text-sm); }
 
+  /* KPI strips: tinted blocks on one baseline (§8 KPI Strips), no dividers. */
   .assumptions, .metric-strip {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
-    border-block: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .assumptions > span, .metric-strip > span {
     display: grid;
     gap: var(--space-1);
-    padding: var(--space-3);
-    border-left: 1px solid var(--divider);
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-radius: var(--panel-radius);
+    background: var(--tint);
     min-width: 0;
   }
-  .assumptions > span:first-child, .metric-strip > span:first-child { border-left: 0; }
   strong { color: var(--text-0); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
   .table-wrap { overflow-x: auto; }
@@ -112,12 +116,9 @@
 
   @media (max-width: 980px) {
     .assumptions, .metric-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .assumptions > span:nth-child(4), .metric-strip > span:nth-child(4) { border-left: 0; }
   }
 
   @media (max-width: 640px) {
     .assumptions, .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .assumptions > span:nth-child(odd), .metric-strip > span:nth-child(odd) { border-left: 0; }
-    .assumptions > span:nth-child(4), .metric-strip > span:nth-child(4) { border-left: 1px solid var(--divider); }
   }
 </style>

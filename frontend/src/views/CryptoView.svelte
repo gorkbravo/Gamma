@@ -306,8 +306,8 @@
           {#if strongestNarrative} · {strongestNarrative.label} leads{/if}
         </span>
       {/if}
-      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
-      {#if portfolioLoading}<span class="loading-pill secondary-pill">Building basket</span>{/if}
+      {#if loading}<span class="tag accent">Refreshing</span>{/if}
+      {#if portfolioLoading}<span class="tag warning">Building basket</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -316,11 +316,11 @@
           <button class="mode-btn" class:selected={modeOption.id === mode} role="tab" aria-selected={modeOption.id === mode} type="button" on:click={() => (mode = modeOption.id)}>{modeOption.label}</button>
         {/each}
       </div>
-      <div class="headline-strip">
+      <div class="header-kpis">
         {#each headlineMetrics as metric}
-          <div class="headline-kpi">
-            <span class="headline-kpi-label">{metric.label}</span>
-            <strong class="headline-kpi-value">{metric.value}{#if metric.meta} <small class={`headline-kpi-meta ${metric.metaTone ?? ""}`}>· {metric.meta}</small>{/if}</strong>
+          <div class="header-kpi">
+            <span>{metric.label}</span>
+            <strong>{metric.value}{#if metric.meta} <small class={`headline-kpi-meta ${metric.metaTone ?? ""}`}>· {metric.meta}</small>{/if}</strong>
           </div>
         {/each}
       </div>
@@ -348,13 +348,13 @@
               <h3>Layer Treemap</h3>
             </div>
             <div class="panel-actions">
-              <button type="button" class="btn" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
+              <button type="button" class="btn" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading…" : "Run Screen"}</button>
               <button type="button" class="btn is-ghost" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
             </div>
           </div>
 
           <div class="screener-strip">
-            <label class="search-field filter-wide"><span>Search</span><input class="form-control is-large" bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
+            <label class="search-field filter-wide"><span>Search</span><input class="form-control is-large" bind:value={query} placeholder="bitcoin, solana, ai, defi…" on:keydown={handleSearchKeydown} /></label>
             <label><span>Narrative</span><select class="form-control is-large" bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
             <label><span>Sort</span><select class="form-control is-large" bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
             <label><span>Min Mcap</span><input class="form-control is-large" bind:value={minMarketCap} placeholder="1B" /></label>
@@ -421,7 +421,7 @@
               </article>
             </div>
 
-            <article class="panel table-panel">
+            <article class="panel is-flush table-panel">
               <div class="table-header">
                 <span>Tokens</span>
                 <small>{workspace?.tokens?.length ?? 0} tokens</small>
@@ -480,7 +480,7 @@
               </div>
             </article>
 
-            <article class="panel table-panel">
+            <article class="panel is-flush table-panel">
               <div class="table-header">
                 <span>Flow Proxy Leaders</span>
                 <small>Gamma turnover + move proxy</small>
@@ -828,7 +828,7 @@
         </article>
 
         <div class="detail-split">
-          <article class="panel table-panel">
+          <article class="panel is-flush table-panel">
             <div class="table-header">
               <span>Pool Tape</span>
               <small>{liquidity?.dominant_dex ?? "N/A"}</small>
@@ -901,7 +901,7 @@
             </div>
           </article>
 
-          <article class="panel table-panel">
+          <article class="panel is-flush table-panel">
             <div class="table-header">
               <span>Flow Leaderboard</span>
               <small>Turnover-led ranking</small>
@@ -991,7 +991,7 @@
 
             <div class="builder-actions">
               <button type="button" class="btn" on:click={normalizeSynthetic}>Normalize</button>
-              <button type="button" class="btn is-ghost" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
+              <button type="button" class="btn is-ghost" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building…" : "Build Basket"}</button>
               <button type="button" class="btn is-ghost" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
             </div>
 
@@ -1047,7 +1047,7 @@
           </article>
         {/if}
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <span>Tokens</span>
             <small>{workspace?.tokens?.length ?? 0} tokens</small>
@@ -1164,7 +1164,6 @@
   }
 
   .table-panel {
-    padding: 0;
     overflow: hidden;
     gap: 0;
   }
@@ -1215,7 +1214,6 @@
   .hero-controls,
   .header-badges,
   .badge-stack,
-  .headline-strip,
   .panel-actions {
     display: flex;
     gap: var(--space-4);
@@ -1228,7 +1226,6 @@
 
   .header-badges,
   .badge-stack,
-  .headline-strip,
   .builder-actions {
     flex-wrap: wrap;
   }
@@ -1250,23 +1247,6 @@
     font: inherit;
     font-family: var(--font-ui);
     font-size: var(--text-sm);
-  }
-
-  .loading-pill {
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: var(--accent-soft);
-    padding: var(--space-2) var(--space-4);
-    white-space: nowrap;
-  }
-
-  .secondary-pill {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 28%, transparent);
-    background: var(--warning-soft);
   }
 
   /* Fields are .form-control.is-large from primitives.css. */
@@ -1297,14 +1277,6 @@
     font-size: var(--text-xs);
   }
 
-  .headline-kpi-label {
-    color: var(--text-2);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    font-size: var(--text-xs);
-    line-height: 1.1;
-  }
-
   h3,
   p,
   small,
@@ -1316,29 +1288,9 @@
     font-size: var(--text-title);
   }
 
-  .header-panel .headline-strip {
-    gap: var(--space-3);
-  }
-
-  .header-panel .headline-kpi {
-    display: grid;
-    gap: 0.05rem;
-    padding: var(--space-1) var(--space-5);
-    border-right: 1px solid var(--divider);
-    border-left: 0;
-    min-width: 5.5rem;
-    text-align: left;
-  }
-
-  .header-panel .headline-kpi-value {
-    display: block;
-    color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    line-height: 1.15;
-  }
-
-  .header-panel .headline-kpi-value .headline-kpi-meta {
+  /* Headline KPIs are .header-kpis / .header-kpi from primitives.css; the
+     inline note after a value stays local. */
+  .header-kpi .headline-kpi-meta {
     color: var(--text-2);
     font-size: var(--text-2xs);
     font-weight: 400;
@@ -1346,27 +1298,9 @@
     line-height: 1.15;
   }
 
-  .header-panel .headline-kpi-value .headline-kpi-meta.positive { color: var(--positive); }
-  .header-panel .headline-kpi-value .headline-kpi-meta.negative { color: var(--negative); }
-  .header-panel .headline-kpi-value .headline-kpi-meta.warning { color: var(--warning); }
-
-  .headline-kpi {
-    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
-    border-left: 0;
-    text-align: right;
-    border-radius: var(--panel-radius);
-    background: var(--tint);
-  }
-
-  .headline-kpi:first-child {
-    border-left: 0;
-  }
-
-  .headline-kpi-value {
-    display: block;
-    font-size: var(--text-kpi);
-    line-height: 1.2;
-  }
+  .header-kpi .headline-kpi-meta.positive { color: var(--positive); }
+  .header-kpi .headline-kpi-meta.negative { color: var(--negative); }
+  .header-kpi .headline-kpi-meta.warning { color: var(--warning); }
 
   .headline-kpi-meta,
   .coverage-note,
@@ -1475,9 +1409,12 @@
     padding-top: var(--space-4);
   }
 
+  /* The track is minmax(0, 1fr) so an input's intrinsic width (about 190px)
+     does not hold a shrunken label open past the strip's edge (V6 gate). */
   .screener-strip label {
     flex: 1 1 7rem;
     min-width: 5rem;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .screener-strip .filter-wide {
@@ -1529,7 +1466,7 @@
   }
 
   .basket-card {
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
     border: 1px solid transparent;
     background: var(--tint);
     color: var(--text-0);
@@ -1597,8 +1534,11 @@
   }
 
   @media (max-width: 1180px) {
+    /* .detail-split.basket-empty is two classes deep, so it is listed too or
+       its 1.6fr/0.4fr split survives and runs past a phone window (V6d). */
     .workspace-grid,
     .detail-split,
+    .detail-split.basket-empty,
     .overview-packed {
       grid-template-columns: 1fr;
     }
@@ -1624,17 +1564,6 @@
       grid-template-columns: 1fr;
     }
 
-    .headline-kpi {
-      border-left: 0;
-      border-top: 1px solid var(--divider);
-      text-align: left;
-      padding-left: 0;
-    }
-
-    .headline-kpi:first-child {
-      border-top: 0;
-    }
-
     .kpi-grid,
     .field-grid {
       grid-template-columns: 1fr;
@@ -1651,7 +1580,6 @@
 
   /* Figures outside tables take the data role (tokens.css), so the Data
      figures setting reaches them while their labels stay on --font-ui. */
-  .headline-kpi-value,
   .focus-value,
   .focus-row strong,
   .meta-row strong {

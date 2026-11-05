@@ -42,7 +42,7 @@ from src.services.macro_adapters import (
     TreasuryCurveAdapter,
     USMacroEventsAdapter,
 )
-from src.utils.time import now_utc
+from src.utils.time import ensure_utc, now_utc
 
 
 logger = logging.getLogger(__name__)
@@ -652,7 +652,11 @@ MACRO_PREDICTION_QUERY_TERMS = {
     "US": {
         "growth": "US economy GDP payrolls unemployment jobs",
         "inflation": "US inflation CPI PCE prices",
-        "policy": "Fed FOMC rates cut hike policy",
+        # The six-word "Fed FOMC rates cut hike policy" matched only settled
+        # 2024-2025 FOMC markets on Polymarket (18 of 22, none open on
+        # 2026-11-05); "Fed interest rates" returns the open December and
+        # January meeting markets (GUA-20261105-2).
+        "policy": "Fed interest rates",
         "recession_risk": "US recession unemployment slowdown",
     },
     "EU": {
@@ -2635,7 +2639,17 @@ class MacroService:
             timeframe=timeframe,
         )
         linked: list[MacroLinkedPredictionMarket] = []
-        for market in result.markets[:3]:
+        # Only contracts still open and not past their end time can speak for
+        # upcoming policy; resolved 2025 FOMC markets drove an "Easier" read
+        # against a 78% December hike (GUA-20261105-2, live audit 2026-11-05).
+        current_time = ensure_utc(now_utc())
+        live_markets = [
+            market
+            for market in result.markets
+            if market.status == "open"
+            and (market.end_time is None or ensure_utc(market.end_time) > current_time)
+        ]
+        for market in live_markets[:3]:
             linked.append(
                 self._linked_prediction_market_record(
                     market,
@@ -2955,9 +2969,12 @@ class MacroService:
             if any(token in text for token in (" below ", " under ", " lower ", " cooler ", " fall ", " falling ", " decline ", " disinflation ")):
                 return -1
         if theme == "policy":
-            if any(token in text for token in (" hike ", " hikes ", " hold ", " higher ", " above ", " no cut ", " fewer cuts ", " hawkish ")):
+            # Venues word meeting markets as "increase/decrease interest rates by
+            # 25 bps" (Polymarket's Fed and ECB decision markets), which matched
+            # neither list and read as neutral.
+            if any(token in text for token in (" hike ", " hikes ", " hold ", " higher ", " above ", " no cut ", " fewer cuts ", " hawkish ", " increase ", " raise ", " raises ")):
                 return 1
-            if any(token in text for token in (" cut ", " cuts ", " lower ", " below ", " easing ", " dovish ")):
+            if any(token in text for token in (" cut ", " cuts ", " lower ", " below ", " easing ", " dovish ", " decrease ", " lowers ")):
                 return -1
         if theme == "growth":
             if any(token in text for token in (" soft landing ", " above ", " stronger ", " accelerate ", " expansion ", " payrolls beat ", " growth beats ")):

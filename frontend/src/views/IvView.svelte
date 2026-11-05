@@ -915,7 +915,7 @@
     </div>
   {:else if mode === "chain"}
     <div class="workspace-grid">
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <h3>Options Chain</h3>
           <select class="form-control" value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value} aria-label="Expiry">
@@ -1034,10 +1034,10 @@
             modelLoading={loading}
             onSurfaceModelChange={chooseSurfaceModel}
           />
-          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
+          {:else}<div class="chart-empty">Loading 3D surface…</div>{/if}
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <div class="table-header">
             <h3>Surface Grid</h3>
             {#if hoveredSurface && result}
@@ -1163,7 +1163,7 @@
     </div>
   {:else if mode === "realized_implied"}
     <div class="workspace-grid">
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="table-header">
           <h3>Realized vs IV</h3>
           <span class="tenor-note">
@@ -1230,7 +1230,7 @@
             formatValue={densityPct}
             emptyMessage="Load a max-depth surface to render the implied probability surface."
           />
-          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
+          {:else}<div class="chart-empty">Loading 3D surface…</div>{/if}
         </article>
 
         <article class="panel probability-slice-panel">
@@ -1733,7 +1733,6 @@
   }
 
   .table-panel {
-    padding: 0;
     overflow: hidden;
   }
 
@@ -1975,8 +1974,10 @@
     fill: color-mix(in srgb, var(--chart-primary) 9%, transparent);
   }
 
+  /* The selected range is a band of the same distribution, so it stays in
+     the primary hue at a stronger fill. */
   .prob-selected {
-    fill: color-mix(in srgb, var(--chart-secondary) 38%, transparent);
+    fill: color-mix(in srgb, var(--chart-primary) 24%, transparent);
   }
 
   .prob-line {

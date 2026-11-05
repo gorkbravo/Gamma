@@ -2214,10 +2214,15 @@ class PredictionMarketService:
         return True
 
     def _should_show_in_screener(self, row: PredictionMarketRecord, request: PredictionMarketScreenerRequest) -> bool:
-        freshness = row.freshness
-        if request.status != "open" or freshness is None:
+        if request.status != "open":
             return True
-        if freshness.is_broken:
+        # A venue search with a query also returns settled markets, so an "open"
+        # screen dropped nothing by status: resolved December 2025 FOMC markets
+        # reached Macro's linked policy contracts (GUA-20261105-2).
+        if row.status in {"resolved", "closed"}:
+            return False
+        freshness = row.freshness
+        if freshness is not None and freshness.is_broken:
             return False
         return True
 

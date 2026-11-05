@@ -174,9 +174,9 @@
     return Math.abs(value) > 0.55 ? "var(--text-0)" : "var(--text-1)";
   }
 
-  /* Cluster identity colours. The eighth has no token and stays a literal
-     (listed in the raw-colour exceptions). */
-  const CLUSTER_COLORS = ["--cat-1", "--cat-3", "--cat-2", "--negative-muted", "--data-cool", "--text-2", "--data-elevated", "rgb(87, 135, 176)"];
+  /* Cluster identity colours: clusters are categories, so the categorical
+     ramp (3:1 on the sheet in both themes). */
+  const CLUSTER_COLORS = ["--cat-1", "--cat-3", "--cat-2", "--cat-4", "--cat-5", "--cat-6", "--cat-7", "--cat-8"];
 
   function clusterColor(clusterId: number, alpha = 1) {
     const color = CLUSTER_COLORS[Math.abs(clusterId) % CLUSTER_COLORS.length];
@@ -680,7 +680,7 @@
   $: cumulativeChart = (() => {
     const rows: ChartSeries[] = [];
     const portfolio = cumulativeSeries(result?.portfolio_return_points ?? [], "portfolio", "Portfolio", "var(--chart-primary)");
-    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkLabel, "var(--chart-secondary)", "dashed");
+    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkLabel, "var(--chart-secondary)");
     if (portfolio) rows.push(portfolio);
     if (benchmark) rows.push(benchmark);
     return rows;
@@ -693,19 +693,19 @@
 
   $: rollingBetaChart = (() => {
     const data = rollingBeta(result?.portfolio_return_points ?? [], result?.benchmark_return_points ?? [], betaWindow);
-    return data.length ? [{ id: "rolling-beta", label: "Rolling Beta", color: "var(--chart-secondary)", type: "line", data }] : [];
+    return data.length ? [{ id: "rolling-beta", label: "Rolling Beta", color: "var(--chart-primary)", type: "line", data }] : [];
   })();
 
   $: drawdownChart = drawdownSeries(result?.portfolio_return_points ?? []);
   $: realizedReturns = result?.portfolio_return_points?.map((point) => point.value) ?? [];
 
   $: realizedMarkers = [
-    { label: "Hist VaR", value: riskBaseValue() ? -(result?.metrics.historical_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
-    { label: "Hist ES", value: riskBaseValue() ? -(result?.metrics.historical_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-secondary)" },
+    { label: "Hist VaR", value: riskBaseValue() ? -(result?.metrics.historical_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--warning)" },
+    { label: "Hist ES", value: riskBaseValue() ? -(result?.metrics.historical_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
   ];
 
   $: monteCarloMarkers = [
-    { label: "MC VaR", value: riskBaseValue() ? -(result?.metrics.monte_carlo_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-primary)" },
+    { label: "MC VaR", value: riskBaseValue() ? -(result?.metrics.monte_carlo_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--warning)" },
     { label: "MC ES", value: riskBaseValue() ? -(result?.metrics.monte_carlo_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
   ];
 
@@ -854,23 +854,23 @@
         <div class="primary-column">
         {#if result?.monte_carlo?.fan_percentiles}
           <div class="two-col">
-            <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={240} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
-            <article class="panel chart-panel">{@render PanelTitle("Forward Path Envelope")}<FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={240} emptyMessage="Monte Carlo fan chart unavailable" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={240} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("Forward Path Envelope")}<FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={240} emptyMessage="Monte Carlo fan chart unavailable" /></article>
           </div>
         {:else}
-          <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
         {/if}
         <div class="two-col">
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need at least 21 observations" /></article>
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Beta")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Need benchmark overlap for selected beta window" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need at least 21 observations" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Beta")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Need benchmark overlap for selected beta window" /></article>
         </div>
         {#if result?.monte_carlo?.terminal_returns}
           <div class="two-col">
-            <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={200} emptyMessage="Drawdown history unavailable" /></article>
-            <article class="panel chart-panel">{@render PanelTitle("MC Terminal Distribution")}<DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={200} emptyMessage="Monte Carlo distribution unavailable" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={200} emptyMessage="Drawdown history unavailable" /></article>
+            <article class="panel is-flush chart-panel">{@render PanelTitle("MC Terminal Distribution")}<DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={200} emptyMessage="Monte Carlo distribution unavailable" /></article>
           </div>
         {:else}
-          <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
         {/if}
         {@render RiskContributorsTable(workspace.riskContributors, workspace.contributionTailDays)}
         </div>
@@ -902,11 +902,11 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
-        <article class="panel chart-panel">{@render PanelTitle("Portfolio Equity Curve")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate equity curve" /></article>
-        <article class="panel chart-panel">{@render PanelTitle("Underwater Chart vs Benchmark")}<TimeSeriesChart series={drawdownChart} height={240} emptyMessage="Drawdown curve unavailable" /></article>
+        <article class="panel is-flush chart-panel">{@render PanelTitle("Portfolio Equity Curve")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate equity curve" /></article>
+        <article class="panel is-flush chart-panel">{@render PanelTitle("Underwater Chart vs Benchmark")}<TimeSeriesChart series={drawdownChart} height={240} emptyMessage="Drawdown curve unavailable" /></article>
         <div class="two-col">
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Downside Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need enough observations" /></article>
-          <article class="panel chart-panel">{@render PanelTitle("Return Distribution")}<DistributionChart values={realizedReturns} markers={realizedMarkers} height={220} emptyMessage="Return distribution unavailable" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Downside Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need enough observations" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Return Distribution")}<DistributionChart values={realizedReturns} markers={realizedMarkers} height={220} emptyMessage="Return distribution unavailable" /></article>
         </div>
         {@render DrawdownTable(workspace.drawdownEpisodes)}
         </div>
@@ -922,9 +922,9 @@
       <div class="workspace-grid">
         <div class="primary-column">
         <article class="panel dependency-panel">{@render PanelTitle("Dependency Network")}{@render DependencyNetwork(workspace.dependencyNetwork)}</article>
-        <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
+        <article class="panel is-flush heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
         <div class="two-col">
-          <article class="panel chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
           <article class="panel">{@render PanelTitle("Normal vs Stress Correlation")}{@render StressCompare(stressCorrelation)}</article>
         </div>
         {@render SimpleTable("Highest Correlated Pairs", ["Pair", "Corr", "Read"], workspace.correlatedPairs)}
@@ -962,7 +962,7 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
-          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot, workspace.frontierMessage)}</article>
+          <article class="panel is-flush chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot, workspace.frontierMessage)}</article>
           {@render RankPanel("Weight Changes Before / After", optimizationBars)}
           {@render CandidateTable(workspace.candidates)}
         </div>
@@ -1007,7 +1007,7 @@
 {/snippet}
 
 {#snippet SimpleTable(title: string, headers: string[], rows: RiskTableRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">{title}<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr>{#each headers as header}<th>{header}</th>{/each}</tr></thead>
@@ -1025,7 +1025,7 @@
 {/snippet}
 
 {#snippet HoldingsTable(rows: HoldingRiskRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Holdings<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Symbol</th><th>Name</th><th>Asset class</th><th>Weight</th><th>Market value</th><th>P&L</th><th>Vol</th><th>Beta</th><th>Risk contribution</th><th>Flag</th></tr></thead>
@@ -1039,7 +1039,7 @@
 {/snippet}
 
 {#snippet RiskContributorsTable(rows: RiskContributionRow[], tailDays: number | null)}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">
       Contribution Detail
       <span>{rows.length} rows{tailDays ? ` · ES over ${tailDays} worst days` : ""}</span>
@@ -1062,7 +1062,7 @@
 {/snippet}
 
 {#snippet ExposureTable(rows: ExposureBreakdownRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Sector/category</th><th>Weight</th><th>Vol contribution</th><th>Benchmark</th><th>Active</th><th>Label</th></tr></thead>
@@ -1072,7 +1072,7 @@
 {/snippet}
 
 {#snippet DrawdownTable(rows: DrawdownEpisode[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Start</th><th>Trough</th><th>Recovery</th><th>Depth</th><th>Duration</th><th>Benchmark DD</th><th>Main contributors</th></tr></thead>
@@ -1082,7 +1082,7 @@
 {/snippet}
 
 {#snippet StressEpisodeTable(rows: StressEpisodeRow[], selected: StressEpisodeRow | null, state: "idle" | "loading" | "ready", summary: string | null)}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">
       Historical Stress Replay
       <span>{state === "loading" ? "Loading…" : `${rows.filter((row) => row.bookReturn != null).length} / ${rows.length} covered`}</span>
@@ -1135,7 +1135,7 @@
 {/snippet}
 
 {#snippet StressLegTable(rows: StressLegRow[], selected: StressEpisodeRow | null)}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Position Impact<span>{selected ? `${selected.label} · ${selected.window}` : "No episode"}</span></header>
     <table class="data-table is-nowrap">
       <!-- Con patas compensadas el reparto es del P&L bruto, no de un neto ≈ 0 (GUA-20261027-6). -->
@@ -1161,7 +1161,7 @@
 {/snippet}
 
 {#snippet CandidateTable(rows: CandidateAllocationRow[])}
-  <article class="panel table-panel">
+  <article class="panel is-flush table-panel">
     <header class="panel-title table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
     <table class="data-table is-nowrap">
       <thead><tr><th>Symbol</th><th>Current weight</th><th>Proposed weight</th><th>Delta</th><th>Current risk</th><th>Proposed risk</th><th>Constraint</th></tr></thead>
@@ -1401,10 +1401,6 @@
             <rect x={FRONTIER_PAD.l} y={FRONTIER_PAD.t} width={plotW} height={plotH} />
           </clipPath>
         </defs>
-        {#each [0.25, 0.5, 0.75] as t}
-          <line class="grid" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t + t * plotH} x2={frontierW - FRONTIER_PAD.r} y2={FRONTIER_PAD.t + t * plotH} />
-          <line class="grid" x1={FRONTIER_PAD.l + t * plotW} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l + t * plotW} y2={frontierH - FRONTIER_PAD.b} />
-        {/each}
         {#if zeroReturnY != null}
           <line class="zero-return-line"
             x1={FRONTIER_PAD.l} y1={zeroReturnY}
@@ -1624,10 +1620,8 @@
      row count in a plain span that stays uppercase, unlike .header-meta. */
   .table-panel-header span { color: var(--text-2); font-weight: 400; font-size: var(--text-xs); }
 
-  /* Chart, heatmap, table panels: edge-to-edge content under a 26px header */
-  .table-panel,
-  .chart-panel,
-  .heatmap-panel { padding: 0; }
+  /* Chart, heatmap, table panels (.panel.is-flush): edge-to-edge content
+     under the 30px .panel-title */
   .table-panel { overflow: auto; }
   .chart-panel { gap: 0; }
 
@@ -1675,16 +1669,16 @@
     right: 0.5rem;
     display: flex;
     align-items: center;
-    gap: 1px;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
+    gap: var(--space-1);
+    background: var(--tint);
+    padding: var(--space-1);
+    border-radius: var(--panel-radius);
   }
   .dependency-controls button {
     width: 28px;
     height: 25px;
     border: 0;
-    border-right: 1px solid var(--divider);
-    border-radius: 0;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--text-1);
     font-size: var(--text-xs);
@@ -1693,14 +1687,12 @@
   }
   .dependency-controls button:last-child {
     width: 34px;
-    border-right: 0;
     font-size: var(--text-2xs);
   }
   .dependency-controls button:hover,
   .dependency-controls button:focus-visible {
-    background: var(--bg-3);
+    background: var(--hover-bg);
     color: var(--text-0);
-    outline: none;
   }
   .dependency-edge {
     stroke: var(--chart-primary);
@@ -1748,14 +1740,16 @@
   .dependency-tooltip {
     position: absolute;
     pointer-events: none;
-    background: var(--surface-2);
-    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
     padding: var(--space-3) var(--space-4);
     display: grid;
     gap: var(--space-1);
     min-width: 150px;
     font-size: var(--text-xs);
     z-index: 2;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
   .dependency-tooltip strong {
     color: var(--text-0);
@@ -1895,12 +1889,6 @@
     inset: 0;
     pointer-events: none;
   }
-  .grid {
-    stroke: var(--divider);
-    stroke-opacity: 0.36;
-    stroke-width: 1;
-    shape-rendering: crispEdges;
-  }
   .axis {
     stroke: var(--divider);
     stroke-width: 1;
@@ -1976,27 +1964,29 @@
     transform: translate(-50%, -100%);
     white-space: nowrap;
     pointer-events: none;
-    background: var(--bg-1);
-    border: 1px solid var(--divider);
+    background: var(--tint);
+    border-radius: var(--radius-control);
   }
-  .frontier-label.current { color: var(--chart-secondary); border-color: color-mix(in srgb, var(--chart-secondary) 40%, transparent); }
-  .frontier-label.candidate { color: var(--chart-primary); border-color: color-mix(in srgb, var(--chart-primary) 40%, transparent); }
-  .frontier-label.universe_candidate { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 40%, transparent); }
-  .frontier-label.cached_equity_candidate { color: var(--text-1); border-color: var(--divider); }
-  .frontier-label.risk_free { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 40%, transparent); }
-  .frontier-label.cached_equity_frontier { color: var(--chart-primary); border-color: color-mix(in srgb, var(--chart-primary) 40%, transparent); }
+  .frontier-label.current { color: var(--text-1); }
+  .frontier-label.candidate { color: var(--chart-primary); }
+  .frontier-label.universe_candidate { color: var(--positive); }
+  .frontier-label.cached_equity_candidate { color: var(--text-1); }
+  .frontier-label.risk_free { color: var(--positive); }
+  .frontier-label.cached_equity_frontier { color: var(--chart-primary); }
 
   .frontier-tooltip {
     position: absolute;
     pointer-events: none;
-    background: var(--surface-2);
-    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
     padding: var(--space-3) var(--space-4);
     display: grid;
     gap: var(--space-1);
     min-width: 150px;
     font-size: var(--text-xs);
     z-index: 2;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
   .frontier-tooltip strong { color: var(--text-0); font-size: var(--text-sm); font-weight: 600; }
   .frontier-tooltip span { color: var(--text-1); display: flex; justify-content: space-between; gap: var(--space-5); }

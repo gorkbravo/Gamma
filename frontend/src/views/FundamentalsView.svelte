@@ -716,11 +716,11 @@
       {#if currentCompany}
         <span class="subtitle">{currentCompany.name} ({currentCompany.ticker}){currentCompany.exchange ? ` · ${currentCompany.exchange}` : ""}</span>
       {/if}
-      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if loading}<span class="tag accent">Refreshing</span>{/if}
       {#if searchLoading}
-        <span class:secondary-pill={searchHasStaleResults} class="loading-pill">{searchHasStaleResults ? "Search Refresh" : "Searching"}</span>
+        <span class="tag {searchHasStaleResults ? 'warning' : 'accent'}">{searchHasStaleResults ? "Refreshing search…" : "Searching…"}</span>
       {/if}
-      {#if saving}<span class="loading-pill secondary-pill">Saving</span>{/if}
+      {#if saving}<span class="tag warning">Saving</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -731,11 +731,11 @@
           </button>
         {/each}
       </div>
-      <div class="headline-strip">
+      <div class="header-kpis">
         {#each headlineStripMetrics as metric}
-          <div class="headline-kpi">
-            <span class="headline-kpi-label">{metric.label}</span>
-            <strong class="headline-kpi-value" class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
+          <div class="header-kpi">
+            <span>{metric.label}</span>
+            <strong class:absent={metric.display_value == null}>{metric.display_value ?? "N/A"}</strong>
           </div>
         {/each}
       </div>
@@ -762,7 +762,7 @@
           </div>
           <SearchDropdown
             bind:value={searchQuery}
-            placeholder="AAPL, Microsoft, NVDA..."
+            placeholder="AAPL, Microsoft, NVDA…"
             ariaLabel="Company search"
             emptyLabel={searchEmptyLabel}
             loading={searchLoading}
@@ -773,7 +773,7 @@
             on:select={(event) => chooseCompany(String(event.detail.id))}
           />
         </div>
-        <button type="button" class="btn" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching..." : "Run Search"}</button>
+        <button type="button" class="btn" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching…" : "Run Search"}</button>
         <button type="button" class="btn is-ghost" on:click={() => runSearch(true)} disabled={loading || searchLoading}>Refresh Search</button>
         {#if currentCompany}
           <button type="button" class="btn is-ghost" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
@@ -970,7 +970,7 @@
               </button>
             </div>
             <button type="button" class="btn is-ghost" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
-              {saving ? "Saving..." : "Save Basket"}
+              {saving ? "Saving…" : "Save Basket"}
             </button>
           </div>
 
@@ -1131,7 +1131,7 @@
               </button>
             </div>
             <button type="button" class="btn is-ghost" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
-              {saving ? "Saving..." : "Save Basket"}
+              {saving ? "Saving…" : "Save Basket"}
             </button>
           </div>
         </div>
@@ -1314,7 +1314,7 @@
         </article>
       </div>
 
-      <article class="panel table-panel">
+      <article class="panel is-flush table-panel">
         <div class="panel-header">
           <div>
             <p class="eyebrow">Statement Viewer</p>
@@ -1487,8 +1487,8 @@
             <h3>Bear / Base / Bull</h3>
           </div>
           <div class="panel-actions">
-            {#if dcfDirty}<span class="dirty-pill">Pending recalculation</span>{/if}
-            <button type="button" class="btn" on:click={saveDcfDraft} disabled={!dcfDirty || saving || !dcfModel}>{saving ? "Saving..." : "Recalculate + Save"}</button>
+            {#if dcfDirty}<span class="tag warning">Pending recalculation</span>{/if}
+            <button type="button" class="btn" on:click={saveDcfDraft} disabled={!dcfDirty || saving || !dcfModel}>{saving ? "Saving…" : "Recalculate + Save"}</button>
           </div>
         </div>
 
@@ -1687,7 +1687,7 @@
           </div>
           <div class="panel-actions snapshot-actions">
             <input class="form-control" bind:value={snapshotName} placeholder="Snapshot name" aria-label="DCF snapshot name" />
-            <button type="button" class="btn is-ghost" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving..." : "Save Snapshot"}</button>
+            <button type="button" class="btn is-ghost" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving…" : "Save Snapshot"}</button>
           </div>
         </div>
 
@@ -2288,10 +2288,17 @@
     line-height: 1.45;
   }
 
-  /* Panels whose primary content is a single table fill edge-to-edge:
-     the panel border is the table's container, no inner frame. */
+  /* Panels whose primary content is a single table fill edge-to-edge, like
+     .panel.is-flush: the sheet's edge is the table's edge. The statement
+     viewer opts in with is-flush; the other table panels are found by their
+     structure (a header, then the table as the last child), because their
+     headers carry an eyebrow, a title and controls. Header rows keep the
+     .panel-title geometry: 30px and no rule beneath. */
   .panel.table-panel,
   .panel:has(> .panel-header + .table-wrap:last-child) {
+    /* One explicit shrinkable track: the implicit auto column took the
+       header's min-content and held the sheet open past a phone window. */
+    grid-template-columns: minmax(0, 1fr);
     padding: 0;
     gap: 0;
   }
@@ -2299,14 +2306,7 @@
   .panel.table-panel > .panel-header,
   .panel:has(> .panel-header + .table-wrap:last-child) > .panel-header {
     padding: var(--space-2) var(--space-5);
-    border-bottom: 1px solid var(--divider);
-    min-height: 26px;
-  }
-
-  .panel.table-panel > .table-wrap,
-  .panel:has(> .panel-header + .table-wrap:last-child) > .table-wrap {
-    border: 0;
-    background: transparent;
+    min-height: 30px;
   }
 
   .headline-title-row,
@@ -2314,7 +2314,6 @@
   .panel-actions,
   .search-actions,
   .search-strip,
-  .headline-strip,
   .scenario-strip {
     display: flex;
     gap: var(--space-4);
@@ -2402,7 +2401,6 @@
 
   .headline-title-row,
   .search-actions,
-  .headline-strip,
   .search-strip,
   .scenario-strip {
     flex-wrap: wrap;
@@ -2420,20 +2418,6 @@
     color: var(--text-2);
   }
 
-  .dirty-pill {
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
-    color: var(--text-1);
-    padding: var(--space-1) var(--space-4);
-    font-size: var(--text-sm);
-    white-space: nowrap;
-  }
-
-  .dirty-pill {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 35%, var(--panel-strong));
-  }
-
   .compact-bar {
     grid-template-columns: repeat(2, auto);
   }
@@ -2447,14 +2431,22 @@
     flex-wrap: wrap;
   }
 
+  /* The ticker field shrinks and the row wraps, so Save Basket stays inside
+     the rail instead of clipping past it (V6d). */
   .peer-manual-control {
     display: inline-flex;
     align-items: stretch;
-    min-width: min(18rem, 100%);
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .builder-actions:has(> .peer-manual-control) {
+    flex-wrap: wrap;
   }
 
   .peer-manual-control input {
-    min-width: 10rem;
+    flex: 1 1 auto;
+    min-width: 0;
     min-height: 1.65rem;
     padding: var(--space-2) var(--space-4);
   }
@@ -2491,7 +2483,7 @@
   /* Scenario cards show the implied value and upside, so they keep the
      figures font. */
   .scenario-card {
-    font-family: var(--font-num), monospace;
+    font-family: var(--font-num);
     display: grid;
     gap: var(--space-1);
     text-align: left;
@@ -2503,23 +2495,6 @@
 
   .scenario-card strong {
     font-size: var(--text-base);
-  }
-
-  .loading-pill {
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-    background: var(--accent-soft);
-    padding: var(--space-2) var(--space-4);
-    white-space: nowrap;
-  }
-
-  .secondary-pill {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 28%, transparent);
-    background: var(--warning-soft);
   }
 
   label,
@@ -2791,14 +2766,6 @@
     font-size: var(--text-xs);
   }
 
-  .headline-kpi-label {
-    color: var(--text-2);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
-    font-size: var(--text-xs);
-    line-height: 1.1;
-  }
-
   h3,
   p,
   small,
@@ -2809,27 +2776,6 @@
   h3 {
     font-size: var(--text-title);
     font-weight: 600;
-  }
-
-  .headline-strip {
-    border-left: 1px solid var(--divider);
-  }
-
-  .headline-kpi {
-    display: grid;
-    gap: 0.05rem;
-    padding: var(--space-1) var(--space-5);
-    border-right: 1px solid var(--divider);
-    min-width: 5.5rem;
-    text-align: left;
-  }
-
-  .headline-kpi-value {
-    display: block;
-    color: var(--text-0);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    line-height: 1.15;
   }
 
   .profile-grid {
@@ -2970,8 +2916,8 @@
     gap: var(--space-5);
     margin-top: var(--space-5);
     padding: var(--space-5) var(--space-5);
-    border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--panel-border));
-    background: color-mix(in srgb, var(--warning) 7%, var(--surface-0));
+    background: var(--tint);
+    border-radius: var(--panel-radius);
   }
 
   .decision-gate strong {
@@ -3035,18 +2981,15 @@
   .terminal-framing {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    border-block: 1px solid var(--divider);
+    gap: var(--space-3);
   }
 
   .terminal-framing > div {
     display: grid;
     gap: var(--space-1);
-    padding: var(--space-3) var(--space-5);
-    border-left: 1px solid var(--divider);
-  }
-
-  .terminal-framing > div:first-child {
-    border-left: 0;
+    padding: var(--space-1) calc(var(--space-4) + var(--space-1));
+    border-radius: var(--panel-radius);
+    background: var(--tint);
   }
 
   .terminal-framing span {
@@ -3059,8 +3002,7 @@
   .terminal-framing p {
     grid-column: 1 / -1;
     margin: 0;
-    padding: var(--space-3) var(--space-5);
-    border-top: 1px solid var(--divider);
+    padding: 0;
     color: var(--text-2);
     font-size: var(--text-xs);
   }
@@ -3250,6 +3192,7 @@
     .header-top,
     .mode-kpi-row,
     .panel-header,
+    .panel-actions,
     .search-actions,
     .search-strip {
       flex-direction: column;
@@ -3261,17 +3204,6 @@
       flex: none;
       width: 100%;
       max-width: none;
-    }
-
-    .headline-kpi {
-      border-left: 0;
-      border-top: 1px solid var(--divider);
-      text-align: left;
-      padding-left: 0;
-    }
-
-    .headline-kpi:first-child {
-      border-top: 0;
     }
 
     .mode-bar,

@@ -60,8 +60,18 @@
   ];
 
   let selectedInstrumentId = "wti";
-  const scatterBounds = { left: 22, right: 342, top: 9, bottom: 92 };
-  const scatterGridFractions = [0.25, 0.5, 0.75];
+  // The scatter is drawn in pixels of its shell (measured below), so text keeps
+  // its token size. It used a fixed 360x110 viewBox stretched with
+  // preserveAspectRatio="none", which distorted every label and clipped the
+  // vertical axis title at wide windows (V6 live audit).
+  let scatterWidth = 360;
+  let scatterHeight = 220;
+  $: scatterBounds = {
+    left: 30,
+    right: Math.max(scatterWidth - 12, 60),
+    top: 22,
+    bottom: Math.max(scatterHeight - 28, 50)
+  };
   const macroDriverSeries = ["us-dollar-broad", "us-real-10y-yield"];
   const requestedMacroDrivers = new Set<string>();
 
@@ -107,7 +117,7 @@
   $: largestMover = findLargestMover(workspace?.market_summaries ?? []);
   $: strongestRoll = findStrongestRoll(workspace?.curves ?? [], workspace?.market_summaries ?? []);
   $: inventoryOutlier = findInventoryOutlier(workspace?.inventories ?? []);
-  $: scatterState = buildScatterState(workspace);
+  $: scatterState = buildScatterState(workspace, scatterBounds);
   $: backwardationRows = overview?.rankings
     ? buildRankRowsFromOverview(overview.rankings.strongest_backwardation, "positive")
     : buildBackwardationRows(workspace?.curves ?? [], workspace?.market_summaries ?? []);
@@ -350,7 +360,7 @@
   }
 
   function priceHistoryEmptyMessage(history: CommodityPriceHistory | null) {
-    return history?.warnings?.[0] ?? "CHART UNAVAILABLE";
+    return history?.warnings?.[0] ?? "Chart unavailable";
   }
 
   function buildCurveSeries(curve: CommodityCurveSnapshot | null): ChartSeries[] {
@@ -527,7 +537,7 @@
       { id: "supply", title: "Supply", categories: ["production", "imports", "refinery"], color: "var(--positive)" },
       { id: "demand", title: "Demand", categories: ["demand", "exports"], color: "var(--warning)" }
     ];
-    const colorPalette = ["var(--chart-primary)", "var(--chart-secondary)", "var(--positive)", "var(--warning)", "var(--negative)"];
+    const colorPalette = ["var(--cat-1)", "var(--cat-5)", "var(--cat-6)", "var(--cat-3)", "var(--cat-7)"];
     return buckets
       .map((bucket) => {
         const inBucket = seriesRows.filter((series) =>
@@ -1104,7 +1114,7 @@
       .sort((left, right) => Math.abs((right.seasonal_percentile ?? 50) - 50) - Math.abs((left.seasonal_percentile ?? 50) - 50))[0] ?? null;
   }
 
-  function buildScatterState(data: CommodityWorkspaceResponse | null) {
+  function buildScatterState(data: CommodityWorkspaceResponse | null, bounds: typeof scatterBounds) {
     const backendPoints = data?.overview?.scatter?.points ?? [];
     if (backendPoints.length) {
       return scaleScatterPoints(
@@ -1115,7 +1125,8 @@
           family: point.family,
           x: point.x_value,
           y: point.y_value
-        }))
+        })),
+        bounds
       );
     }
     const summaries = data?.market_summaries ?? [];
@@ -1142,10 +1153,10 @@
       })
       .filter((point): point is { id: string; symbol: string; name: string; family: string; x: number; y: number } => point != null);
 
-    return scaleScatterPoints(raw);
+    return scaleScatterPoints(raw, bounds);
   }
 
-  function scaleScatterPoints(raw: Array<{ id: string; symbol: string; name: string; family: string; x: number; y: number }>) {
+  function scaleScatterPoints(raw: Array<{ id: string; symbol: string; name: string; family: string; x: number; y: number }>, bounds: typeof scatterBounds) {
     if (!raw.length) {
       return { points: [], zeroX: 50, zeroY: 50, xMin: -1, xMax: 1, yMin: -1, yMax: 1 };
     }
@@ -1158,7 +1169,7 @@
     const xMax = xExtent;
     const yMin = -yExtent;
     const yMax = yExtent;
-    const { left, right, top, bottom } = scatterBounds;
+    const { left, right, top, bottom } = bounds;
     const scaleX = (value: number) => left + ((value - xMin) / (xMax - xMin || 1)) * (right - left);
     const scaleY = (value: number) => bottom - ((value - yMin) / (yMax - yMin || 1)) * (bottom - top);
     return {
@@ -1314,14 +1325,6 @@
       });
   }
 
-  function scatterGridX(fraction: number) {
-    return scatterBounds.left + (scatterBounds.right - scatterBounds.left) * fraction;
-  }
-
-  function scatterGridY(fraction: number) {
-    return scatterBounds.top + (scatterBounds.bottom - scatterBounds.top) * fraction;
-  }
-
   function curveTone(value: string | null | undefined) {
     const normalized = (value ?? "").toLowerCase();
     if (normalized.includes("backward")) return "positive";
@@ -1389,7 +1392,7 @@
       {#if workspace}
         <span class="subtitle">{workspace.coverage.provider_label} | {providerMixLabel} | as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</span>
       {/if}
-      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if loading}<span class="tag accent">Refreshing</span>{/if}
       {#if workspace && selectedInstrument}
         <div class="handoff-actions" aria-label="Strategy Lab commodity handoff actions">
           <button
@@ -1480,7 +1483,7 @@
     {#if mode === "overview"}
       <section class="overview-grid">
         <div class="overview-top">
-        <article class="panel table-panel matrix-panel matrix-cell">
+        <article class="panel is-flush table-panel matrix-panel matrix-cell">
           <header class="panel-title">
             <span>Commodity Matrix</span>
             <span class="header-meta">{overviewRows.length} markets · click row to drill</span>
@@ -1543,7 +1546,7 @@
         </article>
 
         <div class="left-stack">
-        <article class="panel chart-panel term-cell">
+        <article class="panel is-flush chart-panel term-cell">
           <header class="panel-title">
             <span>Term Structure Stack</span>
             <span class="header-meta">
@@ -1568,31 +1571,29 @@
               <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={220} emptyMessage="NO CURVE NODES" showLegend={true} />
+          <TimeSeriesChart series={curveSeries} height={220} emptyMessage="No curve nodes" showLegend={true} />
         </article>
 
-        <article class="panel scatter-panel scatter-cell">
+        <article class="panel is-flush scatter-panel scatter-cell">
           <header class="panel-title">
             <span>Momentum / Roll Scatter</span>
           </header>
           {#if scatterState.points.length}
             <div class="scatter-shell" bind:this={scatterShellEl}
+                 bind:clientWidth={scatterWidth}
+                 bind:clientHeight={scatterHeight}
                  role="presentation"
                  on:mousemove={handleScatterMouseMove}
                  on:mouseleave={() => tooltipPoint = null}>
-              <svg viewBox="0 0 360 110" preserveAspectRatio="none" role="img" aria-label="Commodity momentum versus roll yield scatter plot">
-                {#each scatterGridFractions as fraction}
-                  <line class="grid-line" x1={scatterGridX(fraction)} x2={scatterGridX(fraction)} y1={scatterBounds.top} y2={scatterBounds.bottom} />
-                  <line class="grid-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterGridY(fraction)} y2={scatterGridY(fraction)} />
-                {/each}
+              <svg viewBox={`0 0 ${scatterWidth} ${scatterHeight}`} role="img" aria-label="Commodity momentum versus roll yield scatter plot">
                 <line class="axis-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterState.zeroY} y2={scatterState.zeroY} />
                 <line class="axis-line" x1={scatterState.zeroX} x2={scatterState.zeroX} y1={scatterBounds.top} y2={scatterBounds.bottom} />
-                <text class="quadrant-label" x="20" y="14">Carry / weak momentum</text>
-                <text class="quadrant-label" x="340" y="14" text-anchor="end">Backwardation + momentum</text>
-                <text class="quadrant-label" x="20" y="89">Contango / weak</text>
-                <text class="quadrant-label" x="340" y="89" text-anchor="end">Momentum / carry drag</text>
-                <text class="axis-label" x="180" y="107">{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"}</text>
-                <text class="axis-label vertical" x="-55" y="6">{overview?.scatter?.y_methodology_label ?? "Roll proxy"}</text>
+                <text class="quadrant-label" x={scatterBounds.left + 4} y={scatterBounds.top - 8}>Carry / weak momentum</text>
+                <text class="quadrant-label" x={scatterBounds.right} y={scatterBounds.top - 8} text-anchor="end">Backwardation + momentum</text>
+                <text class="quadrant-label" x={scatterBounds.left + 4} y={scatterBounds.bottom - 6}>Contango / weak</text>
+                <text class="quadrant-label" x={scatterBounds.right} y={scatterBounds.bottom - 6} text-anchor="end">Momentum / carry drag</text>
+                <text class="axis-label" x={(scatterBounds.left + scatterBounds.right) / 2} y={scatterHeight - 8}>{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"}</text>
+                <text class="axis-label" transform={`translate(12, ${(scatterBounds.top + scatterBounds.bottom) / 2}) rotate(-90)`}>{overview?.scatter?.y_methodology_label ?? "Roll proxy"}</text>
                 {#each scatterState.points as point}
                   {@const hovered = tooltipPoint?.id === point.id}
                   <g class="scatter-point {point.family}"
@@ -1623,7 +1624,7 @@
         </div>
         </div>
 
-        <article class="panel table-panel rankers-panel span-4">
+        <article class="panel is-flush table-panel rankers-panel span-4">
           <header class="panel-title">
             <span>Market Regime Ranks</span>
           </header>
@@ -1727,7 +1728,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel span-2">
+        <article class="panel is-flush table-panel span-2">
           <header class="panel-title">
             <span>Event Tape</span>
             <span class="header-meta">{workspace.events.length} events</span>
@@ -1758,7 +1759,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel span-2">
+        <article class="panel is-flush table-panel span-2">
           <header class="panel-title">
             <span>Cross-Domain Links</span>
             <span class="header-meta">{workspace.cross_domain_links.length} links</span>
@@ -1930,7 +1931,7 @@
 
     {#if mode === "energy" || mode === "metals"}
       <section class="split">
-        <article class="panel chart-panel">
+        <article class="panel is-flush chart-panel">
           <header class="panel-title">
             <span>{selectedInstrument?.name ?? "Price"} · Price History</span>
             <span class="header-meta">{historyPointCount ? `${historyPointCount} obs · ${formatDate(latestHistoryDate)}` : "—"}</span>
@@ -1941,7 +1942,7 @@
           {/if}
         </article>
 
-        <article class="panel table-panel snapshot-panel">
+        <article class="panel is-flush table-panel snapshot-panel">
           <header class="panel-title">
             <span>{mode === "metals" ? "Metals Snapshot" : "Energy Snapshot"}</span>
             <span class="header-meta">{visibleSummaries.length} markets</span>
@@ -2002,7 +2003,7 @@
     <!-- 1. Forward curve + curve nodes (top of curve-bearing modes) -->
     {#if mode === "energy" || mode === "metals" || mode === "curves_spreads"}
       <section class="split">
-        <article class="panel chart-panel">
+        <article class="panel is-flush chart-panel">
           <header class="panel-title">
             <span>{selectedInstrument?.symbol ?? "Curve"} · Forward Curve</span>
             <span class="header-meta" class:absent={selectedCurve?.shape_label == null}>{selectedCurve?.shape_label ?? "N/A"}</span>
@@ -2021,10 +2022,10 @@
               <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)} class:absent={formatPct(selectedCurve?.roll_yield_proxy_pct, false) === "N/A"}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
+          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="No curve nodes" showLegend={true} />
         </article>
 
-        <article class="panel table-panel curve-nodes-panel">
+        <article class="panel is-flush table-panel curve-nodes-panel">
           <header class="panel-title">
             <span>Curve Nodes</span>
             <span class="header-meta">{selectedCurve?.nodes.length ?? 0} contracts</span>
@@ -2064,7 +2065,7 @@
     <!-- 2. Energy curve-support: Crack Spread Matrix + Term Structure Heatmap -->
     {#if mode === "energy"}
       <section class="curve-support-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Crack Spread Matrix</span>
             <span class="header-meta">{crackMatrixRows.length} rows</span>
@@ -2105,7 +2106,7 @@
           </div>
         </article>
 
-        <article class="panel rows-panel">
+        <article class="panel is-flush rows-panel">
           <header class="panel-title">
             <span>Term Structure Heatmap</span>
             <span class="header-meta">{termSpreadHeatmapRows.length} legs</span>
@@ -2128,7 +2129,7 @@
         </article>
       </section>
 
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Vessel / Flow Proxy</span>
           <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
@@ -2180,7 +2181,7 @@
     <!-- 2b. Metals curve-support: Substitution Spreads + Term Structure Heatmap -->
     {#if mode === "metals"}
       <section class="curve-support-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Substitution Spreads</span>
             <span class="header-meta">{substitutionSpreadRows.length} rows</span>
@@ -2223,7 +2224,7 @@
           </div>
         </article>
 
-        <article class="panel rows-panel">
+        <article class="panel is-flush rows-panel">
           <header class="panel-title">
             <span>Term Structure Heatmap</span>
             <span class="header-meta">{termSpreadHeatmapRows.length} legs</span>
@@ -2252,7 +2253,7 @@
       {#key selectedInstrumentId}
         <CommodityCurveHistory instrumentId={selectedInstrumentId} instrument={selectedInstrument} curve={selectedCurve} coverage={workspace?.coverage ?? null} providerLoading={loading} />
       {/key}
-      <section class="panel rows-panel">
+      <section class="panel is-flush rows-panel">
         <header class="panel-title"><span>Term Structure Heatmap</span></header>
         {#if termSpreadHeatmapRows.length}
           <div class="heatmap-list">
@@ -2274,7 +2275,7 @@
 
     <!-- 3. Spreads table -->
     {#if mode === "curves_spreads" || mode === "metals" || mode === "energy"}
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Spreads</span>
           <span class="header-meta">{selectedSpreads.length} linked</span>
@@ -2323,7 +2324,7 @@
     <!-- 4. Metals macro context (parallel to where Energy's fundamentals charts go) -->
     {#if mode === "metals"}
       <section class="curve-support-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Macro Driver Correlation</span>
             <span class="header-meta">{metalsCorrelationRows.length} pairs</span>
@@ -2354,7 +2355,7 @@
           </div>
         </article>
 
-        <article class="panel rows-panel">
+        <article class="panel is-flush rows-panel">
           <header class="panel-title">
             <span>Precious Ratio Gauges</span>
             <span class="header-meta">{metalRatioGaugeRows.length} · loaded-history band</span>
@@ -2393,7 +2394,7 @@
     <!-- 5. Fundamentals charts (split by category group) -->
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
       <section class="fundamental-grid">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>{fundamentalStackTitle(mode)}</span>
             <span class="header-meta">{fundamentalTapeRows.length} series</span>
@@ -2427,12 +2428,12 @@
         </article>
 
         {#each fundamentalGroups as group}
-          <article class="panel chart-panel">
+          <article class="panel is-flush chart-panel">
             <header class="panel-title">
               <span>{group.title}</span>
               <span class="header-meta">{group.count} · idx 100</span>
             </header>
-            <TimeSeriesChart series={group.series} height={180} emptyMessage="NO HISTORY" showLegend={true} />
+            <TimeSeriesChart series={group.series} height={180} emptyMessage="No history" showLegend={true} />
           </article>
         {/each}
       </section>
@@ -2440,7 +2441,7 @@
 
     <!-- 6. Fundamental Tape (full width, room to breathe) -->
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Fundamental Tape</span>
           <span class="header-meta">{fundamentalTapeRows.length} series</span>
@@ -2488,7 +2489,7 @@
 
     <!-- 7. Inventory vs Seasonality (energy only, box-plot redesign) -->
     {#if mode === "energy" || mode === "metals"}
-      <section class="panel rows-panel">
+      <section class="panel is-flush rows-panel">
         <header class="panel-title">
           <span>Inventory vs Seasonality</span>
           <span class="header-meta">5Y · same week-of-year band</span>
@@ -2524,7 +2525,7 @@
     {/if}
 
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
-      <section class="panel table-panel">
+      <section class="panel is-flush table-panel">
         <header class="panel-title">
           <span>Inventory Series</span>
           <span class="header-meta">{visibleInventories.length} series</span>
@@ -2572,7 +2573,7 @@
 
     {#if mode === "events_cross_domain"}
       <section class="split">
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Linked Events</span>
             <span class="header-meta">{eventRows.length} events</span>
@@ -2605,7 +2606,7 @@
           </div>
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel is-flush table-panel">
           <header class="panel-title">
             <span>Cross-Domain Links</span>
             <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
@@ -2668,7 +2669,7 @@
     </footer>
   {:else}
     <article class="panel empty-state">
-      <h2>{loading ? "LOADING COMMODITIES" : "Commodities unavailable"}</h2>
+      <h2>{loading ? "Loading commodities…" : "Commodities unavailable"}</h2>
       <p>{loading ? "Gamma is preparing the commodities workspace." : "No commodities payload is loaded yet."}</p>
     </article>
   {/if}
@@ -2705,15 +2706,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .loading-pill {
-    color: var(--accent);
-    border: 1px solid var(--panel-strong);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-xs);
-    text-transform: var(--label-case);
-    letter-spacing: 0;
   }
 
   .basis-strip {
@@ -2880,11 +2872,6 @@
   /* .panel-title and .tag come from primitives.css. */
 
   /* Edge-to-edge panels */
-  .table-panel,
-  .chart-panel,
-  .rows-panel,
-  .scatter-panel { padding: 0; }
-
   .chart-panel { display: flex; flex-direction: column; gap: 0; }
 
   /* ── Layout grids ── */
@@ -2899,7 +2886,10 @@
 
   /* Overview top block: term structure + scatter stacked left, matrix right */
   .overview-top {
-    grid-column: 1 / span 4;
+    /* 1 / -1, not span 4: a span adds implicit columns when the grid has
+       fewer (two at 1200px, one at 720px), and the panels after it then
+       flow into them. */
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--space-4);
@@ -3130,25 +3120,24 @@
 
   .scatter-shell {
     position: relative;
+    min-height: 12rem;
     border: 0;
     background: transparent;
   }
 
+  /* Absolute, so the drawing never feeds the shell's height back into the
+     measurement that sizes it. */
   .scatter-shell svg {
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
   }
 
   .axis-line {
     stroke: var(--panel-strong);
-    stroke-width: 0.5;
-  }
-
-  .grid-line {
-    stroke: var(--divider);
-    stroke-width: 0.35;
-    opacity: 0.5;
+    stroke-width: 1;
   }
 
   .axis-label,
@@ -3162,10 +3151,6 @@
     text-anchor: middle;
   }
 
-  .vertical {
-    transform: rotate(-90deg);
-  }
-
   .scatter-point {
     cursor: pointer;
   }
@@ -3176,7 +3161,7 @@
   }
 
   .scatter-point.metals circle {
-    fill: var(--chart-secondary);
+    fill: var(--cat-3);
   }
 
   .scatter-point.hovered circle {
@@ -3195,11 +3180,13 @@
     position: absolute;
     pointer-events: none;
     z-index: 20;
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+    border: 1px solid var(--panel-border);
     padding: var(--space-4) var(--space-5);
     font-size: var(--text-sm);
     min-width: 11rem;
+    border-radius: var(--overlay-radius);
+    box-shadow: var(--overlay-shadow);
   }
 
   .scatter-tooltip strong {
@@ -3613,18 +3600,22 @@
     .header-top { flex-wrap: nowrap; }
     .header-top > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
 
-    .mode-bar {
-      display: grid;
-      width: 100%;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
+    /* The mode bar scrolls within its width (primitives.css); the header
+       KPIs are tinted blocks, so no rule above them. */
+    .header-kpis { width: 100%; }
 
-    .mode-bar button { min-width: 0; white-space: normal; }
-
-    .mode-bar button:nth-child(3) { border-right: 0; }
-    .mode-bar button:nth-child(-n+3) { border-bottom: 1px solid var(--panel-strong); }
-
-    .header-kpis { width: 100%; border-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); }
+    /* One column: term structure and scatter first, then the matrix, so
+       the curve legend and the market picker no longer collide (V6d). */
+    .overview-top { grid-template-columns: minmax(0, 1fr); }
+    .overview-top .left-stack { grid-column: 1; grid-row: 1; }
+    .overview-top .matrix-cell { grid-column: 1; grid-row: 2; }
+    /* Stacked, the cells size to their content instead of sharing the
+       matrix's height, so the chart and the scatter get heights of their own. */
+    .overview-top .left-stack > .term-cell,
+    .overview-top .left-stack > .scatter-cell { flex: none; }
+    .overview-top .term-cell :global(.chart-shell) { flex: none; height: 14rem !important; }
+    .overview-top .scatter-cell .scatter-shell { flex: none; height: 13rem; }
+    .overview-top .matrix-cell .table-wrap { max-height: 28rem; }
 
     .overview-grid,
     .rank-grid,
@@ -3642,10 +3633,8 @@
     .span-2, .span-4 { grid-column: span 1; }
 
     .inline-stats { grid-template-columns: minmax(0, 1fr); }
-    .inline-stats > div { border-right: 0; border-bottom: 1px solid var(--divider); }
-    .inline-stats > div:last-child { border-bottom: 0; }
 
-    .ctx-kpis { margin-left: 0; border-left: 0; border-top: 1px solid var(--divider); width: 100%; padding-top: var(--space-3); }
+    .ctx-kpis { margin-left: 0; width: 100%; }
   }
 
   /* Figures outside tables take the data role (tokens.css), so the Data

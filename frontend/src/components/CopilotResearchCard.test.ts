@@ -119,7 +119,7 @@ describe("CopilotResearchCard", () => {
     // Detailed fingerprint and warning metadata moves into the collapsed dropdown.
     expect(body).not.toContain("FP a1b2c3d4");
     expect(body).toContain("Grounded Research");
-    expect(body).toContain("Ask a follow-up grounded in this context scope...");
+    expect(body).toContain("Ask a follow-up grounded in this context scope…");
   });
 
   it("renders backend error results with grounding metadata when no card is returned", () => {

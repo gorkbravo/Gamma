@@ -287,9 +287,9 @@
   /* ── Tables ── */
   .table-wrap { overflow: auto; }
 
-  /* Cells and the sticky header come from .data-table.is-sticky.is-relaxed.is-body-text in
-     primitives.css; only this tab's fainter stripe stays local. */
-  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--accent) 2%, transparent); }
+  /* Cells, rules and the sticky header come from
+     .data-table.is-sticky.is-relaxed.is-body-text in primitives.css; ruled rows,
+     no zebra (§8 Tables). */
 
   .positive { color: var(--positive); }
   .negative { color: var(--negative); }

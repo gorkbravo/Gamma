@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
@@ -1807,3 +1807,38 @@ def _fx_points(ages: list[int], values: list[float], *, pair_code: str) -> list[
         )
         for age, value in sorted(zip(ages, values), reverse=True)
     ]
+
+
+def test_linked_policy_contracts_skip_resolved_and_expired_markets(monkeypatch):
+    # Live audit 2026-11-05 (GUA-20261105-2): resolved December 2025 FOMC cut
+    # markets drove Macro's "Easier" read against a 78% December 2026 hike.
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    resolved = replace(
+        _prediction_market_record(market_id="polymarket:705689", title="Will the December 2025 FOMC decision result in a 25bp cut?", probability=1.0, recent_change=0.27),
+        status="resolved",
+        end_time=datetime(2025, 12, 12, 0, 0, 0),
+    )
+    expired = replace(
+        _prediction_market_record(market_id="polymarket:expired-open", title="Will the Fed cut rates in January?", probability=0.2, recent_change=0.0),
+        end_time=NOW - timedelta(days=1),
+    )
+    live = _prediction_market_record(market_id="polymarket:december-hike", title="Will the Fed increase interest rates by 25 bps after the December meeting?", probability=0.78, recent_change=0.03)
+
+    class _MixedPredictionMarketService:
+        def screener(self, request) -> PredictionMarketScreenerResult:
+            return PredictionMarketScreenerResult(markets=[resolved, expired, live], venues=[], warnings=[])
+
+    service = MacroService(
+        fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=_FakeEventsAdapter(),
+        fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+        prediction_market_service=_MixedPredictionMarketService(),
+    )
+
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+
+    assert snapshot.rates_policy is not None
+    assert [row.market_id for row in snapshot.rates_policy.linked_markets] == ["polymarket:december-hike"]
+    # "increase interest rates by 25 bps" is a tighter outcome, not a neutral one.
+    assert snapshot.rates_policy.linked_markets[0].macro_stance == "policy-tighter"

@@ -44,8 +44,8 @@
     max-width: 100%;
     max-height: 28rem;
     object-fit: contain;
-    border: 1px solid var(--divider);
     background: var(--surface-0);
+    border-radius: var(--radius-control);
   }
 
   .image-state {
