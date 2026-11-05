@@ -1,144 +1,768 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-04T00:00:00Z",
+  "generatedAt": "2026-11-05T00:00:00Z",
   "title": "Design System: Gamma Website",
   "extensions": {
     "colorMeta": {
-      "bg-0": {
+      "canvas-dark": {
         "role": "neutral",
-        "displayName": "Terminal Ground",
-        "canonical": "#070809",
-        "tonalRamp": ["#070809", "#0b0d10", "#0f1114", "#131618", "#1c2126", "#2f3641", "#46505e", "#8a919a"]
+        "displayName": "Canvas (dark)",
+        "canonical": "#0b0e12",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "bg-1": {
+      "panel-bg-dark": {
         "role": "neutral",
-        "displayName": "Panel Fill",
-        "canonical": "#0b0d10",
-        "tonalRamp": ["#070809", "#0b0d10", "#0f1114", "#131618", "#1c2126", "#2f3641", "#46505e", "#8a919a"]
+        "displayName": "Sheet (dark)",
+        "canonical": "#151a20",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "bg-2": {
+      "tint-dark": {
         "role": "neutral",
-        "displayName": "Recessed Chrome",
-        "canonical": "#0f1114",
-        "tonalRamp": ["#070809", "#0b0d10", "#0f1114", "#131618", "#1c2126", "#2f3641", "#46505e", "#8a919a"]
+        "displayName": "Tint (dark)",
+        "canonical": "#1b2129",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "bg-3": {
+      "button-bg-dark": {
         "role": "neutral",
-        "displayName": "Chrome Hover",
-        "canonical": "#131618",
-        "tonalRamp": ["#070809", "#0b0d10", "#0f1114", "#131618", "#1c2126", "#2f3641", "#46505e", "#8a919a"]
+        "displayName": "Button Fill (dark)",
+        "canonical": "color-mix(in srgb, #edf1f6 8%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #edf1f6 4%, transparent)",
+          "color-mix(in srgb, #edf1f6 6%, transparent)",
+          "color-mix(in srgb, #edf1f6 9%, transparent)",
+          "color-mix(in srgb, #edf1f6 14%, transparent)",
+          "color-mix(in srgb, #edf1f6 20%, transparent)",
+          "color-mix(in srgb, #edf1f6 28%, transparent)",
+          "color-mix(in srgb, #edf1f6 45%, transparent)",
+          "#edf1f6"
+        ]
       },
-      "panel-border": {
+      "surface-0-dark": {
         "role": "neutral",
-        "displayName": "Seam Grey",
-        "canonical": "#2f3641",
-        "tonalRamp": ["#12151a", "#1b1f26", "#242932", "#2f3641", "#3a424e", "#46505e", "#5b6673", "#8a919a"]
+        "displayName": "Overlay Surface (dark)",
+        "canonical": "#181d24",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "panel-strong": {
+      "panel-border-dark": {
         "role": "neutral",
-        "displayName": "Emphasis Seam",
-        "canonical": "#46505e",
-        "tonalRamp": ["#12151a", "#1b1f26", "#242932", "#2f3641", "#3a424e", "#46505e", "#5b6673", "#8a919a"]
+        "displayName": "Line (dark)",
+        "canonical": "#232a33",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "rule": {
+      "panel-strong-dark": {
         "role": "neutral",
-        "displayName": "Hairline",
-        "canonical": "rgba(70, 80, 94, 0.30)",
-        "tonalRamp": ["rgba(70,80,94,0.09)", "rgba(70,80,94,0.13)", "rgba(70,80,94,0.16)", "rgba(70,80,94,0.20)", "rgba(70,80,94,0.30)", "rgba(70,80,94,0.45)", "rgba(70,80,94,0.55)", "#46505e"]
+        "displayName": "Strong Line (dark)",
+        "canonical": "#343d49",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "text-0": {
+      "divider-dark": {
         "role": "neutral",
-        "displayName": "Primary Ink",
-        "canonical": "#f0f2f5",
-        "tonalRamp": ["#2b3038", "#3b424c", "#4d5560", "#626973", "#767d87", "#8a919a", "#c2c8d0", "#f0f2f5"]
+        "displayName": "Row Rule (dark)",
+        "canonical": "#212830",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "text-1": {
+      "text-0-dark": {
         "role": "neutral",
-        "displayName": "Reading Ink",
-        "canonical": "#c2c8d0",
-        "tonalRamp": ["#2b3038", "#3b424c", "#4d5560", "#626973", "#767d87", "#8a919a", "#c2c8d0", "#f0f2f5"]
+        "displayName": "Primary Text (dark)",
+        "canonical": "#edf1f6",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "text-2": {
+      "text-1-dark": {
         "role": "neutral",
-        "displayName": "Supporting Ink",
-        "canonical": "#8a919a",
-        "tonalRamp": ["#2b3038", "#3b424c", "#4d5560", "#626973", "#767d87", "#8a919a", "#c2c8d0", "#f0f2f5"]
+        "displayName": "Reading Text (dark)",
+        "canonical": "#b8c1cc",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "text-3": {
+      "text-2-dark": {
         "role": "neutral",
-        "displayName": "Label Ink",
-        "canonical": "#626973",
-        "tonalRamp": ["#2b3038", "#3b424c", "#4d5560", "#626973", "#767d87", "#8a919a", "#c2c8d0", "#f0f2f5"]
+        "displayName": "Metadata Text (dark)",
+        "canonical": "#8a95a3",
+        "tonalRamp": [
+          "#0b0e12",
+          "#151a20",
+          "#1b2129",
+          "#232a33",
+          "#343d49",
+          "#8a95a3",
+          "#b8c1cc",
+          "#edf1f6"
+        ]
       },
-      "accent": {
+      "accent-dark": {
         "role": "primary",
-        "displayName": "Instrument Blue",
-        "canonical": "#7aa6c8",
-        "tonalRamp": ["#16242e", "#1f3646", "#2c4d63", "#3b6884", "#5286a6", "#7aa6c8", "#a3c4dd", "#cfe0ee"]
+        "displayName": "Interaction Blue (dark)",
+        "canonical": "#7d9df2",
+        "tonalRamp": [
+          "#050955",
+          "#162974",
+          "#2e4693",
+          "#4863b3",
+          "#6382d4",
+          "#7d9df2",
+          "#afc6ff",
+          "#dee8ff"
+        ]
       },
-      "accent-hover": {
+      "accent-soft-dark": {
         "role": "primary",
-        "displayName": "Instrument Blue Bright",
-        "canonical": "#93b9d6",
-        "tonalRamp": ["#16242e", "#1f3646", "#2c4d63", "#3b6884", "#5286a6", "#7aa6c8", "#93b9d6", "#cfe0ee"]
+        "displayName": "Accent Soft Fill (dark)",
+        "canonical": "color-mix(in srgb, #7d9df2 14%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #7d9df2 4%, transparent)",
+          "color-mix(in srgb, #7d9df2 6%, transparent)",
+          "color-mix(in srgb, #7d9df2 9%, transparent)",
+          "color-mix(in srgb, #7d9df2 14%, transparent)",
+          "color-mix(in srgb, #7d9df2 20%, transparent)",
+          "color-mix(in srgb, #7d9df2 28%, transparent)",
+          "color-mix(in srgb, #7d9df2 45%, transparent)",
+          "#7d9df2"
+        ]
       },
-      "accent-ink": {
-        "role": "primary",
-        "displayName": "Primary Button Ink",
-        "canonical": "#06171f",
-        "tonalRamp": ["#03090c", "#06171f", "#0a2430", "#103544", "#1a4a5d", "#2c6a80", "#4b93ab", "#8fc2d6"]
-      },
-      "accent-2": {
+      "accent-2-dark": {
         "role": "secondary",
-        "displayName": "Brass",
-        "canonical": "#c49a5a",
-        "tonalRamp": ["#2a2013", "#3d2f1c", "#554128", "#715738", "#96744a", "#c49a5a", "#d9b787", "#eddbbe"]
+        "displayName": "Context Gold (dark)",
+        "canonical": "#e0aa50",
+        "tonalRamp": [
+          "#261700",
+          "#452e01",
+          "#674603",
+          "#8b6001",
+          "#af7b14",
+          "#e0aa50",
+          "#f4bd64",
+          "#ffe4ba"
+        ]
       },
-      "positive": {
+      "positive-dark": {
         "role": "tertiary",
-        "displayName": "Signal Green",
-        "canonical": "#4bb474",
-        "tonalRamp": ["#0e2618", "#153a24", "#1d5032", "#276b44", "#35915a", "#4bb474", "#82cfa0", "#c0e8cf"]
+        "displayName": "Signal Green (dark)",
+        "canonical": "#45c48b",
+        "tonalRamp": [
+          "#002112",
+          "#003e26",
+          "#025c3b",
+          "#057d51",
+          "#009f69",
+          "#45c48b",
+          "#68e3a8",
+          "#a3ffcf"
+        ]
       },
-      "negative": {
+      "positive-soft-dark": {
         "role": "tertiary",
-        "displayName": "Signal Red",
-        "canonical": "#d97a70",
-        "tonalRamp": ["#2c1614", "#40201d", "#582c27", "#753b34", "#9d5046", "#d97a70", "#e8a79f", "#f4d3cf"]
+        "displayName": "Positive Soft Fill (dark)",
+        "canonical": "color-mix(in srgb, #45c48b 14%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #45c48b 4%, transparent)",
+          "color-mix(in srgb, #45c48b 6%, transparent)",
+          "color-mix(in srgb, #45c48b 9%, transparent)",
+          "color-mix(in srgb, #45c48b 14%, transparent)",
+          "color-mix(in srgb, #45c48b 20%, transparent)",
+          "color-mix(in srgb, #45c48b 28%, transparent)",
+          "color-mix(in srgb, #45c48b 45%, transparent)",
+          "#45c48b"
+        ]
       },
-      "warning": {
+      "negative-dark": {
         "role": "tertiary",
-        "displayName": "Brass Warning",
-        "canonical": "#c49a5a",
-        "tonalRamp": ["#2a2013", "#3d2f1c", "#554128", "#715738", "#96744a", "#c49a5a", "#d9b787", "#eddbbe"]
+        "displayName": "Signal Red (dark)",
+        "canonical": "#f2806f",
+        "tonalRamp": [
+          "#3a0100",
+          "#650200",
+          "#8a2016",
+          "#ac4134",
+          "#ce6050",
+          "#f2806f",
+          "#ffb0a3",
+          "#ffe0da"
+        ]
       },
-      "hover-bg": {
-        "role": "primary",
-        "displayName": "Accent Hover Tint",
-        "canonical": "rgba(122, 166, 200, 0.06)",
-        "tonalRamp": ["rgba(122,166,200,0.03)", "rgba(122,166,200,0.06)", "rgba(122,166,200,0.09)", "rgba(122,166,200,0.12)", "rgba(122,166,200,0.18)", "rgba(122,166,200,0.28)", "rgba(122,166,200,0.45)", "#7aa6c8"]
+      "negative-muted-dark": {
+        "role": "tertiary",
+        "displayName": "Muted Red (dark)",
+        "canonical": "#dc7465",
+        "tonalRamp": [
+          "#3b0000",
+          "#660100",
+          "#87261d",
+          "#a84539",
+          "#c96355",
+          "#dc7465",
+          "#ffb0a3",
+          "#fee0db"
+        ]
       },
-      "active-bg": {
-        "role": "primary",
-        "displayName": "Accent Active Tint",
-        "canonical": "rgba(122, 166, 200, 0.12)",
-        "tonalRamp": ["rgba(122,166,200,0.03)", "rgba(122,166,200,0.06)", "rgba(122,166,200,0.09)", "rgba(122,166,200,0.12)", "rgba(122,166,200,0.18)", "rgba(122,166,200,0.28)", "rgba(122,166,200,0.45)", "#7aa6c8"]
+      "negative-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Negative Soft Fill (dark)",
+        "canonical": "color-mix(in srgb, #dc7465 14%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #dc7465 4%, transparent)",
+          "color-mix(in srgb, #dc7465 6%, transparent)",
+          "color-mix(in srgb, #dc7465 9%, transparent)",
+          "color-mix(in srgb, #dc7465 14%, transparent)",
+          "color-mix(in srgb, #dc7465 20%, transparent)",
+          "color-mix(in srgb, #dc7465 28%, transparent)",
+          "color-mix(in srgb, #dc7465 45%, transparent)",
+          "#dc7465"
+        ]
       },
-      "focus-ring": {
+      "warning-dark": {
+        "role": "tertiary",
+        "displayName": "Signal Amber (dark)",
+        "canonical": "#e0aa50",
+        "tonalRamp": [
+          "#261700",
+          "#452e01",
+          "#674603",
+          "#8b6001",
+          "#af7b14",
+          "#e0aa50",
+          "#f4bd64",
+          "#ffe4ba"
+        ]
+      },
+      "warning-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Warning Soft Fill (dark)",
+        "canonical": "color-mix(in srgb, #e0aa50 14%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #e0aa50 4%, transparent)",
+          "color-mix(in srgb, #e0aa50 6%, transparent)",
+          "color-mix(in srgb, #e0aa50 9%, transparent)",
+          "color-mix(in srgb, #e0aa50 14%, transparent)",
+          "color-mix(in srgb, #e0aa50 20%, transparent)",
+          "color-mix(in srgb, #e0aa50 28%, transparent)",
+          "color-mix(in srgb, #e0aa50 45%, transparent)",
+          "#e0aa50"
+        ]
+      },
+      "hover-bg-dark": {
         "role": "primary",
-        "displayName": "Focus Ring",
-        "canonical": "rgba(122, 166, 200, 0.55)",
-        "tonalRamp": ["rgba(122,166,200,0.12)", "rgba(122,166,200,0.28)", "rgba(122,166,200,0.40)", "rgba(122,166,200,0.55)", "rgba(122,166,200,0.70)", "rgba(122,166,200,0.85)", "#7aa6c8", "#a3c4dd"]
+        "displayName": "Hover Fill (dark)",
+        "canonical": "color-mix(in srgb, #7d9df2 6%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #7d9df2 4%, transparent)",
+          "color-mix(in srgb, #7d9df2 6%, transparent)",
+          "color-mix(in srgb, #7d9df2 9%, transparent)",
+          "color-mix(in srgb, #7d9df2 14%, transparent)",
+          "color-mix(in srgb, #7d9df2 20%, transparent)",
+          "color-mix(in srgb, #7d9df2 28%, transparent)",
+          "color-mix(in srgb, #7d9df2 45%, transparent)",
+          "#7d9df2"
+        ]
+      },
+      "active-bg-dark": {
+        "role": "primary",
+        "displayName": "Selection Fill (dark)",
+        "canonical": "color-mix(in srgb, #7d9df2 14%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #7d9df2 4%, transparent)",
+          "color-mix(in srgb, #7d9df2 6%, transparent)",
+          "color-mix(in srgb, #7d9df2 9%, transparent)",
+          "color-mix(in srgb, #7d9df2 14%, transparent)",
+          "color-mix(in srgb, #7d9df2 20%, transparent)",
+          "color-mix(in srgb, #7d9df2 28%, transparent)",
+          "color-mix(in srgb, #7d9df2 45%, transparent)",
+          "#7d9df2"
+        ]
+      },
+      "focus-ring-dark": {
+        "role": "primary",
+        "displayName": "Focus Ring (dark)",
+        "canonical": "#7d9df2",
+        "tonalRamp": [
+          "#050955",
+          "#162974",
+          "#2e4693",
+          "#4863b3",
+          "#6382d4",
+          "#7d9df2",
+          "#afc6ff",
+          "#dee8ff"
+        ]
+      },
+      "scrim-dark": {
+        "role": "neutral",
+        "displayName": "Scrim (dark)",
+        "canonical": "rgba(0, 0, 0, 0.45)",
+        "tonalRamp": [
+          "rgba(0, 0, 0, 0.06)",
+          "rgba(0, 0, 0, 0.12)",
+          "rgba(0, 0, 0, 0.18)",
+          "rgba(0, 0, 0, 0.22)",
+          "rgba(0, 0, 0, 0.3)",
+          "rgba(0, 0, 0, 0.45)",
+          "rgba(0, 0, 0, 0.6)",
+          "rgba(0, 0, 0, 0.8)"
+        ]
+      },
+      "canvas-light": {
+        "role": "neutral",
+        "displayName": "Canvas (light)",
+        "canonical": "#eceff3",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "panel-bg-light": {
+        "role": "neutral",
+        "displayName": "Sheet (light)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "tint-light": {
+        "role": "neutral",
+        "displayName": "Tint (light)",
+        "canonical": "#f4f6f9",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "button-bg-light": {
+        "role": "neutral",
+        "displayName": "Button Fill (light)",
+        "canonical": "color-mix(in srgb, #0f1720 8%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #0f1720 4%, transparent)",
+          "color-mix(in srgb, #0f1720 6%, transparent)",
+          "color-mix(in srgb, #0f1720 9%, transparent)",
+          "color-mix(in srgb, #0f1720 14%, transparent)",
+          "color-mix(in srgb, #0f1720 20%, transparent)",
+          "color-mix(in srgb, #0f1720 28%, transparent)",
+          "color-mix(in srgb, #0f1720 45%, transparent)",
+          "#0f1720"
+        ]
+      },
+      "surface-0-light": {
+        "role": "neutral",
+        "displayName": "Overlay Surface (light)",
+        "canonical": "#f8f9fb",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "panel-border-light": {
+        "role": "neutral",
+        "displayName": "Line (light)",
+        "canonical": "#e3e7ec",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "panel-strong-light": {
+        "role": "neutral",
+        "displayName": "Strong Line (light)",
+        "canonical": "#cfd6df",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "divider-light": {
+        "role": "neutral",
+        "displayName": "Row Rule (light)",
+        "canonical": "#eef1f4",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "text-0-light": {
+        "role": "neutral",
+        "displayName": "Primary Text (light)",
+        "canonical": "#0f1720",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "text-1-light": {
+        "role": "neutral",
+        "displayName": "Reading Text (light)",
+        "canonical": "#3b4655",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "text-2-light": {
+        "role": "neutral",
+        "displayName": "Metadata Text (light)",
+        "canonical": "#636e7f",
+        "tonalRamp": [
+          "#0f1720",
+          "#3b4655",
+          "#636e7f",
+          "#cfd6df",
+          "#e3e7ec",
+          "#eceff3",
+          "#f4f6f9",
+          "#ffffff"
+        ]
+      },
+      "accent-light": {
+        "role": "primary",
+        "displayName": "Interaction Blue (light)",
+        "canonical": "#2952cc",
+        "tonalRamp": [
+          "#02005f",
+          "#061693",
+          "#183cb5",
+          "#2952cc",
+          "#4c7cfa",
+          "#78a1ff",
+          "#adc7ff",
+          "#dde8ff"
+        ]
+      },
+      "accent-soft-light": {
+        "role": "primary",
+        "displayName": "Accent Soft Fill (light)",
+        "canonical": "color-mix(in srgb, #2952cc 9%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #2952cc 4%, transparent)",
+          "color-mix(in srgb, #2952cc 6%, transparent)",
+          "color-mix(in srgb, #2952cc 9%, transparent)",
+          "color-mix(in srgb, #2952cc 14%, transparent)",
+          "color-mix(in srgb, #2952cc 20%, transparent)",
+          "color-mix(in srgb, #2952cc 28%, transparent)",
+          "color-mix(in srgb, #2952cc 45%, transparent)",
+          "#2952cc"
+        ]
+      },
+      "accent-2-light": {
+        "role": "secondary",
+        "displayName": "Context Gold (light)",
+        "canonical": "#8a5a00",
+        "tonalRamp": [
+          "#271700",
+          "#472c00",
+          "#694403",
+          "#8a5a00",
+          "#ad7b32",
+          "#cd9a53",
+          "#f2bc75",
+          "#ffe3bf"
+        ]
+      },
+      "positive-light": {
+        "role": "tertiary",
+        "displayName": "Signal Green (light)",
+        "canonical": "#0c7049",
+        "tonalRamp": [
+          "#002112",
+          "#013e26",
+          "#045c3b",
+          "#0c7049",
+          "#439a70",
+          "#64b98e",
+          "#87ddb0",
+          "#a8fed0"
+        ]
+      },
+      "positive-soft-light": {
+        "role": "tertiary",
+        "displayName": "Positive Soft Fill (light)",
+        "canonical": "color-mix(in srgb, #0c7049 13%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #0c7049 4%, transparent)",
+          "color-mix(in srgb, #0c7049 6%, transparent)",
+          "color-mix(in srgb, #0c7049 9%, transparent)",
+          "color-mix(in srgb, #0c7049 14%, transparent)",
+          "color-mix(in srgb, #0c7049 20%, transparent)",
+          "color-mix(in srgb, #0c7049 28%, transparent)",
+          "color-mix(in srgb, #0c7049 45%, transparent)",
+          "#0c7049"
+        ]
+      },
+      "negative-light": {
+        "role": "tertiary",
+        "displayName": "Signal Red (light)",
+        "canonical": "#b83329",
+        "tonalRamp": [
+          "#3a0001",
+          "#660001",
+          "#940104",
+          "#b83329",
+          "#da5446",
+          "#fe7464",
+          "#ffb0a4",
+          "#ffe0db"
+        ]
+      },
+      "negative-muted-light": {
+        "role": "tertiary",
+        "displayName": "Muted Red (light)",
+        "canonical": "#b83329",
+        "tonalRamp": [
+          "#3a0001",
+          "#660001",
+          "#940104",
+          "#b83329",
+          "#da5446",
+          "#fe7464",
+          "#ffb0a4",
+          "#ffe0db"
+        ]
+      },
+      "negative-soft-light": {
+        "role": "tertiary",
+        "displayName": "Negative Soft Fill (light)",
+        "canonical": "color-mix(in srgb, #b83329 13%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #b83329 4%, transparent)",
+          "color-mix(in srgb, #b83329 6%, transparent)",
+          "color-mix(in srgb, #b83329 9%, transparent)",
+          "color-mix(in srgb, #b83329 14%, transparent)",
+          "color-mix(in srgb, #b83329 20%, transparent)",
+          "color-mix(in srgb, #b83329 28%, transparent)",
+          "color-mix(in srgb, #b83329 45%, transparent)",
+          "#b83329"
+        ]
+      },
+      "warning-light": {
+        "role": "tertiary",
+        "displayName": "Signal Amber (light)",
+        "canonical": "#8a5a00",
+        "tonalRamp": [
+          "#271700",
+          "#472c00",
+          "#694403",
+          "#8a5a00",
+          "#ad7b32",
+          "#cd9a53",
+          "#f2bc75",
+          "#ffe3bf"
+        ]
+      },
+      "warning-soft-light": {
+        "role": "tertiary",
+        "displayName": "Warning Soft Fill (light)",
+        "canonical": "color-mix(in srgb, #8a5a00 13%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #8a5a00 4%, transparent)",
+          "color-mix(in srgb, #8a5a00 6%, transparent)",
+          "color-mix(in srgb, #8a5a00 9%, transparent)",
+          "color-mix(in srgb, #8a5a00 14%, transparent)",
+          "color-mix(in srgb, #8a5a00 20%, transparent)",
+          "color-mix(in srgb, #8a5a00 28%, transparent)",
+          "color-mix(in srgb, #8a5a00 45%, transparent)",
+          "#8a5a00"
+        ]
+      },
+      "hover-bg-light": {
+        "role": "primary",
+        "displayName": "Hover Fill (light)",
+        "canonical": "color-mix(in srgb, #2952cc 4%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #2952cc 4%, transparent)",
+          "color-mix(in srgb, #2952cc 6%, transparent)",
+          "color-mix(in srgb, #2952cc 9%, transparent)",
+          "color-mix(in srgb, #2952cc 14%, transparent)",
+          "color-mix(in srgb, #2952cc 20%, transparent)",
+          "color-mix(in srgb, #2952cc 28%, transparent)",
+          "color-mix(in srgb, #2952cc 45%, transparent)",
+          "#2952cc"
+        ]
+      },
+      "active-bg-light": {
+        "role": "primary",
+        "displayName": "Selection Fill (light)",
+        "canonical": "color-mix(in srgb, #2952cc 9%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, #2952cc 4%, transparent)",
+          "color-mix(in srgb, #2952cc 6%, transparent)",
+          "color-mix(in srgb, #2952cc 9%, transparent)",
+          "color-mix(in srgb, #2952cc 14%, transparent)",
+          "color-mix(in srgb, #2952cc 20%, transparent)",
+          "color-mix(in srgb, #2952cc 28%, transparent)",
+          "color-mix(in srgb, #2952cc 45%, transparent)",
+          "#2952cc"
+        ]
+      },
+      "focus-ring-light": {
+        "role": "primary",
+        "displayName": "Focus Ring (light)",
+        "canonical": "#2952cc",
+        "tonalRamp": [
+          "#02005f",
+          "#061693",
+          "#183cb5",
+          "#2952cc",
+          "#4c7cfa",
+          "#78a1ff",
+          "#adc7ff",
+          "#dde8ff"
+        ]
+      },
+      "scrim-light": {
+        "role": "neutral",
+        "displayName": "Scrim (light)",
+        "canonical": "rgba(18, 26, 38, 0.22)",
+        "tonalRamp": [
+          "rgba(18, 26, 38, 0.06)",
+          "rgba(18, 26, 38, 0.12)",
+          "rgba(18, 26, 38, 0.18)",
+          "rgba(18, 26, 38, 0.22)",
+          "rgba(18, 26, 38, 0.3)",
+          "rgba(18, 26, 38, 0.45)",
+          "rgba(18, 26, 38, 0.6)",
+          "rgba(18, 26, 38, 0.8)"
+        ]
       }
     },
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "The page thesis, once per page, upper-left. Capped at a 17ch measure so the headline is set, not wrapped."
+        "purpose": "The page thesis, once per page, upper-left, at a 17ch measure. Slight optical tightening (-0.02em)."
       },
       "headline": {
         "displayName": "Headline",
-        "purpose": "Section heads and the closing call."
+        "purpose": "Section heads and the closing call, on the canvas."
       },
       "title": {
         "displayName": "Title",
@@ -146,58 +770,61 @@
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Document default, Archivo with tabular numerals. Hero lede 62ch, moment prose 46ch, step prose 72ch, FAQ answers 70ch."
+        "purpose": "Document default, Instrument Sans at 15px with tabular figures on for the whole document. Hero lede 62ch."
       },
       "body-sm": {
         "displayName": "Body Small",
-        "purpose": "The working size: section subheads, card prose, table cells, answers."
+        "purpose": "The working size: section subheads, moment, step and card prose, table cells, FAQ answers."
+      },
+      "panel-title": {
+        "displayName": "Panel Title",
+        "purpose": "The 30px title row of a sheet: the tape title, table captions, the surface index, the boundary columns."
       },
       "label": {
-        "displayName": "Instrument Caps",
-        "purpose": "Names a container that is present: section labels, table headers and captions, badges, code heads, shot bars, rail ticks, footer column heads. Never prose, never a floating eyebrow."
+        "displayName": "Label",
+        "purpose": "Sentence case, 11px, weight 500, no letter-spacing, in --text-2: column headers, definition terms, the shot bar, the code head, footer column heads, rail ticks."
       },
-      "data": {
-        "displayName": "Data / Mono",
-        "purpose": "Every number, ticker, timestamp, path, and stamped label. Applied via one named selector list in site.css, never per-element."
+      "figures": {
+        "displayName": "Figures",
+        "purpose": "Data figures in Instrument Sans with tabular digits (tabular-nums, \"tnum\" 1): the tape, fact lists, table cells, timestamps."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "JetBrains Mono, for code only: code blocks, environment strings, inline code and the README cite."
       }
     },
     "shadows": [
       {
-        "name": "board-lift",
-        "value": "0 24px 60px -30px rgba(0, 0, 0, 0.9)",
-        "purpose": "The live demonstration board — a plate lifted a few millimetres off the ground."
+        "name": "overlay",
+        "value": "0 12px 40px color-mix(in srgb, var(--shadow-ink) 32%, transparent)",
+        "purpose": "A floating overlay (the skip link when focused), with the 12px overlay radius and a 1px --panel-border line. The only elevation in the system."
       },
       {
-        "name": "plate-lift",
-        "value": "0 30px 70px -40px rgba(0, 0, 0, 0.95)",
-        "purpose": "A captured application screen. The only other shadow in the system."
-      },
-      {
-        "name": "sweep-glow",
-        "value": "0 0 8px rgba(122, 166, 200, 0.5)",
-        "purpose": "The reading-position sweep line on the time rail. A glow, not elevation."
-      },
-      {
-        "name": "marker-halo",
-        "value": "0 0 0 3px rgba(7, 8, 9, 0.55), 0 0 12px rgba(122, 166, 200, 0.35)",
-        "purpose": "A specimen marker on a screenshot: a ground ring keeps it legible over any pixel, plus a soft accent bleed."
+        "name": "marker-ring",
+        "value": "0 0 0 2px color-mix(in srgb, var(--panel-bg) 70%, transparent)",
+        "purpose": "A 2px ring in the sheet colour that keeps a specimen marker legible over any pixel of a screenshot. A ring, not elevation."
       }
     ],
     "motion": [
       {
         "name": "motion-fast",
         "value": "120ms",
-        "purpose": "Chrome state: nav, buttons, tabs, copy button, tick color."
+        "purpose": "Chrome state: nav, buttons, segments, the copy button, row hover."
       },
       {
         "name": "motion-base",
         "value": "180ms",
-        "purpose": "Surface state: card border, cell fill, disclosure marker rotation."
+        "purpose": "Surface state: the disclosure marker rotation, rail tick colour."
       },
       {
         "name": "motion-slow",
         "value": "620ms",
-        "purpose": "The entry pour and the repriced-cell flash decay."
+        "purpose": "The entry pour."
+      },
+      {
+        "name": "flash-duration",
+        "value": "800ms",
+        "purpose": "A repriced value tints toward --flash-up or --flash-down and fades."
       },
       {
         "name": "ease",
@@ -226,17 +853,42 @@
       }
     ],
     "breakpoints": [
-      { "name": "brand-sub", "value": "620px" },
-      { "name": "index-2up", "value": "640px" },
-      { "name": "shot-pan", "value": "760px" },
-      { "name": "board-stack", "value": "820px" },
-      { "name": "nav-scroll", "value": "860px" },
-      { "name": "moment-stack", "value": "1000px" },
-      { "name": "hero-stack", "value": "1080px" },
-      { "name": "index-5up", "value": "1100px" },
-      { "name": "rail-on", "value": "1180px" },
-      { "name": "page-max", "value": "1400px" },
-      { "name": "wide-max", "value": "1560px" }
+      {
+        "name": "brand-sub",
+        "value": "620px"
+      },
+      {
+        "name": "index-2up",
+        "value": "640px"
+      },
+      {
+        "name": "shot-pan",
+        "value": "760px"
+      },
+      {
+        "name": "board-stack",
+        "value": "820px"
+      },
+      {
+        "name": "nav-scroll",
+        "value": "860px"
+      },
+      {
+        "name": "moment-stack",
+        "value": "1000px"
+      },
+      {
+        "name": "index-5up",
+        "value": "1100px"
+      },
+      {
+        "name": "rail-on",
+        "value": "1180px"
+      },
+      {
+        "name": "page-max",
+        "value": "1400px"
+      }
     ]
   },
   "components": [
@@ -244,184 +896,196 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The one filled element on a page. Accent fill, dark blue-black ink, optional 13px stroked arrow.",
+      "description": "The one primary action per view: an accent tint (accent-soft fill, accent text, 45% accent edge), never a solid fill.",
       "html": "<a class=\"ds-btn ds-btn-primary\" href=\"#\">Get started<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 8h10M9 4l4 4-4 4\"/></svg></a>",
-      "css": ".ds-btn { font-family: 'Archivo', 'Segoe UI Variable Text', system-ui, sans-serif; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.01em; padding: 11px 20px; border-radius: 4px; border: 1px solid #2f3641; background: #0f1114; color: #f0f2f5; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color 120ms cubic-bezier(0.2,0,0,1), background 120ms cubic-bezier(0.2,0,0,1), transform 120ms cubic-bezier(0.2,0,0,1); } .ds-btn svg { width: 13px; height: 13px; flex: none; } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 2px solid rgba(122,166,200,0.55); outline-offset: 2px; border-radius: 2px; } .ds-btn-primary { background: #7aa6c8; border-color: #7aa6c8; color: #06171f; } .ds-btn-primary:hover { background: #93b9d6; border-color: #93b9d6; color: #06171f; }"
+      "css": ".ds-btn { min-height: 36px; padding: 6px 16px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--button-bg); color: var(--text-0); font-family: var(--font-ui); font-size: 13.5px; font-weight: 500; line-height: 1.2; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color 120ms cubic-bezier(0.2,0,0,1), color 120ms cubic-bezier(0.2,0,0,1); } .ds-btn svg { width: 13px; height: 13px; flex: none; } .ds-btn:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong)); } .ds-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-btn-primary { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); color: var(--accent); } .ds-btn-primary:hover { border-color: color-mix(in srgb, var(--accent) 70%, transparent); }"
     },
     {
       "name": "Default Button",
       "kind": "button",
       "refersTo": "button",
-      "description": "Quiet chrome action. Recessed fill, hairline border; hover lifts one tonal step and brightens the seam.",
-      "html": "<a class=\"ds-btn-default\" href=\"#\">Watch a morning on it</a>",
-      "css": ".ds-btn-default { font-family: 'Archivo', 'Segoe UI Variable Text', system-ui, sans-serif; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.01em; padding: 11px 20px; border-radius: 4px; border: 1px solid #2f3641; background: #0f1114; color: #f0f2f5; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color 120ms cubic-bezier(0.2,0,0,1), background 120ms cubic-bezier(0.2,0,0,1), transform 120ms cubic-bezier(0.2,0,0,1); } .ds-btn-default:hover { border-color: #46505e; background: #131618; color: #f0f2f5; } .ds-btn-default:active { transform: translateY(1px); } .ds-btn-default:focus-visible { outline: 2px solid rgba(122,166,200,0.55); outline-offset: 2px; }"
+      "description": "An ordinary action, filled and edgeless on the button fill (the text colour at 8%); hover draws the accent line.",
+      "html": "<a class=\"ds-btn\" href=\"#\">Watch a morning on it</a>",
+      "css": ".ds-btn { min-height: 36px; padding: 6px 16px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--button-bg); color: var(--text-0); font-family: var(--font-ui); font-size: 13.5px; font-weight: 500; line-height: 1.2; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color 120ms cubic-bezier(0.2,0,0,1), color 120ms cubic-bezier(0.2,0,0,1); } .ds-btn svg { width: 13px; height: 13px; flex: none; } .ds-btn:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong)); } .ds-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
     },
     {
-      "name": "State Badges",
+      "name": "State Tags",
       "kind": "chip",
-      "refersTo": "badge",
-      "description": "A statement about data, not a control. State lives in the text color and a 40%-alpha border; planned is dashed.",
-      "html": "<span class=\"ds-badge ds-badge-live\">Live</span> <span class=\"ds-badge ds-badge-mock\">Mock</span> <span class=\"ds-badge ds-badge-accent\">Free</span> <span class=\"ds-badge ds-badge-plan\">Planned</span> <span class=\"ds-badge\">Read-only</span>",
-      "css": ".ds-badge { display: inline-block; font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; border: 1px solid #2f3641; color: #8a919a; white-space: nowrap; } .ds-badge-live { color: #4bb474; border-color: rgba(75,180,116,0.4); } .ds-badge-mock { color: #c49a5a; border-color: rgba(196,154,90,0.4); } .ds-badge-accent { color: #7aa6c8; border-color: rgba(122,166,200,0.4); } .ds-badge-plan { color: #626973; border-style: dashed; }"
+      "refersTo": "tag",
+      "description": "The app's pill tag with a dot, toned by --tg and --tg-fill: Live positive, Delayed and Mock warning, accent for a highlighted fact, planned with a hollow dot.",
+      "html": "<span class=\"ds-tag ds-tag-live\">Live</span> <span class=\"ds-tag ds-tag-delayed\">Delayed</span> <span class=\"ds-tag ds-tag-mock\">Mock</span> <span class=\"ds-tag ds-tag-accent\">Free</span> <span class=\"ds-tag ds-tag-plan\">Planned</span> <span class=\"ds-tag\">Read-only</span>",
+      "css": ".ds-tag { --tg: var(--text-2); --tg-fill: var(--tint); display: inline-block; border-radius: var(--radius-pill); padding: 0 6px; font-family: var(--font-ui); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg); color: var(--text-1); } .ds-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: var(--tg); vertical-align: 1px; } .ds-tag-live { --tg: var(--positive); --tg-fill: var(--positive-soft); color: var(--tg); } .ds-tag-mock, .ds-tag-delayed { --tg: var(--warning); --tg-fill: var(--warning-soft); color: var(--tg); } .ds-tag-accent { --tg: var(--accent); --tg-fill: var(--accent-soft); color: var(--tg); } .ds-tag-plan { color: var(--text-2); } .ds-tag-plan::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tg); }"
     },
     {
       "name": "Top Navigation",
       "kind": "nav",
       "refersTo": "nav-link",
-      "description": "Sticky 46px bar, translucent ground with a saturating blur, seamed underneath. Current page keeps a fill and a visible border; the repo link is a ghost CTA.",
-      "html": "<header class=\"ds-topbar\"><a class=\"ds-brand\" href=\"#\"><span class=\"ds-brand-mark\" aria-hidden=\"true\"><svg viewBox=\"0 0 96 64\" fill=\"none\"><path d=\"M30 6H84V22H46V58H30V6Z\" fill=\"#d6e3ee\"/></svg></span><span class=\"ds-brand-name\">GAMMA</span><span class=\"ds-brand-sub\">Research Workspace</span></a><nav class=\"ds-topnav\" aria-label=\"Primary\"><a href=\"#\">Session</a><a href=\"#\" aria-current=\"page\">Surfaces</a><a href=\"#\">Setup</a><a class=\"ds-ghost-cta\" href=\"#\">GitHub</a></nav></header>",
-      "css": ".ds-topbar { display: flex; align-items: center; gap: 16px; height: 46px; padding: 0 24px; background: rgba(7,8,9,0.86); backdrop-filter: blur(14px) saturate(1.2); border-bottom: 1px solid #2f3641; } .ds-brand { display: flex; align-items: center; gap: 12px; text-decoration: none; flex: none; } .ds-brand-mark { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid #2f3641; border-radius: 4px; background: #0f1114; flex: none; } .ds-brand-mark svg { width: 12px; height: 12px; } .ds-brand-name { font-family: 'Archivo', system-ui, sans-serif; font-weight: 700; font-size: 0.95rem; letter-spacing: 0.01em; color: #f0f2f5; } .ds-brand-sub { font-family: 'Archivo', system-ui, sans-serif; font-size: 0.6875rem; color: #8a919a; letter-spacing: 0.04em; } .ds-topnav { display: flex; align-items: center; gap: 4px; margin-left: auto; } .ds-topnav a { font-family: 'Archivo', system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; color: #8a919a; text-decoration: none; padding: 6px 12px; border-radius: 2px; border: 1px solid transparent; transition: color 120ms cubic-bezier(0.2,0,0,1), background 120ms cubic-bezier(0.2,0,0,1); white-space: nowrap; } .ds-topnav a:hover { color: #f0f2f5; background: rgba(122,166,200,0.06); } .ds-topnav a[aria-current=\"page\"] { color: #f0f2f5; border-color: #2f3641; background: #0f1114; } .ds-topnav a.ds-ghost-cta { color: #7aa6c8; border-color: #2f3641; background: #0f1114; } .ds-topnav a.ds-ghost-cta:hover { border-color: #46505e; background: rgba(122,166,200,0.12); }"
+      "description": "Sticky 46px bar on the canvas itself, no edge or blur. Links show the hover fill; the current page the selection fill; the repository link is a ghost button on the tint.",
+      "html": "<header class=\"ds-topbar\"><a class=\"ds-brand\" href=\"#\"><span class=\"ds-brand-mark\" aria-hidden=\"true\"><svg viewBox=\"0 0 96 64\" fill=\"none\"><path d=\"M30 6H84V22H46V58H30V6Z\" fill=\"currentColor\"/></svg></span><span class=\"ds-brand-name\">Gamma</span><span class=\"ds-brand-sub\">Research Workspace</span></a><nav class=\"ds-topnav\" aria-label=\"Primary\"><a href=\"#\">Session</a><a href=\"#\" aria-current=\"page\">Surfaces</a><a href=\"#\">Setup</a><a class=\"ds-ghost-cta\" href=\"#\">GitHub</a></nav></header>",
+      "css": ".ds-topbar { display: flex; align-items: center; gap: 16px; height: 46px; padding: 0 24px; background: var(--canvas); font-family: var(--font-ui); } .ds-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; flex: none; } .ds-brand-mark { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); border-radius: var(--radius-control); background: var(--accent-soft); color: var(--accent); } .ds-brand-mark svg { width: 12px; height: 12px; } .ds-brand-name { font-size: 15px; font-weight: 600; color: var(--text-0); } .ds-brand-sub { font-size: 12px; color: var(--text-1); } .ds-topnav { display: flex; align-items: center; gap: 2px; margin-left: auto; } .ds-topnav a { font-size: 13.5px; font-weight: 500; color: var(--text-1); text-decoration: none; padding: 4px 12px; border-radius: var(--radius-control); border: 1px solid transparent; transition: color 120ms cubic-bezier(0.2,0,0,1), background 120ms cubic-bezier(0.2,0,0,1); white-space: nowrap; } .ds-topnav a:hover { color: var(--text-0); background: var(--hover-bg); } .ds-topnav a[aria-current=\"page\"] { color: var(--text-0); background: var(--active-bg); } .ds-topnav a.ds-ghost-cta { margin-left: 4px; color: var(--text-1); background: var(--tint); } .ds-topnav a.ds-ghost-cta:hover { color: var(--text-0); border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong)); } .ds-topnav a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
     },
     {
       "name": "Key Card",
       "kind": "card",
-      "refersTo": "card",
-      "description": "A provider card: title row with a state badge, prose, a mono definition list, an env string, a brass degradation note, and a bottom-anchored action row. Only the border changes on hover.",
-      "html": "<article class=\"ds-key\"><div class=\"ds-key-top\"><h3>FRED</h3><span class=\"ds-key-badge\">Free</span></div><p>Macro series, spreads and the derived YoY transforms behind the Macro tab.</p><dl><div><dt>Cost</dt><dd>Free</dd></div><div><dt>Limit</dt><dd>120 req/min</dd></div></dl><p class=\"ds-key-env\">FRED_API_KEY=…</p><p class=\"ds-key-degrade\"><b>Without it:</b> Macro falls back to sample series, labelled as such.</p><div class=\"ds-key-actions\"><a class=\"ds-key-btn\" href=\"#\">Get a key</a></div></article>",
-      "css": ".ds-key { border: 1px solid #2f3641; border-radius: 4px; background: #0b0d10; padding: 24px; display: flex; flex-direction: column; gap: 12px; transition: border-color 180ms cubic-bezier(0.2,0,0,1); font-family: 'Archivo', system-ui, sans-serif; max-width: 360px; } .ds-key:hover { border-color: #46505e; } .ds-key-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; } .ds-key h3 { margin: 0; font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em; color: #f0f2f5; } .ds-key-badge { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; border: 1px solid rgba(122,166,200,0.4); color: #7aa6c8; } .ds-key p { margin: 0; font-size: 0.8125rem; color: #8a919a; line-height: 1.6; } .ds-key dl { margin: 0; display: grid; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; } .ds-key dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 0.6875rem; padding-block: 4px; border-bottom: 1px solid rgba(70,80,94,0.16); } .ds-key dt { color: #626973; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.625rem; flex: none; } .ds-key dd { margin: 0; text-align: right; color: #c2c8d0; } .ds-key-env { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.6875rem; color: #c49a5a; background: #0f1114; border: 1px solid #2f3641; border-radius: 2px; padding: 6px 12px; overflow-x: auto; white-space: nowrap; } .ds-key-degrade { font-size: 0.6875rem; color: #8a919a; border-left: 1px solid #c49a5a; padding-left: 12px; line-height: 1.55; } .ds-key-degrade b { color: #c49a5a; font-weight: 600; } .ds-key-actions { margin-top: auto; padding-top: 12px; display: flex; gap: 12px; flex-wrap: wrap; } .ds-key-btn { font-family: 'Archivo', system-ui, sans-serif; font-size: 0.6875rem; font-weight: 600; padding: 8px 14px; border-radius: 4px; border: 1px solid #2f3641; background: #0f1114; color: #f0f2f5; text-decoration: none; transition: border-color 120ms cubic-bezier(0.2,0,0,1), background 120ms cubic-bezier(0.2,0,0,1); } .ds-key-btn:hover { border-color: #46505e; background: #131618; }"
+      "refersTo": "sheet",
+      "description": "A provider card on its own sheet: title row with a tag, prose, a ruled definition list, a code env string on the tint, a warning-led degradation note, and a bottom-anchored row of compact buttons.",
+      "html": "<article class=\"ds-key\"><div class=\"ds-key-top\"><h3>FRED</h3><span class=\"ds-tag ds-tag-accent\">Free</span></div><p>Macro series, spreads and the derived YoY transforms behind the Macro tab.</p><dl><div><dt>Cost</dt><dd>Free</dd></div><div><dt>Unlocks</dt><dd>Macro · Commodities proxies</dd></div></dl><p class=\"ds-key-env\">FRED_API_KEY=…</p><p class=\"ds-key-degrade\"><b>Without it:</b> Macro falls back to cached or unavailable series.</p><div class=\"ds-key-actions\"><a class=\"ds-key-btn ds-key-btn-primary\" href=\"#\">Get a FRED key</a><a class=\"ds-key-btn\" href=\"#\">Docs</a></div></article>",
+      "css": ".ds-key { border-radius: var(--panel-radius); background: var(--panel-bg); padding: 24px; display: flex; flex-direction: column; gap: 12px; max-width: 360px; font-family: var(--font-ui); font-variant-numeric: tabular-nums; } .ds-key-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .ds-key h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-0); } .ds-key p { margin: 0; font-size: 13.5px; color: var(--text-1); line-height: 1.6; } .ds-key dl { margin: 0; display: grid; } .ds-key dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding-block: 6px; border-bottom: 1px solid var(--divider); } .ds-key dl > div:last-child { border-bottom: none; } .ds-key dt { color: var(--text-2); font-size: 11px; font-weight: 500; } .ds-key dd { margin: 0; text-align: right; color: var(--text-1); } .ds-key p.ds-key-env { font-family: var(--font-code); font-size: 12px; color: var(--text-0); background: var(--tint); border-radius: var(--radius-control); padding: 6px 12px; overflow-x: auto; white-space: nowrap; } .ds-key p.ds-key-degrade { font-size: 12px; line-height: 1.55; } .ds-key-degrade b { color: var(--warning); font-weight: 600; } .ds-key-actions { margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; } .ds-key-btn { min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--button-bg); color: var(--text-0); font-size: 12px; font-weight: 500; text-decoration: none; display: inline-flex; align-items: center; } .ds-key-btn:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong)); } .ds-key-btn-primary { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); color: var(--accent); } .ds-key-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-tag { --tg: var(--text-2); --tg-fill: var(--tint); display: inline-block; border-radius: var(--radius-pill); padding: 0 6px; font-family: var(--font-ui); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg); color: var(--text-1); } .ds-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: var(--tg); vertical-align: 1px; } .ds-tag-live { --tg: var(--positive); --tg-fill: var(--positive-soft); color: var(--tg); } .ds-tag-mock, .ds-tag-delayed { --tg: var(--warning); --tg-fill: var(--warning-soft); color: var(--tg); } .ds-tag-accent { --tg: var(--accent); --tg-fill: var(--accent-soft); color: var(--tg); } .ds-tag-plan { color: var(--text-2); } .ds-tag-plan::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tg); }"
     },
     {
       "name": "Surface Cell",
       "kind": "card",
       "refersTo": "cell",
-      "description": "A square, seam-drawn cell in the surfaces plane. The container owns top and left seams, each cell owns right and bottom, so no seam ever doubles.",
-      "html": "<div class=\"ds-plane\"><div class=\"ds-cell\"><div class=\"ds-cell-top\"><h3>Portfolio</h3><span class=\"ds-cell-badge\">IBKR</span></div><p>Net liquidation, day P&amp;L, gross and net exposure, cash weight, allocation and concentration.</p><p class=\"ds-cell-modes\">Local daily history · FX-converted positions · readiness diagnostics</p></div><div class=\"ds-cell\"><div class=\"ds-cell-top\"><h3>Strategy Lab</h3></div><p>Read-only strategy objects: import CSV return streams, inspect drawdown and rolling-risk stress windows.</p><p class=\"ds-cell-modes\">Composer · Script · Backtest · Regime/Stress · Saved</p></div></div>",
-      "css": ".ds-plane { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); border-top: 1px solid #2f3641; border-left: 1px solid #2f3641; font-family: 'Archivo', system-ui, sans-serif; } .ds-cell { border-right: 1px solid #2f3641; border-bottom: 1px solid #2f3641; padding: 16px; min-height: 176px; display: flex; flex-direction: column; gap: 8px; transition: background 180ms cubic-bezier(0.2,0,0,1); } .ds-cell:hover { background: #0b0d10; } .ds-cell-top { display: flex; align-items: center; gap: 8px; } .ds-cell h3 { margin: 0; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #f0f2f5; } .ds-cell-badge { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; border: 1px solid rgba(75,180,116,0.4); color: #4bb474; } .ds-cell p { margin: 0; font-size: 0.6875rem; color: #8a919a; line-height: 1.55; } .ds-cell-modes { font-family: 'JetBrains Mono', ui-monospace, monospace; margin-top: auto !important; padding-top: 12px; border-top: 1px solid rgba(70,80,94,0.30); font-size: 0.625rem; color: #626973 !important; letter-spacing: 0.05em; line-height: 1.5; }"
+      "description": "A surface on its own sheet in an 8px-seam grid: sentence-case title, prose, and its modes above a row rule. No border, no hover fill.",
+      "html": "<div class=\"ds-plane\"><div class=\"ds-cell\"><div class=\"ds-cell-top\"><h3>Portfolio</h3><span class=\"ds-tag ds-tag-live\">IBKR</span></div><p>Net liquidation, day P&amp;L, gross and net exposure, cash weight, allocation and concentration.</p><p class=\"ds-cell-modes\">Local daily history · FX-converted positions · readiness diagnostics</p></div><div class=\"ds-cell\"><div class=\"ds-cell-top\"><h3>Sealanes</h3><span class=\"ds-tag ds-tag-plan\">Prototype</span></div><p>Live AIS over a server-side AISstream proxy. Chokepoints, routes, ports and event replay.</p><p class=\"ds-cell-modes\">Live Map · Chokepoints · Trade Flows · Fleet · Event Replay</p></div></div>",
+      "css": ".ds-plane { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 8px; padding: 8px; background: var(--canvas); font-family: var(--font-ui); } .ds-cell { border-radius: var(--panel-radius); background: var(--panel-bg); padding: 16px; min-height: 176px; display: flex; flex-direction: column; gap: 8px; } .ds-cell-top { display: flex; align-items: center; gap: 8px; } .ds-cell h3 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-0); } .ds-cell p { margin: 0; font-size: 12px; color: var(--text-1); line-height: 1.55; } .ds-cell p.ds-cell-modes { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--divider); font-size: 11px; color: var(--text-2); line-height: 1.5; } .ds-tag { --tg: var(--text-2); --tg-fill: var(--tint); display: inline-block; border-radius: var(--radius-pill); padding: 0 6px; font-family: var(--font-ui); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg); color: var(--text-1); } .ds-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: var(--tg); vertical-align: 1px; } .ds-tag-live { --tg: var(--positive); --tg-fill: var(--positive-soft); color: var(--tg); } .ds-tag-mock, .ds-tag-delayed { --tg: var(--warning); --tg-fill: var(--warning-soft); color: var(--tg); } .ds-tag-accent { --tg: var(--accent); --tg-fill: var(--accent-soft); color: var(--tg); } .ds-tag-plan { color: var(--text-2); } .ds-tag-plan::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tg); }"
     },
     {
       "name": "Data Table",
       "kind": "custom",
       "refersTo": "table-header",
-      "description": "Documentation table: sans caps sticky headers on panel fill, mono cells, row hover tint, inline brass code, inside a 4px-radius scrolling wrapper.",
-      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-data\"><caption>Works with zero keys</caption><thead><tr><th scope=\"col\">Provider</th><th scope=\"col\">Powers</th><th scope=\"col\">Why no key</th></tr></thead><tbody><tr><td class=\"ds-k\">yfinance</td><td>SITREP tape, equity history</td><td>Public endpoint, cached <code>300 s</code></td></tr><tr><td class=\"ds-k\">CoinGecko</td><td>Crypto screen</td><td>Free public tier</td></tr></tbody></table></div>",
-      "css": ".ds-table-wrap { border: 1px solid #2f3641; border-radius: 4px; overflow-x: auto; } .ds-data { width: 100%; border-collapse: collapse; font-size: 0.8125rem; font-family: 'JetBrains Mono', ui-monospace, monospace; } .ds-data caption { text-align: left; padding: 12px 16px; border-bottom: 1px solid #2f3641; background: #0b0d10; font-family: 'Archivo', system-ui, sans-serif; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #626973; } .ds-data th { font-family: 'Archivo', system-ui, sans-serif; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #626973; text-align: left; padding: 12px 16px; border-bottom: 1px solid #2f3641; background: #0b0d10; white-space: nowrap; position: sticky; top: 0; } .ds-data td { padding: 12px 16px; border-bottom: 1px solid rgba(70,80,94,0.2); color: #8a919a; vertical-align: top; line-height: 1.5; } .ds-data tbody tr:last-child td { border-bottom: none; } .ds-data tbody tr:hover { background: rgba(122,166,200,0.06); } .ds-data td.ds-k { color: #f0f2f5; font-weight: 600; white-space: nowrap; } .ds-data code { font-size: 0.6875rem; color: #c49a5a; background: #0f1114; padding: 1px 5px; border-radius: 2px; white-space: nowrap; }"
+      "description": "A documentation table that owns its sheet: a 30px caption row, a tinted header band without a rule, sentence-case labels, ruled rows, no zebra, tabular figures, inline code on the tint.",
+      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-data\"><caption>Integrated providers</caption><thead><tr><th scope=\"col\">Provider</th><th scope=\"col\">Key</th><th scope=\"col\">Status</th></tr></thead><tbody><tr><td class=\"ds-k\">FRED</td><td><code>FRED_API_KEY</code></td><td><span class=\"ds-tag ds-tag-live\">Live</span></td></tr><tr><td class=\"ds-k\">EIA</td><td><code>EIA_API_KEY</code></td><td><span class=\"ds-tag ds-tag-accent\">Optional</span></td></tr><tr><td class=\"ds-k\">BLS · BEA · ECB</td><td>Env slots reserved</td><td><span class=\"ds-tag ds-tag-plan\">Planned</span></td></tr></tbody></table></div>",
+      "css": ".ds-table-wrap { border-radius: var(--panel-radius); background: var(--panel-bg); overflow-x: auto; } .ds-data { width: 100%; border-collapse: collapse; font-family: var(--font-ui); font-size: 13.5px; font-variant-numeric: tabular-nums; } .ds-data caption { text-align: left; padding: 6px 12px; font-size: 12.5px; font-weight: 600; color: var(--text-1); } .ds-data th { font-size: 11px; font-weight: 500; color: var(--text-2); text-align: left; padding: 6px 10px; background: var(--tint); white-space: nowrap; } .ds-data td { padding: 8px 10px; border-bottom: 1px solid var(--divider); color: var(--text-1); vertical-align: top; line-height: 1.5; } .ds-data th:first-child, .ds-data td:first-child { padding-left: 12px; } .ds-data th:last-child, .ds-data td:last-child { padding-right: 12px; } .ds-data tbody tr:last-child td { border-bottom: none; } .ds-data tbody tr:hover { background: var(--hover-bg); } .ds-data td.ds-k { color: var(--text-0); font-weight: 600; white-space: nowrap; } .ds-data code { font-family: var(--font-code); font-size: 0.86em; color: var(--text-0); background: var(--tint); padding: 1px 5px; border-radius: 2px; white-space: nowrap; } .ds-data td .ds-tag { vertical-align: top; } .ds-tag { --tg: var(--text-2); --tg-fill: var(--tint); display: inline-block; border-radius: var(--radius-pill); padding: 0 6px; font-family: var(--font-ui); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg); color: var(--text-1); } .ds-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: var(--tg); vertical-align: 1px; } .ds-tag-live { --tg: var(--positive); --tg-fill: var(--positive-soft); color: var(--tg); } .ds-tag-mock, .ds-tag-delayed { --tg: var(--warning); --tg-fill: var(--warning-soft); color: var(--tg); } .ds-tag-accent { --tg: var(--accent); --tg-fill: var(--accent-soft); color: var(--tg); } .ds-tag-plan { color: var(--text-2); } .ds-tag-plan::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tg); }"
     },
     {
       "name": "Screenshot Plate",
       "kind": "custom",
       "refersTo": "mark-point",
-      "description": "The signature component. Seamed shot bar with a Mock badge, the frame, numbered markers that never cover what they point at, and a legend strip below.",
-      "html": "<figure class=\"ds-shot\"><figcaption class=\"ds-shot-bar\"><span>Research · Macro · Snapshot</span><span class=\"ds-shot-right\"><span class=\"ds-shot-badge\">Mock</span></span></figcaption><div class=\"ds-shot-frame\"><div class=\"ds-shot-stand\" aria-hidden=\"true\"></div><span class=\"ds-mark-pt\" style=\"left:30.5%;top:35%\">1</span><span class=\"ds-mark-pt\" style=\"left:62.5%;top:60%\">2</span></div><ul class=\"ds-shot-legend\"><li><b>1</b> Coherence label — a Gamma heuristic, marked as one</li><li><b>2</b> Divergence state on the same row</li></ul></figure>",
-      "css": ".ds-shot { margin: 0; position: relative; border: 1px solid #2f3641; border-radius: 4px; background: #0b0d10; overflow: hidden; box-shadow: 0 30px 70px -40px rgba(0,0,0,0.95); font-family: 'Archivo', system-ui, sans-serif; } .ds-shot-bar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid #2f3641; background: #0b0d10; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: #626973; } .ds-shot-right { margin-left: auto; } .ds-shot-badge { font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; padding: 2px 6px; border-radius: 2px; border: 1px solid rgba(196,154,90,0.4); color: #c49a5a; } .ds-shot-frame { position: relative; overflow: hidden; background: #070809; } .ds-shot-stand { aspect-ratio: 16 / 9; background-image: repeating-linear-gradient(to right, rgba(96,108,124,0.22) 0 1px, transparent 1px 8%), repeating-linear-gradient(to bottom, rgba(96,108,124,0.14) 0 1px, transparent 1px 28px); } .ds-mark-pt { position: absolute; z-index: 3; transform: translate(-50%, -50%); width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; border: 1px solid #7aa6c8; background: rgba(7,8,9,0.88); color: #7aa6c8; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.625rem; font-weight: 700; line-height: 1; box-shadow: 0 0 0 3px rgba(7,8,9,0.55), 0 0 12px rgba(122,166,200,0.35); pointer-events: none; } .ds-shot-legend { list-style: none; margin: 0; padding: 12px 16px; border-top: 1px solid #2f3641; background: #0b0d10; display: flex; flex-wrap: wrap; gap: 8px 24px; } .ds-shot-legend li { display: flex; align-items: center; gap: 8px; font-size: 0.6875rem; color: #8a919a; line-height: 1.4; } .ds-shot-legend li b { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; border: 1px solid #46505e; color: #7aa6c8; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.625rem; font-weight: 700; }"
+      "description": "The signature component: a shot bar with a Mock tag, the capture, numbered markers that never cover what they point at, and a legend row below.",
+      "html": "<figure class=\"ds-shot\"><figcaption class=\"ds-shot-bar\"><span>Research · Macro · Snapshot</span><span class=\"ds-shot-right\"><span class=\"ds-tag ds-tag-mock\">Mock</span></span></figcaption><div class=\"ds-shot-frame\"><div class=\"ds-shot-stand\" aria-hidden=\"true\"></div><span class=\"ds-mark-pt\" style=\"left:30.5%;top:35%\">1</span><span class=\"ds-mark-pt\" style=\"left:62.5%;top:60%\">2</span></div><ul class=\"ds-shot-legend\"><li><b>1</b> Coherence label — a Gamma heuristic, marked as one</li><li><b>2</b> Divergence state on the same row</li></ul></figure>",
+      "css": ".ds-shot { margin: 0; position: relative; border-radius: var(--panel-radius); background: var(--panel-bg); overflow: hidden; font-family: var(--font-ui); } .ds-shot-bar { display: flex; align-items: center; gap: 12px; min-height: 30px; padding: 4px 12px; font-size: 11px; font-weight: 500; color: var(--text-2); } .ds-shot-right { margin-left: auto; } .ds-shot-frame { position: relative; overflow: hidden; background: var(--tint); } .ds-shot-stand { aspect-ratio: 16 / 9; } .ds-mark-pt { position: absolute; z-index: 3; transform: translate(-50%, -50%); width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--accent); background: var(--panel-bg); color: var(--accent); font-size: 10px; font-weight: 700; line-height: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--panel-bg) 70%, transparent); pointer-events: none; } .ds-shot-legend { list-style: none; margin: 0; padding: 8px 12px 12px; display: flex; flex-wrap: wrap; gap: 6px 24px; } .ds-shot-legend li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-1); line-height: 1.4; } .ds-shot-legend li b { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 10px; font-weight: 700; } .ds-tag { --tg: var(--text-2); --tg-fill: var(--tint); display: inline-block; border-radius: var(--radius-pill); padding: 0 6px; font-family: var(--font-ui); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg); color: var(--text-1); } .ds-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: var(--tg); vertical-align: 1px; } .ds-tag-live { --tg: var(--positive); --tg-fill: var(--positive-soft); color: var(--tg); } .ds-tag-mock, .ds-tag-delayed { --tg: var(--warning); --tg-fill: var(--warning-soft); color: var(--tg); } .ds-tag-accent { --tg: var(--accent); --tg-fill: var(--accent-soft); color: var(--tg); } .ds-tag-plan { color: var(--text-2); } .ds-tag-plan::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tg); }"
     },
     {
       "name": "Command Block",
       "kind": "custom",
       "refersTo": "code-block",
-      "description": "Seamed head naming the shell, a copy button that confirms in green, and a mono body with exactly three syntax colors: comment, value, parameter.",
+      "description": "A sheet whose head is a tinted band naming the shell, with a filled copy button; the body is the only monospace, with three syntax roles: comment, value, parameter.",
       "html": "<div class=\"ds-code\"><div class=\"ds-code-head\"><span>PowerShell</span><span class=\"ds-code-right\"><button class=\"ds-copy\" type=\"button\">Copy</button></span></div><pre><span class=\"ds-p\">$env:MOCK_DATA</span>=<span class=\"ds-v\">\"true\"</span>\n.\\.venv\\Scripts\\python.exe -m uvicorn src.api.main:app <span class=\"ds-c\">`</span>\n  --host 127.0.0.1 --port 8000 --reload</pre></div>",
-      "css": ".ds-code { border: 1px solid #2f3641; border-radius: 4px; background: #0b0d10; overflow: hidden; } .ds-code-head { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid #2f3641; font-family: 'Archivo', system-ui, sans-serif; font-size: 0.625rem; letter-spacing: 0.12em; text-transform: uppercase; color: #626973; font-weight: 600; } .ds-code-right { margin-left: auto; } .ds-copy { font-family: 'Archivo', system-ui, sans-serif; font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; color: #8a919a; background: #0f1114; border: 1px solid #2f3641; border-radius: 2px; padding: 3px 8px; cursor: pointer; transition: color 120ms cubic-bezier(0.2,0,0,1), border-color 120ms cubic-bezier(0.2,0,0,1); } .ds-copy:hover { color: #f0f2f5; border-color: #46505e; } .ds-copy:focus-visible { outline: 2px solid rgba(122,166,200,0.55); outline-offset: 2px; } .ds-copy[data-copied=\"true\"] { color: #4bb474; border-color: rgba(75,180,116,0.45); } .ds-code pre { margin: 0; padding: 16px; overflow-x: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem; line-height: 1.7; color: #c2c8d0; tab-size: 2; } .ds-code pre .ds-c { color: #626973; } .ds-code pre .ds-v { color: #c49a5a; } .ds-code pre .ds-p { color: #7aa6c8; }"
+      "css": ".ds-code { border-radius: var(--panel-radius); background: var(--panel-bg); overflow: hidden; } .ds-code-head { display: flex; align-items: center; gap: 12px; min-height: 32px; padding: 2px 6px 2px 12px; background: var(--tint); font-family: var(--font-ui); font-size: 11px; font-weight: 500; color: var(--text-2); } .ds-code-right { margin-left: auto; } .ds-copy { font-family: var(--font-ui); font-size: 11px; font-weight: 500; line-height: 1.2; color: var(--text-1); background: var(--button-bg); border: 1px solid transparent; border-radius: var(--radius-control); min-height: 22px; padding: 2px 8px; cursor: pointer; transition: color 120ms cubic-bezier(0.2,0,0,1), border-color 120ms cubic-bezier(0.2,0,0,1); } .ds-copy:hover { color: var(--text-0); border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong)); } .ds-copy:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; } .ds-copy[data-copied=\"true\"] { color: var(--positive); } .ds-code pre { margin: 0; padding: 12px 12px 16px; overflow-x: auto; font-family: var(--font-code); font-size: 12px; line-height: 1.7; color: var(--text-0); tab-size: 2; } .ds-code pre .ds-c { color: var(--text-2); } .ds-code pre .ds-v { color: var(--accent-2); } .ds-code pre .ds-p { color: var(--accent); }"
     },
     {
       "name": "Live Tape",
       "kind": "custom",
       "refersTo": "table-cell",
-      "description": "The live board's readout: fully mono, right-aligned except the symbol column, semantic direction colors, and an accent flash that decays over 620ms when a value reprices.",
-      "html": "<div class=\"ds-term\"><div class=\"ds-term-bar\"><span class=\"ds-dot\" aria-hidden=\"true\"></span><span>Gamma · live board</span><span class=\"ds-term-right\"><span class=\"ds-term-badge\">Mock</span></span></div><table class=\"ds-tape\"><thead><tr><th scope=\"col\">Market</th><th scope=\"col\">Last</th><th scope=\"col\">Chg</th><th scope=\"col\">%Chg</th></tr></thead><tbody><tr><td class=\"ds-sym\">S&amp;P 500</td><td class=\"ds-flash\">5,471.28</td><td class=\"ds-pos\">+12.44</td><td class=\"ds-pos\">+0.23%</td></tr><tr><td class=\"ds-sym\">NASDAQ 100</td><td>19,318.70</td><td class=\"ds-neg\">-41.02</td><td class=\"ds-neg\">-0.21%</td></tr><tr><td class=\"ds-sym\">WTI M1</td><td>74.18</td><td class=\"ds-warn\">CONTANGO</td><td class=\"ds-dim\">—</td></tr></tbody></table></div>",
-      "css": ".ds-term { border: 1px solid #2f3641; border-radius: 4px; background: #070809; overflow: hidden; box-shadow: 0 24px 60px -30px rgba(0,0,0,0.9); } .ds-term-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #2f3641; background: #0b0d10; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.625rem; letter-spacing: 0.1em; color: #626973; text-transform: uppercase; } .ds-dot { width: 5px; height: 5px; border-radius: 50%; background: #4bb474; box-shadow: 0 0 6px rgba(75,180,116,0.7); flex: none; } .ds-term-right { margin-left: auto; } .ds-term-badge { border: 1px solid rgba(196,154,90,0.4); border-radius: 2px; padding: 2px 6px; color: #c49a5a; font-weight: 600; } .ds-tape { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem; font-variant-numeric: tabular-nums; } .ds-tape th { font-family: 'Archivo', system-ui, sans-serif; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #626973; text-align: right; padding: 8px 16px; border-bottom: 1px solid rgba(70,80,94,0.30); white-space: nowrap; } .ds-tape th:first-child, .ds-tape td:first-child { text-align: left; } .ds-tape td { padding: 8px 16px; text-align: right; border-bottom: 1px solid rgba(70,80,94,0.14); color: #c2c8d0; white-space: nowrap; } .ds-tape tr:last-child td { border-bottom: none; } .ds-tape td.ds-sym { color: #f0f2f5; font-weight: 600; } .ds-pos { color: #4bb474; } .ds-neg { color: #d97a70; } .ds-warn { color: #c49a5a; } .ds-dim { color: #626973; } td.ds-flash { animation: ds-flash 620ms cubic-bezier(0.2,0,0,1); } @keyframes ds-flash { 0% { background: rgba(122,166,200,0.16); } 100% { background: transparent; } }"
+      "description": "The live board on its own sheet: a title row with Mock and Read-only tags, a B′ segmented track, and a tape of tabular figures on a tinted header band; a repriced cell flashes toward its direction and fades over 800ms.",
+      "html": "<div class=\"ds-term\"><div class=\"ds-term-bar\"><span class=\"ds-dot\" aria-hidden=\"true\"></span><span>Gamma · live board</span><span class=\"ds-term-right\"><span class=\"ds-tag ds-tag-mock\">Mock</span> <span class=\"ds-tag\">Read-only</span></span></div><div class=\"ds-seg\" role=\"tablist\"><button role=\"tab\" aria-selected=\"true\">Sitrep</button><button role=\"tab\" aria-selected=\"false\">Macro</button><button role=\"tab\" aria-selected=\"false\">Commodities</button></div><table class=\"ds-tape\"><thead><tr><th scope=\"col\">Market</th><th scope=\"col\">Last</th><th scope=\"col\">Chg</th><th scope=\"col\">Shape</th></tr></thead><tbody><tr><td class=\"ds-sym\">S&amp;P 500</td><td class=\"ds-flash-up\">5,471.28</td><td class=\"ds-pos\">+12.44</td><td>—</td></tr><tr><td class=\"ds-sym\">NASDAQ 100</td><td>19,318.70</td><td class=\"ds-neg\">-41.02</td><td>—</td></tr><tr><td class=\"ds-sym\">WTI M1</td><td>74.18</td><td class=\"ds-dim\">—</td><td><span class=\"ds-tag ds-tag-live\">Backwardation</span></td></tr></tbody></table></div>",
+      "css": ".ds-term { border-radius: var(--panel-radius); background: var(--panel-bg); overflow: hidden; font-family: var(--font-ui); font-variant-numeric: tabular-nums; font-feature-settings: \"tnum\" 1; } .ds-term-bar { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 12px; font-size: 11px; font-weight: 500; color: var(--text-2); } .ds-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--positive); flex: none; } .ds-term-right { margin-left: auto; } .ds-seg { display: flex; gap: 2px; width: fit-content; margin: 0 12px 4px; padding: 2px; border-radius: var(--panel-radius); background: var(--tint); } .ds-seg button { font-family: var(--font-ui); font-size: 12px; font-weight: 500; line-height: 1.2; color: var(--text-1); background: transparent; border: 0; border-radius: var(--radius-control); padding: 3px 12px; cursor: pointer; } .ds-seg button:hover { color: var(--text-0); background: var(--hover-bg); } .ds-seg button[aria-selected=\"true\"] { color: var(--text-0); background: var(--panel-bg); outline: 1px solid var(--panel-border); outline-offset: -1px; font-weight: 600; } .ds-tape { width: 100%; border-collapse: collapse; font-size: 13.5px; } .ds-tape th { font-size: 11px; font-weight: 500; color: var(--text-2); text-align: right; padding: 6px 10px; background: var(--tint); white-space: nowrap; } .ds-tape td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--divider); color: var(--text-1); line-height: 1.3; white-space: nowrap; } .ds-tape th:first-child, .ds-tape td:first-child { text-align: left; padding-left: 12px; } .ds-tape th:last-child, .ds-tape td:last-child { padding-right: 12px; } .ds-tape tr:last-child td { border-bottom: none; } .ds-tape td.ds-sym { color: var(--text-0); font-weight: 600; } .ds-pos { color: var(--positive); } .ds-neg { color: var(--negative); } .ds-dim { color: var(--text-2); } .ds-tape td .ds-tag { vertical-align: top; } td.ds-flash-up { animation: ds-flash-up 800ms ease-out; } @keyframes ds-flash-up { 0% { background-color: var(--flash-up); } 100% { background-color: transparent; } } .ds-tag { --tg: var(--text-2); --tg-fill: var(--tint); display: inline-block; border-radius: var(--radius-pill); padding: 0 6px; font-family: var(--font-ui); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; background: linear-gradient(var(--tg-fill), var(--tg-fill)), var(--panel-bg); color: var(--text-1); } .ds-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: var(--tg); vertical-align: 1px; } .ds-tag-live { --tg: var(--positive); --tg-fill: var(--positive-soft); color: var(--tg); } .ds-tag-mock, .ds-tag-delayed { --tg: var(--warning); --tg-fill: var(--warning-soft); color: var(--tg); } .ds-tag-accent { --tg: var(--accent); --tg-fill: var(--accent-soft); color: var(--tg); } .ds-tag-plan { color: var(--text-2); } .ds-tag-plan::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tg); }"
     },
     {
       "name": "Disclosure",
       "kind": "custom",
       "refersTo": "title",
-      "description": "FAQ row: seam-separated native details/summary, marker replaced by a plus that rotates 45 degrees to a cross when open.",
-      "html": "<div class=\"ds-faq\"><details class=\"ds-qa\"><summary>Does Gamma ever place an order?<svg class=\"ds-mark\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M8 3v10M3 8h10\"/></svg></summary><div class=\"ds-answer\"><p>No. Read-only is a platform-level contract exposed as an API, covering the TWS operator lock and the app-side no-execution boundary.</p></div></details></div>",
-      "css": ".ds-faq { border-top: 1px solid #2f3641; max-width: 800px; font-family: 'Archivo', system-ui, sans-serif; } .ds-qa { border-bottom: 1px solid #2f3641; } .ds-qa summary { display: flex; align-items: center; gap: 16px; padding: 24px 0; cursor: pointer; list-style: none; font-size: clamp(0.95rem, 1.5vw, 1.1rem); font-weight: 600; letter-spacing: -0.015em; color: #f0f2f5; transition: color 120ms cubic-bezier(0.2,0,0,1); } .ds-qa summary::-webkit-details-marker { display: none; } .ds-qa summary:hover { color: #7aa6c8; } .ds-qa summary:focus-visible { outline: 2px solid rgba(122,166,200,0.55); outline-offset: 2px; } .ds-qa summary .ds-mark { margin-left: auto; margin-right: 4px; flex: none; width: 13px; height: 13px; color: #626973; transition: transform 180ms cubic-bezier(0.2,0,0,1), color 120ms cubic-bezier(0.2,0,0,1); } .ds-qa[open] summary .ds-mark { transform: rotate(45deg); color: #7aa6c8; } .ds-qa .ds-answer { padding-bottom: 24px; max-width: 70ch; } .ds-qa .ds-answer p { margin: 0; font-size: 0.8125rem; color: #8a919a; line-height: 1.7; }"
+      "description": "FAQ rows on a sheet, ruled with the divider; hover paints the hover fill across the row, and the plus rotates 45 degrees to an accent cross when open.",
+      "html": "<div class=\"ds-faq\"><details class=\"ds-qa\" open><summary>Can Gamma place trades?<svg class=\"ds-mark\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M8 3v10M3 8h10\"/></svg></summary><div class=\"ds-answer\"><p>No, and it is not a setting. The read-only contract is exposed by the API itself.</p></div></details><details class=\"ds-qa\"><summary>Is this investment advice?<svg class=\"ds-mark\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M8 3v10M3 8h10\"/></svg></summary><div class=\"ds-answer\"><p>No. Gamma is research software.</p></div></details></div>",
+      "css": ".ds-faq { max-width: 800px; border-radius: var(--panel-radius); background: var(--panel-bg); overflow: hidden; font-family: var(--font-ui); } .ds-qa + .ds-qa { border-top: 1px solid var(--divider); } .ds-qa summary { display: flex; align-items: center; gap: 16px; padding: 16px 16px 16px 24px; cursor: pointer; list-style: none; font-size: clamp(0.95rem, 1.3vw, 1.06rem); font-weight: 600; line-height: 1.35; color: var(--text-0); transition: background 120ms cubic-bezier(0.2,0,0,1); } .ds-qa summary::-webkit-details-marker { display: none; } .ds-qa summary:hover { background: var(--hover-bg); } .ds-qa summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; } .ds-qa summary .ds-mark { margin-left: auto; margin-right: 4px; flex: none; width: 13px; height: 13px; color: var(--text-2); transition: transform 180ms cubic-bezier(0.2,0,0,1), color 120ms cubic-bezier(0.2,0,0,1); } .ds-qa[open] summary .ds-mark { transform: rotate(45deg); color: var(--accent); } .ds-qa .ds-answer { padding: 0 24px 24px; max-width: 70ch; } .ds-qa .ds-answer p { margin: 0; font-size: 13.5px; color: var(--text-1); line-height: 1.7; }"
     }
   ],
   "narrative": {
     "northStar": "The Desk Session",
-    "overview": "The site is not a page about a terminal; it is a plane of instrument surfaces with a morning of research laid across it. The ground is a fixed ruled graticule — four repeating-gradient layers under a radial mask — so the whole document reads as something measured rather than something composed. Content sits on that ground in seamed regions divided by hairline borders, never in floating cards. A fixed time rail on the left carries the session's timestamps like the scale on an instrument; it activates only while the session is in view, because a rail that tracked the whole document would be a minimap, and a minimap is decoration.\n\nThe palette, the two typefaces and the semantic colors are inherited wholesale from Gamma's implemented application tokens. Nothing here is a marketing-only color. The one structural inversion is typographic: the application defaults to mono and opts into sans for chrome, while the site defaults to the display sans and opts a named list of data classes into mono — the same Two-Type Rule, entered from the other side, because the site carries prose the app does not.\n\nRestraint is enforced by role, not by taste. Chrome is grey on grey; hue appears only where a value has direction or a state has a name. The only two shadows in the system sit under the two objects that depict a screen. The refusal the product is built on — Gamma cannot place an order — is given a full seamed region with semantic checkmarks and crosses rather than a footnote, and every sample value on the page wears a MOCK badge, because a marketing surface that quietly showed synthetic numbers as live would contradict the product it is selling.",
+    "overview": "The site is a morning of research laid across one plane: a cool, flat canvas with borderless tonal sheets on it, exactly as the application builds a workspace. The canvas carries the page's headings and the hero; everything that holds evidence — the live board, each moment of the session, the surface cells, the boundary, every table, key card, code block and FAQ list, and the footer — is a sheet one tonal step above it, separated by 8px seams or by canvas space between sections. A sheet's edge is its change of tone, never a line. A time rail on the left carries the session's timestamps like the scale on an instrument; it activates only while the session is in view, because a rail that tracked the whole document would be a minimap.\n\nThe palette, the type and the shapes are the application's B′ \"Tonal compact\" tokens, copied value for value into site.css (a static site cannot import the app's stylesheets). There is no marketing-only colour. Both themes come from the same role names and follow the operating system: the site is light when the OS is light and dark when it is dark, which is the app's System default. Instrument Sans is the interface, label and figure font, with tabular figures across the whole document; a monospace appears only where the content is code.\n\nRestraint is enforced by role, not by taste. Chrome is neutral; hue appears only where a value has direction, a state has a name, or an action is the primary one. The refusal the product is built on — Gamma cannot place an order — is given three full sheets with semantic checkmarks and crosses rather than a footnote, and every sample value on the page wears a Mock tag, because a marketing surface that quietly showed synthetic numbers as live would contradict the product it is selling.",
     "keyCharacteristics": [
-      "Ruled graticule ground, fixed behind everything, masked to fade downward",
-      "One accent (#7aa6c8), used for state and action only; data supplies the rest of the color",
-      "Hairline seams (1px) instead of gaps, cards, or radii above 4px",
-      "Instrument caps: 10–11px uppercase labels at 0.10–0.16em tracking name every region",
-      "Every number, ticker, timestamp, path and stamped label is monospace",
-      "Sample data is always badged; planned things are always dashed",
+      "A flat cool canvas with borderless tonal sheets on it; no texture, no ruled ground",
+      "Light and dark from one set of role names, following the OS (System by default), WCAG AA in both",
+      "One accent, for interaction and the primary action only; data supplies the rest of the colour",
+      "Instrument Sans everywhere, with tabular figures; JetBrains Mono for code only",
+      "Sentence-case labels at 11px, weight 500, no letter-spacing",
+      "Filled, edgeless controls; the primary action is an accent tint, never a solid fill",
+      "Pill tags with a dot for state; sample data is always tagged",
+      "Floating overlays (12px radius and the overlay shadow) are the only elevation",
       "Motion is functional — a pour-in on entry, a sweep that tracks reading position, one board that ticks",
       "Nothing is hidden by an overflow-x mask; wide content scrolls inside its own container"
     ],
     "rules": [
       {
         "name": "The Data-Owns-Color Rule",
-        "body": "Chrome is grey. Hue enters only where a value has a direction (positive/negative), a state has a name (live/mock/planned), or an action is primary. A section heading, a nav item at rest, a card border, and a body paragraph are never colored.",
+        "body": "Chrome is neutral. Hue enters only where a value has a direction (positive/negative), a state has a name (live/delayed/mock/planned), or an action is primary. A section heading, a nav item at rest, a sheet and a body paragraph are never coloured.",
         "section": "colors"
       },
       {
         "name": "The One-Accent Rule",
-        "body": "#7aa6c8 is the only chrome accent on the site. #c49a5a is analytical — warnings, environment values, sample-data badges — and never a second brand color. If a new element wants a third color, it wants a semantic role that already exists.",
+        "body": "--accent is the only chrome accent on the site. The gold is the warning and context role and never a second brand colour. If a new element wants a third colour, it wants a semantic role that already exists.",
         "section": "colors"
       },
       {
         "name": "The Labeled-Absence Rule",
-        "body": "Anything sample, planned, or degraded says so in color and in shape: sample data wears a brass Mock badge, planned things wear a dashed grey badge-plan, and a degradation note carries a brass left rule. No synthetic value on this site is ever presented unbadged.",
+        "body": "Anything sample, delayed, planned or degraded says so in words and in tone: sample data wears an amber Mock or Sample tag, planned things a neutral tag with a hollow dot, and a degradation note leads with an amber phrase. No synthetic value on this site is ever presented untagged.",
+        "section": "colors"
+      },
+      {
+        "name": "The Same-Roles-Both-Themes Rule",
+        "body": "Every colour is a custom property in site.css, defined once in the dark :root block and once in the prefers-color-scheme: light block, with the app's literal values. A rule names a role, never a hex value, so the second theme is never an afterthought. --text-2 reaches 4.5:1 on the sheet and the tint in both themes but not on the light canvas, so text on the canvas uses --text-1 or --text-0.",
         "section": "colors"
       },
       {
         "name": "The Two-Type Rule",
-        "body": "Sans explains the instrument; mono carries the research. Inherited verbatim from docs/design_principles.md, but implemented from the opposite default: body is Archivo, and mono is opt-in via one named selector list in the stylesheet. Adding a data element means adding its class to that list, not setting font-family locally. Never set sans on a number; never force navigation into mono because the product is terminal-like.",
+        "body": "Sans explains the instrument; tabular figures carry the research; mono is for code. The two types are proportional interface text and tabular data figures, both Instrument Sans: the body turns tabular figures on for the whole document, so a number in a table, a fact list, a tag or a sentence holds its width. JetBrains Mono is applied by one short selector list in site.css (code, .code pre, .key .env, .pull cite). Never set chrome or data in a monospace because the product handles numbers; adding a code element means adding it to that list.",
         "section": "typography"
       },
       {
-        "name": "The Instrument-Caps Rule",
-        "body": "Every structural label is 10–11px, weight 600, uppercase, tracked 0.10–0.16em, in --text-3. A label names a container that is present; it is never a floating eyebrow above a headline, and it never carries a sentence.",
+        "name": "The Sentence-Case Rule",
+        "body": "Labels, tags, buttons, tabs and headings are sentence case; the copy carries its own capitals. There is no text-transform: uppercase anywhere in the stylesheet. Upper case appears only where the content is itself a code — environment variables, key names, tickers, tenors — and that content is written in capitals in the markup.",
         "section": "typography"
       },
       {
-        "name": "The Tracking-Inversion Rule",
-        "body": "Tracking runs negative as type grows and positive as it shrinks: -0.042em at display, -0.028em at headline, -0.02em at title, normal at body, +0.08em to +0.16em at label. A 10px cap set at normal tracking is a bug.",
+        "name": "The No-Tracking Rule",
+        "body": "Labels and body text carry no letter-spacing. The only tracking on the site is a slight optical tightening of large type: -0.02em on the display headline and -0.015em on section headlines.",
         "section": "typography"
       },
       {
         "name": "The Fluid-Minimum Rule",
-        "body": "Every auto-placed grid track is written minmax(min(Npx, 100%), 1fr). The min() guarantees the declared minimum never exceeds the viewport, so no grid can push the page wider than the screen at any width.",
+        "body": "Every auto-placed grid track is written minmax(min(Npx, 100%), 1fr). The min() guarantees the declared minimum never exceeds the viewport, so no grid can push the page wider than the screen; the page has no horizontal overflow at 390px.",
         "section": "layout"
       },
       {
         "name": "The No-Mask Rule",
-        "body": "There is no overflow-x: hidden anywhere in the system. Wide content is given its own scroll container instead — the table wrapper, the code block's pre, the live board's tab strip, the nav strip below 860px, and the screenshot frame below 760px. Hiding overflow hides a layout bug; scrolling it admits one honestly.",
+        "body": "There is no overflow-x: hidden anywhere in the system. Wide content is given its own scroll container instead — the table sheet, the code block's pre, the live board's tape and segmented track, the nav strip below 860px, and the screenshot frame below 760px (where a 1920px capture becomes a 740px-wide pannable viewport labelled \"Drag to pan\"). Hiding overflow hides a layout bug; scrolling it admits one honestly.",
         "section": "layout"
       },
       {
-        "name": "The Seam Rule",
-        "body": "Regions are separated by 1px borders, not by gaps or drop shadows. Region seams use --panel-border; divisions inside a region use the fainter --rule or a ~14% alpha hairline. A gap where a seam belongs makes the plane read as loose cards.",
+        "name": "The One-Plane Rule",
+        "body": "Regions are separated by tone and space, not by borders. A sheet sits on the canvas, a block sits on the tint inside a sheet, and rules (--divider) divide rows inside them. A line around a region turns the plane back into outlined boxes.",
         "section": "layout"
       },
       {
-        "name": "The Flat-Chrome Rule",
-        "body": "Only an object that depicts a screen may cast a shadow. Everything else conveys depth with a tonal step and a hairline. A shadow on a button, a badge, a card, or a table is out of system.",
+        "name": "The Overlays-Only Rule",
+        "body": "Only a floating overlay may cast a shadow. Everything else conveys depth with a tonal step. A shadow, glow or blur on a sheet, button, tag, card or table is out of system, and so is glass.",
         "section": "elevation"
       },
       {
         "name": "The Visible-At-Rest Rule",
-        "body": ".reveal resolves to opacity: 1. The pour-in — a 620ms rise from 15px with a 3px blur clearing — is applied by adding a class on intersection, and only inside a prefers-reduced-motion: no-preference block on a .js root. A failed observer, a disabled script, or a reduced-motion preference costs the animation and never the copy.",
+        "body": ".reveal resolves to opacity: 1. The pour-in — a 620ms rise from 15px — is applied by adding a class on intersection, and only inside a prefers-reduced-motion: no-preference block on a .js root. A failed observer, a disabled script, or a reduced-motion preference costs the animation and never the copy. Elements entering together are sorted by their top edge and staggered 55ms apart via a --d custom property, so a group pours top-to-bottom rather than arriving at once.",
         "section": "components"
       }
     ],
     "dos": [
-      "Do inherit the palette from Gamma's application tokens. This site has no marketing-only color, and adding one would break the claim that the screenshots and the page are the same world.",
-      "Do add a new data element's class to the mono selector list in site.css rather than setting font-family on it locally. That list is the Two-Type Rule's only implementation.",
-      "Do name every region with instrument caps (10–11px, 600, uppercase, 0.10–0.16em) in --text-3.",
-      "Do separate regions with a 1px --panel-border seam and divide inside them with the fainter --rule.",
+      "Do copy colours from the app's tokens.css into the two token blocks in site.css, by role, for both themes. This site has no marketing-only colour, and adding one would break the claim that the screenshots and the page are the same world.",
+      "Do check every change in the light and the dark theme, and keep text at 4.5:1 (3:1 at 24px, or 18.66px bold) over its rendered background in both.",
+      "Do put evidence on a sheet (--panel-bg, 6px, no edge) and inner blocks on the tint; separate related sheets with 8px seams.",
+      "Do write labels in sentence case at 11px / 500 in --text-2, with no letter-spacing, and let the copy carry its own capitals.",
+      "Do set every number in Instrument Sans with tabular figures, and keep JetBrains Mono for code by adding a code element to the mono selector list.",
+      "Do fill every action: --button-bg for ordinary buttons, --tint for a ghost, the accent tint for the one primary action.",
       "Do write auto-placed grid tracks as minmax(min(Npx, 100%), 1fr).",
-      "Do give wide content its own scroll container, and label it when the gesture is not obvious (the screenshot frame's \"drag to pan\" below 760px).",
-      "Do badge every synthetic value Mock and every uncontracted provider badge-plan with its dashed border, on this site as in the app.",
+      "Do give wide content its own scroll container, and label it when the gesture is not obvious (the screenshot frame's \"Drag to pan\" below 760px).",
+      "Do tag every synthetic value Mock (or Sample) and every planned provider with the hollow-dot tag, on this site as in the app.",
       "Do annotate a screenshot with a numbered .mark-pt plus a legend row, and keep the marker pointer-events: none.",
-      "Do keep .reveal's resting state visible and animate only on entry.",
-      "Do state a limit plainly and give it weight — the boundary region is a full seamed field, not a disclaimer."
+      "Do keep .reveal's resting state visible and animate only on entry."
     ],
     "donts": [
-      "Don't put a shadow on chrome. Only the live board and the screenshot plate cast one; everything else uses a tonal step and a hairline.",
-      "Don't introduce a radius above 4px, or use a circle for anything that is not a status dot or a numbered marker.",
-      "Don't color chrome. A heading, a nav item at rest, a card border, or a body paragraph is grey; hue belongs to values, states, and the one primary action.",
-      "Don't treat brass (#c49a5a) as a second brand accent. It is the analytical / warning role: env strings, code values, mock badges, degradation rules.",
+      "Don't draw a border around a sheet, card, block, field, tag or button; the tonal step is the edge. Lines are for row rules, the selected segment, hover, focus and the primary action's edge.",
+      "Don't put a shadow, glow or blur on anything but a floating overlay.",
+      "Don't add texture to the canvas — no grid, no grain, no ruled ground.",
+      "Don't use a radius off the scale (5px controls, 6px sheets and blocks, 12px overlays, pills for tags only), or a circle for anything that is not a dot or a numbered marker.",
+      "Don't colour chrome. A heading, a nav item at rest, a sheet or a body paragraph is neutral; hue belongs to values, states and the one primary action.",
+      "Don't fill a button with a solid accent, green or red.",
+      "Don't uppercase or track a label, or write copy in capitals; upper case is for content that is itself a code.",
+      "Don't set chrome, labels or figures in a monospace, or set figures in proportional digits.",
+      "Don't put --text-2 on the light canvas; it is tuned for the sheet and the tint.",
       "Don't add overflow-x: hidden anywhere. If something overflows, either fix the track minimum or give it a scroll container.",
       "Don't float a callout over a screenshot. The marker points; the legend explains.",
-      "Don't set a 10px uppercase label at normal tracking, or set display type without negative tracking.",
       "Don't let the time rail track the whole document or appear below 1180px — it belongs to the session section and needs its own 92px column.",
       "Don't hide content behind a scroll-triggered animation. If the observer never fires, the page must still read completely.",
-      "Don't show a number on this site that a real Gamma surface could not produce, and never show one without its provenance or its Mock badge."
+      "Don't show a number on this site that a real Gamma surface could not produce, and never show one without its provenance or its Mock tag."
     ]
   }
 }
