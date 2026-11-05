@@ -3,8 +3,8 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
-- Last reviewed: 2026-11-03
-- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete and merged into main on 2026-11-03 (c3343b4). V5 complete and merged into main on 2026-11-04 (9192e29). V6 planned.
+- Last reviewed: 2026-11-05
+- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete and merged into main on 2026-11-03 (c3343b4). V5 complete and merged into main on 2026-11-04 (9192e29). V6 done on branch `claude/v6-hardening` (2026-11-05, not merged) except the live usability audit, which stopped when TWS closed.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
 - Doctrine: [`design_principles.md`](./design_principles.md) describes B′ since V5; this plan records the decisions behind it, the kept exceptions and the drift-scan findings left for V6.
@@ -70,7 +70,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 ### Surfaces, shape and components
 
 - **Panels:** solid sheet on the canvas, no border, no shadow, 6px radius, 8px seams (`--space-4`). A table that owns its panel keeps zero panel padding.
-- **Tables:** 28px rows, 10–12px side padding, tinted header band, light row rules, no zebra, sticky header. Heat-map cells may separate with 2px gaps and a 3px radius.
+- **Tables:** 28px rows, 10–12px side padding, tinted header band, light row rules, no zebra, sticky header. Heat-map cells may separate with 2px gaps and a `--radius-sm` (2px) radius (V6 decision; the treemaps used a raw 3px).
 - **KPI strips:** cells share one row and baseline as tinted blocks (6px radius, 6px gap), never bordered or shadowed. 14px values, plus a sparkline and week-over-week change where history exists.
 - **Tags:** pill with a dot, toned by one variable (`--tg`: neutral, positive, negative, warning, accent).
 - **Provenance badge:** soft pill reading `● Live · IBKR · 16:42 UTC · 2 warnings`. The full detail stays in the tooltip.
@@ -90,7 +90,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 | V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Done (2026-10-30), merged into main as a68ed3a; see [V3 theme infrastructure](#v3-theme-infrastructure) |
 | V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Done (2026-11-03), merged into main as c3343b4; see [V4 B′ values and fonts](#v4-b-values-and-fonts) |
 | V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Done (2026-11-03), merged into main as 9192e29 on 2026-11-04; see [V5 doctrine and skills](#v5-doctrine-and-skills) |
-| V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Planned |
+| V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Done on branch `claude/v6-hardening` (2026-11-05), not merged; website screenshots regenerated; the usability audit was interrupted, see [V6 hardening](#v6-hardening) |
 
 Rough effort for one developer who knows the codebase: V1 6–8, V2 3–4, V3 2–3, V4 5–8, V5 1–2 and V6 2–3 dev-days, about **19–28 dev-days** in total. These are estimates from a static read, not commitments. V1 and V2 would be needed for any restyle and also pay off without one.
 
@@ -497,6 +497,116 @@ Clean: no off-ramp font size, no solid, green or red button fill, uppercase only
 - `website/DESIGN.md` and `website/.impeccable/design.json` still inherit the old doctrine verbatim (the old Two-Type Rule, "Terminal Ground", uppercase tracked mono labels, the pre-V2 colours).
 - The marketing site's wording was changed with the app's, at the user's request: "Research Workspace" under the wordmark of all four pages, "a read-only market research workspace" in the index title, meta description, Open Graph title and every page footer, and the same words in `website/DESIGN.md` (description) and `website/.impeccable/design.json` (the topbar sample). Below 860px the site's nav is a sideways-scrolling strip by design; the longer subtitle makes it start scrolling at 724px instead of 710px, and the subtitle still hides below 620px. Left for V6: the thirteen app screenshots in `website/assets/img/screens/` predate B′ and still show "Research Terminal" and the old look, and the rest of `DESIGN.md` and `design.json` (the "Terminal Ground" colour, the old Two-Type Rule, "not a page about a terminal").
 
+## V6 hardening
+
+V6 ran on branch `claude/v6-hardening` from main 4b60e16, one commit per step: 5bf2ffb V6a primitives, c134206 V6b copy and charts, 6d943d1 V6c special surfaces, fe13f68 V6d narrow widths, then the gate (5294bfa visual baselines and two contrast fixes, 87333e4 the last two narrow overflows), four fixes found in the live audit session (0697257, 499642c, e70d6e4, d296f6f), the website (369e51c) and this section. Step 0 re-ran the V5 drift scan: the same 310 lines, only a `primitives.css` line moved by V5's comments, so every V5 finding was still at its V5 line.
+
+### Decisions before step 1 (2026-11-04)
+
+| Question | Decision |
+|---|---|
+| Screenshot baselines | The website screenshots **and** a small Playwright visual baseline for fixture-driven e2e harness pages, both themes (`frontend/e2e/visual.spec.ts`) |
+| Website scope | Move the site to B′: tokens for both themes following the OS, Instrument Sans, sentence-case labels, borderless sheets, screenshots in both themes |
+| Sealanes base map | Keep recolouring the CARTO style from tokens, with per-theme map tokens; the light theme turns the land and water roles over (sheet C of the decision sheets); dark unchanged |
+| 3px heat tiles | The user leaned to square or a very small radius and left it to the implementer: `--radius-sm` (2px), the existing inner-mark token |
+| MacroCoherencePanel | Revive it, in the four Cross-Asset theme cards only (a follow-up answer after seeing it mounted) |
+
+### Per drift-scan group
+
+| # | Group | Outcome |
+|---|---|---|
+| 1 | Bordered cards and boxes | Fixed: tinted blocks on the sheet or sheets on the canvas, no border, `--panel-radius` (Macro theme and divergence cards, key bindings window, Diagnostics, view load and error states, Setup notice, modes and facts, Equity signed book, Fundamentals decision gate, FanChart shell, AllocationDonut empty state) |
+| 2 | Bordered `.table-wrap` | Fixed (Strategy Lab, parameter sweep) |
+| 3 | Copilot surfaces | Fixed: transcript blocks, notices, event rows and result states are tinted blocks (confirmations and degraded states on `--warning-soft`, no coloured edges), chips are pills, the confirm action is the accent tint; artifacts panel, run inspector, Strategy Lab working analysis, session rename, run tools, storage badge, actions and details, the composer and the session confirm dialog converge |
+| 4 | Script surfaces | Fixed: the editor is a tinted inset (frame and CodeMirror ground on `--tint`, rule-only gutter, accent focus line); status chips are pills; state boxes, output and candidate cards, sweep evaluation and reference, the analytical book and the comparison table lose their edges |
+| 5 | Edged controls and chips | Fixed: landing choices and the hero chart settings button take the button fills; the scoped `.btn` copy in the scope analysis is deleted; Risk dependency zoom is a tinted track; status pills in six views, the DCF dirty pill and the Copilot options status become `.tag`; the Equity treemap tooltip chip is a pill; Sitrep reload buttons, note editor and news chips converge |
+| 6 | KPI strips with dividers | Fixed: Crypto, Macro and Fundamentals headline strips moved to `.header-kpis`/`.header-kpi` (values 14px, were 12px); `MacroMetricRow`, the sweep KPIs, the Copilot working analyses, the Fundamentals DCF terminal framing and the Sitrep tape strip lose their dividers |
+| 7 | Overlays off the tokens | Fixed: both Copilot context menus, the Commodities scatter, Risk dependency and frontier and allocation tooltips, the Portfolio and Copilot confirm dialogs (`--scrim`), the Surface3D settings popover and the Sealanes shelf, drawer, replay panel, notice and popup |
+| 8 | Radius off the scale | Fixed: Macro pills, chat bubbles on `--panel-radius` with a `--radius-sm` tail corner, `--radius-control` on controls; heat tiles `--radius-sm` (decision) |
+| 9 | Copy in capitals | Fixed: every capitalised state and label (list in the V6 handover), and visible "..." became "…"; tests that asserted the old copy follow. Kept: Sitrep state codes, which are codes in logic and formatted where shown |
+| 10 | Zebra | Fixed: Macro Rates stripe removed |
+| 11 | Charts | Fixed: no grid in FanChart, the Commodities scatter or the Risk frontier; the Risk benchmark is solid; lone series on `--chart-primary` (Risk Rolling Beta, Equity Research price and rolling beta/corr, Macro FX pairs 2 and 3, the PM spread); categories on `--cat-*` (Strategy Lab Rolling Corr, Macro rate and inflation pairs, Commodities inventory series and metals, Portfolio allocation, PM comparison, Risk clusters); the Options selected mass a stronger primary fill; VaR and ES markers warning and negative in both distributions |
+| 12 | Font stacks | Fixed: no `var(--font-num), monospace`; the key bindings body on `--font-ui`; Surface3D canvas labels on `--font-num` |
+| 13 | Local panel copies | Fixed: 103 panel class attributes opt into `.panel.is-flush`; Equity Research, Strategy Lab and the Macro Country Compare and Trade Partners table titles are `.panel-title` (a new primitive rule lets an `<h2>`–`<h4>` keep the row's type). Kept: Fundamentals finds about 20 table panels by structure (`:has()`), because their headers carry an eyebrow, a title and controls; they get the flush geometry and the 30px rule-less header row |
+| 14 | Transparent close buttons | Fixed: the drawer header and close buttons and the Copilot shelf close button sit on `--tint`; the top bar's Copilot trigger on `--accent-soft` |
+
+The V6 row's surfaces: the Sitrep stream (Bloomberg TV states sentence case, tape controls, strip), the Sealanes map style and chrome, Surface3D labels and controls, the Script editor frame and cards, the Copilot run inspector and chrome, the drawer and shelf close buttons, and the Tauri splash, which now loads `tokens.css`, applies the stored theme before first paint and draws the accent Γ mark.
+
+### Narrow widths (V6d)
+
+| Problem (V4 list + step 0) | Cause | Fix |
+|---|---|---|
+| Macro 662px, Fundamentals 551px at 390 | `.header-panel` was a grid with an implicit `auto` column whose minimum came from the mode bar's min-content width (every mode on one line) | `.header-panel { grid-template-columns: minmax(0, 1fr) }` in primitives.css: the mode bar scrolls within the window, as 8a30beb intended |
+| Equity Research 394px | the three overview pickers in one non-wrapping group | they share the row at ≤980px |
+| Crypto › Deep Dive 417px (found in step 0) | `.detail-split.basket-empty` outranked the ≤1180px one-column rule | listed in that rule |
+| Fundamentals › Peers 1449/1009px | the ticker field's 18rem minimum in a non-wrapping row | the field shrinks, the row wraps |
+| Commodities two columns at 390 | `.overview-top` had no narrow rule, and `grid-column: 1 / span 4` added implicit columns at ≤1200px | `1 / -1`; one column at ≤720px with own heights for the chart and scatter; the pre-B′ narrow mode-bar grid and divider rules removed |
+
+Side effect at 1000px: the Commodities span-2 panels take the full width as the ≤1200px rule intended (they had shared a row through the implicit columns).
+
+### Kept exceptions
+
+Everything the final drift scan still reports, and why (also in design_principles.md §11):
+
+- Overlay lines: tooltips, menus, popovers, dialogs, the drawer, the Copilot shelf and the Sealanes shelf, drawer, replay panel, notice and popup keep the 1px `--panel-border` line of floating overlays.
+- Boxes and marks that encode data: Commodities band boxes and markers, the gauge marker, the Surface3D and Risk colour-scale tracks, legend swatches, the Sealanes chokepoint ring and the lane swatch's glow (it mirrors how the lane is drawn), the Fundamentals range tick.
+- Control glyphs: the checkbox edges in the Copilot context menus.
+- The landing card (a gateway overlay), its brand tile and readout grid; the primary-style accent edge on the top bar's Copilot trigger.
+- Table structure: the full grid of Copilot rich tables (`.is-grid`), the Commodities sector rule and the Options chain strike column rules; the top bar's zone separator.
+- Transparent controls that are not action buttons: menu items, list rows, navigation rows, text links, the tooltip trigger, the asset chip's clear icon, the Commodities market cards (V1), segments inside the Risk dependency track, and the Sitrep follow-up pins (dense per-row icon toggles).
+- Dashes: Macro's comparison region and the reference marks (distribution markers, FanChart start value, split and hover lines, Options ATM and guide lines, Risk CML and zero line, the hidden universe frontier) and negative dependency edges (data).
+- `--chart-secondary` on comparison only: benchmarks, the previous curve, run comparison, realized vs predicted, the current book on the frontier.
+- Surface3D keeps its reference planes (they carry the depth cue).
+- Gradients that encode uncertainty (the FanChart bands); blur on the drawer scrim and the treemap tooltip.
+- Raw-colour gate: two literals left, the MaritimeMap chevron outline (canvas, read on both maps) and the viridis end stop (data). Removed in V6: the FanChart grid line and tooltip edge, MacroCoherencePanel, the eighth Risk cluster colour.
+
+### Verification
+
+- Drift scan on the final branch: box-border 35, dashed 18, transparent-button 10, chart-secondary-use 11, font 8 (all `--font-code`), uppercase 7 and letter-spacing 5 (code labels: crypto tile symbols, venue codes, the payoff and correlation heat-map headers, the benchmark ticker field; the provenance dot's first letter), side-divider 4, svg-gradient 3 (the FanChart bands), radius-inner-token-on-container 2, blur 2, shadow 1 (the lane legend glow), radius 1 (the Fundamentals range tick) and caps-copy 3 (Sitrep state codes in logic). Every hit is one of the kept exceptions above.
+- `tsc --noEmit` 0 errors; vitest 82 files, 654 tests; `vite build` with only the four known warnings (IvView a11y, an unused CopilotTranscriptResult selector, two unused Surface3D exports); `raw-colors.test.ts` and `contrast.test.ts` pass.
+- Rendered contrast audit (every text over its real background): 0 failures in light and in dark, after two fixes in 5294bfa (the landing choices' secondary line, and the Macro score pills inside tinted cards, which now paint their soft fill over the sheet).
+- Rows above the 780px fold (`measure-fold-rows.mjs`): 74 in each theme on the branch. Main, re-measured the same night with the same keyed backend, also has 74; the step-0 figure of 60 was taken without the FRED keys. The V4 guardrail is 58.
+- Theme switch without reload, dark → light → dark: the Commodities chart, the Sealanes map, the 3D surface (with data frozen: 0 changed pixels against the dark control, 33,609 in light, 0 back in dark) and the Script editor repaint, with no page errors.
+- Width: after 87333e4 every view and mode fits the window at 1440, 1000 and 390 in both themes; what still extends is clipped inside a scrolling mode bar or a treemap tile.
+- Visual baselines: `frontend/e2e/visual.spec.ts`, six fixture harness pages in both themes, stable over two reruns.
+- Before and after: 168 pairs per theme (52 screens at each of 1440, 1000 and 390, plus 6 special surfaces and 6 harness pages) and contact sheets of both sets, kept with the V6 handover note.
+
+### Live usability audit
+
+Started on 2026-11-05 at 03:07 with TWS connected (a second backend port, IB client id 17, `check-live-ibkr.ps1` exit 0), driven headless because the Browser pane was hidden. The session paused at 03:48; at 06:52 TWS was no longer running, so the thesis work and the dated report in `docs/audits/usability/` are not done. The evidence from 03:07–03:17 is kept with the handover note.
+
+Found in that hour and fixed on the branch:
+
+- Sitrep › Rates: the Prior column repeated the current value on the policy rows ("Fed Funds 3.88% +0.25 pp, prior 3.88%"; now 3.63%, and 47 bps for 2s10s), with a "Feds Funds" typo (0697257).
+- Three Sitrep empty states were still in capitals, missed by V6b (0697257).
+- The Commodities momentum/roll scatter stretched a 360×110 viewBox, which distorted every label and clipped the vertical title; main has the same defect (499642c).
+- Risk › Largest Movers toned flat rows (cash at 0 P&L) as gains (e70d6e4).
+- The Macro FX charts read "Loading FX data" for good when the IBKR history comes back empty (d296f6f).
+
+Found and not fixed, because they are backend changes that need the user's decision:
+
+- P1: Macro › Rates & Policy reads "Market bias Easier, avg probability 67%" and "diverging" from three resolved Polymarket contracts (the December 2025 and January 2026 FOMC cut markets), although the service asks the screener for open markets. The open December 2026 contract priced a 25 bp hike at 78% at 03:13. The same read feeds Sitrep's What Changed.
+- P2: the Polymarket wallet summary returns 500 when the venue's trades endpoint answers 410 Gone.
+
+The visual findings in the part that ran are P2 and fixed. The acceptance gate (no new P0/P1 visual findings) still needs the full run.
+
+### Website
+
+369e51c moves the site to B′ (scope b: both themes following the OS, Instrument Sans, sentence case, no textures) and replaces every capture. The 13 screens were taken headless at 1920×1200, DPR 1, each in both themes, and are served through `<picture>` by the visitor's colour scheme. The user reviewed and approved every image.
+
+- Live, public providers with no broker connected: Macro (FRED, Treasury), Prediction Markets (Polymarket, Kalshi), Sealanes (AISstream; vessels draw from zoom 4) and Crypto (CoinGecko).
+- Demo mode: Sitrep, Commodities, Options, Risk, Copilot, Portfolio, Equity Research, Strategy Lab and Fundamentals, so no account, position, balance or P&L of the user's appears. Sitrep and Fundamentals still read public rates and SEC filings.
+- The worktree cache still held IBKR FX and futures data from the live audit session, and both backends served it. It was quarantined, and the Sitrep and Macro captures were retaken and approved again before the commit.
+- Badges: Live on Macro, Prediction Markets and Sealanes; Mock on the other six figures. The "mock mode" sentence and the footer say which screens are live; the Risk caption reads "Portfolio · Risk · Overview"; alt texts and markers match the captures.
+- Not verified, for the user before publishing: whether the ICE BofA high-yield OAS that FRED serves may be reproduced, and CoinGecko's attribution terms for its free API.
+
+### Left after V6
+
+- Finish the live usability audit with TWS: thesis log, trade verdict, Copilot, the regression delta against 2026-10-27 and the report with the account masked; confirm no new P0/P1 visual findings in the views it did not reach.
+- The two backend findings above.
+- Risk's simple tables tone whole rows, so identifiers and rule text take the signal colour; the MC VaR and ES labels overlap in the terminal distribution.
+- Equity Research and Strategy Lab show little in demo mode (an N/A treemap, an empty composer result), so their site captures are thin; the page does not use them.
+
 ## Doctrine rewrite map (V5)
 
 Edit sections in place and keep the numbering and the rule names. Skills and reviews cite `§14`/`§15` and named rules.
@@ -555,3 +665,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-11-03/04: after the report, at the user's request, 7b36ac3 renamed the brand subtitle in the app from "Research Terminal" to "Research Workspace" (and the gamma-usability-audit skill's wording), and 694bb07 did the same on the marketing site.
 - 2026-11-04: the user merged V5 into main as 9192e29 (not pushed). V5 is complete.
 - 2026-11-04: main pushed to origin (fast-forward from ab6467c), V5.
+- 2026-11-04/05: V6 on branch `claude/v6-hardening` from main 4b60e16: 5bf2ffb V6a primitives, c134206 V6b copy and charts, 6d943d1 V6c special surfaces, fe13f68 V6d narrow widths, 5294bfa gate (visual baselines, two contrast fixes) and 87333e4 (the last narrow overflows); 0697257, 499642c, e70d6e4 and d296f6f from the live audit session; 369e51c the website on B′ with captures the user approved. Contrast audit 0 failures and 74 fold rows in each theme. The live audit stopped when TWS closed. Not merged, not pushed.
