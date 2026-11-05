@@ -58,6 +58,37 @@ describe("SitrepView", () => {
     expect(body).toContain("% chg (1D)");
   });
 
+  it("shows the value one window ago in the Prior column of policy rows", () => {
+    const macro = makeMacroSnapshot();
+    macro.rates_policy!.policy_metrics = [
+      makeMacroMetric({ metric_id: "fed-funds", label: "Fed Funds Rate", value: 3.88, display_value: "3.88%", unit: "pct", delta_value: 0.25, delta_display: "+0.25 pp" }),
+      makeMacroMetric({ metric_id: "slope", label: "2s10s Treasury Slope", value: 33.999999999999986, display_value: "34 bps", unit: "bps", delta_value: -12.999999999999986, delta_display: "-13 bps" }),
+    ];
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: null,
+        news: null,
+        macro,
+        commodities: null,
+        prediction: null,
+        loading: false,
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+      },
+    });
+
+    expect(body).toContain("Fed Funds");
+    expect(body).not.toContain("Feds Funds");
+    expect(body).toContain("3.63%");
+    expect(body).toContain("47 bps");
+  });
+
   it("renders macro events in the Events & Markets panel with a follow-up affordance", () => {
     const { body } = render(SitrepView, {
       props: {

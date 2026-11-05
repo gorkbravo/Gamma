@@ -649,11 +649,28 @@
   function cleanYieldLabel(label: string): string {
     return label
       .replace(/^(US|EU)\s+/i, "")
-      .replace(/\bFed\s+Funds\s+Rate\b/i, "Feds Funds")
+      .replace(/\bFed\s+Funds\s+Rate\b/i, "Fed Funds")
       .replace(/\bTreasury\s*/gi, "")
       .replace(/\bYield\b/gi, "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  // The Prior column of a policy row is the value one window ago (value minus
+  // the window delta) in the metric's unit. It used to repeat the current
+  // value: "Fed Funds 3.88% · +0.25 pp · prior 3.88%" (live audit 2026-11-05).
+  function policyPriorDisplay(metric: MacroMetric): string {
+    if (metric.value == null || metric.delta_value == null) {
+      return "";
+    }
+    const prior = metric.value - metric.delta_value;
+    if (metric.unit === "bps") {
+      return `${Math.round(prior)} bps`;
+    }
+    if (metric.unit === "pct") {
+      return `${prior.toFixed(2)}%`;
+    }
+    return formatNumber(prior);
   }
 
   function buildYieldRows(data: MacroSnapshot | null): SitrepMarketRow[] {
@@ -678,7 +695,7 @@
         ...metricRow(m),
         label: cleanYieldLabel(m.label),
         group: "",
-        secondary: m.display_value ?? "",
+        secondary: policyPriorDisplay(m),
         source: ""
       }));
     return [...curveRows, ...policyRows].slice(0, 10).map((row) => ({
@@ -1697,7 +1714,7 @@
               </div>
             {/each}
           {:else}
-            <p class="empty-state">LOAD MARKET CONTEXT TO POPULATE CHANGE TRIAGE.</p>
+            <p class="empty-state">Load market context to populate change triage.</p>
           {/if}
         </div>
       </article>
@@ -1739,7 +1756,7 @@
               </div>
             {/each}
           {:else}
-            <p class="empty-state">LOAD MACRO / PREDICTION / COMMODITY CONTEXT TO POPULATE EVENTS.</p>
+            <p class="empty-state">Load macro, prediction or commodity context to populate events.</p>
           {/if}
         </div>
       </article>
@@ -1809,7 +1826,7 @@
               </div>
             {/each}
           {:else}
-            <p class="news-empty">NO NEWS LOADED.</p>
+            <p class="news-empty">No news loaded.</p>
           {/if}
         </div>
       </article>
