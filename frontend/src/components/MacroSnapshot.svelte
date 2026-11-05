@@ -20,6 +20,9 @@
   export let fxLast0: string | null = null;
   export let fxLast1: string | null = null;
   export let fxLast2: string | null = null;
+  export let fxEmpty1 = "Loading FX data";
+  export let fxEmpty2 = "Loading FX data";
+  export let fxEmpty3 = "Loading FX data";
   export let fxPairOptions: Array<{ id: string; label: string; seriesId: string }> = [];
   export let fxPair0 = "eurusd";
   export let fxPair1 = "gbpusd";
@@ -182,7 +185,7 @@
       </select>
       {#if fxLast0}<strong class="fx-last-price">{fxLast0}</strong>{/if}
     </div>
-    <TimeSeriesChart series={fxChart1} height={160} emptyMessage="Loading FX data" />
+    <TimeSeriesChart series={fxChart1} height={160} emptyMessage={fxEmpty1} />
   </article>
   <article class="panel fx-panel">
     <div class="fx-header">
@@ -192,7 +195,7 @@
       </select>
       {#if fxLast1}<strong class="fx-last-price">{fxLast1}</strong>{/if}
     </div>
-    <TimeSeriesChart series={fxChart2} height={160} emptyMessage="Loading FX data" />
+    <TimeSeriesChart series={fxChart2} height={160} emptyMessage={fxEmpty2} />
   </article>
   <article class="panel fx-panel">
     <div class="fx-header">
@@ -202,7 +205,7 @@
       </select>
       {#if fxLast2}<strong class="fx-last-price">{fxLast2}</strong>{/if}
     </div>
-    <TimeSeriesChart series={fxChart3} height={160} emptyMessage="Loading FX data" />
+    <TimeSeriesChart series={fxChart3} height={160} emptyMessage={fxEmpty3} />
   </article>
 </div>
 

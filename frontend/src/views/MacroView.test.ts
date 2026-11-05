@@ -55,6 +55,28 @@ describe("MacroView", () => {
     expect(body).toContain('option value="usdcnh"');
   });
 
+  it("says an FX history that came back empty is unavailable, not loading", () => {
+    const empty = (seriesId: string) => ({
+      series_id: seriesId, title: seriesId, region: "Global", unit: null, frequency: "daily", theme: "policy",
+      mode_tags: [], points: [], source_provider: "ibkr", retrieved_at: null, origin: "test", transformation_note: null
+    });
+    const { body } = render(MacroView, {
+      props: {
+        snapshot: makeSnapshot(),
+        divergences: null,
+        events: makeEvents(),
+        // The first default pair came back without points; the others are still pending.
+        histories: { "Global:6M:fx-eurusd": empty("fx-eurusd") },
+        loading: false,
+        onLoadWorkspace: vi.fn(),
+        onLoadSeries: vi.fn()
+      }
+    });
+
+    expect(body.match(/FX history unavailable/g)?.length ?? 0).toBe(1);
+    expect(body.match(/Loading FX data/g)?.length ?? 0).toBe(2);
+  });
+
   it("renders snapshot focus items and drilldown targets", () => {
     const { body } = render(MacroView, {
       props: {

@@ -225,6 +225,16 @@
   $: fxLast0 = fxLastPrice(fxChart1);
   $: fxLast1 = fxLastPrice(fxChart2);
   $: fxLast2 = fxLastPrice(fxChart3);
+  $: fxEmpty1 = fxEmptyMessage(histories, chartContext, fxPair0SeriesId);
+  $: fxEmpty2 = fxEmptyMessage(histories, chartContext, fxPair1SeriesId);
+  $: fxEmpty3 = fxEmptyMessage(histories, chartContext, fxPair2SeriesId);
+
+  // A history that came back without points is unavailable, not still loading.
+  // The pairs come from IBKR; without TWS they return empty and the charts read
+  // "Loading FX data" for good (V6 live audit, 2026-11-05).
+  function fxEmptyMessage(seriesMap: Record<string, MacroSeriesHistory>, context: MacroChartContext, seriesId: string): string {
+    return seriesMap[historyKey(seriesId, context.timeframe, context.region)] ? "FX history unavailable" : "Loading FX data";
+  }
 
   /* ── Headline KPI strip ── */
   const headlineSeriesUS = ["us-cpi-yoy", "us-fed-funds", "us-2s10s-slope", "us-dollar-broad"];
@@ -341,6 +351,7 @@
       {snapshot} {events} {loading}
       {fxChart1} {fxChart2} {fxChart3}
       {fxLast0} {fxLast1} {fxLast2}
+      {fxEmpty1} {fxEmpty2} {fxEmpty3}
       {fxPairOptions}
       bind:fxPair0 bind:fxPair1 bind:fxPair2
       {maxSnapshotMetrics}
