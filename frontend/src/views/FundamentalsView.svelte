@@ -2428,14 +2428,22 @@
     flex-wrap: wrap;
   }
 
+  /* The ticker field shrinks and the row wraps, so Save Basket stays inside
+     the rail instead of clipping past it (V6d). */
   .peer-manual-control {
     display: inline-flex;
     align-items: stretch;
-    min-width: min(18rem, 100%);
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .builder-actions:has(> .peer-manual-control) {
+    flex-wrap: wrap;
   }
 
   .peer-manual-control input {
-    min-width: 10rem;
+    flex: 1 1 auto;
+    min-width: 0;
     min-height: 1.65rem;
     padding: var(--space-2) var(--space-4);
   }

@@ -2872,7 +2872,10 @@
 
   /* Overview top block: term structure + scatter stacked left, matrix right */
   .overview-top {
-    grid-column: 1 / span 4;
+    /* 1 / -1, not span 4: a span adds implicit columns when the grid has
+       fewer (two at 1200px, one at 720px), and the panels after it then
+       flow into them. */
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--space-4);
@@ -3582,18 +3585,22 @@
     .header-top { flex-wrap: nowrap; }
     .header-top > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
 
-    .mode-bar {
-      display: grid;
-      width: 100%;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
+    /* The mode bar scrolls within its width (primitives.css); the header
+       KPIs are tinted blocks, so no rule above them. */
+    .header-kpis { width: 100%; }
 
-    .mode-bar button { min-width: 0; white-space: normal; }
-
-    .mode-bar button:nth-child(3) { border-right: 0; }
-    .mode-bar button:nth-child(-n+3) { border-bottom: 1px solid var(--panel-strong); }
-
-    .header-kpis { width: 100%; border-left: 0; border-top: 1px solid var(--divider); padding-top: var(--space-3); }
+    /* One column: term structure and scatter first, then the matrix, so
+       the curve legend and the market picker no longer collide (V6d). */
+    .overview-top { grid-template-columns: minmax(0, 1fr); }
+    .overview-top .left-stack { grid-column: 1; grid-row: 1; }
+    .overview-top .matrix-cell { grid-column: 1; grid-row: 2; }
+    /* Stacked, the cells size to their content instead of sharing the
+       matrix's height, so the chart and the scatter get heights of their own. */
+    .overview-top .left-stack > .term-cell,
+    .overview-top .left-stack > .scatter-cell { flex: none; }
+    .overview-top .term-cell :global(.chart-shell) { flex: none; height: 14rem !important; }
+    .overview-top .scatter-cell .scatter-shell { flex: none; height: 13rem; }
+    .overview-top .matrix-cell .table-wrap { max-height: 28rem; }
 
     .overview-grid,
     .rank-grid,
@@ -3611,10 +3618,8 @@
     .span-2, .span-4 { grid-column: span 1; }
 
     .inline-stats { grid-template-columns: minmax(0, 1fr); }
-    .inline-stats > div { border-right: 0; border-bottom: 1px solid var(--divider); }
-    .inline-stats > div:last-child { border-bottom: 0; }
 
-    .ctx-kpis { margin-left: 0; border-left: 0; border-top: 1px solid var(--divider); width: 100%; padding-top: var(--space-3); }
+    .ctx-kpis { margin-left: 0; width: 100%; }
   }
 
   /* Figures outside tables take the data role (tokens.css), so the Data

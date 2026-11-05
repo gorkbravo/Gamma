@@ -2943,6 +2943,18 @@
       justify-content: flex-start;
     }
 
+    /* The three pickers share the row instead of running 4px past a phone
+       window (V6d). */
+    .ctrl-group {
+      width: 100%;
+    }
+
+    .ctrl-group .ctrl-select {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+    }
+
     .stat {
       padding: var(--space-4) 0;
       border-left: 0;

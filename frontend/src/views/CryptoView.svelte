@@ -1531,8 +1531,11 @@
   }
 
   @media (max-width: 1180px) {
+    /* .detail-split.basket-empty is two classes deep, so it is listed too or
+       its 1.6fr/0.4fr split survives and runs past a phone window (V6d). */
     .workspace-grid,
     .detail-split,
+    .detail-split.basket-empty,
     .overview-packed {
       grid-template-columns: 1fr;
     }
