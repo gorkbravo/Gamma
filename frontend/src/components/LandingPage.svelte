@@ -283,7 +283,7 @@
   }
 
   button small {
-    color: var(--text-2);
+    color: var(--text-1);
     font-size: var(--text-xs);
     font-weight: 400;
   }

@@ -230,19 +230,20 @@
     min-width: 2.6rem;
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-pill);
-    background: var(--accent-soft);
+    --pill-fill: var(--accent-soft);
     color: var(--text-1);
     font-size: var(--text-2xs);
     font-weight: 600;
+    background: linear-gradient(var(--pill-fill), var(--pill-fill)), var(--panel-bg);
   }
 
   .signal-score.positive {
-    background: var(--positive-soft);
+    --pill-fill: var(--positive-soft);
     color: var(--positive);
   }
 
   .signal-score.negative {
-    background: var(--negative-soft);
+    --pill-fill: var(--negative-soft);
     color: var(--negative);
   }
 
@@ -301,22 +302,23 @@
     font-size: var(--text-2xs);
     font-weight: 600;
     border-radius: var(--radius-pill);
-    background: var(--accent-soft);
+    --pill-fill: var(--accent-soft);
     color: var(--text-1);
+    background: linear-gradient(var(--pill-fill), var(--pill-fill)), var(--panel-bg);
   }
 
   .score-badge.high {
-    background: var(--negative-soft);
+    --pill-fill: var(--negative-soft);
     color: var(--negative);
   }
 
   .score-badge.moderate {
-    background: var(--warning-soft);
+    --pill-fill: var(--warning-soft);
     color: var(--accent-2);
   }
 
   .score-badge.low {
-    background: var(--positive-soft);
+    --pill-fill: var(--positive-soft);
     color: var(--positive);
   }
 
