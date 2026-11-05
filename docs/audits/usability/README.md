@@ -4,7 +4,9 @@ Live product workflow audits and research-thread evaluations.
 
 ## Audits
 
-- [`gamma_usability_findings_2026-10-27.md`](./gamma_usability_findings_2026-10-27.md) (current): verify-only live IBKR retest of the 2026-10-21 fixes plus the Event Book ladder and `us_macro_events`; every retested P0/P1 holds after nine follow-up fixes found live (Commodities SITREP 50 s → ~11 s, FOMC dropped on its first day, partial calls counted as failures, Operator SEC warning and transcript noise, Retry on cancelled turns); the six findings it opened were closed the same evening (see its Closure section).
+- [`gamma_usability_findings_2026-11-05.md`](./gamma_usability_findings_2026-11-05.md) (current): live IBKR audit for the V6 visual hardening (both themes, no new P0/P1 visual finding); the December-versus-January Fed path thesis was partially confirmed. Two backend P1s were left open: Copilot hangs when Prediction Markets is in context (Polymarket trades endpoint 410 Gone), and Macro reads its policy bias from resolved 2025 contracts. Four P2 visual and state defects and the Sitrep Prior column were fixed on the branch.
+
+- [`gamma_usability_findings_2026-10-27.md`](./gamma_usability_findings_2026-10-27.md): historical - verify-only live IBKR retest of the 2026-10-21 fixes plus the Event Book ladder and `us_macro_events`; every retested P0/P1 holds after nine follow-up fixes found live (Commodities SITREP 50 s → ~11 s, FOMC dropped on its first day, partial calls counted as failures, Operator SEC warning and transcript noise, Retry on cancelled turns); the six findings it opened were closed the same evening (see its Closure section).
 
 - [`gamma_usability_findings_2026-10-21.md`](./gamma_usability_findings_2026-10-21.md): historical - live IBKR Brent–WTI / Strait of Hormuz trade-idea audit; Prediction Markets and the Commodities → Strategy Lab → Risk loop carried the thesis, the Operator tool-name, Options symbol-change and Strategy Lab → Risk defects are confirmed fixed, and two new P0s were found (Add Leg duplicate-key app wedge, crack spreads computed from week-old history but stamped current).
 

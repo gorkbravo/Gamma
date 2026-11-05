@@ -4,7 +4,7 @@ _Living implementation and handoff document._
 
 - Decision approved: 2026-10-28. Target direction **B′ "Tonal compact"**; the current left navigation drawer stays as primary navigation.
 - Last reviewed: 2026-11-05
-- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete and merged into main on 2026-11-03 (c3343b4). V5 complete and merged into main on 2026-11-04 (9192e29). V6 done on branch `claude/v6-hardening` (2026-11-05, not merged) except the live usability audit, which stopped when TWS closed.
+- Implementation status: V1 complete and merged into main on 2026-10-28 (77d40e5 tables and tags, 7867445 controls and inline stats). V2 complete and merged into main on 2026-10-28 (9676017). V3 complete and merged into main on 2026-10-30 (a68ed3a). V4 complete and merged into main on 2026-11-03 (c3343b4). V5 complete and merged into main on 2026-11-04 (9192e29). V6 done on branch `claude/v6-hardening` (2026-11-05), not merged.
 - Roadmap owner: Workstream 1, Cross-Cutting Platform Foundation, in [`../roadmap.md`](../roadmap.md). V1–V3 are shared-platform work; V4–V6 are the visual layer on top of it.
 - Exploration and measurements: private artifact `https://claude.ai/artifact/GWx2nqyGg7WK2JhAaxeXXb` (version 2, 2026-10-28). It mocks Sitrep, Commodities › Curves & Spreads, Options › Overview, Risk › Overview and Copilot in every direction considered.
 - Doctrine: [`design_principles.md`](./design_principles.md) describes B′ since V5; this plan records the decisions behind it, the kept exceptions and the drift-scan findings left for V6.
@@ -90,7 +90,7 @@ Semantic soft fills (tags, stale and conflict cells, heat maps) mix the semantic
 | V3 — Theme infrastructure | `data-theme` on `<html>` (System/Light/Dark) with persistence and a Settings control, plus a theme store. `TimeSeriesChart`, `Surface3D`, `MaritimeMap` and the CodeMirror editor re-read tokens on change. Retire the chart-theme setting; turn the font setting into "Data figures". Add the light token block, with current dark values kept as the dark block. | Switching theme needs no reload and every chart and map recolors. Contrast meets WCAG AA (4.5:1 text, 3:1 graphics and focus), including warning text on its soft fill in light mode. | Done (2026-10-30), merged into main as a68ed3a; see [V3 theme infrastructure](#v3-theme-infrastructure) |
 | V4 — B′ values and fonts | Self-host Instrument Sans and preload it. Set B′ token values and the structural rules: borderless sheets, radii, header band, pill tags, KPI blocks, segmented controls, floating drawer and chart styling. Resolve the identifier-font decision. | Visual review of all 13 views in light and dark at 1440, 1000 and 390px. Rows above a 780px fold on Sitrep, Commodities, Options and Risk stay within −5% of today. Fonts resolve in the packaged desktop build with no network. | Done (2026-11-03), merged into main as c3343b4; see [V4 B′ values and fonts](#v4-b-values-and-fonts) |
 | V5 — Doctrine and skills | Rewrite `design_principles.md` in place (map below) and update the `tokens.css` comments. Update the `gamma-ui` and `gamma-charts` skills outside the repo, whose descriptions still ask for "more like a professional trading terminal". | §1–§15 numbering is unchanged and the skills' §14/§15 references still land on the right content. The drift scan reflects B′. | Done (2026-11-03), merged into main as 9192e29 on 2026-11-04; see [V5 doctrine and skills](#v5-doctrine-and-skills) |
-| V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Done on branch `claude/v6-hardening` (2026-11-05), not merged; website screenshots regenerated; the usability audit was interrupted, see [V6 hardening](#v6-hardening) |
+| V6 — Hardening | Per-surface exceptions: Sitrep stream, Sealanes map style, `Surface3D`, the Script editor, the Copilot run inspector, website screenshots. Update the screenshot baselines and run a usability audit pass. | Usability audit with no new P0/P1 visual findings; website screenshots regenerated or explicitly deferred. | Done on branch `claude/v6-hardening` (2026-11-05), not merged: no new P0/P1 visual finding in the live audit, website screenshots regenerated; see [V6 hardening](#v6-hardening) |
 
 Rough effort for one developer who knows the codebase: V1 6–8, V2 3–4, V3 2–3, V4 5–8, V5 1–2 and V6 2–3 dev-days, about **19–28 dev-days** in total. These are estimates from a static read, not commitments. V1 and V2 would be needed for any restyle and also pay off without one.
 
@@ -573,9 +573,11 @@ Everything the final drift scan still reports, and why (also in design_principle
 
 ### Live usability audit
 
-Started on 2026-11-05 at 03:07 with TWS connected (a second backend port, IB client id 17, `check-live-ibkr.ps1` exit 0), driven headless because the Browser pane was hidden. The session paused at 03:48; at 06:52 TWS was no longer running, so the thesis work and the dated report in `docs/audits/usability/` are not done. The evidence from 03:07–03:17 is kept with the handover note.
+Report: [`audits/usability/gamma_usability_findings_2026-11-05.md`](./audits/usability/gamma_usability_findings_2026-11-05.md) (account masked). It ran on 2026-11-05 with TWS connected (a second backend port, IB client id 17, `check-live-ibkr.ps1` exit 0) in two blocks, 03:07–03:17 and 14:03–14:40, after TWS had closed during a pause. It was driven headless because the Browser pane was hidden, and both blocks were outside US market hours. The visual pass covered the twelve Research tabs in both themes. Portfolio and the account's Risk were left out so that no account data was captured.
 
-Found in that hour and fixed on the branch:
+**Acceptance: no new P0 or P1 visual finding.** Every visual defect found was P2 and is fixed. Scores against 2026-10-27: visual density and design consistency 8/10 (+1), Copilot 6 (−1), cross-tab 6 (−1), overall 6 (−1). The thesis (December versus January Fed pricing) was partially confirmed. Its decisive test needs a meeting-dated futures curve that Gamma does not expose.
+
+Found and fixed on the branch:
 
 - Sitrep › Rates: the Prior column repeated the current value on the policy rows ("Fed Funds 3.88% +0.25 pp, prior 3.88%"; now 3.63%, and 47 bps for 2s10s), with a "Feds Funds" typo (0697257).
 - Three Sitrep empty states were still in capitals, missed by V6b (0697257).
@@ -585,10 +587,11 @@ Found in that hour and fixed on the branch:
 
 Found and not fixed, because they are backend changes that need the user's decision:
 
-- P1: Macro › Rates & Policy reads "Market bias Easier, avg probability 67%" and "diverging" from three resolved Polymarket contracts (the December 2025 and January 2026 FOMC cut markets), although the service asks the screener for open markets. The open December 2026 contract priced a 25 bp hike at 78% at 03:13. The same read feeds Sitrep's What Changed.
-- P2: the Polymarket wallet summary returns 500 when the venue's trades endpoint answers 410 Gone.
+- P1 (GUA-20261105-1): a Copilot run with Prediction Markets in its context hangs at "Plan / Stop". The context builder calls the wallet summary, Polymarket's trades endpoint answers 410 Gone, and the agent thread catches only `ValueError`, so it dies without a failed event.
+- P1 (GUA-20261105-2): Macro › Rates & Policy reads "Market bias Easier, avg probability 67%" and "diverging" from three resolved Polymarket contracts (the December 2025 and January 2026 FOMC cut markets), although the service asks the screener for open markets. The open December 2026 contract priced a 25 bp hike at 78%. The same read feeds Sitrep's What Changed.
+- P2 (GUA-20261105-4): the Polymarket wallet summary returns 500 on the same 410.
 
-The visual findings in the part that ran are P2 and fixed. The acceptance gate (no new P0/P1 visual findings) still needs the full run.
+Also open, frontend, from the report: the contract page keeps an old detail after a screener Refresh (GUA-20261105-5), the Meeting Ladder allocates the whole 2Y gap to two meetings (GUA-20261105-6), and Copilot's Sitrep context seems to omit the Rates table (GUA-20261105-7).
 
 ### Website
 
@@ -602,8 +605,8 @@ The visual findings in the part that ran are P2 and fixed. The acceptance gate (
 
 ### Left after V6
 
-- Finish the live usability audit with TWS: thesis log, trade verdict, Copilot, the regression delta against 2026-10-27 and the report with the account masked; confirm no new P0/P1 visual findings in the views it did not reach.
-- The two backend findings above.
+- The three backend findings above, and the three frontend ones from the report.
+- Options in session: both audit blocks were outside US market hours.
 - Risk's simple tables tone whole rows, so identifiers and rule text take the signal colour; the MC VaR and ES labels overlap in the terminal distribution.
 - Equity Research and Strategy Lab show little in demo mode (an N/A treemap, an empty composer result), so their site captures are thin; the page does not use them.
 
@@ -665,4 +668,4 @@ Edit sections in place and keep the numbering and the rule names. Skills and rev
 - 2026-11-03/04: after the report, at the user's request, 7b36ac3 renamed the brand subtitle in the app from "Research Terminal" to "Research Workspace" (and the gamma-usability-audit skill's wording), and 694bb07 did the same on the marketing site.
 - 2026-11-04: the user merged V5 into main as 9192e29 (not pushed). V5 is complete.
 - 2026-11-04: main pushed to origin (fast-forward from ab6467c), V5.
-- 2026-11-04/05: V6 on branch `claude/v6-hardening` from main 4b60e16: 5bf2ffb V6a primitives, c134206 V6b copy and charts, 6d943d1 V6c special surfaces, fe13f68 V6d narrow widths, 5294bfa gate (visual baselines, two contrast fixes) and 87333e4 (the last narrow overflows); 0697257, 499642c, e70d6e4 and d296f6f from the live audit session; 369e51c the website on B′ with captures the user approved. Contrast audit 0 failures and 74 fold rows in each theme. The live audit stopped when TWS closed. Not merged, not pushed.
+- 2026-11-04/05: V6 on branch `claude/v6-hardening` from main 4b60e16: 5bf2ffb V6a primitives, c134206 V6b copy and charts, 6d943d1 V6c special surfaces, fe13f68 V6d narrow widths, 5294bfa gate (visual baselines, two contrast fixes) and 87333e4 (the last narrow overflows); 0697257, 499642c, e70d6e4 and d296f6f from the live audit session; 369e51c the website on B′ with captures the user approved. Contrast audit 0 failures and 74 fold rows in each theme. The live audit stopped when TWS closed and resumed at 14:03 after the user reopened it; its report found no new P0/P1 visual finding and left two backend P1s for the user. Not merged, not pushed.
