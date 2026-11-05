@@ -1484,6 +1484,62 @@ def test_copilot_stream_endpoint_emits_run_events(tmp_path):
         runtime.shutdown()
 
 
+def test_copilot_stream_fails_the_run_when_a_context_provider_raises(tmp_path):
+    # A provider error while assembling the context (Polymarket's retired Data
+    # API answered 410) killed the worker thread: no terminal event, and the run
+    # stayed "running" (GUA-20261105-1, live audit 2026-11-05).
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        def broken_builder(request):
+            raise RuntimeError("HTTP Error 410: Gone")
+
+        runtime.copilot_service._context_builders["macro"] = broken_builder
+        response = client.post("/copilot/research-card/stream", json=_MACRO_STREAM_REQUEST)
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        terminal = [event for event in events if event["event"] in {"completed", "failed", "cancelled"}]
+        assert [event["event"] for event in terminal] == ["failed"]
+        message = terminal[0]["result"]["message"]
+        assert "could not assemble the macro context" in message
+        assert "RuntimeError" in message and "410" in message
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_research_card_returns_an_error_when_a_context_provider_raises(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        def broken_builder(request):
+            raise RuntimeError("HTTP Error 410: Gone")
+
+        runtime.copilot_service._context_builders["macro"] = broken_builder
+        response = client.post("/copilot/research-card", json={k: v for k, v in _MACRO_STREAM_REQUEST.items() if k != "user_session_id"})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "error"
+        assert "could not assemble the macro context" in payload["message"]
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_worker_guard_ends_a_run_whose_worker_dies(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        def dying_run(**kwargs):
+            raise KeyError("boom")
+
+        runtime.copilot_service._execute_agent_run = dying_run
+        response = client.post("/copilot/research-card/stream", json=_MACRO_STREAM_REQUEST)
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        terminal = [event for event in events if event["event"] in {"completed", "failed", "cancelled"}]
+        assert [event["event"] for event in terminal] == ["failed"]
+        assert "unexpected error" in terminal[0]["result"]["message"]
+        assert "KeyError" in terminal[0]["result"]["message"]
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_stream_persists_turn_for_replay(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

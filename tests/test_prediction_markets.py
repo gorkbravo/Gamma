@@ -3764,3 +3764,64 @@ def test_kalshi_series_markets_use_the_series_ticker_and_guard_other_series(tmp_
     assert url.endswith("/events")
     assert params["series_ticker"] == "KXHORMUZ"
     assert params["with_nested_markets"] == "true"
+
+
+def _fed_market_record(**overrides) -> PredictionMarketRecord:
+    base = _build_market(
+        market_id="polymarket:fed-dec",
+        venue="polymarket",
+        provider_market_id="fed-dec",
+        title="Will the Fed increase interest rates by 25 bps after the December meeting?",
+        event_title="Fed Decision in December?",
+        category="Economics",
+        current_probability=0.78,
+        retrieved_at=datetime(2026, 11, 5, 13, 0, 0),
+    )
+    return replace(base, **overrides)
+
+
+def test_polymarket_wallet_summary_reads_data_api_v2(tmp_path):
+    # Polymarket retired Data API v1 ("Data API v1 has been retired", HTTP 410);
+    # v2 filters by `condition` and wraps snake_case rows in {"data": [...]}.
+    seen: dict[str, dict | None] = {}
+
+    def fake_fetch(url: str, params: dict | None = None):
+        if url.endswith("/v2/trades"):
+            seen["trades"] = params
+            return {
+                "data": [
+                    {"proxy_wallet": "0xdesk", "name": "Desk", "side": "BUY", "outcome": "Yes", "size": 100.0, "price": 0.77, "timestamp": 1_793_880_000},
+                    {"proxy_wallet": "0xdesk", "name": "Desk", "side": "BUY", "outcome": "Yes", "size": 50.0, "price": 0.78, "timestamp": 1_793_880_600},
+                ],
+                "pagination": {"limit": 200, "offset": 0, "has_more": False},
+            }
+        if url.endswith("/v2/holders"):
+            seen["holders"] = params
+            return {"data": [{"token_id": "yes", "holders": [{"proxy_wallet": "0xa", "amount": 75.0}, {"proxy_wallet": "0xb", "amount": 25.0}]}]}
+        raise AssertionError(f"Unexpected request: {url} {params}")
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    wallet = adapter.get_wallet_summary(_fed_market_record())
+
+    assert seen["trades"] == {"condition": "condition-1", "limit": 200}
+    assert seen["holders"] == {"condition": "condition-1", "limit": 25}
+    assert wallet.total_trades == 2
+    assert wallet.participants[0].display_name == "Desk"
+    assert wallet.top_participant_share == pytest.approx(0.75)
+    assert wallet.concentration_hhi == pytest.approx(0.75**2 + 0.25**2)
+    assert wallet.warnings == []
+
+
+def test_polymarket_wallet_summary_degrades_when_the_data_api_fails(tmp_path):
+    from urllib.error import HTTPError
+
+    def fake_fetch(url: str, params: dict | None = None):
+        raise HTTPError(url, 410, "Gone", hdrs=None, fp=None)
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    wallet = adapter.get_wallet_summary(_fed_market_record())
+
+    assert wallet.participants == []
+    assert wallet.concentration_hhi is None
+    assert any("trades request failed" in warning and "410" in warning for warning in wallet.warnings)
+    assert any("holders request failed" in warning for warning in wallet.warnings)

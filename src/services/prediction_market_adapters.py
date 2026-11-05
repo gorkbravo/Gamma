@@ -149,6 +149,12 @@ POLYMARKET_CATEGORY_SEARCH_QUERIES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _data_api_rows(payload: Any) -> list[dict[str, Any]]:
+    """Rows from a Polymarket Data API payload: a bare list (v1) or {"data": [...]} (v2)."""
+    rows = payload.get("data") if isinstance(payload, dict) else payload
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
 class BasePredictionMarketAdapter:
     provider = "unknown"
 
@@ -680,24 +686,40 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
         )
 
     def get_wallet_summary(self, market: PredictionMarketRecord) -> WalletSummary:
+        # Polymarket retired Data API v1 (it answers 410 "Data API v1 has been
+        # retired"); v2 filters by condition id with `condition` and wraps rows
+        # in {"data": [...]} with snake_case fields. A failed request now leaves
+        # that half of the summary empty with a warning instead of raising,
+        # because the raise reached Copilot's context builder and killed the run
+        # (GUA-20261105-1, live audit 2026-11-05).
         condition_id = market.provider_condition_id or market.provider_market_id
-        trades_key = self.cache.make_key("prediction_markets", self.provider, "trades", market.provider_market_id)
-        holders_key = self.cache.make_key("prediction_markets", self.provider, "holders", market.provider_market_id)
-        trades_payload, trades_retrieved_at = self._fetch_cached_json(
-            trades_key,
-            f"{self._data_base}/trades",
-            {"market": condition_id, "limit": 200},
-        )
-        holders_payload, holders_retrieved_at = self._fetch_cached_json(
-            holders_key,
-            f"{self._data_base}/holders",
-            {"market": condition_id, "limit": 25},
-        )
-        trades = trades_payload if isinstance(trades_payload, list) else []
+        trades_key = self.cache.make_key("prediction_markets", self.provider, "trades-v2", market.provider_market_id)
+        holders_key = self.cache.make_key("prediction_markets", self.provider, "holders-v2", market.provider_market_id)
+        warnings: list[str] = []
+        request_time = ensure_utc(now_utc())
+        try:
+            trades_payload, trades_retrieved_at = self._fetch_cached_json(
+                trades_key,
+                f"{self._data_base}/v2/trades",
+                {"condition": condition_id, "limit": 200},
+            )
+        except Exception as exc:  # provider outage or API change: degrade, do not raise
+            trades_payload, trades_retrieved_at = None, request_time
+            warnings.append(f"Polymarket trades request failed ({exc}); wallet flow is unavailable for this market.")
+        try:
+            holders_payload, holders_retrieved_at = self._fetch_cached_json(
+                holders_key,
+                f"{self._data_base}/v2/holders",
+                {"condition": condition_id, "limit": 25},
+            )
+        except Exception as exc:
+            holders_payload, holders_retrieved_at = None, request_time
+            warnings.append(f"Polymarket holders request failed ({exc}); holder concentration is unavailable for this market.")
+        trades = _data_api_rows(trades_payload)
         participants: dict[str, dict[str, Any]] = {}
         total_notional = 0.0
         for trade in trades:
-            wallet = str(trade.get("proxyWallet") or "").strip()
+            wallet = str(trade.get("proxy_wallet") or trade.get("proxyWallet") or "").strip()
             if not wallet:
                 continue
             trade_side = str(trade.get("side") or "").lower() or "mixed"
@@ -730,10 +752,10 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             total_notional += size * (price or 0.0)
 
         holder_balances: dict[str, float] = {}
-        holder_groups = holders_payload if isinstance(holders_payload, list) else []
+        holder_groups = _data_api_rows(holders_payload)
         for group in holder_groups:
             for holder in group.get("holders", []):
-                wallet = str(holder.get("proxyWallet") or "").strip()
+                wallet = str(holder.get("proxy_wallet") or holder.get("proxyWallet") or "").strip()
                 if not wallet:
                     continue
                 holder_balances[wallet] = holder_balances.get(wallet, 0.0) + (_to_float(holder.get("amount")) or 0.0)
@@ -781,10 +803,9 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
                 else None
             ]
         ]
-        warnings: list[str] = []
-        if not participant_rows:
+        if not participant_rows and trades_payload is not None:
             warnings.append("Public wallet flow data returned no recent trades for this market.")
-        if not holder_balances:
+        if not holder_balances and holders_payload is not None:
             warnings.append("Holder concentration data was unavailable for this market.")
         return WalletSummary(
             market_id=market.market_id,

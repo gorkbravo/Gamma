@@ -203,6 +203,20 @@ def _related_markets_for_model(related: list[Any], *, analog_limit: int, sibling
     return [*analogs, *siblings]
 
 
+def _context_build_error_message(domain: str, exc: Exception) -> str:
+    """User-facing message for a context that could not be assembled.
+
+    A ValueError is Gamma's own explanation (no selected market, unsupported
+    scope) and is shown as it is; anything else is a provider or internal
+    failure and names the domain and the error type.
+    """
+    if isinstance(exc, ValueError):
+        return str(exc)
+    logger.warning("Copilot context for %s could not be assembled", domain, exc_info=exc)
+    label = domain.replace("_", " ")
+    return f"Gamma could not assemble the {label} context ({type(exc).__name__}: {exc})."
+
+
 @dataclass
 class _CopilotRunHandle:
     run_id: str
@@ -2056,13 +2070,13 @@ class CopilotService:
             )
         try:
             context = builder(normalized_request)
-        except ValueError as exc:
+        except Exception as exc:
             result = CopilotResearchCardResult(
                 domain=resolved_domain,
                 current_tab=request.context.current_tab,
                 status="error",
                 provider=getattr(self.provider, "provider_name", "unknown"),
-                message=str(exc),
+                message=_context_build_error_message(resolved_domain, exc),
             )
             return self._with_run_metadata(
                 result,
@@ -2627,8 +2641,9 @@ class CopilotService:
                 },
             )
             worker = threading.Thread(
-                target=self._execute_agent_run,
+                target=self._run_worker_guarded,
                 kwargs={
+                    "target": self._execute_agent_run,
                     "handle": handle,
                     "request": normalized_request,
                     "timeout_seconds": timeout_seconds,
@@ -2638,6 +2653,35 @@ class CopilotService:
             )
             worker.start()
         return self._subscribe_run(handle, after_sequence=after_sequence)
+
+    def _run_worker_guarded(
+        self,
+        *,
+        target: Callable[..., None],
+        handle: _CopilotRunHandle,
+        request: CopilotResearchCardRequest,
+        timeout_seconds: float | None,
+    ) -> None:
+        """Run a Copilot worker and end the run if the worker dies.
+
+        The run handlers finalize every outcome they expect. An unexpected
+        exception used to end the thread silently, so the client kept a
+        "running" run until it gave up (GUA-20261105-1). The guard appends a
+        failed terminal event instead; it is a no-op once the run is terminal.
+        """
+        try:
+            target(handle=handle, request=request, timeout_seconds=timeout_seconds)
+        except Exception as exc:  # last resort: never leave a run without a terminal event
+            logger.exception("Copilot %s run %s stopped on an unexpected error", handle.run_kind, handle.run_id)
+            message = f"The run stopped on an unexpected error ({type(exc).__name__}: {exc})."
+            result = CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=request.context.current_tab,
+                status="error",
+                provider=getattr(self.provider, "provider_name", "unknown"),
+                message=message,
+            )
+            self._append_run_event(handle, "failed", {"message": message}, result=result)
 
     def _execute_agent_run(
         self,
@@ -2747,15 +2791,20 @@ class CopilotService:
 
         try:
             context = builder(request)
-        except ValueError as exc:
+        except Exception as exc:
+            # Any failure while assembling the context ends the run. Only
+            # ValueError was caught, so a provider error (Polymarket's Data API
+            # 410) killed this thread and left the run "running" with no
+            # terminal event (GUA-20261105-1).
+            message = _context_build_error_message(resolved_domain, exc)
             result = finalize(CopilotResearchCardResult(
                 domain=resolved_domain,
                 current_tab=request.context.current_tab,
                 status="error",
                 provider=provider_name,
-                message=str(exc),
+                message=message,
             ))
-            self._append_run_event(handle, "failed", {"message": str(exc)}, result=result)
+            self._append_run_event(handle, "failed", {"message": message}, result=result)
             return
 
         if resolution.status not in {"ready", "degraded"}:
@@ -2988,8 +3037,9 @@ class CopilotService:
                 },
             )
             worker = threading.Thread(
-                target=self._execute_operator_run,
+                target=self._run_worker_guarded,
                 kwargs={
+                    "target": self._execute_operator_run,
                     "handle": handle,
                     "request": normalized_request,
                     "timeout_seconds": timeout_seconds,
