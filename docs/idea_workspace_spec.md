@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14), not started.** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). Nothing here is implemented yet.
+> **Status: approved (2026-11-14); I1 done on branch, not merged.** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I2-I6 are not started.
 
 ## Goal
 
@@ -284,13 +284,25 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 
 | Checkpoint | Scope | Acceptance |
 | --- | --- | --- |
-| I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file |
+| I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done on branch, not merged** (see [I1 implementation notes](#i1-implementation-notes)) |
 | I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep |
 | I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
 | I5: Copilot | Ideas context builder, draft, review and explain tools | Copilot plan updated with a dated OpenAI guidance review; draft-from-card needs user acceptance; no execution authority |
 | I6: persona audits | Retail audit without TWS and quant audit, each with fixed tasks | No P0/P1 finding in either; each scores at least 8 on cross-tab workflow and speed to insight |
+
+### I1 implementation notes
+
+Recorded 2026-11-14 for review; the branch is not merged.
+
+- **Model:** `src/models/ideas.py`. `title` is required; `thesis` may be empty while the idea is a draft, and activation requires it. Evidence `stance` is required. `captured_values` are deep-frozen, JSON-strict and bounded (24 KiB, nesting depth 5, 500 items per list or object, 2,000 characters per string); a `series` longer than 260 points is downsampled at a uniform stride that keeps both ends, and the method is stored beside it. The journal is append-only and the store refuses any write that edits or drops an entry.
+- **Lifecycle in I1:** `draft` -> `active` -> `archived`, plus restore (back to the status the idea had when archived) and delete (the file moves to `data/ideas/trash/`). `closed` and `closed_at` are valid stored values reserved for I3; no I1 route reaches them.
+- **Store:** `data/ideas/items/<id>.json` plus `index.json`. The index is reused at start only when it matches every item file's size and mtime; otherwise it is rebuilt from the files. Corrupt, invalid and unsupported files move to `quarantine/` and appear as storage warnings on the Board; a file from a newer schema is left untouched.
+- **Routes:** the I1 subset of the table above, plus `POST /ideas/{id}/journal` (user notes and decisions), `POST /ideas/{id}/archive` and `POST /ideas/{id}/restore`. Every edit, pin, unpin and status change writes a system journal entry.
+- **Pin to idea** (`frontend/src/components/PinToIdea.svelte`, one shared component) is wired on Sitrep (the four market tables), Equity Research (Scope Analysis), Fundamentals (Price and Valuation), Options (the surface header), Prediction Markets (the contract panel) and Commodities (the selected market). Each pin freezes the shared provenance badge the panel shows; Fundamentals, Prediction Markets, Commodities and the Equity Research scope panel gained the shared badge (dot variant) in their title rows so the pin and the panel show the same provenance. Reopen goes through the existing cross-tab handoff path in `App.svelte` (`openHandoffEnvelope`), shared with Copilot source links. A synthetic Equity Research basket reopens the Scope mode without its weights.
+- **Sitrep promote** creates an idea with the follow-up's title, note and handoff (`origin.kind = sitrep_follow_up`); the follow-up stays, and its row then offers "open" instead of a second promote.
+- **Not verified in the browser:** Fundamentals needs a saved SEC identity even in mock mode, so its pin was checked by build and tests only.
 
 ## Non-goals
 
