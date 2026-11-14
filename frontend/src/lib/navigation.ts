@@ -14,17 +14,18 @@ export const WORKSPACE_TAB_DEFINITIONS = {
   ],
   research: [
     { id: "sitrep", label: "Sitrep", pinned: true, defaultIndex: 0 },
-    { id: "equity_research", label: "Equity Research", pinned: false, defaultIndex: 1 },
-    { id: "strategy_lab", label: "Strategy Lab", pinned: false, defaultIndex: 2 },
-    { id: "macro", label: "Macro", pinned: false, defaultIndex: 3 },
-    { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 4 },
-    { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 5 },
-    { id: "fundamentals", label: "Fundamentals", pinned: false, defaultIndex: 6 },
-    { id: "commodities", label: "Commodities", pinned: false, defaultIndex: 7 },
-    { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 8 },
-    { id: "copilot", label: "Copilot", pinned: false, defaultIndex: 9 },
-    { id: "risk", label: "Risk", pinned: false, defaultIndex: 10 },
-    { id: "iv", label: "Options", pinned: false, defaultIndex: 11 },
+    { id: "ideas", label: "Ideas", pinned: false, defaultIndex: 1 },
+    { id: "equity_research", label: "Equity Research", pinned: false, defaultIndex: 2 },
+    { id: "strategy_lab", label: "Strategy Lab", pinned: false, defaultIndex: 3 },
+    { id: "macro", label: "Macro", pinned: false, defaultIndex: 4 },
+    { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 5 },
+    { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 6 },
+    { id: "fundamentals", label: "Fundamentals", pinned: false, defaultIndex: 7 },
+    { id: "commodities", label: "Commodities", pinned: false, defaultIndex: 8 },
+    { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 9 },
+    { id: "copilot", label: "Copilot", pinned: false, defaultIndex: 10 },
+    { id: "risk", label: "Risk", pinned: false, defaultIndex: 11 },
+    { id: "iv", label: "Options", pinned: false, defaultIndex: 12 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 
@@ -40,6 +41,11 @@ export interface NavigationRouteMatch {
 }
 
 export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
+  // Workstream 12 - Ideas. Review mode (closed ideas) arrives with I3.
+  ideas: defineTabModes([
+    { id: "board", label: "Board", defaultIndex: 0 },
+    { id: "idea", label: "Idea", defaultIndex: 1 },
+  ]),
   equity_research: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "scope_analysis", label: "Scope Analysis", defaultIndex: 1 },

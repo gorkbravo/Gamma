@@ -3,7 +3,7 @@ import { hydrateActiveWorkspace, type ActiveWorkspaceHydration } from "./bootstr
 
 function loaders(): ActiveWorkspaceHydration {
   return Object.fromEntries([
-    "portfolio", "sitrep", "equityResearch", "strategyLab", "macro", "commodities",
+    "portfolio", "sitrep", "ideas", "equityResearch", "strategyLab", "macro", "commodities",
     "predictionMarkets", "crypto", "fundamentals", "maritime", "copilot", "risk", "iv"
   ].map((key) => [key, vi.fn().mockResolvedValue(undefined)])) as unknown as ActiveWorkspaceHydration;
 }
@@ -14,6 +14,13 @@ describe("active workspace hydration", () => {
     await hydrateActiveWorkspace("macro", null, calls);
     expect(calls.macro).toHaveBeenCalledTimes(1);
     expect(calls.portfolio).not.toHaveBeenCalled();
+    expect(calls.sitrep).not.toHaveBeenCalled();
+  });
+
+  it("hydrates the Ideas board when Ideas is the restored tab", async () => {
+    const calls = loaders();
+    await hydrateActiveWorkspace("ideas", null, calls);
+    expect(calls.ideas).toHaveBeenCalledTimes(1);
     expect(calls.sitrep).not.toHaveBeenCalled();
   });
 

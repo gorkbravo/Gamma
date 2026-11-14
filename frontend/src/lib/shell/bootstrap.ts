@@ -3,6 +3,7 @@ import type { SystemStatus, TabId } from "../api/types";
 export type ActiveWorkspaceHydration = {
   portfolio: () => Promise<unknown>;
   sitrep: () => Promise<unknown>;
+  ideas: () => Promise<unknown>;
   equityResearch: () => Promise<unknown>;
   strategyLab: () => Promise<unknown>;
   macro: () => Promise<unknown>;
@@ -30,6 +31,7 @@ export async function hydrateActiveWorkspace(
   }
   const loader: Record<Exclude<TabId, "portfolio">, () => Promise<unknown>> = {
     sitrep: loaders.sitrep,
+    ideas: loaders.ideas,
     equity_research: loaders.equityResearch,
     strategy_lab: loaders.strategyLab,
     macro: loaders.macro,

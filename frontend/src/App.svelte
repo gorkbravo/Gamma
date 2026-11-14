@@ -31,6 +31,26 @@
   import { openMaterializedResearchScript } from "./lib/stores/research-script";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
   import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
+  import { buildPromotePayload, findPromotedIdea } from "./lib/ideas";
+  import {
+    activeIdea,
+    addIdeaJournalEntry,
+    createIdea,
+    deleteIdea,
+    ensureIdeasLoaded,
+    exportIdea,
+    ideaList,
+    ideaOpenRequest,
+    ideaSummaries,
+    ideasError,
+    ideasLoading,
+    loadIdea,
+    loadIdeas,
+    patchIdea,
+    selectedIdeaId,
+    transitionIdea,
+    unpinEvidence,
+  } from "./lib/stores/ideas";
   import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
   import {
     loadPersistedWorkspaceState,
@@ -298,7 +318,7 @@
   } from "./lib/api/types";
   import type { CryptoMode } from "./lib/view-models/crypto";
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
-  import type { SitrepHandoffRequest, SitrepWorkspaceMeta } from "./lib/view-models/sitrep";
+  import type { SitrepFollowUp, SitrepHandoffRequest, SitrepWorkspaceMeta } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
   import { maritimeFocusFromHandoff, type MaritimeFocusRequest } from "./lib/view-models/maritime";
@@ -311,6 +331,7 @@
   const viewLoaders: Record<TabId, LazyViewLoader> = {
     portfolio: () => import("./views/PortfolioView.svelte"),
     sitrep: () => import("./views/SitrepView.svelte"),
+    ideas: () => import("./views/IdeasView.svelte"),
     equity_research: () => import("./views/EquityResearchView.svelte"),
     strategy_lab: () => import("./views/StrategyLabView.svelte"),
     macro: () => import("./views/MacroView.svelte"),
@@ -361,6 +382,7 @@
   );
   let optionsMode: OptionsMode = persistedMode(restoredWorkspaceState, "iv", "overview");
   let riskMode: RiskMode = persistedMode(restoredWorkspaceState, "risk", "overview");
+  let ideasMode: "board" | "idea" = persistedMode(restoredWorkspaceState, "ideas", "board");
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -503,7 +525,8 @@
             maritime: maritimeMode,
             prediction_markets: predictionMarketsMode,
             iv: optionsMode,
-            risk: riskMode
+            risk: riskMode,
+            ideas: ideasMode
           }
         }
   );
@@ -1559,6 +1582,7 @@
     await hydrateActiveWorkspace(tab, status, {
       portfolio: loadPortfolioSnapshot,
       sitrep: loadSitrepContext,
+      ideas: loadIdeasWorkspace,
       equityResearch: async () => {
         await Promise.allSettled([loadResearchOverview(), loadSavedResearch()]);
       },
@@ -1633,6 +1657,8 @@
       push("Commodities", $commoditiesWorkspace?.warnings, "warning");
       push("Coverage", $commoditiesWorkspace?.coverage.caveats, "warning");
       push("Prediction", $predictionMarketScreener?.warnings, "warning");
+    } else if ($activeTab === "ideas") {
+      push("Ideas", $ideaList?.storage_warnings.map((warning) => warning.message), "warning");
     } else if ($activeTab === "equity_research") {
       push("Equity Research", $researchResult?.warnings, "warning");
       push("Equity Overview", $researchOverview?.warnings, "warning");
@@ -1836,6 +1862,8 @@
 
     if (nextTab === "sitrep") {
       await loadSitrepContext();
+    } else if (nextTab === "ideas") {
+      await loadIdeasWorkspace();
     } else if (nextTab === "copilot") {
       await handleLoadCopilotWorkspaceState();
     } else if (nextTab === "equity_research") {
@@ -2108,6 +2136,10 @@
 
     if ($activeTab === "sitrep") {
       await loadSitrepContext({ forceRefresh: true });
+    }
+
+    if ($activeTab === "ideas") {
+      await loadIdeasWorkspace();
     }
 
     if ($activeTab === "prediction_markets") {
@@ -2495,7 +2527,15 @@
     if (!handoff) {
       return;
     }
+    await openHandoffEnvelope(handoff);
+  }
 
+  /**
+   * Open a cross-tab handoff envelope in its target tab and mode, on the
+   * entity and lens it names. Shared by Copilot source links and by Ideas,
+   * which reopens a pin (or a promoted follow-up) where it was captured.
+   */
+  async function openHandoffEnvelope(handoff: CrossTabHandoffEnvelope) {
     const targetTab = normalizeAppTabId(handoff.intended_target_tab as TabId | "research");
     if (!workspaceMode || !isWorkspaceTab(workspaceMode, targetTab)) {
       workspaceMode = targetTab === "portfolio" ? "portfolio" : "research";
@@ -2549,7 +2589,11 @@
       // list, not an answer to "show me this market".
       predictionMarketsMode = (handoff.intended_target_mode ??
         (marketId ? "contract" : "screener")) as PredictionMarketsMode;
-      if (marketId) await selectPredictionMarket(marketId);
+      // A pin carries the history range it was read over; reopen on the same lens.
+      const range = handoff.selected_timeframe?.label?.trim().toLowerCase();
+      const knownRange = (["1d", "1w", "1m", "3m", "6m", "1y", "max"] as const).find((candidate) => candidate === range);
+      if (knownRange) predictionHistoryRange.set(knownRange);
+      if (marketId) await selectPredictionMarket(marketId, knownRange ? { range: knownRange } : {});
       return;
     } else if (targetTab === "crypto") {
       const tokenId =
@@ -2560,6 +2604,53 @@
 
     if (handoff.intended_target_mode) {
       await selectModeById(targetTab, handoff.intended_target_mode);
+    }
+  }
+
+  // ── Ideas (Workstream 12, I1) ───────────────────────────────────────────
+  async function loadIdeasWorkspace() {
+    await loadIdeas();
+    const selected = $selectedIdeaId;
+    if (selected) {
+      await loadIdea(selected);
+    } else if (ideasMode === "idea") {
+      ideasMode = "board";
+    }
+  }
+
+  async function openIdea(ideaId: string) {
+    workspaceMode = "research";
+    ideasMode = "idea";
+    selectedIdeaId.set(ideaId);
+    if ($activeTab !== "ideas") {
+      await selectTab("ideas");
+    } else {
+      await loadIdea(ideaId);
+    }
+  }
+
+  $: if ($ideaOpenRequest) {
+    const request = $ideaOpenRequest;
+    ideaOpenRequest.set(null);
+    void openIdea(request.ideaId);
+  }
+
+  // Sitrep marks follow-ups that already became ideas, so it needs the board once.
+  $: if (workspaceMode === "research" && $activeTab === "sitrep") void ensureIdeasLoaded();
+
+  $: promotedFollowUps = Object.fromEntries(
+    $sitrepFollowUps
+      .map((followUp) => [followUp.id, findPromotedIdea($ideaSummaries, followUp.id)?.idea_id ?? null] as const)
+      .filter(([, ideaId]) => ideaId != null)
+  ) as Record<string, string>;
+
+  /** "Promote to idea": carry the follow-up's title, note and handoff across; the follow-up stays. */
+  async function promoteSitrepFollowUp(followUp: SitrepFollowUp) {
+    await loadIdeas();
+    const existing = findPromotedIdea($ideaSummaries, followUp.id);
+    const ideaId = existing?.idea_id ?? (await createIdea(buildPromotePayload(followUp)))?.idea_id ?? null;
+    if (ideaId) {
+      await openIdea(ideaId);
     }
   }
 
@@ -2618,6 +2709,11 @@
   async function selectModeById(tabId: TabId, modeId: string) {
     if (!getTabModes(tabId).some((mode) => mode.id === modeId)) {
       return false;
+    }
+
+    if (tabId === "ideas") {
+      ideasMode = modeId as typeof ideasMode;
+      return true;
     }
 
     if (tabId === "equity_research") {
@@ -2685,6 +2781,7 @@
   }
 
   function getCurrentModeId(tabId: TabId) {
+    if (tabId === "ideas") return ideasMode;
     if (tabId === "equity_research") return equityResearchMode;
     if (tabId === "strategy_lab") return strategyLabMode;
     if (tabId === "macro") return $macroContext.mode;
@@ -3107,6 +3204,26 @@
             onToggleFollowUp={toggleSitrepFollowUpItem}
             onUpdateFollowUp={(id: string, patch: { note?: string; status?: "open" | "resolved" }) => updateSitrepFollowUpItem(id, patch)}
             onDismissFollowUp={dismissSitrepFollowUpItem}
+            promotedFollowUps={promotedFollowUps}
+            onPromoteFollowUp={promoteSitrepFollowUp}
+          />
+        {:else if $activeTab === "ideas"}
+          <svelte:component
+            this={activeViewComponent}
+            bind:mode={ideasMode}
+            list={$ideaList}
+            idea={$activeIdea}
+            loading={$ideasLoading}
+            errorMessage={$ideasError}
+            onOpenIdea={openIdea}
+            onCreateIdea={createIdea}
+            onPatchIdea={patchIdea}
+            onUnpinEvidence={unpinEvidence}
+            onAddJournalEntry={addIdeaJournalEntry}
+            onTransition={transitionIdea}
+            onDeleteIdea={deleteIdea}
+            onExportIdea={exportIdea}
+            onReopen={openHandoffEnvelope}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component
