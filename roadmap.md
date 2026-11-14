@@ -2503,6 +2503,32 @@ At the end of Beta Readiness, Gamma should be installable and testable by truste
 
 ---
 
+## Workstream 12 - Ideas
+
+_Status: Planned (0%). Spec approved on 2026-11-14: [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md)._
+_Dependency marker: Foundation for cross-tab workflow; builds on the handoff envelope, provenance records, Saved Research, Strategy Lab, Risk and the Copilot context contract_
+_Parallelization note: I1 (the object, evidence pins, journal and the Ideas tab) can start now; criteria, tracking and the quant layer follow in order; the Copilot checkpoint needs the Copilot plan and a dated OpenAI guidance review first._
+
+### Why this workstream matters
+
+Gamma's tabs are broad, but a thesis still lives in fragments: Sitrep follow-ups, saved research items, prediction watchlists, Copilot memos, Strategy Lab runs and Risk replays. The 2026-11-05 live audit scored cross-tab workflow and speed to insight lowest (6/10) while data breadth and tooling scored 7. An Idea is the one object that joins them: a written thesis, evidence pinned from any tab with its provenance frozen, criteria stated in advance (what would prove it wrong), tests and risk snapshots, an honest hypothetical forward record, a journal and a closing review.
+
+### Goal of the workstream
+
+- One **Ideas** tab in Research (Board, Idea, Review), with "Pin to idea" from every panel and "Promote to idea" from Sitrep follow-ups.
+- Criteria evaluated read-only over a registry of observables; missing data is `unavailable`, never `holding`. In-app notifications and a Sitrep "Your ideas" section; evaluation runs only while Gamma runs.
+- Forward tracking that never backfills: a canonical daily series for statistics, plus an intraday layer while TWS is connected, with per-asset-class costs shown.
+- A quant layer (Script or imported signals, out-of-sample validation, trial count) and, after it, a read-only Python client in `clients/python/`.
+- The reference retail user has any broker and no TWS; IBKR-backed observables are enhancements.
+
+The product boundary is unchanged: no orders, staging, broker alerts or automated deployment; Copilot may draft an idea only with the user's confirmation.
+
+### Deliverable
+
+Checkpoints I1-I6 in the spec, ending with two persona audits (retail without TWS, and quant) with no P0/P1 finding and at least 8/10 on cross-tab workflow and speed to insight.
+
+---
+
 ## Data Provider Strategy
 
 This roadmap should use multiple provider classes rather than search for one universal provider.
@@ -2750,6 +2776,10 @@ Close the calibration correctness gap, give Copilot the tab's current contracts,
 
 Prepare Gamma for external testing by turning the existing mock/demo, diagnostics, provider metadata, and warning foundations into installer, tutorial, first-run setup, and feedback-loop workflows.
 
+### Workstream 12 - Ideas
+
+Planned. Join the tabs into one research workflow around an Idea: thesis, pinned evidence with frozen provenance, criteria stated in advance, tests and risk, honest hypothetical forward tracking, journal and review, for retail and quant users at different depths. Spec: [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md).
+
 ---
 
 ## End State Vision
@@ -2772,6 +2802,7 @@ If this roadmap is executed well, Gamma becomes a deeper read-only research plat
 - ask Copilot to synthesize grounded context across domains,
 - ask Copilot Operator to acquire inputs and run authorized Gamma research workflows without manually preloading every tab,
 - save research sessions and memos,
+- turn a thesis into an Idea with evidence, criteria stated in advance, tests, risk and an honest forward record, and review it when it closes,
 - onboard trusted testers through a real installer and tutorial.
 
 The desired end state is not a generic terminal clone. It is a focused, transparent, read-only research environment where every major feature is backed by data models, provider boundaries, reusable analytics, provenance, and cross-domain reasoning.

@@ -7,7 +7,7 @@ This directory is split into active documentation, audits, and archived project 
 - [`../README.md`](../README.md): setup, run commands, validation commands, current product status, current roadmap direction, and provider stance
 - [`../roadmap.md`](../roadmap.md): single active source of truth for product direction, historical phase checkpoints, workstreams, provider strategy, beta readiness, and constraints
 - [`design_principles.md`](./design_principles.md): canonical frontend doctrine for the B′ look (one plane of tonal sheets, Instrument Sans with tabular figures, light and dark themes): token roles, component contracts, interaction/accessibility rules, review tests including the B′ drift scan, and the §14 common-mistakes / §15 quick-reference lookup used as the post-edit check
-- [`visual_refresh_plan.md`](./visual_refresh_plan.md): approved "B′ Tonal compact" visual refresh, with target tokens, measured density, checkpoints V1-V6 (shared primitives first), each checkpoint's decisions and kept exceptions, and the drift-scan findings left for V6
+- [`visual_refresh_plan.md`](./visual_refresh_plan.md): approved "B′ Tonal compact" visual refresh, with target tokens, measured density, checkpoints V1-V6 (all complete; V6 merged 2026-11-05), each checkpoint's decisions and kept exceptions, and what was left after V6
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
 - [`research_script_workspace_plan.md`](./research_script_workspace_plan.md): Strategy Lab `Script` architecture and expansion checkpoints E1-E6, isolated-runtime boundary, data bundles, delivery evidence, tests, and maintenance rules
@@ -15,6 +15,7 @@ This directory is split into active documentation, audits, and archived project 
 - [`strategy_lab_cross_tab_handoffs.md`](./strategy_lab_cross_tab_handoffs.md): active spec and progress board for sending selected research objects from source tabs into the Strategy Lab composer
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 - [`fundamentals_phase6_spec.md`](./fundamentals_phase6_spec.md): product and architecture spec for the first-pass `Fundamentals` workspace
+- [`idea_workspace_spec.md`](./idea_workspace_spec.md): approved spec (2026-11-14) for roadmap Workstream 12, the Idea object and Ideas tab: thesis, pinned evidence with frozen provenance, criteria stated in advance, tests and risk, hypothetical forward tracking, journal and review; checkpoints I1-I6 and the owner's seven decisions
 
 Current Commodities tab setup, EIA and IBKR provider switches, sample fallback behavior, futures-curve caveats, and read-only constraints are documented in [`../README.md`](../README.md).
 
