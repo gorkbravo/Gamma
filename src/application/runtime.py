@@ -21,6 +21,7 @@ from src.application.commodities_service import CommoditiesService
 from src.services.commodity_curve_store import CommodityCurveStore
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
+from src.application.idea_service import IdeaService
 from src.application.iv_service import IVService
 from src.services.iv_snapshot_store import IVSnapshotStore
 from src.application.macro_service import MacroService
@@ -107,6 +108,7 @@ from src.services.saved_research_store import SavedResearchStore
 from src.services.prediction_research_store import PredictionResearchStore
 from src.services.setup_store import SetupStore
 from src.services.sitrep_follow_up_store import SitrepFollowUpStore
+from src.services.idea_store import IdeaStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
 from src.utils.logging_config import setup_logging
@@ -187,6 +189,9 @@ class ApplicationRuntime:
     risk_service: RiskService
     iv_service: IVService
     iv_snapshot_store: IVSnapshotStore
+    # Workstream 12 - Ideas: local research records (thesis, pinned evidence, journal).
+    idea_store: IdeaStore
+    idea_service: IdeaService
     desktop: DesktopRuntimeState | None = None
     # Preferencias del asistente de primer arranque y origen de cada ajuste de inicio.
     setup_store: SetupStore | None = None
@@ -328,6 +333,8 @@ def build_runtime(
     research_script_store = ResearchScriptStore(base_dir=resolved_history_dir / "research_scripts")
     research_script_runtime = _build_research_script_runtime()
     copilot_store = CopilotStore(base_dir=resolved_history_dir / "copilot")
+    idea_store = IdeaStore(base_dir=resolved_history_dir / "ideas")
+    idea_service = IdeaService(idea_store)
     risk_free_service = RiskFreeRateService(cache=cache)
 
     portfolio_provider = PortfolioDataProvider(
@@ -579,6 +586,8 @@ def build_runtime(
         iv_service=iv_service,
         desktop=desktop,
         iv_snapshot_store=iv_snapshot_store,
+        idea_store=idea_store,
+        idea_service=idea_service,
         setup_store=setup_store,
         startup_settings=startup_settings,
         sec_fundamentals_adapter=sec_fundamentals_adapter,

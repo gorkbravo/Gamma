@@ -12,6 +12,7 @@ from src.api.routes import (
     commodities_router,
     crypto_router,
     fundamentals_router,
+    ideas_router,
     iv_router,
     macro_router,
     maritime_router,
@@ -89,6 +90,7 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
     app.include_router(portfolio_router)
     app.include_router(research_router)
     app.include_router(sitrep_router)
+    app.include_router(ideas_router)
     app.include_router(macro_router)
     app.include_router(maritime_router)
     app.include_router(news_router)
