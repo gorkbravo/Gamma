@@ -3,6 +3,9 @@
   import SearchDropdown from "../components/SearchDropdown.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromProvenance } from "../lib/ideas";
+  import type { IdeaPinDraft } from "../lib/api/types";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CrossTabHandoffEnvelope,
@@ -676,6 +679,30 @@
   $: marketContextMetrics = marketContextMetricIds
     .map((metricId) => headlineMetrics.find((metric) => metric.metric_id === metricId))
     .filter((metric): metric is NonNullable<typeof headlineMetrics[number]> => Boolean(metric));
+  // Pin to idea: the company's price and valuation figures as shown, frozen
+  // with the price-context provenance; reopening lands on this overview.
+  $: valuationPinMetrics = marketContextMetrics.length ? marketContextMetrics : headlineMetrics.slice(0, 7);
+  $: valuationPinDraft = ((): IdeaPinDraft | null => {
+    if (!currentCompany || !valuationPinMetrics.length) return null;
+    const ticker = currentCompany.ticker;
+    const source = pinSourceFromProvenance(priceContextMetric ?? valuationPinMetrics[0], "fundamentals_view.price_and_valuation");
+    return {
+      kind: "metric",
+      title: `${ticker} price and valuation`,
+      captured_values: {
+        metrics: valuationPinMetrics.map((metric) => captureMetric(metric.label, metric.display_value, metric.value, metric.unit)),
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "fundamentals",
+        mode: "overview",
+        entity: { entity_type: "equity", label: currentCompany.name || ticker, normalized_id: ticker, metadata: { symbol: ticker, cik: currentCompany.cik } },
+        normalizedIds: { symbol: ticker, cik: currentCompany.cik },
+        provider: source.provenance?.source_provider ?? null,
+      }),
+    };
+  })();
   $: heroPricePoints = (overview?.price_history ?? [])
     .map((point) => heroPricePointFromApiPoint(point))
     .filter((point): point is HeroPricePoint => point !== null);
@@ -878,7 +905,11 @@
               <p class="eyebrow">Market Context</p>
               <h3>Price and Valuation</h3>
             </div>
-            <small>{overview?.price_history?.length ?? 0} points</small>
+            <div class="panel-header-actions">
+              <small>{overview?.price_history?.length ?? 0} points</small>
+              <ProvenanceBadge variant="dot" data={priceContextBadge} label="Source" />
+              <PinToIdea draft={valuationPinDraft} />
+            </div>
           </div>
 
           {#if heroPricePoints.length}
@@ -3245,5 +3276,13 @@
       padding-top: var(--space-4);
       max-width: none;
     }
+  }
+
+  .panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 </style>

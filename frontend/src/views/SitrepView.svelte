@@ -5,6 +5,10 @@
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromBadge } from "../lib/ideas";
+  import type { ProvenanceBadgeData } from "../lib/provenance";
+  import type { IdeaPinDraft } from "../lib/api/types";
   import Tooltip from "../components/Tooltip.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -71,6 +75,9 @@
     | ((id: string, patch: { note?: string; status?: SitrepFollowUpStatus }) => Promise<unknown> | void)
     | null = null;
   export let onDismissFollowUp: ((id: string) => Promise<unknown> | void) | null = null;
+  /** Follow-up id -> the idea promoted from it, so the row offers "open" instead of a second promote. */
+  export let promotedFollowUps: Record<string, string> = {};
+  export let onPromoteFollowUp: ((item: SitrepFollowUp) => Promise<unknown> | void) | null = null;
 
   const bloombergStreamUrl = "https://www.bloomberg.com/media-manifest/streams/phoenix-us.m3u8";
   const bloombergWatchUrl = "https://www.bloomberg.com/live";
@@ -1523,6 +1530,45 @@
         warnings: warningsByDomain.news ?? []
       })
     : null;
+
+  // Pin to idea: each market panel pins the rows it shows, frozen with the
+  // panel's provenance; reopening returns to Sitrep on the same section.
+  function sitrepRowsPinDraft(
+    section: string,
+    title: string,
+    rows: SitrepMarketRow[],
+    badge: ProvenanceBadgeData | null,
+    lens: string | null
+  ): IdeaPinDraft | null {
+    // Nothing to freeze when every row is a placeholder or unavailable.
+    const hasValue = (value: string | undefined) => Boolean(value && value !== "N/A");
+    if (!rows.some((row) => hasValue(row.last) || hasValue(row.change))) return null;
+    const source = pinSourceFromBadge(badge, `sitrep_view.${section}`);
+    return {
+      kind: "table",
+      title: `Sitrep · ${title}${lens ? ` (${lens})` : ""}`,
+      captured_values: {
+        metrics: rows
+          .slice(0, 24)
+          .map((row) => captureMetric(row.label, [row.last, row.change, row.changePct].filter((part) => part && part !== "N/A").join(" · ") || "N/A")),
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "sitrep",
+        mode: null,
+        entity: { entity_type: "sitrep_section", label: title, normalized_id: `sitrep:${section}` },
+        timeframe: lens,
+        normalizedIds: { section },
+        provider: badge?.provider ?? null,
+      }),
+    };
+  }
+
+  $: indicesPinDraft = sitrepRowsPinDraft("indices", "Worldwide indices", indexRows, indicesProvenance, "Latest day");
+  $: fxPinDraft = sitrepRowsPinDraft("fx", "FX pairs", fxRows, fxProvenance, macroWindowLabel);
+  $: ratesPinDraft = sitrepRowsPinDraft("rates", "Rates", yieldRows, ratesProvenance, macroWindowLabel);
+  $: commoditiesPinDraft = sitrepRowsPinDraft("commodities", "Commodities", commodityRows, commoditiesProvenance, "1D");
   $: tvStatus =
     bloombergPlaybackStatus === "ready"
       ? "LIVE"
@@ -1630,9 +1676,12 @@
               <span>Worldwide Indices</span>
               <ProvenanceBadge variant="dot" data={indicesProvenance} label={indicesOverview?.source_provider ?? "not loaded"} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={indicesPinDraft} />
             <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")} aria-label={refreshTitle("indices")} title={refreshTitle("indices")}>
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
@@ -1643,9 +1692,12 @@
               <span>FX Pairs</span>
               <ProvenanceBadge variant="dot" data={fxProvenance} label={formatFxSourceMix(fxRows, macro)} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={fxPinDraft} />
             <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")} aria-label={refreshTitle("fx")} title={refreshTitle("fx")}>
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("Chg", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("% chg", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
@@ -1656,9 +1708,12 @@
               <span>Rates</span>
               <ProvenanceBadge variant="dot" data={ratesProvenance} label={macro?.rates_policy?.source_provider ?? "not loaded"} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={ratesPinDraft} />
             <button type="button" class="reload-button" on:click={refreshRates} disabled={refreshing.rates || isCoolingDown("rates")} aria-label={refreshTitle("rates")} title={refreshTitle("rates")}>
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
@@ -1669,9 +1724,12 @@
               <span>Commodities</span>
               <ProvenanceBadge variant="dot" data={commoditiesProvenance} label={formatCommodityProviderMix(commodities)} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={commoditiesPinDraft} />
             <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")} aria-label={refreshTitle("commodities")} title={refreshTitle("commodities")}>
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="Chg (1D)" pctChangeLabel="% chg (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
@@ -1870,6 +1928,15 @@
                 >✎</button>
                 <button
                   type="button"
+                  class="tape-pin promote-pin"
+                  class:active={Boolean(promotedFollowUps[item.id])}
+                  disabled={!onPromoteFollowUp}
+                  on:click={() => onPromoteFollowUp?.(item)}
+                  aria-label={promotedFollowUps[item.id] ? `Open the idea promoted from ${item.title}` : `Promote ${item.title} to an idea`}
+                  title={promotedFollowUps[item.id] ? "Open the idea promoted from this follow-up" : "Promote to idea"}
+                >{promotedFollowUps[item.id] ? "◆" : "◇"}</button>
+                <button
+                  type="button"
                   class="tape-pin"
                   class:active={item.status === "resolved"}
                   on:click={() => toggleFollowUpResolved(item)}
@@ -2047,6 +2114,13 @@
   .media-links a:hover,
   .video-state a:hover {
     text-decoration: underline;
+  }
+
+  .table-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-shrink: 0;
   }
 
   .reload-button {

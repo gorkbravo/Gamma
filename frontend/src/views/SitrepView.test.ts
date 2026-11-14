@@ -246,6 +246,50 @@ describe("SitrepView", () => {
     expect(body).toContain("Dismiss follow-up");
   });
 
+  it("offers Promote to idea on a follow-up, and Open once it has been promoted", () => {
+    const followUp = {
+      id: "uuid-open",
+      row_id: "evt-cpi",
+      source: "Event",
+      tone: "warning",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      note: "",
+      status: "open" as const,
+      handoff: { targetTab: "macro" as const, targetMode: "events_regimes" },
+      saved_at: "2026-07-12T00:00:00Z",
+    };
+    const baseProps = {
+      overview: null,
+      indicesOverview: null,
+      news: null,
+      macro: null,
+      commodities: null,
+      prediction: null,
+      loading: false,
+      onLoadNews: vi.fn(),
+      onLoadOverview: vi.fn(),
+      onLoadIndicesOverview: vi.fn(),
+      onLoadMacro: vi.fn(),
+      onLoadCommodities: vi.fn(),
+      onLoadPrediction: vi.fn(),
+      onOpenHandoff: vi.fn(),
+      followUps: [followUp],
+      onPromoteFollowUp: vi.fn(),
+    };
+
+    const fresh = render(SitrepView, { props: baseProps }).body;
+    expect(fresh).toContain('aria-label="Promote CPI release to an idea"');
+    expect(fresh).toContain("◇");
+
+    const promoted = render(SitrepView, { props: { ...baseProps, promotedFollowUps: { "uuid-open": "idea-1" } } }).body;
+    expect(promoted).toContain('aria-label="Open the idea promoted from CPI release"');
+    expect(promoted).toContain("◆");
+    // Pin to idea stays disabled while the market panels have nothing loaded.
+    expect(promoted).toContain('title="Nothing on this panel to pin yet."');
+  });
+
   it("renders clickable news ticker chips and keeps per-item provenance off the row", () => {
     const { body } = render(SitrepView, {
       props: {
