@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 done on branch, not merged.** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I2-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 done on branches, not merged (I2 on 2026-11-15).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I3-I6 are not started.
 
 ## Goal
 
@@ -285,7 +285,7 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 | Checkpoint | Scope | Acceptance |
 | --- | --- | --- |
 | I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done on branch, not merged** (see [I1 implementation notes](#i1-implementation-notes)) |
-| I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep |
+| I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done on branch, not merged** (see [I2 implementation notes](#i2-implementation-notes)) |
 | I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
@@ -303,6 +303,39 @@ Recorded 2026-11-14 for review; the branch is not merged.
 - **Pin to idea** (`frontend/src/components/PinToIdea.svelte`, one shared component) is wired on Sitrep (the four market tables), Equity Research (Scope Analysis), Fundamentals (Price and Valuation), Options (the surface header), Prediction Markets (the contract panel) and Commodities (the selected market). Each pin freezes the shared provenance badge the panel shows; Fundamentals, Prediction Markets, Commodities and the Equity Research scope panel gained the shared badge (dot variant) in their title rows so the pin and the panel show the same provenance. Reopen goes through the existing cross-tab handoff path in `App.svelte` (`openHandoffEnvelope`), shared with Copilot source links. A synthetic Equity Research basket reopens the Scope mode without its weights.
 - **Sitrep promote** creates an idea with the follow-up's title, note and handoff (`origin.kind = sitrep_follow_up`); the follow-up stays, and its row then offers "open" instead of a second promote.
 - **Fundamentals** needs an SEC identity even in mock mode (its adapter is live). With the developer identity configured, its pin and reopen were verified in the browser on 2026-11-14. The Price and Valuation panel mixes SEC figures with the price-context source; the pin carries the panel's badge provenance (the price context), not per-figure sources.
+
+### I2 implementation notes
+
+Recorded 2026-11-15 for review. Branch `claude/ideas-i2-c55f00`, stacked on the I1 branch; neither is merged.
+
+- **Model (schema v2):** `IdeaCriterion` in `src/models/ideas.py` with `kind`, a plain-language `label` (generated from the rule when left blank, editable), an `ObservableRef`, `condition`, `threshold`, `window` (`1d`, `5d`, `1m`, `3m`, `6m`, `1y`), `cadence`, `armed_at`, `last_evaluation`, and, once triggered, `triggered_at` plus `trigger_evaluation` (the observation that met the rule, the date it was first met and its provenance). A trigger latches until the rule is edited. Editing the rule re-arms it from now and starts again; a label-only edit keeps the state. An idea holds at most 12 criteria. Version 1 idea files migrate on load (`migrate_idea_v1_to_v2`), so an older build skips a v2 file instead of dropping its criteria.
+- **Evaluation** (`src/application/idea_evaluation.py`, pure rules in `idea_criteria.py`):
+  - Only `active` ideas are evaluated. Each pass reads each observable once.
+  - A daemon scheduler, started in the API lifespan only when the app owns its runtime, runs every cadence at start. It runs a daily-close pass after 16:20 New York time on weekdays. With Trader Workstation connected it runs an intraday pass every five minutes for intraday criteria whose observable has an IBKR intraday source.
+  - Opening an active idea evaluates its `on_open` criteria and any never evaluated. Activation and saving a rule on an active idea evaluate at once. `GAMMA_IDEAS_EVALUATION=off` disables the scheduler, which never runs under pytest.
+  - Only observations dated on or after the day a rule was armed (and the idea activated) can trigger it, so a start-up pass finds "while you were away" triggers with their first-met date and nothing older.
+  - A missing dependency or provider failure is `unavailable` with the reason. A value older than the observable tolerates is `stale` unless it already met the rule.
+- **Observable registry v1** (`src/application/idea_observables.py`), ordered for the reference retail user. Differences from the table above are noted:
+  - `equity_close`: research market data (Yahoo Finance, then IBKR). In demo mode only the AAPL, MSFT, SAP and SPY sample histories exist.
+  - `macro_series`: FRED series through a new `MacroService.get_series_history_result`, which reports why a series did not load. It needs `FRED_API_KEY`; FX series need TWS.
+  - `prediction_probability`: Prediction Markets detail and daily history in percent. `event_occurs` reads the venue's resolution (Yes, or the chosen outcome).
+  - `crypto_price`: CoinGecko daily history.
+  - `commodity_price`: the Commodities service price history. `commodity_spread` offers level rules only, because calendar-spread history is a proxy until historical futures curves exist. Curve points are not in v1.
+  - `macro_event`: the macro calendar drops past events and carries no released values, so it supports `date_reached` only, using the scheduled time stored with the rule once the event leaves the calendar. Use a macro series for the print.
+  - `calendar_date`: Gamma's clock.
+  - `script_signal`: the latest completed run of the accepted revision, read only from an eligible `gamma_analytics.json` (a metric, or the last point of a signals series). Mock-runtime runs are unavailable with that reason.
+  - `option_atm_iv` and `option_skew`: the Options IV snapshot; both need TWS. Skew ports the Options tab's wing rule (put wing minus call wing, front expiry at least seven days out). A live Options stream on another symbol is never interrupted; the criterion is unavailable and says why.
+  - Intraday criteria on any other observable fall back to the daily close and say so.
+- **Notifications:** `GET /ideas/notifications` lists unacknowledged triggers and reviews due (an active idea whose review date is today or earlier, in UTC). The top-bar notification center and Sitrep's "Your ideas" section show the same items, open the idea and acknowledge triggers. The frontend polls every minute and refreshes after every criterion change. Both surfaces state that evaluation runs only while Gamma runs. A review stays listed until its date changes or the idea leaves `active`.
+- **"What is this?":** one registry (`src/services/idea_explanations.py`, served at `GET /ideas/explanations`) covers every observable, condition, state, the cadence, the criterion kinds and the idea statistics. A single shared popover (`WhatIsThis.svelte`) shows it with the reading's provenance.
+- **Routes:** the I2 subset of the table above, plus `POST /ideas/observables/preview` (the form's "Check now"), `GET /ideas/explanations` and `POST /ideas/{id}/criteria/{cid}/acknowledge`. Every criterion change, trigger and acknowledgement writes a journal entry. Markdown and JSON exports carry the criteria (JSON export format v2).
+- **Mock acceptance, 2026-11-15:**
+  - One criterion per observable was added through the form, and activation evaluated them.
+  - Bitcoin, the 2026-11-01 date and the demo SPY ATM IV triggered. AAPL was stale on the old sample history.
+  - XOM, the FRED series without a key and the Script run were unavailable, each with its reason. The rest held.
+  - Triggers reached the notification center and Sitrep. Acknowledging from Sitrep cleared both lists.
+  - A backend restart ran the start-up pass over two ideas (13 criteria, 12 readings, no duplicate triggers).
+- **Left for later checkpoints:** native desktop notifications (Tauri), commodity curve points, IBKR intraday marks for equities, and a history for ATM IV and skew (so crossings and changes on them), which needs stored snapshots.
 
 ## Non-goals
 
