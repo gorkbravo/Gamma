@@ -342,6 +342,8 @@ class CriterionEvaluationModel(BaseModel):
     value: float | None = None
     value_display: str | None = None
     as_of: datetime | None = None
+    met_value: float | None = None
+    met_display: str | None = None
     reference_value: float | None = None
     change: float | None = None
     first_met_at: datetime | None = None

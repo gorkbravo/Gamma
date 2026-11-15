@@ -542,6 +542,7 @@ def test_routes_manage_criteria_evaluate_and_notify(tmp_path):
     activated = client.post(f"/ideas/{idea_id}/activate", headers=headers).json()
     criterion = activated["criteria"][0]
     assert criterion["state"] == "triggered" and criterion["trigger_evaluation"]["provenance"]["source_provider"] == "gamma_clock"
+    assert "met_display" in criterion["trigger_evaluation"], "the value that met the rule reaches the client"
 
     notes = client.get("/ideas/notifications", headers=headers).json()
     assert notes["triggered"] == 1 and notes["items"][0]["idea_title"] == "Deadline idea"

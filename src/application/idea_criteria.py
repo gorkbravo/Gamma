@@ -209,7 +209,7 @@ def describe_criterion(
     if condition == "date_reached":
         return f"{subject} reached"
     if condition == "event_occurs":
-        return f"{subject} is released"
+        return f"{subject} resolves Yes"
     return subject
 
 
