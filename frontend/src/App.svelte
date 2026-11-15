@@ -33,24 +33,39 @@
   import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
   import { buildPromotePayload, findPromotedIdea } from "./lib/ideas";
   import {
+    acknowledgeCriterion,
     activeIdea,
+    addCriterion,
     addIdeaJournalEntry,
     createIdea,
+    criteriaBusy,
     deleteIdea,
+    ensureIdeaObservables,
     ensureIdeasLoaded,
+    evaluateIdea,
     exportIdea,
     ideaList,
+    ideaNotifications,
+    ideaObservables,
     ideaOpenRequest,
     ideaSummaries,
     ideasError,
     ideasLoading,
     loadIdea,
+    loadIdeaNotifications,
+    loadIdeaObservables,
     loadIdeas,
+    loadMacroEventOptions,
     patchIdea,
+    previewObservable,
+    removeCriterion,
     selectedIdeaId,
     transitionIdea,
     unpinEvidence,
+    updateCriterion,
   } from "./lib/stores/ideas";
+  import type { Idea, IdeaCriterionPayload } from "./lib/api/types";
+  import IdeaNotificationCenter from "./components/IdeaNotificationCenter.svelte";
   import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
   import {
     loadPersistedWorkspaceState,
@@ -356,6 +371,8 @@
   let systemStatusPoller: AdaptivePoller | null = null;
   let providerUsagePoller: AdaptivePoller | null = null;
   let ivSessionPoller: AdaptivePoller | null = null;
+  // Workstream 12, I2: triggered criteria and reviews due for the notification center and Sitrep.
+  let ideaNotificationsPoller: AdaptivePoller | null = null;
   let workspaceMode: WorkspaceMode | null = restoredWorkspaceState?.workspaceMode ?? null;
   let navigationSearchResetToken = 0;
   let ivRequestedSymbol = "";
@@ -1474,6 +1491,13 @@
       runImmediately: false
     });
     systemStatusPoller.start();
+    ideaNotificationsPoller = createAdaptivePoller({
+      task: async () => Boolean(await loadIdeaNotifications()),
+      baseDelayMs: 60_000,
+      maxDelayMs: 300_000,
+      runImmediately: true
+    });
+    ideaNotificationsPoller.start();
     const handleGlobalKeydown = (event: KeyboardEvent) => {
       void handleAppKeydown(event);
     };
@@ -1487,6 +1511,7 @@
       systemStatusPoller?.stop();
       providerUsagePoller?.stop();
       ivSessionPoller?.stop();
+      ideaNotificationsPoller?.stop();
       stopIvPolling();
     };
   });
@@ -2607,15 +2632,22 @@
     }
   }
 
-  // ── Ideas (Workstream 12, I1) ───────────────────────────────────────────
+  // ── Ideas (Workstream 12, I1 and I2) ────────────────────────────────────
   async function loadIdeasWorkspace() {
-    await loadIdeas();
+    await Promise.all([loadIdeas(), loadIdeaNotifications(), ensureIdeaObservables()]);
     const selected = $selectedIdeaId;
     if (selected) {
-      await loadIdea(selected);
+      await evaluateOnOpen(await loadIdea(selected));
     } else if (ideasMode === "idea") {
       ideasMode = "board";
     }
+  }
+
+  /** Opening an active idea evaluates its on-open criteria (and any never evaluated). */
+  async function evaluateOnOpen(idea: Idea | null) {
+    if (!idea || idea.status !== "active") return;
+    if (!idea.criteria.some((criterion) => criterion.cadence === "on_open" || criterion.state === "pending")) return;
+    await evaluateIdea(idea.idea_id, "open");
   }
 
   async function openIdea(ideaId: string) {
@@ -2625,8 +2657,19 @@
     if ($activeTab !== "ideas") {
       await selectTab("ideas");
     } else {
-      await loadIdea(ideaId);
+      await evaluateOnOpen(await loadIdea(ideaId));
     }
+  }
+
+  async function saveIdeaCriterion(ideaId: string, criterionId: string | null, payload: IdeaCriterionPayload) {
+    const result = criterionId ? await updateCriterion(ideaId, criterionId, payload) : await addCriterion(ideaId, payload);
+    return Boolean(result);
+  }
+
+  async function acknowledgeIdeaCriterion(ideaId: string, criterionId: string) {
+    const idea = await acknowledgeCriterion(ideaId, criterionId);
+    if (!idea) await loadIdeaNotifications();
+    return idea;
   }
 
   $: if ($ideaOpenRequest) {
@@ -3104,6 +3147,16 @@
     onToggleCopilot={handleToggleCopilot}
     onToggleSidebar={handleToggleSidebar}
   >
+    <svelte:fragment slot="actions">
+      {#if workspaceMode != null}
+        <IdeaNotificationCenter
+          notifications={$ideaNotifications}
+          onOpenIdea={openIdea}
+          onAcknowledge={acknowledgeIdeaCriterion}
+          onRefresh={loadIdeaNotifications}
+        />
+      {/if}
+    </svelte:fragment>
     <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
@@ -3206,6 +3259,10 @@
             onDismissFollowUp={dismissSitrepFollowUpItem}
             promotedFollowUps={promotedFollowUps}
             onPromoteFollowUp={promoteSitrepFollowUp}
+            ideaNotifications={$ideaNotifications?.items ?? []}
+            ideaNotificationLimitation={$ideaNotifications?.limitation ?? ""}
+            onOpenIdea={openIdea}
+            onAcknowledgeIdeaCriterion={acknowledgeIdeaCriterion}
           />
         {:else if $activeTab === "ideas"}
           <svelte:component
@@ -3224,6 +3281,15 @@
             onDeleteIdea={deleteIdea}
             onExportIdea={exportIdea}
             onReopen={openHandoffEnvelope}
+            observables={$ideaObservables}
+            criteriaBusy={$criteriaBusy}
+            onLoadObservables={loadIdeaObservables}
+            onSaveCriterion={saveIdeaCriterion}
+            onRemoveCriterion={removeCriterion}
+            onAcknowledgeCriterion={acknowledgeIdeaCriterion}
+            onEvaluateIdea={(ideaId: string) => evaluateIdea(ideaId, "manual")}
+            onPreviewObservable={previewObservable}
+            onLoadEvents={() => loadMacroEventOptions("US")}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component

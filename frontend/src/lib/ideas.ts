@@ -58,6 +58,11 @@ const JOURNAL_KIND_LABELS: Record<IdeaJournalKind, string> = {
   status_changed: "Status",
   evidence_pinned: "Pinned",
   evidence_unpinned: "Unpinned",
+  criterion_added: "Criterion",
+  criterion_edited: "Criterion",
+  criterion_removed: "Criterion",
+  criterion_triggered: "Triggered",
+  criterion_acknowledged: "Acknowledged",
 };
 
 /** Board filter presets; "open" is every idea that is neither archived nor closed. */

@@ -23,9 +23,12 @@ const LIST: IdeaListResponse = {
       journal_count: 4,
       origin_kind: "manual",
       origin_ref: null,
-      review_date: null,
+      review_date: "2026-11-01",
       created_at: "2026-11-13T09:00:00",
       updated_at: "2026-11-14T09:00:00",
+      criteria_counts: { pending: 0, holding: 2, triggered: 1, unavailable: 0, stale: 0 },
+      criteria_total: 3,
+      unacknowledged_triggers: 1,
     },
     {
       idea_id: "i2",
@@ -44,6 +47,9 @@ const LIST: IdeaListResponse = {
       review_date: null,
       created_at: "2026-11-01T09:00:00",
       updated_at: "2026-11-01T09:00:00",
+      criteria_counts: { pending: 0, holding: 0, triggered: 0, unavailable: 0, stale: 0 },
+      criteria_total: 0,
+      unacknowledged_triggers: 0,
     },
   ],
   total: 2,
@@ -92,6 +98,8 @@ const IDEA: Idea = {
       note: "Cheap for a reason?",
     },
   ],
+  criteria: [],
+  criteria_counts: { pending: 0, holding: 0, triggered: 0, unavailable: 0, stale: 0 },
   journal: [
     { schema_version: 1, entry_id: "j1", idea_id: "i1", kind: "created", author: "system", body: "Created the idea.", created_at: "2026-11-13T09:00:00", details: {} },
     {
@@ -120,6 +128,10 @@ describe("IdeasView", () => {
     expect(body).toContain("Relative");
     expect(body).toContain(">Active</span>");
     expect(body).toMatch(/<th class="num">Challenges<\/th>/);
+    // I2: criterion states (triggered first) and days to review.
+    expect(body).toContain("<th>Criteria</th>");
+    expect(body.indexOf("1 triggered")).toBeLessThan(body.indexOf("2 holding"));
+    expect(body).toContain("overdue");
     // The default "Open" filter hides archived ideas.
     expect(body).not.toContain("Old rates idea");
     expect(body).toContain("1 shown");
@@ -153,6 +165,12 @@ describe("IdeasView", () => {
     expect(body).toContain("Export Markdown");
     expect(body).toContain("Export JSON");
     expect(body).toContain("Review 2027-03-31 · 3M");
+    // I2: the criteria section sits after the evidence, before the journal column.
+    const criteriaAt = body.search(/<h3[^>]*>Criteria /);
+    expect(criteriaAt).toBeGreaterThan(-1);
+    expect(body.indexOf(">Context</h3>")).toBeLessThan(criteriaAt);
+    expect(criteriaAt).toBeLessThan(body.indexOf(">Journal</h3>"));
+    expect(body).toContain("No criteria yet.");
   });
 
   it("asks for a selection when Idea mode has no idea", () => {

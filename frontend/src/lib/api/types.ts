@@ -4704,7 +4704,180 @@ export type IdeaJournalKind =
   | "edited"
   | "status_changed"
   | "evidence_pinned"
-  | "evidence_unpinned";
+  | "evidence_unpinned"
+  | "criterion_added"
+  | "criterion_edited"
+  | "criterion_removed"
+  | "criterion_triggered"
+  | "criterion_acknowledged";
+
+export type IdeaCriterionKind = "invalidate" | "confirm" | "review";
+export type IdeaCriterionCondition =
+  | "above"
+  | "below"
+  | "crosses_above"
+  | "crosses_below"
+  | "change_over_window"
+  | "date_reached"
+  | "event_occurs";
+export type IdeaCriterionCadence = "on_open" | "daily_close" | "intraday";
+export type IdeaCriterionState = "pending" | "holding" | "triggered" | "unavailable" | "stale";
+export type IdeaCriterionWindow = "1d" | "5d" | "1m" | "3m" | "6m" | "1y";
+
+export interface IdeaObservableRef {
+  observable_id: string;
+  params: Record<string, string>;
+  label: string;
+}
+
+export interface IdeaCriterionEvaluation {
+  state: Exclude<IdeaCriterionState, "pending">;
+  evaluated_at: string;
+  value: number | null;
+  value_display: string | null;
+  as_of: string | null;
+  met_value: number | null;
+  met_display: string | null;
+  reference_value: number | null;
+  change: number | null;
+  first_met_at: string | null;
+  reason: string | null;
+  effective_cadence: IdeaCriterionCadence;
+  cadence_note: string | null;
+  provenance: IdeaProvenanceRecord | null;
+  warnings: string[];
+}
+
+export interface IdeaCriterion {
+  schema_version: number;
+  criterion_id: string;
+  idea_id: string;
+  kind: IdeaCriterionKind;
+  label: string;
+  observable: IdeaObservableRef;
+  condition: IdeaCriterionCondition;
+  threshold: number | null;
+  window: IdeaCriterionWindow | null;
+  cadence: IdeaCriterionCadence;
+  state: IdeaCriterionState;
+  last_evaluation: IdeaCriterionEvaluation | null;
+  trigger_evaluation: IdeaCriterionEvaluation | null;
+  triggered_at: string | null;
+  acknowledged_at: string | null;
+  armed_at: string;
+  created_at: string;
+}
+
+export interface IdeaCriterionPayload {
+  kind: IdeaCriterionKind;
+  observable: IdeaObservableRef;
+  condition: IdeaCriterionCondition;
+  threshold: number | null;
+  window: IdeaCriterionWindow | null;
+  cadence: IdeaCriterionCadence;
+  label?: string | null;
+}
+
+export interface IdeaCriterionResponse {
+  idea: Idea;
+  criterion: IdeaCriterion;
+}
+
+export interface IdeaObservableParam {
+  name: string;
+  label: string;
+  kind: string;
+  required: boolean;
+  placeholder: string | null;
+  options: Array<{ value: string; label: string; unit?: string | null }>;
+}
+
+export interface IdeaObservableDefinition {
+  observable_id: string;
+  label: string;
+  group: string;
+  source: string;
+  params: IdeaObservableParam[];
+  conditions: IdeaCriterionCondition[];
+  cadences: IdeaCriterionCadence[];
+  change_unit: "percent" | "points";
+  value_unit: string;
+  needs_tws: boolean;
+  needs_keys: string[];
+  intraday_capable: boolean;
+  available: boolean;
+  unavailable_reason: string | null;
+  dependency_label: string | null;
+  order: number;
+}
+
+export interface IdeaObservableRegistryResponse {
+  items: IdeaObservableDefinition[];
+  tws_connected: boolean;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+}
+
+export interface IdeaObservablePreview {
+  observable: IdeaObservableRef;
+  available: boolean;
+  value: number | null;
+  value_display: string | null;
+  as_of: string | null;
+  reason: string | null;
+  stale_reason: string | null;
+  history_points: number;
+  event_time: string | null;
+  event_released: boolean | null;
+  provenance: IdeaProvenanceRecord | null;
+  warnings: string[];
+  retrieved_at: string;
+}
+
+export interface IdeaNotification {
+  notification_id: string;
+  kind: "criterion_triggered" | "review_due";
+  idea_id: string;
+  idea_title: string;
+  created_at: string;
+  criterion_id: string | null;
+  criterion_kind: IdeaCriterionKind | null;
+  label: string;
+  value_display: string | null;
+  first_met_at: string | null;
+  review_date: string | null;
+  days_overdue: number | null;
+  provenance: IdeaProvenanceRecord | null;
+}
+
+export interface IdeaNotificationsResponse {
+  items: IdeaNotification[];
+  triggered: number;
+  reviews_due: number;
+  evaluation_running: boolean;
+  last_pass: Record<string, unknown> | null;
+  limitation: string;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+}
+
+export interface IdeaExplanation {
+  key: string;
+  title: string;
+  measures: string;
+  why: Record<IdeaStance, string>;
+  computed: string;
+  source: string | null;
+}
+
+export interface IdeaExplanationsResponse {
+  items: IdeaExplanation[];
+  retrieved_at: string;
+  source_provider: string;
+  origin: string;
+}
 
 export interface IdeaLeg {
   entity: CrossTabHandoffEntity;
@@ -4804,8 +4977,10 @@ export interface Idea {
   updated_at: string;
   closed_at: string | null;
   evidence: IdeaEvidence[];
+  criteria: IdeaCriterion[];
   journal: IdeaJournalEntry[];
   evidence_counts: Record<IdeaEvidenceStance, number>;
+  criteria_counts: Record<IdeaCriterionState, number>;
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
 }
 
@@ -4833,6 +5008,9 @@ export interface IdeaSummary {
   review_date: string | null;
   created_at: string;
   updated_at: string;
+  criteria_counts: Record<IdeaCriterionState, number>;
+  criteria_total: number;
+  unacknowledged_triggers: number;
 }
 
 export interface IdeaStorageWarning {

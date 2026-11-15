@@ -8,7 +8,8 @@
   import PinToIdea from "../components/PinToIdea.svelte";
   import { buildReopenEnvelope, captureMetric, pinSourceFromBadge } from "../lib/ideas";
   import type { ProvenanceBadgeData } from "../lib/provenance";
-  import type { IdeaPinDraft } from "../lib/api/types";
+  import type { IdeaNotification, IdeaPinDraft } from "../lib/api/types";
+  import { CRITERION_KIND_LABELS, notificationDetail, notificationTone } from "../lib/idea-criteria";
   import Tooltip from "../components/Tooltip.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -78,6 +79,11 @@
   /** Follow-up id -> the idea promoted from it, so the row offers "open" instead of a second promote. */
   export let promotedFollowUps: Record<string, string> = {};
   export let onPromoteFollowUp: ((item: SitrepFollowUp) => Promise<unknown> | void) | null = null;
+  /** Workstream 12, I2: the same items as the notification center (triggered criteria, reviews due). */
+  export let ideaNotifications: IdeaNotification[] = [];
+  export let ideaNotificationLimitation = "";
+  export let onOpenIdea: ((ideaId: string) => Promise<unknown> | void) | null = null;
+  export let onAcknowledgeIdeaCriterion: ((ideaId: string, criterionId: string) => Promise<unknown> | void) | null = null;
 
   const bloombergStreamUrl = "https://www.bloomberg.com/media-manifest/streams/phoenix-us.m3u8";
   const bloombergWatchUrl = "https://www.bloomberg.com/live";
@@ -1889,6 +1895,49 @@
         </div>
       </article>
 
+      <article class="panel is-flush tape-panel your-ideas-panel" aria-label="Your ideas">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Your ideas</span>
+            <small>{ideaNotifications.filter((item) => item.kind === "criterion_triggered").length} triggered / {ideaNotifications.filter((item) => item.kind === "review_due").length} reviews due</small>
+          </div>
+        </div>
+        <div class="tape-list">
+          {#each ideaNotifications as item (item.notification_id)}
+            <div class="tape-row-wrap">
+              <button
+                type="button"
+                class="idea-notice"
+                disabled={!onOpenIdea}
+                on:click={() => onOpenIdea?.(item.idea_id)}
+                title={`Open ${item.idea_title}`}
+              >
+                <span class="idea-notice-line">
+                  <span class="tag {notificationTone(item)}"
+                    >{item.kind === "review_due" ? "Review due" : `${CRITERION_KIND_LABELS[item.criterion_kind ?? "review"]} triggered`}</span
+                  >
+                  <strong>{item.label}</strong>
+                </span>
+                <span class="idea-notice-detail">{item.idea_title} · {notificationDetail(item)}</span>
+              </button>
+              {#if item.kind === "criterion_triggered" && item.criterion_id}
+                <button
+                  type="button"
+                  class="tape-pin"
+                  disabled={!onAcknowledgeIdeaCriterion}
+                  on:click={() => item.criterion_id && onAcknowledgeIdeaCriterion?.(item.idea_id, item.criterion_id)}
+                  aria-label={`Acknowledge ${item.label}`}
+                  title="Acknowledge"
+                >✓</button>
+              {/if}
+            </div>
+          {:else}
+            <p class="news-empty">No triggered criteria or reviews due.</p>
+          {/each}
+        </div>
+        {#if ideaNotificationLimitation}<p class="ideas-limitation">{ideaNotificationLimitation}</p>{/if}
+      </article>
+
       <article class="panel is-flush tape-panel follow-up-panel">
         <div class="table-header">
           <div class="table-title">
@@ -2384,6 +2433,65 @@
 
   .tape-pin.active {
     color: var(--accent);
+  }
+
+  .your-ideas-panel .tape-list {
+    overflow: auto;
+    max-height: 16rem;
+  }
+
+  .idea-notice {
+    appearance: none;
+    display: grid;
+    flex: 1;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-3) var(--space-5);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-family: var(--font-ui);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .idea-notice:hover,
+  .idea-notice:focus-visible {
+    background: var(--hover-bg);
+  }
+
+  .idea-notice:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .idea-notice-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .idea-notice-line strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .idea-notice-detail {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .ideas-limitation {
+    margin: 0;
+    padding: var(--space-2) var(--space-5) var(--space-3);
+    color: var(--text-2);
+    font-size: var(--text-2xs);
   }
 
   .follow-up-panel .tape-list {

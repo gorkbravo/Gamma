@@ -12,8 +12,13 @@ const client = vi.hoisted(() => ({
 vi.mock("../api/client", () => client);
 
 import {
+  acknowledgeCriterion,
   activeIdea,
+  addCriterion,
   createIdea,
+  evaluateIdea,
+  ideaNotifications,
+  loadIdeaNotifications,
   deleteIdea,
   exportIdea,
   ideaList,
@@ -90,6 +95,43 @@ describe("ideas store", () => {
     client.getText.mockResolvedValue("# Idea");
     expect(await exportIdea("b", "md")).toBe("# Idea");
     expect(client.getText).toHaveBeenCalledWith("/ideas/b/export?format=md");
+  });
+
+  it("adds a criterion, then refreshes the board and the notifications", async () => {
+    await loadIdea("a");
+    client.postJson.mockResolvedValue({ idea: { idea_id: "a", title: "With criterion" }, criterion: { criterion_id: "c" } });
+    client.getJson.mockImplementation(async (path: string) =>
+      path === "/ideas" ? LIST : path === "/ideas/notifications" ? { items: [], triggered: 0, reviews_due: 0 } : { idea_id: "a" }
+    );
+    const response = await addCriterion("a", {
+      kind: "invalidate",
+      observable: { observable_id: "equity_close", params: { symbol: "XOM" }, label: "XOM close" },
+      condition: "below",
+      threshold: 100,
+      window: null,
+      cadence: "daily_close",
+      label: null,
+    });
+    expect(response?.criterion.criterion_id).toBe("c");
+    expect(get(activeIdea)?.title).toBe("With criterion");
+    expect(client.getJson).toHaveBeenCalledWith("/ideas/notifications");
+  });
+
+  it("evaluates on open with the open trigger and acknowledges through the criterion route", async () => {
+    client.postJson.mockResolvedValue({ idea_id: "b" });
+    await evaluateIdea("b", "open");
+    expect(client.postJson).toHaveBeenCalledWith("/ideas/b/evaluate?trigger=open", {});
+    await acknowledgeCriterion("b", "c1");
+    expect(client.postJson).toHaveBeenCalledWith("/ideas/b/criteria/c1/acknowledge", {});
+  });
+
+  it("loads notifications quietly, without touching the Ideas error line", async () => {
+    client.getJson.mockRejectedValue(new Error("backend starting"));
+    expect(await loadIdeaNotifications()).toBeNull();
+    expect(get(ideasError)).toBe("");
+    client.getJson.mockResolvedValue({ items: [], triggered: 2, reviews_due: 0 });
+    await loadIdeaNotifications();
+    expect(get(ideaNotifications)?.triggered).toBe(2);
   });
 
   it("issues a fresh open request each time", () => {

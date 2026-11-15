@@ -1,18 +1,25 @@
 <script lang="ts">
-  // Ideas tab (Workstream 12, checkpoint I1): Board lists every idea in one
-  // dense table; Idea shows one thesis with its frozen evidence, grouped by
-  // stance, and its append-only journal. Local research records only: no
-  // criteria, tracking or provider calls happen here.
+  // Ideas tab (Workstream 12, checkpoints I1 and I2): Board lists every idea in
+  // one dense table with its criterion states; Idea shows one thesis with its
+  // frozen evidence grouped by stance, its criteria and their live state, and
+  // its append-only journal. The backend evaluates criteria read-only; this
+  // view never calls a provider itself.
+  import IdeaCriteriaPanel from "../components/IdeaCriteriaPanel.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import WhatIsThis from "../components/WhatIsThis.svelte";
   import type {
     CrossTabHandoffEnvelope,
     Idea,
     IdeaCreatePayload,
+    IdeaCriterionPayload,
     IdeaEvidence,
     IdeaEvidenceStance,
     IdeaJournalEntry,
     IdeaLeg,
     IdeaListResponse,
+    IdeaObservablePreview,
+    IdeaObservableRef,
+    IdeaObservableRegistryResponse,
     IdeaPatchPayload,
     IdeaStance,
     IdeaSummary,
@@ -40,6 +47,7 @@
   } from "../lib/ideas";
   import { toProvenanceBadge } from "../lib/provenance";
   import { activateRowOnKey } from "../lib/row-activation";
+  import { CRITERION_STATE_LABELS, criteriaSummary, daysToReview, daysToReviewText } from "../lib/idea-criteria";
 
   export let mode: "board" | "idea" = "board";
   export let list: IdeaListResponse | null = null;
@@ -57,6 +65,17 @@
   export let onDeleteIdea: (ideaId: string) => Promise<boolean> = async () => false;
   export let onExportIdea: (ideaId: string, format: "md" | "json") => Promise<string | null> = async () => null;
   export let onReopen: (envelope: CrossTabHandoffEnvelope) => void | Promise<void> = () => {};
+  // I2: criteria, evaluation and the observable registry.
+  export let observables: IdeaObservableRegistryResponse | null = null;
+  export let criteriaBusy = false;
+  export let onLoadObservables: () => void | Promise<unknown> = () => {};
+  export let onSaveCriterion: (ideaId: string, criterionId: string | null, payload: IdeaCriterionPayload) => Promise<boolean> =
+    async () => false;
+  export let onRemoveCriterion: (ideaId: string, criterionId: string) => Promise<unknown> = async () => null;
+  export let onAcknowledgeCriterion: (ideaId: string, criterionId: string) => Promise<unknown> = async () => null;
+  export let onEvaluateIdea: (ideaId: string) => Promise<unknown> = async () => null;
+  export let onPreviewObservable: (observable: IdeaObservableRef) => Promise<IdeaObservablePreview | null> = async () => null;
+  export let onLoadEvents: () => Promise<Array<{ event_id: string; title: string; scheduled_at: string; region: string }>> = async () => [];
 
   const modes: Array<{ id: "board" | "idea"; label: string }> = [
     { id: "board", label: "Board" },
@@ -74,12 +93,19 @@
   $: summaries = list?.items ?? [];
   $: statusCounts = list?.status_counts ?? { draft: 0, active: 0, closed: 0, archived: 0 };
   $: filterStatuses = boardFilterStatuses(filter);
-  $: boardRows = summaries.filter(
-    (row) =>
-      (!filterStatuses.length || filterStatuses.includes(row.status)) && (!tagFilter || row.tags.includes(tagFilter))
-  );
+  // Ideas with an unacknowledged trigger come first; otherwise newest change first.
+  $: boardRows = summaries
+    .filter(
+      (row) =>
+        (!filterStatuses.length || filterStatuses.includes(row.status)) && (!tagFilter || row.tags.includes(tagFilter))
+    )
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => Number((right.row.unacknowledged_triggers ?? 0) > 0) - Number((left.row.unacknowledged_triggers ?? 0) > 0) || left.index - right.index)
+    .map((item) => item.row);
   $: totalPins = summaries.reduce((sum, row) => sum + row.evidence_total, 0);
-  $: storageWarnings = list?.storage_warnings ?? [];
+  $: totalTriggered = summaries.reduce((sum, row) => sum + (row.status === "active" ? row.unacknowledged_triggers ?? 0 : 0), 0);
+  // A one-time schema migration is not a problem to act on; quarantines and skipped files are.
+  $: storageWarnings = (list?.storage_warnings ?? []).filter((warning) => warning.action !== "migrated");
   $: if (tagFilter && list && !list.tags.includes(tagFilter)) tagFilter = "";
 
   async function submitCreate() {
@@ -295,19 +321,33 @@
     return `${total} ${total === 1 ? "idea" : "ideas"} · stored locally`;
   }
 
+  $: ideaReviewDays = idea ? daysToReview(idea.horizon.review_date) : null;
   $: headerKpis =
     mode === "idea" && idea
       ? [
-          { label: "Status", value: IDEA_STATUS_LABELS[idea.status], tone: "" },
-          { label: "Supports", value: String(idea.evidence_counts.supports), tone: "" },
-          { label: "Challenges", value: String(idea.evidence_counts.challenges), tone: "" },
-          { label: "Context", value: String(idea.evidence_counts.context), tone: "" },
+          { label: "Status", value: IDEA_STATUS_LABELS[idea.status], tone: "", explain: "" },
+          {
+            label: "Triggered",
+            value: String(idea.criteria_counts?.triggered ?? 0),
+            tone: (idea.criteria_counts?.triggered ?? 0) > 0 ? "warning" : "",
+            explain: "state.triggered",
+          },
+          {
+            label: "Review",
+            value: daysToReviewText(ideaReviewDays),
+            tone: ideaReviewDays != null && ideaReviewDays < 0 ? "warning" : "",
+            explain: "stat.days_to_review",
+          },
+          { label: "Supports", value: String(idea.evidence_counts.supports), tone: "", explain: "stat.evidence_balance" },
+          { label: "Challenges", value: String(idea.evidence_counts.challenges), tone: "", explain: "" },
+          { label: "Context", value: String(idea.evidence_counts.context), tone: "", explain: "" },
         ]
       : [
-          { label: "Draft", value: String(statusCounts.draft ?? 0), tone: "" },
-          { label: "Active", value: String(statusCounts.active ?? 0), tone: "" },
-          { label: "Archived", value: String(statusCounts.archived ?? 0), tone: "" },
-          { label: "Pins", value: String(totalPins), tone: "" },
+          { label: "Draft", value: String(statusCounts.draft ?? 0), tone: "", explain: "" },
+          { label: "Active", value: String(statusCounts.active ?? 0), tone: "", explain: "" },
+          { label: "New triggers", value: String(totalTriggered), tone: totalTriggered > 0 ? "warning" : "", explain: "" },
+          { label: "Archived", value: String(statusCounts.archived ?? 0), tone: "", explain: "" },
+          { label: "Pins", value: String(totalPins), tone: "", explain: "" },
         ];
 
   function rowLegs(row: IdeaSummary) {
@@ -336,7 +376,10 @@
       </div>
       <div class="header-kpis">
         {#each headerKpis as kpi}
-          <div class="header-kpi"><span>{kpi.label}</span><strong>{kpi.value}</strong></div>
+          <div class="header-kpi">
+            <span>{kpi.label}{#if kpi.explain && idea}<WhatIsThis key={kpi.explain} stance={idea.stance} />{/if}</span>
+            <strong class={kpi.tone}>{kpi.value}</strong>
+          </div>
         {/each}
       </div>
     </div>
@@ -391,6 +434,8 @@
               <th>Stance</th>
               <th>Legs</th>
               <th>Status</th>
+              <th>Criteria</th>
+              <th class="num">Review</th>
               <th class="num">Supports</th>
               <th class="num">Challenges</th>
               <th class="num">Context</th>
@@ -414,6 +459,18 @@
                 <td><span class="tag">{IDEA_STANCE_LABELS[row.stance]}</span></td>
                 <td class="legs-cell" class:absent={!row.legs.length}>{rowLegs(row)}</td>
                 <td><span class="tag {ideaStatusTone(row.status)}">{IDEA_STATUS_LABELS[row.status]}</span></td>
+                <td class="criteria-cell" class:absent={!row.criteria_total}>
+                  {#if row.criteria_total}
+                    {#each criteriaSummary(row.criteria_counts) as item}
+                      <span class="tag" class:warning={item.state === "triggered" || item.state === "unavailable" || item.state === "stale"}
+                        >{item.count} {CRITERION_STATE_LABELS[item.state].toLowerCase()}</span
+                      >
+                    {/each}
+                  {:else}
+                    None
+                  {/if}
+                </td>
+                <td class="num" class:absent={!row.review_date} class:warning={(daysToReview(row.review_date) ?? 1) < 0}>{daysToReviewText(daysToReview(row.review_date))}</td>
                 <td class="num" class:absent={!row.evidence_counts.supports}>{row.evidence_counts.supports}</td>
                 <td class="num" class:absent={!row.evidence_counts.challenges}>{row.evidence_counts.challenges}</td>
                 <td class="num" class:absent={!row.evidence_counts.context}>{row.evidence_counts.context}</td>
@@ -421,7 +478,7 @@
               </tr>
             {:else}
               <tr class="empty-row">
-                <td colspan="8">
+                <td colspan="10">
                   {#if loading && !list}
                     Loading…
                   {:else if summaries.length}
@@ -641,6 +698,19 @@
             </div>
           </article>
         {/each}
+
+        <IdeaCriteriaPanel
+          {idea}
+          registry={observables}
+          busy={criteriaBusy}
+          onLoadRegistry={onLoadObservables}
+          onSave={(criterionId, payload) => (idea ? onSaveCriterion(idea.idea_id, criterionId, payload) : Promise.resolve(false))}
+          onRemove={(criterionId) => (idea ? onRemoveCriterion(idea.idea_id, criterionId) : Promise.resolve(null))}
+          onAcknowledge={(criterionId) => (idea ? onAcknowledgeCriterion(idea.idea_id, criterionId) : Promise.resolve(null))}
+          onEvaluate={() => (idea ? onEvaluateIdea(idea.idea_id) : Promise.resolve(null))}
+          onPreview={onPreviewObservable}
+          {onLoadEvents}
+        />
       </div>
 
       <div class="support-column">
@@ -731,7 +801,10 @@
     min-width: 0;
   }
 
+  /* Positioned, so the visually hidden header labels stay inside the scroll
+     box instead of widening the page on a narrow window. */
   .table-scroll {
+    position: relative;
     overflow-x: auto;
   }
 
@@ -767,6 +840,24 @@
 
   .legs-cell {
     min-width: 7rem;
+  }
+
+  .criteria-cell {
+    min-width: 8rem;
+  }
+
+  .criteria-cell .tag + .tag {
+    margin-left: var(--space-1);
+  }
+
+  td.warning,
+  .header-kpi strong.warning {
+    color: var(--warning);
+  }
+
+  .header-kpi span {
+    display: inline-flex;
+    align-items: center;
   }
 
   .storage-warnings {

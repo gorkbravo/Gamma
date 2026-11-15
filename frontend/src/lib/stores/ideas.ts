@@ -1,16 +1,25 @@
-// Ideas store (Workstream 12, checkpoint I1).
+// Ideas store (Workstream 12, checkpoints I1 and I2).
 //
 // One place that talks to /ideas, so the Ideas tab, the shared Pin to idea
-// action and Sitrep's "Promote to idea" all see the same board. Every call is
-// a local read or write of research records; none touches a provider.
+// action, Sitrep ("Promote to idea", "Your ideas") and the notification center
+// all see the same board. Records are local; criterion evaluation and the
+// observable preview read through the backend's read-only observable registry.
 
 import { derived, get, writable } from "svelte/store";
 import { deleteJson, getJson, getText, patchJson, postJson } from "../api/client";
 import type {
   Idea,
   IdeaCreatePayload,
+  IdeaCriterionPayload,
+  IdeaCriterionResponse,
   IdeaEvidenceCreatePayload,
+  IdeaExplanation,
+  IdeaExplanationsResponse,
   IdeaListResponse,
+  IdeaNotificationsResponse,
+  IdeaObservablePreview,
+  IdeaObservableRef,
+  IdeaObservableRegistryResponse,
   IdeaPatchPayload,
   IdeaPinResponse,
   IdeaSummary,
@@ -23,6 +32,12 @@ export const ideasLoading = writable(false);
 export const ideasError = writable("");
 /** The idea the last pin went to, so a run of pins from several panels lands in one place. */
 export const lastPinnedIdeaId = writable<string | null>(null);
+/** Triggered criteria and reviews due: the notification center and Sitrep "Your ideas". */
+export const ideaNotifications = writable<IdeaNotificationsResponse | null>(null);
+export const ideaObservables = writable<IdeaObservableRegistryResponse | null>(null);
+/** "What is this?" texts by key, loaded once. */
+export const ideaExplanations = writable<Record<string, IdeaExplanation>>({});
+export const criteriaBusy = writable(false);
 
 /** Every idea the board knows about, newest change first. */
 export const ideaSummaries = derived(ideaList, ($list): IdeaSummary[] => $list?.items ?? []);
@@ -140,9 +155,115 @@ export async function transitionIdea(ideaId: string, action: "activate" | "archi
   const idea = await guarded(() => postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/${action}`, {}));
   if (idea) {
     applyIdea(idea);
-    await loadIdeas();
+    await Promise.all([loadIdeas(), loadIdeaNotifications()]);
   }
   return idea;
+}
+
+// ── Criteria, evaluation and notifications (I2) ─────────────────────────────
+
+/** Quiet loader: the notification center must never replace the Ideas error line. */
+export async function loadIdeaNotifications(): Promise<IdeaNotificationsResponse | null> {
+  try {
+    const response = await getJson<IdeaNotificationsResponse>("/ideas/notifications");
+    ideaNotifications.set(response);
+    return response;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadIdeaObservables(): Promise<IdeaObservableRegistryResponse | null> {
+  const response = await guarded(() => getJson<IdeaObservableRegistryResponse>("/ideas/observables"));
+  if (response) ideaObservables.set(response);
+  return response;
+}
+
+/** The criteria table names each observable's source, so the registry loads with the Ideas tab. */
+export async function ensureIdeaObservables() {
+  if (!get(ideaObservables)) await loadIdeaObservables();
+}
+
+export async function ensureIdeaExplanations() {
+  if (Object.keys(get(ideaExplanations)).length) return;
+  try {
+    const response = await getJson<IdeaExplanationsResponse>("/ideas/explanations");
+    ideaExplanations.set(Object.fromEntries(response.items.map((item) => [item.key, item])));
+  } catch {
+    // The popovers fall back to "No explanation yet"; nothing else depends on them.
+  }
+}
+
+async function afterCriteriaChange(idea: Idea | null) {
+  if (!idea) return;
+  applyIdea(idea);
+  await Promise.all([loadIdeas(), loadIdeaNotifications()]);
+}
+
+async function busy<T>(action: () => Promise<T>): Promise<T> {
+  criteriaBusy.set(true);
+  try {
+    return await action();
+  } finally {
+    criteriaBusy.set(false);
+  }
+}
+
+export async function addCriterion(ideaId: string, payload: IdeaCriterionPayload): Promise<IdeaCriterionResponse | null> {
+  return busy(async () => {
+    const response = await guarded(() =>
+      postJson<IdeaCriterionResponse>(`/ideas/${encodeURIComponent(ideaId)}/criteria`, payload)
+    );
+    await afterCriteriaChange(response?.idea ?? null);
+    return response;
+  });
+}
+
+export async function updateCriterion(ideaId: string, criterionId: string, payload: IdeaCriterionPayload): Promise<Idea | null> {
+  return busy(async () => {
+    const idea = await guarded(() =>
+      patchJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/criteria/${encodeURIComponent(criterionId)}`, payload)
+    );
+    await afterCriteriaChange(idea);
+    return idea;
+  });
+}
+
+export async function removeCriterion(ideaId: string, criterionId: string): Promise<Idea | null> {
+  const idea = await guarded(() =>
+    deleteJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/criteria/${encodeURIComponent(criterionId)}`)
+  );
+  await afterCriteriaChange(idea);
+  return idea;
+}
+
+export async function acknowledgeCriterion(ideaId: string, criterionId: string): Promise<Idea | null> {
+  const idea = await guarded(() =>
+    postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/criteria/${encodeURIComponent(criterionId)}/acknowledge`, {})
+  );
+  await afterCriteriaChange(idea);
+  return idea;
+}
+
+/** ``open`` evaluates on-open (and never-evaluated) criteria; ``manual`` evaluates every criterion. */
+export async function evaluateIdea(ideaId: string, trigger: "manual" | "open" = "manual"): Promise<Idea | null> {
+  return busy(async () => {
+    const idea = await guarded(() =>
+      postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/evaluate?trigger=${trigger}`, {})
+    );
+    await afterCriteriaChange(idea);
+    return idea;
+  });
+}
+
+/** Read an observable once so the criterion form can show where it stands now. */
+export async function previewObservable(observable: IdeaObservableRef): Promise<IdeaObservablePreview | null> {
+  try {
+    return await postJson<IdeaObservablePreview>("/ideas/observables/preview", { observable });
+  } catch (error) {
+    ideasError.set(messageOf(error));
+    return null;
+  }
 }
 
 export async function deleteIdea(ideaId: string): Promise<boolean> {
@@ -159,4 +280,26 @@ export async function deleteIdea(ideaId: string): Promise<boolean> {
 /** The export text exactly as the backend renders it (Markdown with provenance, or JSON). */
 export async function exportIdea(ideaId: string, format: "md" | "json"): Promise<string | null> {
   return guarded(() => getText(`/ideas/${encodeURIComponent(ideaId)}/export?format=${format}`));
+}
+
+export interface MacroEventOption {
+  event_id: string;
+  title: string;
+  scheduled_at: string;
+  region: string;
+}
+
+/** Upcoming calendar events for a "Scheduled economic event" criterion (Macro's own read path). */
+export async function loadMacroEventOptions(region = "US"): Promise<MacroEventOption[]> {
+  try {
+    const response = await getJson<{ events: MacroEventOption[] }>(`/macro/events?region=${encodeURIComponent(region)}`);
+    return (response.events ?? []).map((item) => ({
+      event_id: item.event_id,
+      title: item.title,
+      scheduled_at: item.scheduled_at,
+      region: item.region || region,
+    }));
+  } catch {
+    return [];
+  }
 }
