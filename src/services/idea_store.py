@@ -31,20 +31,22 @@ from typing import Any
 from uuid import uuid4
 
 from src.models.ideas import (
+    CRITERION_STATES,
     EVIDENCE_STANCES,
     IDEA_SCHEMA_VERSION,
     Idea,
     IdeaValidationError,
     assert_journal_append_only,
+    migrate_idea_v1_to_v2,
 )
 from src.utils.time import now_utc
 
-IDEA_INDEX_SCHEMA_VERSION = 1
+# Version 2 (I2) added the criteria columns to each board row.
+IDEA_INDEX_SCHEMA_VERSION = 2
 IdeaMigration = Callable[[dict[str, Any]], dict[str, Any]]
 
 # from_version -> function returning the payload at from_version + 1.
-# Empty while v1 is the only schema; a later checkpoint adds a step here.
-DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {}
+DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {1: migrate_idea_v1_to_v2}
 
 
 class IdeaStoreError(RuntimeError):
@@ -103,6 +105,9 @@ class IdeaSummary:
     review_date: str | None
     created_at: datetime
     updated_at: datetime
+    criteria_counts: Mapping[str, int] = field(default_factory=dict)
+    criteria_total: int = 0
+    unacknowledged_triggers: int = 0
     schema_version: int = IDEA_SCHEMA_VERSION
 
     @classmethod
@@ -133,6 +138,9 @@ class IdeaSummary:
             review_date=idea.horizon.review_date.isoformat() if idea.horizon.review_date else None,
             created_at=idea.created_at,
             updated_at=idea.updated_at,
+            criteria_counts=idea.criteria_counts(),
+            criteria_total=len(idea.criteria),
+            unacknowledged_triggers=idea.unacknowledged_triggers,
             schema_version=idea.schema_version,
         )
 
@@ -162,12 +170,16 @@ class IdeaSummary:
             "review_date": self.review_date,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "criteria_counts": {state: int(self.criteria_counts.get(state, 0)) for state in CRITERION_STATES},
+            "criteria_total": self.criteria_total,
+            "unacknowledged_triggers": self.unacknowledged_triggers,
             "schema_version": self.schema_version,
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaSummary":
         counts = dict(payload.get("evidence_counts") or {})
+        criteria_counts = dict(payload.get("criteria_counts") or {})
         return cls(
             idea_id=str(payload["idea_id"]),
             title=str(payload["title"]),
@@ -193,6 +205,9 @@ class IdeaSummary:
             review_date=payload.get("review_date"),
             created_at=_parse_datetime(payload["created_at"]) or now_utc(),
             updated_at=_parse_datetime(payload["updated_at"]) or now_utc(),
+            criteria_counts={state: int(criteria_counts.get(state) or 0) for state in CRITERION_STATES},
+            criteria_total=int(payload.get("criteria_total") or 0),
+            unacknowledged_triggers=int(payload.get("unacknowledged_triggers") or 0),
             schema_version=int(payload.get("schema_version") or IDEA_SCHEMA_VERSION),
         )
 

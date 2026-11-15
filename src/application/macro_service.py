@@ -1133,6 +1133,26 @@ class MacroService:
             return None
         return self._load_histories([series_id], timeframe=self._normalize_timeframe(timeframe), force_refresh=force_refresh).get(series_id)
 
+    def get_series_history_result(
+        self,
+        series_id: str,
+        *,
+        timeframe: str = "1Y",
+        force_refresh: bool = False,
+    ) -> tuple[MacroSeriesHistory | None, list[str]]:
+        """Like :meth:`get_series_history`, but says why a series could not load.
+
+        Ideas criteria (Workstream 12) use the reason to show a criterion as
+        unavailable instead of silently holding, e.g. when FRED needs a key.
+        """
+        warnings: list[str] = []
+        if series_id not in SERIES_REGISTRY:
+            return None, [f"Unknown macro series {series_id}."]
+        rows = self._load_histories(
+            [series_id], timeframe=self._normalize_timeframe(timeframe), force_refresh=force_refresh, warnings=warnings
+        )
+        return rows.get(series_id), warnings
+
     def get_dbnomics_series_history(
         self,
         *,

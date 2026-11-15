@@ -1,11 +1,12 @@
-"""Domain model for Workstream 12 - Ideas (checkpoint I1: the core object).
+"""Domain model for Workstream 12 - Ideas (checkpoints I1 and I2).
 
 An Idea joins Gamma's tabs into one research workflow: a written thesis,
-evidence pinned from any tab with its provenance frozen at capture, and an
-append-only journal. Criteria, tracking, tests and reviews arrive in later
-checkpoints (I2-I4); the lifecycle already reserves ``closed`` and
-``closed_at`` for them, but nothing in this module evaluates, tracks or
-fetches anything. Every record is a frozen dataclass that carries
+evidence pinned from any tab with its provenance frozen at capture, criteria
+stated before the outcome is known, and an append-only journal. Tracking,
+tests and reviews arrive in later checkpoints (I3-I4); the lifecycle already
+reserves ``closed`` and ``closed_at`` for them. Nothing in this module fetches
+anything: a criterion stores the rule and the last evaluation it was given by
+the evaluation service. Every record is a frozen dataclass that carries
 ``schema_version`` and validates itself on construction.
 
 See ``docs/idea_workspace_spec.md``.
@@ -25,7 +26,9 @@ from src.models.handoff import CrossTabHandoffEnvelope, HandoffEntity
 from src.models.provenance import FreshnessRecord, ProvenanceRecord, normalize_freshness_label
 from src.utils.time import now_utc
 
-IDEA_SCHEMA_VERSION = 1
+# Version 2 (I2) added ``criteria``; version 1 files migrate on load
+# (``migrate_idea_v1_to_v2``), so an older build skips them instead of dropping criteria.
+IDEA_SCHEMA_VERSION = 2
 
 IDEA_STANCES = ("long", "short", "relative", "event", "neutral")
 # ``closed`` belongs to I3 (close requires a review); it is a valid stored state
@@ -56,6 +59,11 @@ JOURNAL_SYSTEM_KINDS = (
     "status_changed",
     "evidence_pinned",
     "evidence_unpinned",
+    "criterion_added",
+    "criterion_edited",
+    "criterion_removed",
+    "criterion_triggered",
+    "criterion_acknowledged",
 )
 JOURNAL_KINDS = JOURNAL_USER_KINDS + JOURNAL_SYSTEM_KINDS
 JOURNAL_AUTHORS = ("user", "system")
@@ -84,6 +92,35 @@ CAPTURED_STRING_MAX = 2_000
 CAPTURED_SERIES_MAX_POINTS = 260
 
 SERIES_DOWNSAMPLING_METHOD = "uniform_stride_keep_endpoints"
+
+# Criteria (I2). A criterion is a rule stated before the outcome is known.
+CRITERION_KINDS = ("invalidate", "confirm", "review")
+CRITERION_CONDITIONS = (
+    "above",
+    "below",
+    "crosses_above",
+    "crosses_below",
+    "change_over_window",
+    "date_reached",
+    "event_occurs",
+)
+CRITERION_THRESHOLD_CONDITIONS = ("above", "below", "crosses_above", "crosses_below", "change_over_window")
+CRITERION_CADENCES = ("on_open", "daily_close", "intraday")
+# ``pending`` means never evaluated (or edited since); evaluation outcomes are the other four.
+CRITERION_STATES = ("pending", "holding", "triggered", "unavailable", "stale")
+CRITERION_EVALUATION_STATES = ("holding", "triggered", "unavailable", "stale")
+# Look-back windows for ``change_over_window``, in calendar days.
+CRITERION_WINDOWS = {"1d": 1, "5d": 5, "1m": 30, "3m": 91, "6m": 182, "1y": 365}
+IDEA_CRITERIA_MAX = 12
+CRITERION_LABEL_MAX = 200
+CRITERION_REASON_MAX = 500
+CRITERION_DISPLAY_MAX = 80
+OBSERVABLE_ID_MAX = 60
+OBSERVABLE_PARAMS_MAX = 8
+OBSERVABLE_PARAM_KEY_MAX = 40
+OBSERVABLE_PARAM_VALUE_MAX = 200
+OBSERVABLE_LABEL_MAX = 160
+CRITERION_WARNINGS_MAX = 10
 
 
 class IdeaValidationError(ValueError):
@@ -461,8 +498,303 @@ class IdeaJournalEntry:
 
 
 @dataclass(frozen=True)
+class ObservableRef:
+    """A reference into the observable registry: which observable, on what.
+
+    ``params`` are short strings the registry validates (a ticker, a series id,
+    a venue and contract id, a date). ``label`` is the display name the user saw
+    when the criterion was written, e.g. "XOM close".
+    """
+
+    observable_id: str
+    params: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    label: str = ""
+
+    def __post_init__(self) -> None:
+        observable_id = str(self.observable_id or "").strip().lower()
+        _require_text(observable_id, "observable id")
+        _require_max(observable_id, OBSERVABLE_ID_MAX, "observable id")
+        object.__setattr__(self, "observable_id", observable_id)
+        raw = self.params or {}
+        if not isinstance(raw, Mapping):
+            raise IdeaValidationError("observable params must be an object.")
+        if len(raw) > OBSERVABLE_PARAMS_MAX:
+            raise IdeaValidationError(f"An observable takes at most {OBSERVABLE_PARAMS_MAX} params.")
+        params: dict[str, str] = {}
+        for key, value in raw.items():
+            key_text = str(key or "").strip()
+            _require_text(key_text, "observable param name")
+            _require_max(key_text, OBSERVABLE_PARAM_KEY_MAX, "observable param name")
+            if value is None:
+                continue
+            value_text = str(value).strip()
+            _require_max(value_text, OBSERVABLE_PARAM_VALUE_MAX, f"observable param {key_text}")
+            if value_text:
+                params[key_text] = value_text
+        object.__setattr__(self, "params", MappingProxyType(dict(sorted(params.items()))))
+        label = " ".join(str(self.label or "").split())
+        _require_max(label, OBSERVABLE_LABEL_MAX, "observable label")
+        object.__setattr__(self, "label", label or observable_id)
+
+    @property
+    def key(self) -> str:
+        """Stable identity of the reading, so one pass reads each observable once."""
+        return self.observable_id + "|" + json.dumps(dict(self.params), sort_keys=True, separators=(",", ":"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"observable_id": self.observable_id, "params": dict(self.params), "label": self.label}
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "ObservableRef":
+        params = payload.get("params")
+        if params is not None and not isinstance(params, Mapping):
+            raise IdeaValidationError("observable params must be an object.")
+        return cls(
+            observable_id=str(payload.get("observable_id") or ""),
+            params=dict(params or {}),
+            label=str(payload.get("label") or ""),
+        )
+
+
+@dataclass(frozen=True)
+class CriterionEvaluation:
+    """The outcome of one evaluation, kept on the criterion until the next one.
+
+    ``state`` is never ``pending``. ``unavailable`` carries ``reason`` and never
+    a condition result: missing data is not evidence that the thesis holds.
+    ``first_met_at`` is when the condition was first met, from the observable's
+    history when it has one (the "while you were away" time), otherwise the
+    time of the evaluation that found it. ``value`` is the latest observation;
+    ``met_value`` is the observation that met the condition, which can be an
+    earlier close than the latest one.
+    """
+
+    state: str
+    evaluated_at: datetime
+    value: float | None = None
+    value_display: str | None = None
+    as_of: datetime | None = None
+    met_value: float | None = None
+    met_display: str | None = None
+    reference_value: float | None = None
+    change: float | None = None
+    first_met_at: datetime | None = None
+    reason: str | None = None
+    effective_cadence: str = "on_open"
+    cadence_note: str | None = None
+    provenance: ProvenanceRecord | None = None
+    warnings: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.state not in CRITERION_EVALUATION_STATES:
+            raise IdeaValidationError(
+                f"An evaluation state must be one of {CRITERION_EVALUATION_STATES}, got {self.state!r}."
+            )
+        if self.effective_cadence not in CRITERION_CADENCES:
+            raise IdeaValidationError(f"effective_cadence must be one of {CRITERION_CADENCES}.")
+        for name in ("value", "reference_value", "change", "met_value"):
+            number = getattr(self, name)
+            if number is not None:
+                finite = _finite_or_none(number)
+                if finite is None:
+                    raise IdeaValidationError(f"evaluation {name} must be a finite number.")
+                object.__setattr__(self, name, finite)
+        if self.state == "unavailable" and not str(self.reason or "").strip():
+            raise IdeaValidationError("An unavailable evaluation needs the reason.")
+        for name, limit in (
+            ("reason", CRITERION_REASON_MAX),
+            ("cadence_note", CRITERION_REASON_MAX),
+            ("value_display", CRITERION_DISPLAY_MAX),
+            ("met_display", CRITERION_DISPLAY_MAX),
+        ):
+            text = _optional_text(getattr(self, name))
+            if text is not None:
+                text = text[:limit]
+            object.__setattr__(self, name, text)
+        if self.provenance is not None and not isinstance(self.provenance, ProvenanceRecord):
+            raise IdeaValidationError("evaluation provenance must be a ProvenanceRecord.")
+        warnings = tuple(str(item).strip()[:CRITERION_REASON_MAX] for item in self.warnings if str(item or "").strip())
+        object.__setattr__(self, "warnings", warnings[:CRITERION_WARNINGS_MAX])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "evaluated_at": self.evaluated_at.isoformat(),
+            "value": self.value,
+            "value_display": self.value_display,
+            "as_of": self.as_of.isoformat() if self.as_of else None,
+            "met_value": self.met_value,
+            "met_display": self.met_display,
+            "reference_value": self.reference_value,
+            "change": self.change,
+            "first_met_at": self.first_met_at.isoformat() if self.first_met_at else None,
+            "reason": self.reason,
+            "effective_cadence": self.effective_cadence,
+            "cadence_note": self.cadence_note,
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "CriterionEvaluation":
+        provenance = payload.get("provenance")
+        return cls(
+            state=str(payload.get("state") or "").strip().lower(),
+            evaluated_at=_parse_instant(payload.get("evaluated_at")) or now_utc(),
+            value=_finite_or_none(payload.get("value")),
+            value_display=_optional_text(payload.get("value_display")),
+            as_of=_parse_instant(payload.get("as_of")),
+            met_value=_finite_or_none(payload.get("met_value")),
+            met_display=_optional_text(payload.get("met_display")),
+            reference_value=_finite_or_none(payload.get("reference_value")),
+            change=_finite_or_none(payload.get("change")),
+            first_met_at=_parse_instant(payload.get("first_met_at")),
+            reason=_optional_text(payload.get("reason")),
+            effective_cadence=str(payload.get("effective_cadence") or "on_open").strip().lower(),
+            cadence_note=_optional_text(payload.get("cadence_note")),
+            provenance=provenance_from_dict(provenance) if isinstance(provenance, Mapping) else None,
+            warnings=tuple(str(item) for item in _list(payload.get("warnings"), "evaluation.warnings")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaCriterion:
+    """A rule stated before the outcome is known (I2).
+
+    ``armed_at`` is when the rule was last set (created or edited); evaluation
+    only counts observations from then on, and from the idea's activation.
+    A trigger latches: ``triggered_at`` (when Gamma detected it) and
+    ``trigger_evaluation`` (the reading that met the condition, with the date it
+    was first met and its provenance) stay until the rule is edited, even if the
+    condition later stops holding, because the trigger is a fact about the
+    thesis. ``acknowledged_at`` only clears the notification.
+    """
+
+    criterion_id: str
+    idea_id: str
+    kind: str
+    label: str
+    observable: ObservableRef
+    condition: str
+    threshold: float | None = None
+    window: str | None = None
+    cadence: str = "daily_close"
+    last_evaluation: CriterionEvaluation | None = None
+    trigger_evaluation: CriterionEvaluation | None = None
+    triggered_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    armed_at: datetime = field(default_factory=now_utc)
+    created_at: datetime = field(default_factory=now_utc)
+    schema_version: int = IDEA_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_text(self.criterion_id, "criterion_id")
+        _require_text(self.idea_id, "idea_id")
+        if self.kind not in CRITERION_KINDS:
+            raise IdeaValidationError(f"Criterion kind must be one of {CRITERION_KINDS}, got {self.kind!r}.")
+        label = " ".join(str(self.label or "").split())
+        _require_text(label, "criterion label")
+        _require_max(label, CRITERION_LABEL_MAX, "criterion label")
+        object.__setattr__(self, "label", label)
+        if not isinstance(self.observable, ObservableRef):
+            raise IdeaValidationError("A criterion needs an observable.")
+        if self.condition not in CRITERION_CONDITIONS:
+            raise IdeaValidationError(f"condition must be one of {CRITERION_CONDITIONS}, got {self.condition!r}.")
+        if self.condition in CRITERION_THRESHOLD_CONDITIONS:
+            threshold = _finite_or_none(self.threshold)
+            if threshold is None:
+                raise IdeaValidationError(f"The {self.condition} condition needs a finite threshold.")
+            if self.condition == "change_over_window" and threshold == 0:
+                raise IdeaValidationError("A change threshold cannot be zero; use a signed rise or fall.")
+            object.__setattr__(self, "threshold", threshold)
+        elif self.threshold is not None:
+            raise IdeaValidationError(f"The {self.condition} condition takes no threshold.")
+        if self.condition == "change_over_window":
+            if self.window not in CRITERION_WINDOWS:
+                raise IdeaValidationError(f"change_over_window needs a window in {tuple(CRITERION_WINDOWS)}.")
+        elif self.window is not None:
+            raise IdeaValidationError(f"The {self.condition} condition takes no window.")
+        if self.cadence not in CRITERION_CADENCES:
+            raise IdeaValidationError(f"cadence must be one of {CRITERION_CADENCES}, got {self.cadence!r}.")
+        if self.last_evaluation is not None and not isinstance(self.last_evaluation, CriterionEvaluation):
+            raise IdeaValidationError("last_evaluation must be a CriterionEvaluation.")
+        if self.trigger_evaluation is not None:
+            if not isinstance(self.trigger_evaluation, CriterionEvaluation) or self.trigger_evaluation.state != "triggered":
+                raise IdeaValidationError("trigger_evaluation must be the triggering evaluation.")
+            if self.triggered_at is None:
+                raise IdeaValidationError("A trigger evaluation needs triggered_at.")
+        if self.acknowledged_at is not None and self.triggered_at is None:
+            raise IdeaValidationError("Only a triggered criterion can be acknowledged.")
+        _check_schema_version(self.schema_version)
+
+    @property
+    def state(self) -> str:
+        """Latched trigger first, then the last evaluation, else ``pending``."""
+        if self.triggered_at is not None:
+            return "triggered"
+        if self.last_evaluation is None:
+            return "pending"
+        return self.last_evaluation.state
+
+    @property
+    def needs_acknowledgement(self) -> bool:
+        return self.triggered_at is not None and self.acknowledged_at is None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "criterion_id": self.criterion_id,
+            "idea_id": self.idea_id,
+            "kind": self.kind,
+            "label": self.label,
+            "observable": self.observable.to_dict(),
+            "condition": self.condition,
+            "threshold": self.threshold,
+            "window": self.window,
+            "cadence": self.cadence,
+            "state": self.state,
+            "last_evaluation": self.last_evaluation.to_dict() if self.last_evaluation else None,
+            "trigger_evaluation": self.trigger_evaluation.to_dict() if self.trigger_evaluation else None,
+            "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
+            "acknowledged_at": self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            "armed_at": self.armed_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaCriterion":
+        observable = payload.get("observable")
+        if not isinstance(observable, Mapping):
+            raise IdeaValidationError("A criterion needs an observable.")
+        last_evaluation = payload.get("last_evaluation")
+        trigger_evaluation = payload.get("trigger_evaluation")
+        window = payload.get("window")
+        created_at = _parse_instant(payload.get("created_at")) or now_utc()
+        return cls(
+            schema_version=_schema_version(payload.get("schema_version")),
+            criterion_id=str(payload.get("criterion_id") or ""),
+            idea_id=str(payload.get("idea_id") or ""),
+            kind=str(payload.get("kind") or "").strip().lower(),
+            label=str(payload.get("label") or ""),
+            observable=ObservableRef.from_dict(observable),
+            condition=str(payload.get("condition") or "").strip().lower(),
+            threshold=None if payload.get("threshold") is None else _finite_or_none(payload.get("threshold")),
+            window=None if window in (None, "") else str(window).strip().lower(),
+            cadence=str(payload.get("cadence") or "daily_close").strip().lower(),
+            last_evaluation=CriterionEvaluation.from_dict(last_evaluation) if isinstance(last_evaluation, Mapping) else None,
+            trigger_evaluation=(
+                CriterionEvaluation.from_dict(trigger_evaluation) if isinstance(trigger_evaluation, Mapping) else None
+            ),
+            triggered_at=_parse_instant(payload.get("triggered_at")),
+            acknowledged_at=_parse_instant(payload.get("acknowledged_at")),
+            armed_at=_parse_instant(payload.get("armed_at")) or created_at,
+            created_at=created_at,
+        )
+
+
+@dataclass(frozen=True)
 class Idea:
-    """A thesis with its pinned evidence and journal (I1 scope)."""
+    """A thesis with its pinned evidence, criteria and journal."""
 
     idea_id: str
     title: str
@@ -478,6 +810,7 @@ class Idea:
     updated_at: datetime = field(default_factory=now_utc)
     closed_at: datetime | None = None
     evidence: tuple[IdeaEvidence, ...] = ()
+    criteria: tuple[IdeaCriterion, ...] = ()
     journal: tuple[IdeaJournalEntry, ...] = ()
     schema_version: int = IDEA_SCHEMA_VERSION
 
@@ -513,6 +846,15 @@ class Idea:
         if len({item.evidence_id for item in evidence}) != len(evidence):
             raise IdeaValidationError("Evidence ids must be unique within an idea.")
         object.__setattr__(self, "evidence", evidence)
+        criteria = tuple(self.criteria)
+        if len(criteria) > IDEA_CRITERIA_MAX:
+            raise IdeaValidationError(f"An idea holds at most {IDEA_CRITERIA_MAX} criteria.")
+        for item in criteria:
+            if not isinstance(item, IdeaCriterion) or item.idea_id != self.idea_id:
+                raise IdeaValidationError("Every criterion must belong to this idea.")
+        if len({item.criterion_id for item in criteria}) != len(criteria):
+            raise IdeaValidationError("Criterion ids must be unique within an idea.")
+        object.__setattr__(self, "criteria", criteria)
         journal = tuple(self.journal)
         if len(journal) > IDEA_JOURNAL_MAX:
             raise IdeaValidationError(f"An idea journal holds at most {IDEA_JOURNAL_MAX} entries.")
@@ -537,6 +879,27 @@ class Idea:
     @property
     def last_evidence_at(self) -> datetime | None:
         return max((item.captured_at for item in self.evidence), default=None)
+
+    def criteria_counts(self) -> dict[str, int]:
+        counts = {state: 0 for state in CRITERION_STATES}
+        for item in self.criteria:
+            counts[item.state] += 1
+        return counts
+
+    @property
+    def unacknowledged_triggers(self) -> int:
+        return sum(1 for item in self.criteria if item.needs_acknowledgement)
+
+    @property
+    def activated_at(self) -> datetime | None:
+        """When the idea last became active, from the journal; ``None`` if it never did."""
+        for entry in reversed(self.journal):
+            if entry.kind == "status_changed" and entry.details.get("to") == "active":
+                return entry.created_at
+        return None
+
+    def criterion(self, criterion_id: str) -> IdeaCriterion | None:
+        return next((item for item in self.criteria if item.criterion_id == criterion_id), None)
 
     # -- immutable updates --------------------------------------------------
 
@@ -563,6 +926,7 @@ class Idea:
             "updated_at": self.updated_at.isoformat(),
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "evidence": [item.to_dict() for item in self.evidence],
+            "criteria": [item.to_dict() for item in self.criteria],
             "journal": [entry.to_dict() for entry in self.journal],
         }
 
@@ -584,6 +948,7 @@ class Idea:
             updated_at=_parse_instant(payload.get("updated_at")) or now_utc(),
             closed_at=_parse_instant(payload.get("closed_at")),
             evidence=tuple(IdeaEvidence.from_dict(item) for item in _list(payload.get("evidence"), "evidence")),
+            criteria=tuple(IdeaCriterion.from_dict(item) for item in _list(payload.get("criteria"), "criteria")),
             journal=tuple(IdeaJournalEntry.from_dict(item) for item in _list(payload.get("journal"), "journal")),
         )
 
@@ -591,6 +956,17 @@ class Idea:
 # ---------------------------------------------------------------------------
 # Rules shared by the store and the service
 # ---------------------------------------------------------------------------
+
+
+def migrate_idea_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 2 adds ``criteria``. Nested records carry the idea's version too."""
+    migrated = dict(payload)
+    migrated["criteria"] = list(migrated.get("criteria") or [])
+    for key in ("evidence", "journal", "criteria"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=2) if isinstance(item, Mapping) else item for item in items]
+    return migrated
 
 
 def assert_journal_append_only(previous: Sequence[IdeaJournalEntry], current: Sequence[IdeaJournalEntry]) -> None:

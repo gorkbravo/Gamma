@@ -35,7 +35,7 @@ from src.models.ideas import (
     prepare_captured_values,
 )
 from src.models.provenance import ProvenanceRecord
-from src.services.idea_store import IdeaStore
+from src.services.idea_store import DEFAULT_IDEA_MIGRATIONS, IdeaStore
 
 T0 = datetime(2026, 11, 14, 9, 30)
 
@@ -355,7 +355,7 @@ def test_store_migrates_by_schema_version_and_skips_future_files(tmp_path):
         payload["title"] = payload.pop("headline")
         return payload
 
-    migrated = IdeaStore(base, migrations={0: v0_to_v1})
+    migrated = IdeaStore(base, migrations={**DEFAULT_IDEA_MIGRATIONS, 0: v0_to_v1})
     assert migrated.require(idea.idea_id).title == "Old"
     assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == IDEA_SCHEMA_VERSION
     assert any(item.action == "migrated" for item in migrated.storage_warnings())
@@ -416,7 +416,7 @@ def test_markdown_export_keeps_provenance_and_reopen_target(tmp_path):
     assert "## Export provenance" in markdown and "not advice" in markdown
 
     exported = service.export_json(idea.idea_id)
-    assert exported["format"] == "gamma.idea" and exported["format_version"] == 1
+    assert exported["format"] == "gamma.idea" and exported["format_version"] == 2
     assert Idea.from_dict(exported["idea"]).to_dict() == service.get_idea(idea.idea_id).to_dict()
 
 

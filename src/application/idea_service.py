@@ -1,10 +1,12 @@
-"""Application service for Ideas (Workstream 12, checkpoint I1).
+"""Application service for Ideas (Workstream 12, checkpoints I1 and I2).
 
-The service owns the rules around the store: every edit, pin, unpin and
-lifecycle change writes a system journal entry; the journal only grows; and the
-I1 lifecycle is ``draft`` -> ``active`` -> ``archived`` (plus restore and
-delete). Nothing here evaluates criteria, tracks prices or calls a provider:
-a pin stores exactly what the user saw, with the provenance they saw.
+The service owns the rules around the store: every edit, pin, unpin,
+criterion change and lifecycle change writes a system journal entry; the
+journal only grows; and the lifecycle is ``draft`` -> ``active`` ->
+``archived`` (plus restore and delete; close and review are I3). A pin stores
+exactly what the user saw, with the provenance they saw. Criteria are
+validated against the observable registry here; evaluating them is the job of
+``IdeaEvaluationService`` (``src/application/idea_evaluation.py``).
 """
 
 from __future__ import annotations
@@ -18,18 +20,21 @@ from uuid import uuid4
 
 from src.models.handoff import CrossTabHandoffEnvelope
 from src.models.ideas import (
+    CRITERION_CADENCES,
     EVIDENCE_STANCES,
     IDEA_I1_STATUSES,
     IDEA_SCHEMA_VERSION,
     IDEA_STATUSES,
     Idea,
     IdeaEvidence,
+    IdeaCriterion,
     IdeaHorizon,
     IdeaJournalEntry,
     IdeaLeg,
     IdeaLifecycleError,
     IdeaOrigin,
     IdeaValidationError,
+    ObservableRef,
     normalize_tags,
     prepare_captured_values,
     thaw_captured_values,
@@ -39,7 +44,8 @@ from src.services.idea_store import IdeaNotFoundError, IdeaStorageWarning, IdeaS
 from src.utils.time import now_utc
 
 IDEA_EXPORT_FORMAT = "gamma.idea"
-IDEA_EXPORT_FORMAT_VERSION = 1
+# Version 2 (I2): the exported idea carries ``criteria``.
+IDEA_EXPORT_FORMAT_VERSION = 2
 IDEAS_SOURCE_PROVIDER = "gamma_ideas"
 
 _TAB_LABELS = {
@@ -100,6 +106,29 @@ class IdeaEvidenceCreateRequest:
 
 
 @dataclass(frozen=True)
+class IdeaCriterionRequest:
+    """A criterion rule as the user wrote it. A blank ``label`` is generated from the rule."""
+
+    kind: str
+    observable: ObservableRef
+    condition: str
+    threshold: float | None = None
+    window: str | None = None
+    cadence: str = "daily_close"
+    label: str | None = None
+
+
+class CriteriaRegistryProtocol:
+    """What the service needs from the observable registry (see ``idea_observables``)."""
+
+    def validate(self, ref: ObservableRef, *, condition: str, cadence: str) -> ObservableRef:  # pragma: no cover
+        raise NotImplementedError
+
+    def describe(self, ref: ObservableRef, *, condition: str, threshold: float | None, window: str | None) -> str:  # pragma: no cover
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
 class IdeaListResult:
     items: list[IdeaSummary]
     total: int
@@ -116,10 +145,12 @@ class IdeaService:
         *,
         clock: Callable[[], datetime] = now_utc,
         id_factory: Callable[[], str] = lambda: uuid4().hex,
+        criteria_registry: CriteriaRegistryProtocol | None = None,
     ) -> None:
         self.store = store
         self._clock = clock
         self._new_id = id_factory
+        self.criteria_registry = criteria_registry
 
     # -- reads ---------------------------------------------------------------
 
@@ -279,6 +310,134 @@ class IdeaService:
 
         return self.store.update(idea_id, mutate)
 
+    # -- criteria (I2) ---------------------------------------------------------
+
+    def add_criterion(self, idea_id: str, request: IdeaCriterionRequest) -> tuple[Idea, IdeaCriterion]:
+        added: dict[str, IdeaCriterion] = {}
+
+        def mutate(current: Idea) -> Idea:
+            _require_editable_criteria(current)
+            now = self._clock()
+            criterion = self._build_criterion(current.idea_id, self._new_id(), request, now=now, created_at=now)
+            added["item"] = criterion
+            updated = replace(current, criteria=(*current.criteria, criterion), updated_at=now)
+            return updated.with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "criterion_added",
+                    f"Added a {criterion.kind} criterion: “{criterion.label}” ({_cadence_text(criterion.cadence)}).",
+                    now,
+                    {"criterion_id": criterion.criterion_id, "rule": _rule_details(criterion)},
+                ),
+                touched_at=now,
+            )
+
+        idea = self.store.update(idea_id, mutate)
+        return idea, added["item"]
+
+    def update_criterion(self, idea_id: str, criterion_id: str, request: IdeaCriterionRequest) -> Idea:
+        """Replace a criterion's rule. Changing the rule re-arms it; a label-only edit does not."""
+
+        def mutate(current: Idea) -> Idea:
+            _require_editable_criteria(current)
+            existing = current.criterion(criterion_id)
+            if existing is None:
+                raise IdeaNotFoundError(f"Criterion {criterion_id} was not found on idea {idea_id}.")
+            now = self._clock()
+            candidate = self._build_criterion(idea_id, criterion_id, request, now=now, created_at=existing.created_at)
+            if _rule_details(candidate) == _rule_details(existing):
+                if candidate.label == existing.label:
+                    return current
+                updated = replace(existing, label=candidate.label)
+                body = f"Renamed a criterion: “{existing.label}” → “{updated.label}”."
+                details = {"criterion_id": criterion_id, "label_before": existing.label, "label_after": updated.label}
+            else:
+                # A new rule starts over: no inherited trigger or evaluation, armed from now.
+                updated = candidate
+                body = (
+                    f"Changed a criterion: “{existing.label}” → “{updated.label}”; "
+                    "it is re-armed from now."
+                )
+                if existing.triggered_at is not None:
+                    body += (
+                        f" The earlier trigger ({existing.triggered_at.strftime('%Y-%m-%d %H:%M')} UTC) "
+                        "stays in this journal."
+                    )
+                details = {
+                    "criterion_id": criterion_id,
+                    "before": _rule_details(existing),
+                    "after": _rule_details(updated),
+                    "previous_state": existing.state,
+                }
+            criteria = tuple(updated if item.criterion_id == criterion_id else item for item in current.criteria)
+            return replace(current, criteria=criteria, updated_at=now).with_journal_entry(
+                self._system_entry(idea_id, "criterion_edited", body, now, details),
+                touched_at=now,
+            )
+
+        return self.store.update(idea_id, mutate)
+
+    def remove_criterion(self, idea_id: str, criterion_id: str) -> Idea:
+        def mutate(current: Idea) -> Idea:
+            existing = current.criterion(criterion_id)
+            if existing is None:
+                raise IdeaNotFoundError(f"Criterion {criterion_id} was not found on idea {idea_id}.")
+            now = self._clock()
+            criteria = tuple(item for item in current.criteria if item.criterion_id != criterion_id)
+            body = f"Removed the {existing.kind} criterion “{existing.label}” (state {existing.state})."
+            return replace(current, criteria=criteria, updated_at=now).with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "criterion_removed",
+                    body,
+                    now,
+                    {
+                        "criterion_id": criterion_id,
+                        "rule": _rule_details(existing),
+                        "state": existing.state,
+                        "triggered_at": existing.triggered_at.isoformat() if existing.triggered_at else None,
+                    },
+                ),
+                touched_at=now,
+            )
+
+        return self.store.update(idea_id, mutate)
+
+    def _build_criterion(
+        self,
+        idea_id: str,
+        criterion_id: str,
+        request: IdeaCriterionRequest,
+        *,
+        now: datetime,
+        created_at: datetime,
+    ) -> IdeaCriterion:
+        if request.cadence not in CRITERION_CADENCES:
+            raise IdeaValidationError(f"cadence must be one of {CRITERION_CADENCES}, got {request.cadence!r}.")
+        observable = request.observable
+        label = " ".join(str(request.label or "").split())
+        if self.criteria_registry is not None:
+            observable = self.criteria_registry.validate(observable, condition=request.condition, cadence=request.cadence)
+            if not label:
+                label = self.criteria_registry.describe(
+                    observable, condition=request.condition, threshold=request.threshold, window=request.window
+                )
+        if not label:
+            label = observable.label
+        return IdeaCriterion(
+            criterion_id=criterion_id,
+            idea_id=idea_id,
+            kind=request.kind,
+            label=label,
+            observable=observable,
+            condition=request.condition,
+            threshold=request.threshold,
+            window=request.window,
+            cadence=request.cadence,
+            armed_at=now,
+            created_at=created_at,
+        )
+
     def add_journal_entry(self, idea_id: str, *, kind: str, body: str) -> Idea:
         def mutate(current: Idea) -> Idea:
             now = self._clock()
@@ -379,6 +538,26 @@ class IdeaService:
 # ---------------------------------------------------------------------------
 # Change description and Markdown export
 # ---------------------------------------------------------------------------
+
+
+def _require_editable_criteria(idea: Idea) -> None:
+    if idea.status not in {"draft", "active"}:
+        raise IdeaLifecycleError(f"Criteria can change on a draft or active idea; this one is {idea.status}.")
+
+
+def _rule_details(criterion: IdeaCriterion) -> dict[str, Any]:
+    return {
+        "kind": criterion.kind,
+        "observable": criterion.observable.to_dict(),
+        "condition": criterion.condition,
+        "threshold": criterion.threshold,
+        "window": criterion.window,
+        "cadence": criterion.cadence,
+    }
+
+
+def _cadence_text(cadence: str) -> str:
+    return {"on_open": "on open", "daily_close": "at the daily close", "intraday": "intraday"}.get(cadence, cadence)
 
 
 def _describe_changes(before: Idea, after: Idea) -> list[dict[str, Any]]:
@@ -490,6 +669,32 @@ def render_idea_markdown(idea: Idea, *, exported_at: datetime) -> str:
             lines += ["", "_None._"]
         for pin in pins:
             lines += ["", *_evidence_markdown(pin)]
+    lines += ["", "## Criteria", ""]
+    if idea.criteria:
+        lines += [
+            "| Kind | Criterion | Cadence | State | Last value | Triggered | Source |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for criterion in idea.criteria:
+            last = criterion.last_evaluation
+            trigger = criterion.trigger_evaluation
+            value = (last.value_display or "N/A") if last else "N/A"
+            if last and last.as_of:
+                value += f" ({last.as_of.strftime('%Y-%m-%d')})"
+            triggered = "—"
+            if criterion.triggered_at:
+                met = trigger.first_met_at if trigger else None
+                triggered = _ts(criterion.triggered_at) + (f", first met {met.strftime('%Y-%m-%d')}" if met else "")
+            source = (trigger or last).provenance.source_provider if (trigger or last) and (trigger or last).provenance else "—"
+            state = criterion.state + (f": {last.reason}" if last and last.reason and criterion.state != "triggered" else "")
+            lines.append(
+                f"| {criterion.kind} | {_md(criterion.label)} | {_cadence_text(criterion.cadence)} | {_md(state)} "
+                f"| {_md(value)} | {_md(triggered)} | {_md(source)} |"
+            )
+        lines.append("")
+        lines.append("Criteria are evaluated only while Gamma runs; a trigger stays until its rule is edited.")
+    else:
+        lines.append("_No criteria._")
     lines += ["", "## Journal", ""]
     if idea.journal:
         lines += ["| Time | Author | Kind | Entry |", "| --- | --- | --- | --- |"]

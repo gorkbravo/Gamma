@@ -49,6 +49,11 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
             from src.application.runtime import start_ib_auto_connect
 
             start_ib_auto_connect(runtime_instance)
+            # Workstream 12 - Ideas (I2): evaluar criterios al arrancar, tras cada cierre y,
+            # con TWS conectado, intradía; solo mientras Gamma está abierto.
+            from src.application.runtime import start_idea_evaluation
+
+            start_idea_evaluation(runtime_instance)
         yield
         if owns_runtime:
             runtime_instance.shutdown()
