@@ -306,18 +306,19 @@ Recorded 2026-11-14 for review; the branch is not merged.
 
 ### I2 implementation notes
 
-Recorded 2026-11-15 for review. Branch `claude/ideas-i2-c55f00`, stacked on the I1 branch; neither is merged.
+Recorded 2026-11-15 for review and updated on 2026-11-16 after the live FRED check. Branch `claude/ideas-i2-c55f00`, stacked on the I1 branch; neither is merged.
 
-- **Model (schema v2):** `IdeaCriterion` in `src/models/ideas.py` with `kind`, a plain-language `label` (generated from the rule when left blank, editable), an `ObservableRef`, `condition`, `threshold`, `window` (`1d`, `5d`, `1m`, `3m`, `6m`, `1y`), `cadence`, `armed_at`, `last_evaluation`, and, once triggered, `triggered_at` plus `trigger_evaluation` (the observation that met the rule, the date it was first met and its provenance). A trigger latches until the rule is edited. Editing the rule re-arms it from now and starts again; a label-only edit keeps the state. An idea holds at most 12 criteria. Version 1 idea files migrate on load (`migrate_idea_v1_to_v2`), so an older build skips a v2 file instead of dropping its criteria.
+- **Model (schema v2):** `IdeaCriterion` in `src/models/ideas.py` with `kind`, a plain-language `label` (generated from the rule when left blank, editable), an `ObservableRef`, `condition`, `threshold`, `window` (`1d`, `5d`, `1m`, `3m`, `6m`, `1y`), `cadence`, `armed_at`, a baseline (`baseline_as_of`, `baseline_for`), `last_evaluation`, and, once triggered, `triggered_at` plus `trigger_evaluation` (the observation that met the rule, the date it was first met and its provenance). A trigger latches until the rule is edited. Editing the rule re-arms it from now and starts again; a label-only edit keeps the state. An idea holds at most 12 criteria. Version 1 idea files migrate on load (`migrate_idea_v1_to_v2`), so an older build skips a v2 file instead of dropping its criteria.
 - **Evaluation** (`src/application/idea_evaluation.py`, pure rules in `idea_criteria.py`):
   - Only `active` ideas are evaluated. Each pass reads each observable once.
   - A daemon scheduler, started in the API lifespan only when the app owns its runtime, runs every cadence at start. It runs a daily-close pass after 16:20 New York time on weekdays. With Trader Workstation connected it runs an intraday pass every five minutes for intraday criteria whose observable has an IBKR intraday source.
   - Opening an active idea evaluates its `on_open` criteria and any never evaluated. Activation and saving a rule on an active idea evaluate at once. `GAMMA_IDEAS_EVALUATION=off` disables the scheduler, which never runs under pytest.
-  - Only observations dated on or after the day a rule was armed (and the idea activated) can trigger it, so a start-up pass finds "while you were away" triggers with their first-met date and nothing older.
+  - Only what was not yet known when a rule was armed (and the idea activated) can trigger it, so a start-up pass finds "while you were away" triggers with their first-met date and nothing older. That means observations dated on or after the arming day, plus any newer than the criterion's baseline. The baseline is the newest observation already known at the first evaluation after arming, taken again after a re-activation.
+  - The baseline exists because lagging series arrive dated before the day they become known. FRED publishes a daily yield a day or two late, and a monthly print carries the first day of its reference month. Without it, the October CPI print, released in November, could never trigger a rule armed in October. If the first usable reading comes long after arming, anything published in between that is dated before the arming day counts as already known. A rule that is already met when it is armed holds until a new observation meets it.
   - A missing dependency or provider failure is `unavailable` with the reason. A value older than the observable tolerates is `stale` unless it already met the rule.
 - **Observable registry v1** (`src/application/idea_observables.py`), ordered for the reference retail user. Differences from the table above are noted:
   - `equity_close`: research market data (Yahoo Finance, then IBKR). In demo mode only the AAPL, MSFT, SAP and SPY sample histories exist.
-  - `macro_series`: FRED series through a new `MacroService.get_series_history_result`, which reports why a series did not load. It needs `FRED_API_KEY`; FX series need TWS.
+  - `macro_series`: FRED series through a new `MacroService.get_series_history_result`, which reports why a series did not load. FRED series need `FRED_API_KEY`. FX series come from IBKR, need TWS but no FRED key, and are unavailable in demo mode, which has no FX history. A series that loads empty is unavailable with the provider and its series code.
   - `prediction_probability`: Prediction Markets detail and daily history in percent. `event_occurs` reads the venue's resolution (Yes, or the chosen outcome).
   - `crypto_price`: CoinGecko daily history.
   - `commodity_price`: the Commodities service price history. `commodity_spread` offers level rules only, because calendar-spread history is a proxy until historical futures curves exist. Curve points are not in v1.
@@ -335,6 +336,13 @@ Recorded 2026-11-15 for review. Branch `claude/ideas-i2-c55f00`, stacked on the 
   - XOM, the FRED series without a key and the Script run were unavailable, each with its reason. The rest held.
   - Triggers reached the notification center and Sitrep. Acknowledging from Sitrep cleared both lists.
   - A backend restart ran the start-up pass over two ideas (13 criteria, 12 readings, no duplicate triggers).
+- **Live FRED check, 2026-11-16** (demo runtime with a real `FRED_API_KEY`, through the API and the UI):
+  - Of the 39 macro series, 16 are FX. Each of the 23 FRED series loads with its value, date and `fred` provenance, except one. Euro Area Unemployment (`LRHUTTTTEZM156S`) came back empty and is unavailable with that reason.
+  - Several euro-area series that FRED takes from the OECD are months old and show as stale. The policy-rate proxy, the 3-month rate, the 10-year yield, EUR/USD monthly and the 3m10y slope end on 2026-01-01; industrial production ends on 2023-10-01. Euro-area HICP and the broad dollar index are a few days past their tolerance. That is the source, not the evaluation.
+  - A rule on the 10-year yield, the core CPI change, or a crossing on the 2s10s slope holds with the real reading, and its baseline is stored.
+  - An idea back-dated on disk to 2026-10-20 triggered on real data, and both triggers reached the journal and notifications:
+    - "Headline CPI YoY above 4.00%" triggered on the October print, first met 2026-10-01, at 4.08 %.
+    - "US 10Y Treasury Yield above 5.00%" triggered at 5.15 %, first met 2026-10-19.
 - **Left for later checkpoints:** native desktop notifications (Tauri), commodity curve points, IBKR intraday marks for equities, and a history for ATM IV and skew (so crossings and changes on them), which needs stored snapshots.
 
 ## Non-goals
