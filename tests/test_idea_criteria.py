@@ -484,6 +484,34 @@ def test_registry_orders_validates_and_states_dependencies():
     assert connected.describe(normalized, condition="below", threshold=100, window=None) == "XOM close below 100.00"
 
 
+def test_macro_series_reasons_name_the_missing_source():
+    calls: list[str] = []
+
+    def history_result(series_id, *, timeframe="1Y", force_refresh=False):
+        calls.append(series_id)
+        return None, []
+
+    macro = SimpleNamespace(get_series_history_result=history_result)
+    demo = ObservableRegistry(macro_service=macro, mock_mode=True, env=lambda key: "set")
+    fx = demo.read(ObservableRef("macro_series", {"series_id": "fx-eurusd"}), now=T0)
+    assert fx.is_unavailable and fx.unavailable_reason.startswith("Demo mode has no FX history")
+    assert calls == [], "demo mode never asks IBKR for FX history"
+
+    empty = demo.read(ObservableRef("macro_series", {"series_id": "eu-unemployment-rate"}), now=T0)
+    assert empty.unavailable_reason == (
+        "FRED returned no observations for Euro Area Unemployment Rate (LRHUTTTTEZM156S) in the last year."
+    )
+
+    # With Trader Workstation and no FRED key, an FX series is still read: it does not come from FRED.
+    live = ObservableRegistry(
+        macro_service=macro, client=SimpleNamespace(is_connected=lambda: True), env=lambda key: None
+    )
+    fx_live = live.read(ObservableRef("macro_series", {"series_id": "fx-eurusd"}), now=T0)
+    assert fx_live.unavailable_reason == "IBKR returned no FX history for EUR/USD."
+    fred = live.read(ObservableRef("macro_series", {"series_id": "us-10y-yield"}), now=T0)
+    assert fred.unavailable_reason == "Needs FRED_API_KEY in Settings."
+
+
 def test_every_observable_condition_and_state_has_an_explanation():
     registry = ObservableRegistry(env=lambda key: None)
     keys = set(EXPLANATIONS)

@@ -158,10 +158,14 @@ class ObservableRegistry:
         except Exception:  # noqa: BLE001
             return False
 
-    def availability(self, definition: ObservableDefinition) -> tuple[bool, str | None]:
+    def availability(self, definition: ObservableDefinition, ref: ObservableRef | None = None) -> tuple[bool, str | None]:
+        """Whether an observable can be read; with ``ref``, for that instance (an FX series needs no FRED key)."""
         if definition.needs_tws and not self.mock_mode and not self.tws_connected():
             return False, f"{TWS_DEPENDENCY}; connect it in Settings."
-        missing = [key for key in definition.needs_keys if not str(self._env(key) or "").strip()]
+        needs_keys = definition.needs_keys
+        if ref is not None and definition.observable_id == "macro_series" and _macro_spec(ref.params.get("series_id")).get("kind") == "fx":
+            needs_keys = ()
+        missing = [key for key in needs_keys if not str(self._env(key) or "").strip()]
         if missing:
             return False, f"Needs {', '.join(missing)} in Settings."
         if self._service_for(definition.observable_id) is None and definition.observable_id != "calendar_date":
@@ -267,7 +271,7 @@ class ObservableRegistry:
     def read(self, ref: ObservableRef, *, now: datetime | None = None, intraday: bool = False) -> ObservableReading:
         moment = now or self._clock()
         definition = self.get(ref.observable_id)
-        available, reason = self.availability(definition)
+        available, reason = self.availability(definition, ref)
         if not available:
             return ObservableReading.unavailable(str(reason))
         reader = getattr(self, f"_read_{definition.observable_id}")
@@ -317,11 +321,15 @@ class ObservableRegistry:
     def _read_macro_series(self, ref: ObservableRef, now: datetime) -> ObservableReading:
         series_id = ref.params["series_id"]
         spec = _macro_spec(series_id)
-        if spec.get("kind") == "fx" and not self.mock_mode and not self.tws_connected():
-            return ObservableReading.unavailable(f"{TWS_DEPENDENCY}: FX series come from IBKR.")
+        if spec.get("kind") == "fx":
+            # The demo market data has no FX history, so demo mode says so instead of "no observations".
+            if self.mock_mode:
+                return ObservableReading.unavailable("Demo mode has no FX history; FX series come from IBKR through Trader Workstation.")
+            if not self.tws_connected():
+                return ObservableReading.unavailable(f"{TWS_DEPENDENCY}: FX series come from IBKR.")
         history, warnings = self.macro_service.get_series_history_result(series_id, timeframe="1Y")
         if history is None or not history.points:
-            reason = warnings[0] if warnings else f"No observations for {series_id}."
+            reason = warnings[0] if warnings else _macro_empty_reason(series_id, spec)
             return ObservableReading.unavailable(reason, warnings=warnings[1:])
         provenance = _provenance(history.source_provider, history.retrieved_at, history.origin, history.transformation_note)
         points = [
@@ -928,6 +936,20 @@ def _macro_registry() -> dict[str, dict[str, Any]]:
 
 def _macro_spec(series_id: str | None) -> dict[str, Any]:
     return dict(_macro_registry().get(str(series_id or ""), {}))
+
+
+def _macro_empty_reason(series_id: str, spec: dict[str, Any]) -> str:
+    """Name the provider and its series code when a macro series loads without observations."""
+    title = str(spec.get("title") or series_id)
+    if spec.get("kind") == "fx":
+        return f"IBKR returned no FX history for {title}."
+    codes = [
+        str(spec.get(key) or "").strip()
+        for key in ("provider_series_id", "left_provider_series_id", "right_provider_series_id")
+    ]
+    reference = " + ".join(code for code in codes if code)
+    suffix = f" ({reference})" if reference else ""
+    return f"FRED returned no observations for {title}{suffix} in the last year."
 
 
 def _macro_unit(series_id: str | None) -> str:
