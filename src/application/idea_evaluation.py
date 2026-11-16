@@ -22,7 +22,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from src.application.idea_criteria import ObservableReading, evaluate_criterion
+from src.application.idea_criteria import ObservableReading, evaluate_criterion, latest_known_before
 from src.models.ideas import (
     CRITERION_CADENCES,
     CriterionEvaluation,
@@ -92,6 +92,15 @@ class IdeaNotification:
             "days_overdue": self.days_overdue,
             "provenance": dict(self.provenance) if self.provenance else None,
         }
+
+
+@dataclass(frozen=True)
+class _Outcome:
+    """One criterion's evaluation, the arming it was taken for, and a new baseline to store."""
+
+    armed_at: datetime
+    evaluation: CriterionEvaluation
+    baseline: tuple[datetime, datetime] | None = None
 
 
 @dataclass
@@ -203,7 +212,7 @@ class IdeaEvaluationService:
         cadences = cadences_for_trigger(trigger)
         activated_at = idea.activated_at
         tws = self.registry.tws_connected()
-        outcomes: dict[str, tuple[datetime, CriterionEvaluation]] = {}
+        outcomes: dict[str, _Outcome] = {}
         for criterion in idea.criteria:
             if only is not None and criterion.criterion_id not in only:
                 continue
@@ -221,6 +230,13 @@ class IdeaEvaluationService:
                 reading = self._read(criterion.observable, now=now, intraday=bool(intraday))
                 readings[key] = reading
             armed_from = max(criterion.armed_at, activated_at) if activated_at else criterion.armed_at
+            # The baseline is taken once per arming moment; a re-activation takes a new one.
+            if criterion.baseline_for == armed_from:
+                known_until = criterion.baseline_as_of
+                baseline = None
+            else:
+                known_until = None if reading.is_unavailable else latest_known_before(reading, armed_from)
+                baseline = (known_until, armed_from) if known_until is not None else None
             ref = criterion.observable
             evaluation = evaluate_criterion(
                 criterion,
@@ -231,8 +247,9 @@ class IdeaEvaluationService:
                 effective_cadence=effective,
                 cadence_note=note,
                 format_value=lambda value, _ref=ref: self.registry.format_value(_ref, value),
+                known_until=known_until,
             )
-            outcomes[criterion.criterion_id] = (criterion.armed_at, evaluation)
+            outcomes[criterion.criterion_id] = _Outcome(criterion.armed_at, evaluation, baseline)
         if not outcomes:
             return idea
         result.ideas_evaluated += 1
@@ -258,7 +275,7 @@ class IdeaEvaluationService:
     def _apply(
         self,
         idea_id: str,
-        outcomes: Mapping[str, tuple[datetime, CriterionEvaluation]],
+        outcomes: Mapping[str, _Outcome],
         result: EvaluationPassResult,
     ) -> Idea:
         def mutate(current: Idea) -> Idea:
@@ -269,11 +286,13 @@ class IdeaEvaluationService:
             for criterion in current.criteria:
                 outcome = outcomes.get(criterion.criterion_id)
                 # A rule edited while it was being read keeps its new, unevaluated state.
-                if outcome is None or outcome[0] != criterion.armed_at:
+                if outcome is None or outcome.armed_at != criterion.armed_at:
                     criteria.append(criterion)
                     continue
-                evaluation = outcome[1]
+                evaluation = outcome.evaluation
                 updated = replace(criterion, last_evaluation=evaluation)
+                if outcome.baseline is not None:
+                    updated = replace(updated, baseline_as_of=outcome.baseline[0], baseline_for=outcome.baseline[1])
                 if evaluation.state == "triggered" and criterion.triggered_at is None:
                     updated = replace(updated, triggered_at=now, trigger_evaluation=evaluation, acknowledged_at=None)
                     entries.append(self._trigger_entry(current, updated, evaluation, now))

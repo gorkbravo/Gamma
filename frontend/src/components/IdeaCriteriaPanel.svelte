@@ -24,6 +24,7 @@
     CRITERION_STATE_LABELS,
     CRITERION_WINDOWS,
     criteriaSummary,
+    criterionArmedText,
     criterionNowText,
     criterionStateTone,
     defaultObservableLabel,
@@ -504,7 +505,7 @@
           {@const trigger = criterion.trigger_evaluation}
           {@const def = definitionFor(criterion)}
           <tr class:is-triggered={criterion.state === "triggered"} data-state={criterion.state}>
-            <td class="criterion-cell" title={`Armed ${formatIdeaInstant(criterion.armed_at)}: only observations from that day on count.`}>
+            <td class="criterion-cell" title={criterionArmedText(criterion, formatIdeaInstant(criterion.armed_at))}>
               <strong>{criterion.label}</strong>
               <span class="meta"
                 >{CRITERION_KIND_LABELS[criterion.kind]} · <span title={def?.source ?? ""}>{criterion.observable.label}</span><WhatIsThis

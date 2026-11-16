@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { IdeaNotification, IdeaObservableDefinition } from "./api/types";
+import type { IdeaCriterion, IdeaNotification, IdeaObservableDefinition } from "./api/types";
 import {
   criteriaSummary,
+  criterionArmedText,
   criterionStateTone,
   daysToReview,
   daysToReviewText,
@@ -145,6 +146,16 @@ describe("idea criteria helpers", () => {
     expect(notificationDetail(trigger)).toBe("99.00 · first met 2026-11-12");
     expect(notificationDetail({ ...trigger, kind: "review_due", review_date: "2026-11-10", days_overdue: 5 })).toBe(
       "Review due 2026-11-10 · 5d overdue"
+    );
+  });
+
+  it("explains that later publications count once newer than the observation known at arming", () => {
+    const criterion = { armed_at: "2026-11-16T10:00:00", baseline_as_of: null } as IdeaCriterion;
+    expect(criterionArmedText(criterion, "2026-11-16 10:00")).toBe(
+      "Armed 2026-11-16 10:00: observations from that day on count, and any published later that are newer than the latest one already known then."
+    );
+    expect(criterionArmedText({ ...criterion, baseline_as_of: "2026-10-01T00:00:00" }, "2026-11-16 10:00")).toContain(
+      "newer than the 2026-10-01 one already known then"
     );
   });
 });

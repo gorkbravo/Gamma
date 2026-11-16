@@ -248,7 +248,7 @@ _ENTRIES: tuple[IdeaExplanation, ...] = (
             "Use it for the outcome level the event should reach.",
             "Use it for a level worth knowing about.",
         ),
-        computed="Every observation since the criterion was armed is checked, so a level met while Gamma was closed still triggers.",
+        computed="Every observation that is new since the criterion was armed is checked, including late publications dated earlier, so a level met while Gamma was closed still triggers.",
     ),
     IdeaExplanation(
         key="condition.below",
@@ -261,7 +261,7 @@ _ENTRIES: tuple[IdeaExplanation, ...] = (
             "Use it for the outcome level the event should not fall under.",
             "Use it for a level worth knowing about.",
         ),
-        computed="Every observation since the criterion was armed is checked, so a level met while Gamma was closed still triggers.",
+        computed="Every observation that is new since the criterion was armed is checked, including late publications dated earlier, so a level met while Gamma was closed still triggers.",
     ),
     IdeaExplanation(
         key="condition.crosses_above",
@@ -274,7 +274,7 @@ _ENTRIES: tuple[IdeaExplanation, ...] = (
             "The outcome moving through a level after the event.",
             "A change of regime rather than a level.",
         ),
-        computed="Pairs of consecutive observations; the later one must be dated on or after the day the criterion was armed.",
+        computed="Pairs of consecutive observations; the later one must be new since the criterion was armed: dated on or after that day, or newer than the latest observation known then.",
     ),
     IdeaExplanation(
         key="condition.crosses_below",
@@ -287,7 +287,7 @@ _ENTRIES: tuple[IdeaExplanation, ...] = (
             "The outcome moving through a level after the event.",
             "A change of regime rather than a level.",
         ),
-        computed="Pairs of consecutive observations; the later one must be dated on or after the day the criterion was armed.",
+        computed="Pairs of consecutive observations; the later one must be new since the criterion was armed: dated on or after that day, or newer than the latest observation known then.",
     ),
     IdeaExplanation(
         key="condition.change_over_window",

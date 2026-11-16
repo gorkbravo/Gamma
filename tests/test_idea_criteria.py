@@ -11,7 +11,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
-from src.application.idea_criteria import ObservablePoint, ObservableReading, describe_criterion, evaluate_criterion
+from src.application.idea_criteria import (
+    ObservablePoint,
+    ObservableReading,
+    describe_criterion,
+    evaluate_criterion,
+    latest_known_before,
+)
 from src.application.idea_evaluation import (
     IdeaEvaluationScheduler,
     IdeaEvaluationService,
@@ -133,8 +139,17 @@ def test_criterion_model_enforces_rule_shape_and_round_trips():
         CriterionEvaluation(state="unavailable", evaluated_at=T0)
 
     evaluation = CriterionEvaluation(state="triggered", evaluated_at=T0, value=98.0, first_met_at=datetime(2026, 11, 9))
+    with pytest.raises(IdeaValidationError, match="baseline"):
+        IdeaCriterion(**base, condition="below", threshold=100, baseline_as_of=datetime(2026, 11, 6))
     criterion = IdeaCriterion(
-        **base, condition="below", threshold=100, last_evaluation=evaluation, trigger_evaluation=evaluation, triggered_at=T0
+        **base,
+        condition="below",
+        threshold=100,
+        last_evaluation=evaluation,
+        trigger_evaluation=evaluation,
+        triggered_at=T0,
+        baseline_as_of=datetime(2026, 11, 6),
+        baseline_for=T0,
     )
     assert criterion.state == "triggered" and criterion.needs_acknowledgement
     payload = json.loads(json.dumps(criterion.to_dict()))
@@ -196,6 +211,25 @@ def test_level_rule_finds_the_first_close_after_arming_while_away():
 
     holding = evaluate_criterion(_rule(threshold=95), reading, armed_from=T0, now=datetime(2026, 11, 15, 9))
     assert holding.state == "holding" and holding.first_met_at is None
+
+
+def test_lagging_prints_count_once_newer_than_the_baseline():
+    # A monthly print carries the first day of its reference month and publishes weeks later.
+    armed = datetime(2026, 11, 16, 10)
+    rule = _rule(condition="above", threshold=4.2, armed=armed)
+    known = ObservableReading(history=(ObservablePoint(datetime(2026, 9, 1), 4.3), ObservablePoint(datetime(2026, 10, 1), 4.1)))
+    baseline = latest_known_before(known, armed)
+    assert baseline == datetime(2026, 10, 1)
+    assert evaluate_criterion(rule, known, armed_from=armed, now=armed, known_until=baseline).state == "holding", (
+        "the September print was already known when the rule was armed"
+    )
+
+    later = ObservableReading(history=(*known.history, ObservablePoint(datetime(2026, 11, 1), 4.5)))
+    result = evaluate_criterion(rule, later, armed_from=armed, now=datetime(2026, 12, 11), known_until=baseline)
+    assert result.state == "triggered" and result.first_met_at == datetime(2026, 11, 1) and result.met_value == 4.5
+    assert evaluate_criterion(rule, later, armed_from=armed, now=datetime(2026, 12, 11)).state == "holding", (
+        "without a baseline the November print, dated before the arming day, would never count"
+    )
 
 
 def test_crossing_rules_need_a_crossing_not_a_level():
@@ -350,6 +384,40 @@ def test_only_active_ideas_evaluate_and_triggers_reach_notifications(tmp_path):
     acknowledged = evaluation.acknowledge(active.idea_id, criterion.criterion_id)
     assert acknowledged.journal[-1].kind == "criterion_acknowledged"
     assert evaluation.notifications() == []
+
+
+def test_the_baseline_is_kept_per_arming_and_lets_lagging_prints_trigger(tmp_path):
+    cpi = ObservableRef("macro_series", {"series_id": "us-cpi-yoy"}, "US CPI YoY")
+    october = ObservablePoint(datetime(2026, 10, 1), 3.9)
+    registry = FakeRegistry({"macro_series": ObservableReading(history=(october,))})
+    clock, store, registry, service, evaluation = _setup(tmp_path, registry)
+    idea = _active_idea(service)
+    idea, fires = service.add_criterion(idea.idea_id, _criterion(kind="confirm", condition="above", threshold=4.0, ref=cpi))
+    idea, waits = service.add_criterion(idea.idea_id, _criterion(kind="confirm", condition="above", threshold=5.0, ref=cpi))
+
+    evaluation.evaluate_all(trigger="startup")
+    stored = store.require(idea.idea_id).criterion(fires.criterion_id)
+    assert stored.state == "holding"
+    assert stored.baseline_as_of == october.at and stored.baseline_for == stored.armed_at
+
+    # The November print publishes weeks later but is dated 1 Nov, before the arming day.
+    november = ObservablePoint(datetime(2026, 11, 1), 4.2)
+    registry.readings["macro_series"] = ObservableReading(history=(october, november))
+    clock.jump(timedelta(days=25))
+    evaluation.evaluate_all(trigger="daily_close")
+    fired = store.require(idea.idea_id).criterion(fires.criterion_id)
+    assert fired.state == "triggered" and fired.trigger_evaluation.first_met_at == november.at
+    assert fired.baseline_as_of == october.at, "later passes do not move the baseline"
+
+    # A re-activation is a new arming moment: what is known by then becomes the baseline.
+    service.archive(idea.idea_id)
+    restored = service.restore(idea.idea_id)
+    evaluation.evaluate_all(trigger="activated")
+    rebased = store.require(idea.idea_id).criterion(waits.criterion_id)
+    assert rebased.baseline_as_of == november.at and rebased.baseline_for == restored.activated_at
+
+    edited = service.update_criterion(idea.idea_id, waits.criterion_id, _criterion(kind="confirm", condition="above", threshold=4.5, ref=cpi))
+    assert edited.criterion(waits.criterion_id).baseline_as_of is None, "a rule edit takes a new baseline"
 
 
 def test_one_pass_reads_each_observable_once_and_failures_become_unavailable(tmp_path):

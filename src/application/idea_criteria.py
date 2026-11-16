@@ -7,8 +7,13 @@ The observable registry (``src/application/idea_observables.py``) produces an
 
 Rules that make the record honest:
 
-- **No look-ahead, no look-back:** only observations dated on or after the day
-  the rule was armed (and the idea activated) can trigger it.
+- **No look-ahead, no look-back:** only what was not yet known when the rule
+  was armed (and the idea activated) can trigger it: observations dated on or
+  after that day, plus any newer than the latest observation already known then
+  (the criterion's baseline). The baseline matters for lagging series: FRED
+  publishes a daily yield a day or two late, and a monthly print carries the
+  first day of its reference month, so both arrive dated before the day they
+  became known.
 - **Absence is a state:** a reading that could not be taken is
   ``unavailable`` with its reason, never ``holding``.
 - **While you were away:** when the observable has a history, the trigger
@@ -94,8 +99,13 @@ def evaluate_criterion(
     effective_cadence: str | None = None,
     cadence_note: str | None = None,
     format_value=None,
+    known_until: datetime | None = None,
 ) -> CriterionEvaluation:
-    """Evaluate one criterion against one reading. Pure: same inputs, same result."""
+    """Evaluate one criterion against one reading. Pure: same inputs, same result.
+
+    ``known_until`` is the criterion's baseline (see :func:`latest_known_before`):
+    observations newer than it count even when dated before the arming day.
+    """
     cadence = effective_cadence or criterion.cadence
     base = {
         "evaluated_at": now,
@@ -121,8 +131,11 @@ def evaluate_criterion(
     since = armed_from.date()
     common = {**base, "value": latest.value, "value_display": display, "as_of": latest.at}
 
+    def counts(point: ObservablePoint) -> bool:
+        return point.at.date() >= since or (known_until is not None and point.at > known_until)
+
     if condition in ("above", "below"):
-        met = next((point for point in points if point.at.date() >= since and _level_met(condition, point.value, threshold)), None)
+        met = next((point for point in points if counts(point) and _level_met(condition, point.value, threshold)), None)
         if met is not None:
             return CriterionEvaluation(
                 state="triggered", first_met_at=met.at, met_value=met.value, met_display=show(met.value), **common
@@ -132,7 +145,7 @@ def evaluate_criterion(
     if condition in ("crosses_above", "crosses_below"):
         previous: ObservablePoint | None = None
         for point in points:
-            if previous is not None and point.at.date() >= since and _crossed(condition, previous.value, point.value, threshold):
+            if previous is not None and counts(point) and _crossed(condition, previous.value, point.value, threshold):
                 return CriterionEvaluation(
                     state="triggered",
                     first_met_at=point.at,
@@ -164,7 +177,7 @@ def evaluate_criterion(
             continue
         if point is latest:
             latest_change = (reference.value, change)
-        if point.at.date() >= since and _change_met(change, threshold):
+        if counts(point) and _change_met(change, threshold):
             return CriterionEvaluation(
                 state="triggered",
                 first_met_at=point.at,
@@ -182,6 +195,20 @@ def evaluate_criterion(
             **common,
         )
     return _holding_or_stale(reading, {**common, "reference_value": latest_change[0], "change": latest_change[1]})
+
+
+def latest_known_before(reading: ObservableReading, armed_from: datetime) -> datetime | None:
+    """The newest observation dated before the arming day: what was already known when the rule was set.
+
+    Taken from the first reading after arming and stored as the criterion's
+    baseline, so later observations count even when their date is earlier
+    (lagging publications). If the first usable reading comes long after
+    arming, anything published in between and dated before the arming day is
+    treated as known; that is the conservative side of no look-back.
+    """
+    since = armed_from.date()
+    known = [point.at for point in _usable_points(reading) if point.at.date() < since]
+    return max(known) if known else None
 
 
 def describe_criterion(

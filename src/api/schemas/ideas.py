@@ -376,6 +376,8 @@ class IdeaCriterionModel(BaseModel):
     acknowledged_at: datetime | None = None
     armed_at: datetime
     created_at: datetime
+    baseline_as_of: datetime | None = None
+    baseline_for: datetime | None = None
 
     @classmethod
     def from_domain(cls, criterion: IdeaCriterion) -> "IdeaCriterionModel":
@@ -403,6 +405,8 @@ class IdeaCriterionModel(BaseModel):
             acknowledged_at=criterion.acknowledged_at,
             armed_at=criterion.armed_at,
             created_at=criterion.created_at,
+            baseline_as_of=criterion.baseline_as_of,
+            baseline_for=criterion.baseline_for,
         )
 
 

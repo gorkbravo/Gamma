@@ -4766,6 +4766,9 @@ export interface IdeaCriterion {
   acknowledged_at: string | null;
   armed_at: string;
   created_at: string;
+  /** Newest observation already known when the rule was armed; later ones count even if dated earlier. */
+  baseline_as_of?: string | null;
+  baseline_for?: string | null;
 }
 
 export interface IdeaCriterionPayload {

@@ -663,7 +663,11 @@ class IdeaCriterion:
 
     ``armed_at`` is when the rule was last set (created or edited); evaluation
     only counts observations from then on, and from the idea's activation.
-    A trigger latches: ``triggered_at`` (when Gamma detected it) and
+    ``baseline_as_of`` is the newest observation already known at the first
+    evaluation after that moment (``baseline_for``): later observations count
+    even when they are dated earlier, because lagging series (FRED daily
+    yields, monthly prints dated by their reference period) publish after the
+    date they carry. A trigger latches: ``triggered_at`` (when Gamma detected it) and
     ``trigger_evaluation`` (the reading that met the condition, with the date it
     was first met and its provenance) stay until the rule is edited, even if the
     condition later stops holding, because the trigger is a fact about the
@@ -685,10 +689,14 @@ class IdeaCriterion:
     acknowledged_at: datetime | None = None
     armed_at: datetime = field(default_factory=now_utc)
     created_at: datetime = field(default_factory=now_utc)
+    baseline_as_of: datetime | None = None
+    baseline_for: datetime | None = None
     schema_version: int = IDEA_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         _require_text(self.criterion_id, "criterion_id")
+        if (self.baseline_as_of is None) != (self.baseline_for is None):
+            raise IdeaValidationError("A criterion baseline needs both baseline_as_of and baseline_for.")
         _require_text(self.idea_id, "idea_id")
         if self.kind not in CRITERION_KINDS:
             raise IdeaValidationError(f"Criterion kind must be one of {CRITERION_KINDS}, got {self.kind!r}.")
@@ -759,6 +767,8 @@ class IdeaCriterion:
             "acknowledged_at": self.acknowledged_at.isoformat() if self.acknowledged_at else None,
             "armed_at": self.armed_at.isoformat(),
             "created_at": self.created_at.isoformat(),
+            "baseline_as_of": self.baseline_as_of.isoformat() if self.baseline_as_of else None,
+            "baseline_for": self.baseline_for.isoformat() if self.baseline_for else None,
         }
 
     @classmethod
@@ -789,6 +799,8 @@ class IdeaCriterion:
             acknowledged_at=_parse_instant(payload.get("acknowledged_at")),
             armed_at=_parse_instant(payload.get("armed_at")) or created_at,
             created_at=created_at,
+            baseline_as_of=_parse_instant(payload.get("baseline_as_of")),
+            baseline_for=_parse_instant(payload.get("baseline_for")),
         )
 
 

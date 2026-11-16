@@ -216,6 +216,12 @@ export function shortDate(value: string | null | undefined): string {
   return value.slice(0, 10);
 }
 
+/** The criterion row's tooltip: which observations can trigger it since it was armed. */
+export function criterionArmedText(criterion: IdeaCriterion, armedDisplay: string): string {
+  const known = criterion.baseline_as_of ? ` the ${shortDate(criterion.baseline_as_of)} one` : " the latest one";
+  return `Armed ${armedDisplay}: observations from that day on count, and any published later that are newer than${known} already known then.`;
+}
+
 /** What the "Now" cell says: the latest value and its date, or why there is none. */
 export function criterionNowText(criterion: IdeaCriterion): { value: string; detail: string } {
   const evaluation = criterion.last_evaluation;
