@@ -119,6 +119,67 @@ describe("IdeaCloseForm", () => {
   });
 });
 
+describe("IdeaCloseForm realized state", () => {
+  const segment = {
+    segment_id: "seg-1",
+    number: 1,
+    started_at: "2026-11-09T14:00:00",
+    start_reason: "activated",
+    start_note: "Activated",
+    stance: "relative" as const,
+    legs: [],
+    ended_at: null,
+    end_reason: null,
+    end_note: "",
+    untracked_reason: null,
+  };
+  const tracked = {
+    ...IDEA,
+    status: "active" as const,
+    closed_at: null,
+    reviews: [],
+    tracking: {
+      label: "Hypothetical, not executed",
+      benchmark: "SPY",
+      cost_model: { per_side_bp: {}, leg_classes: {}, updated_at: null },
+      segments: [segment],
+      snapshot: null,
+    },
+  };
+
+  it("says loading, unavailable or not computed instead of waiting forever", () => {
+    expect(render(IdeaCloseForm, { props: { idea: tracked, trackingLoading: true } }).body).toContain("Loading…");
+    const failed = render(IdeaCloseForm, { props: { idea: tracked, trackingError: "502" } }).body;
+    expect(failed).toContain("Tracking unavailable");
+    expect(failed).not.toContain("Loading…");
+    expect(render(IdeaCloseForm, { props: { idea: tracked } }).body).toContain("Not computed yet");
+  });
+
+  it("falls back to the last stored headline with its date", () => {
+    const stored = {
+      ...tracked,
+      tracking: {
+        ...tracked.tracking,
+        snapshot: {
+          status: "tracking" as const,
+          computed_at: "2026-11-20T12:00:00",
+          as_of: "2026-11-19",
+          net_return: 0.0123,
+          gross_return: 0.014,
+          benchmark_return: 0.002,
+          benchmark: "SPY",
+          sessions: 9,
+          gaps: 0,
+          partial: false,
+        },
+      },
+    };
+    const body = render(IdeaCloseForm, { props: { idea: stored, trackingError: "502" } }).body;
+    expect(body).toContain("+1.23%");
+    expect(body).toContain("as of 2026-11-19 (last stored figure)");
+  });
+});
+
 const STATS: IdeaReviewStatsResponse = {
   rows: [
     {

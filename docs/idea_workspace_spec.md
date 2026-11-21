@@ -510,6 +510,20 @@ Recorded 2026-11-21 for review. Branch `claude/ideas-i3c-test-risk`, cut from th
   - On the demo sample, the backtest covers 2024-12-24 to 2026-01-27. Only the 2025 tariff episode falls inside the sample; the older ones are unavailable and stay out of the table.
 - **Left for later:** "Attach to idea" from Strategy Lab and Risk results (the snapshots here run from the idea itself); out-of-sample validation and trial counts (I4); costs inside the backtest; Monte Carlo for signed books.
 
+### Stack review, 2026-11-21
+
+A code review of the I3a-I3c stack found nine defects. They were fixed in one commit on top of `claude/ideas-i3c-test-risk`, so merging the whole stack includes them; merging I3a or I3b alone does not. Each fix has a regression test in `tests/test_idea_tracking.py` or `tests/test_idea_analysis.py`, or a frontend unit test, and the frontend ones were checked in the mock browser.
+
+- **(I3a)** A version 2 file whose migration fails, for example an active idea with an out-of-range leg weight, now goes to quarantine. Before, it stopped the store, and so the backend, from starting.
+- **(I3a)** A headline computed while the record changed is dropped. The tracking signature (segments and their ends, benchmark, costs) is checked before the snapshot is written, so a slow rebuild no longer overwrites the Board figure of a book edited meanwhile.
+- **(I3a)** Consecutive segments never hold two books at once. A segment enters no earlier than the close where the previous one exits, and waits, with that reason, while the previous one cannot exit yet. Before, a removed leg with a missing close could make both segments count the same sessions.
+- **(I3a)** A provider that stops answering is named. When a leg of an open, waiting or exiting segment has no close for more than three of its market's sessions, the record gains `stale_since` with a warning and the reason. The Board shows "provider stopped", and the panel shows "no close since …". The record still stops there and is never filled in.
+- **(I3a, pre-existing pattern)** A store update whose mutation changes nothing no longer rewrites the item file and the index, so reading a tracking record no longer writes to disk when nothing changed.
+- **(I3a)** Editing anything other than the legs of an active idea never opens a tracking segment. Before, a migrated idea without a segment got one labelled "Legs added" on a title edit.
+- **(I3b)** Review mode requests its statistics once when it opens; it requested them twice.
+- **(I3b)** The close form says "Loading…", "Tracking unavailable" or "Not computed yet" according to the tracking state, and falls back to the last stored headline with its date. Before, it could show "Loading…" forever.
+- **(I3c)** A failing source during "Run test" or "Run risk" (Strategy Lab, Risk, CoinGecko) answers 502 with the reason instead of a bare 500.
+
 ## Non-goals
 
 - Orders, execution, broker-side alerts, paper trading through the broker, automatic deployment.

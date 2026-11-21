@@ -45,6 +45,7 @@ from src.models.ideas import (
     IdeaTrackingSegment,
     IdeaTrackingSnapshot,
     tracking_market,
+    tracking_signature,
 )
 from src.models.provenance import ProvenanceRecord
 from src.utils.time import now_utc
@@ -62,6 +63,8 @@ CRYPTO_HISTORY_MAX_DAYS = 365
 # Un histórico que empieza más tarde que esto tras el inicio del segmento se avisa.
 TRUNCATED_HISTORY_DAYS = 7
 WARNINGS_MAX = 40
+# Sesiones de mercado sin cierre del proveedor tras las que el registro se marca como detenido.
+STALE_SESSIONS = 3
 US_MARKET = ("America/New_York", 16, 0)
 CRYPTO_ALIASES = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
 
@@ -489,6 +492,7 @@ class TrackingComputation:
     sessions: int = 0
     gaps: int = 0
     partial: bool = False
+    stale_since: date | None = None
     first_session: date | None = None
     as_of: date | None = None
     warnings: tuple[str, ...] = ()
@@ -514,6 +518,7 @@ class TrackingComputation:
             gaps=self.gaps,
             partial=self.partial,
             final=self.final,
+            stale_since=self.stale_since,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -540,6 +545,7 @@ class TrackingComputation:
                 "gaps": self.gaps,
                 "partial": self.partial,
                 "final": self.final,
+                "stale_since": self.stale_since.isoformat() if self.stale_since else None,
                 "first_session": self.first_session.isoformat() if self.first_session else None,
                 "as_of": self.as_of.isoformat() if self.as_of else None,
             },
@@ -616,8 +622,13 @@ def compute_tracking(
     if not bench_ok:
         bench_reason = (benchmark.unavailable_reason if benchmark else None) or f"No closes for {tracking.benchmark}."
     bench_market = tracking_market(HandoffEntity(entity_type="etf", label=tracking.benchmark, normalized_id=tracking.benchmark))
-    results = [
-        _compute_segment(
+    results: list[SegmentResult] = []
+    held: SegmentResult | None = None
+    for segment in tracking.segments:
+        # Un libro se compra al cierre en que se vende el anterior: nunca hay dos libros a la vez.
+        not_before = held.exit_session if held is not None and held.status == "closed" else None
+        blocked_by = held.segment.number if held is not None and held.status == "exiting" else None
+        result = _compute_segment(
             segment,
             tracking.cost_model,
             prices,
@@ -625,9 +636,13 @@ def compute_tracking(
             bench_market,
             now=now,
             warnings=warnings,
+            not_before=not_before,
+            blocked_by=blocked_by,
         )
-        for segment in tracking.segments
-    ]
+        results.append(result)
+        if result.priced:
+            held = result
+    stale_since = _stale_since(results, prices, now=now, warnings=warnings)
     points, chained = _chain(results)
     priced_points = [point for point in points if not point.gap]
     # Parcial: hubo un periodo con libro que no se pudo valorar. Un segmento que nunca entró no tuvo libro.
@@ -635,6 +650,8 @@ def compute_tracking(
         results[-1].status in {"untracked", "unavailable"} and any(result.priced for result in results[:-1])
     )
     status, reason = _overall_status(results)
+    if stale_since is not None and status in {"tracking", "waiting"}:
+        reason = f"The provider has no close since {stale_since.isoformat()}; the record stops there and is not filled in."
     # El motivo de un segmento sin libro va en su fila (y en el estado), no repetido como aviso.
     provenance = _provenance_rows(tracking, prices, benchmark)
     for data in prices.values():
@@ -665,6 +682,7 @@ def compute_tracking(
         sessions=len(priced_points),
         gaps=sum(1 for point in points if point.gap),
         partial=partial,
+        stale_since=stale_since,
         first_session=next((result.entry_session for result in results if result.entry_session), None),
         as_of=priced_points[-1].session if priced_points else None,
         warnings=tuple(deduped),
@@ -703,6 +721,8 @@ def _compute_segment(
     *,
     now: datetime,
     warnings: list[str],
+    not_before: date | None = None,
+    blocked_by: int | None = None,
 ) -> SegmentResult:
     views = _leg_views(segment, cost_model)
     if segment.untracked_reason:
@@ -721,6 +741,20 @@ def _compute_segment(
             segment=segment,
             status="unavailable",
             reason="A leg's cost class takes its cost from a live quote, which daily tracking does not read.",
+            legs=views,
+        )
+    if blocked_by is not None:
+        if segment.ended_at is not None:
+            return SegmentResult(
+                segment=segment,
+                status="never_entered",
+                reason=f"The legs changed again before segment {blocked_by} exited; this one held nothing.",
+                legs=views,
+            )
+        return SegmentResult(
+            segment=segment,
+            status="waiting",
+            reason=f"Enters at the close where segment {blocked_by} exits; that close is not in yet.",
             legs=views,
         )
     horizon = min(market_horizon(leg.market, now) for leg in legs)
@@ -753,7 +787,10 @@ def _compute_segment(
     def all_after(day: date, instant: datetime) -> bool:
         return all(day in rows and rows[day].close_at > instant for rows in by_leg)
 
-    entry = next((day for day in candidates if all_after(day, segment.started_at)), None)
+    entry = next(
+        (day for day in candidates if (not_before is None or day >= not_before) and all_after(day, segment.started_at)),
+        None,
+    )
     pre_entry_missing = [
         (day, [leg.entity.label for leg, rows in zip(legs, by_leg) if day not in rows and day in calendars[leg.market]])
         for day in candidates
@@ -867,6 +904,48 @@ def _compute_segment(
         gaps=len(points) - len(priced),
         last_session=final.session if final else None,
     )
+
+
+def _sessions_behind(market: str, latest: date, horizon: date) -> int:
+    """Sessions of ``market`` after ``latest`` up to ``horizon`` (weekdays; every day for crypto)."""
+    count = 0
+    day = latest + timedelta(days=1)
+    while day <= horizon:
+        if market == "crypto" or day.weekday() < 5:
+            count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def _stale_since(
+    results: Sequence[SegmentResult], prices: Mapping[str, LegCloses], *, now: datetime, warnings: list[str]
+) -> date | None:
+    """The oldest last close among legs that still need prices, once it lags the market.
+
+    Only open, waiting and exiting segments need new closes. A provider that
+    stopped answering leaves the record where it was, never filled in; this
+    names it instead of letting the record look current.
+    """
+    oldest: date | None = None
+    seen: set[str] = set()
+    for result in results:
+        if result.status not in {"tracking", "waiting", "exiting"}:
+            continue
+        for leg in result.segment.legs:
+            if leg.key in seen:
+                continue
+            seen.add(leg.key)
+            data = prices.get(leg.key)
+            if data is None or not data.closes:
+                continue
+            latest = max(close.session for close in data.closes)
+            if _sessions_behind(leg.market, latest, market_horizon(leg.market, now)) > STALE_SESSIONS:
+                warnings.append(
+                    f"No close from the provider for {leg.entity.label} since {latest.isoformat()}; "
+                    "the record stops there and is not filled in."
+                )
+                oldest = latest if oldest is None else min(oldest, latest)
+    return oldest
 
 
 def _bench_mark(rows: Mapping[date, SessionClose], day: date, calendar: set[date] | None) -> float | None:
@@ -1042,7 +1121,7 @@ class IdeaTrackingService:
         result = compute_tracking(idea.idea_id, tracking, prices, benchmark, now=now)
         if persist:
             try:
-                self.idea_service.store_tracking_snapshot(idea.idea_id, result.snapshot())
+                self.idea_service.store_tracking_snapshot(idea.idea_id, result.snapshot(), basis=tracking_signature(tracking))
             except Exception:  # noqa: BLE001 - la idea pudo borrarse durante la lectura
                 logger.info("Could not store the tracking snapshot of idea %s", idea.idea_id, exc_info=True)
         return result

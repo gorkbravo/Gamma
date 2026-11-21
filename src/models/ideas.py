@@ -219,6 +219,10 @@ class IdeaLifecycleError(IdeaValidationError):
     """Raised for a lifecycle transition the current status does not allow."""
 
 
+class IdeaSourceUnavailableError(IdeaValidationError):
+    """A read-only source (Strategy Lab, Risk, a price provider) failed; routes answer 502."""
+
+
 # ---------------------------------------------------------------------------
 # Frozen captured values
 # ---------------------------------------------------------------------------
@@ -1202,6 +1206,8 @@ class IdeaTrackingSnapshot:
     partial: bool = False
     # I3b: no hay segmento abierto ni salida pendiente; la cifra ya no cambiará.
     final: bool = False
+    # Revisión del stack: último cierre del proveedor cuando dejó de llegar (registro detenido, no rellenado).
+    stale_since: date | None = None
 
     def __post_init__(self) -> None:
         if self.status not in TRACKING_STATUSES:
@@ -1239,6 +1245,7 @@ class IdeaTrackingSnapshot:
             "gaps": self.gaps,
             "partial": self.partial,
             "final": self.final,
+            "stale_since": self.stale_since.isoformat() if self.stale_since else None,
         }
 
     @classmethod
@@ -1255,6 +1262,7 @@ class IdeaTrackingSnapshot:
             gaps=int(payload.get("gaps") or 0),
             partial=payload.get("partial") is True,
             final=payload.get("final") is True,
+            stale_since=_parse_date(payload.get("stale_since")),
         )
 
 
@@ -1352,6 +1360,21 @@ class IdeaTracking:
             segments=tuple(IdeaTrackingSegment.from_dict(item) for item in _list(payload.get("segments"), "tracking.segments")),
             snapshot=IdeaTrackingSnapshot.from_dict(snapshot) if isinstance(snapshot, Mapping) else None,
         )
+
+
+def tracking_signature(tracking: IdeaTracking | None) -> tuple[Any, ...]:
+    """What a computed series depends on: segments, their ends, the benchmark and the costs.
+
+    A headline computed from one signature must not be stored on a record whose
+    signature changed meanwhile (a leg edit, an archive, a cost change).
+    """
+    if tracking is None:
+        return ()
+    return (
+        tracking.benchmark,
+        json.dumps(tracking.cost_model.to_dict(), sort_keys=True),
+        tuple((segment.segment_id, segment.ended_at.isoformat() if segment.ended_at else None) for segment in tracking.segments),
+    )
 
 
 def freeze_tracking_legs(legs: Sequence[IdeaLeg], stance: str) -> tuple[tuple[IdeaTrackedLeg, ...], str | None]:

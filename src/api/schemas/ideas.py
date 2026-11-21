@@ -732,6 +732,7 @@ class IdeaTrackingSnapshotModel(BaseModel):
     gaps: int = 0
     partial: bool = False
     final: bool = False
+    stale_since: date | None = None
 
 
 class IdeaCostModelRecordModel(BaseModel):
@@ -792,6 +793,7 @@ class TrackingSummaryModel(BaseModel):
     gaps: int = 0
     partial: bool = False
     final: bool = False
+    stale_since: date | None = None
     first_session: date | None = None
     as_of: date | None = None
 

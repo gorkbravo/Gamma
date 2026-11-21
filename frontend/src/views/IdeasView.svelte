@@ -113,12 +113,12 @@
   ];
 
   // Review se recalcula cada vez que se entra en el modo: los cierres pueden haber cambiado.
-  let previousMode = mode;
+  // Un único disparador: al montar en Review y cada vez que se entra en el modo.
+  let previousMode: typeof mode | null = null;
   $: if (mode !== previousMode) {
     previousMode = mode;
     if (mode === "review") void onLoadReview();
   }
-  $: if (mode === "review" && !reviewStats) void onLoadReview();
 
   // ── Board ──────────────────────────────────────────────────────────────
   let filter: IdeaBoardFilter = "open";
@@ -700,7 +700,7 @@
         </article>
 
         {#if closing && idea.status === "active"}
-          <IdeaCloseForm {idea} {tracking} onSubmit={submitClose} onCancel={() => (closing = false)} />
+          <IdeaCloseForm {idea} {tracking} {trackingLoading} {trackingError} onSubmit={submitClose} onCancel={() => (closing = false)} />
         {/if}
         <IdeaReviewSection {idea} {tracking} />
 

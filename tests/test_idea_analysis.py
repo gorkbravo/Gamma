@@ -296,3 +296,17 @@ def test_v4_files_migrate_with_no_snapshots(tmp_path):
     migrated = IdeaStore(tmp_path / "ideas").require(idea.idea_id)
     assert migrated.schema_version == IDEA_SCHEMA_VERSION
     assert migrated.tests == () and migrated.risks == ()
+
+
+def test_a_source_failure_is_a_502_with_the_reason(demo_client):
+    idea_id = _create_pair(demo_client)
+
+    class Broken:
+        def compose_strategy_lab_portfolio(self, request):
+            raise TimeoutError("yfinance timed out")
+
+    demo_client.runtime.idea_analysis._research_service = lambda: Broken()
+    response = demo_client.post(f"/ideas/{idea_id}/test")
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Strategy Lab could not read the prices: yfinance timed out"
+    assert demo_client.get(f"/ideas/{idea_id}").json()["tests"] == []

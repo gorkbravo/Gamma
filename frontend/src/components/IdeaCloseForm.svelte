@@ -19,6 +19,8 @@
 
   export let idea: Idea;
   export let tracking: IdeaTrackingResponse | null = null;
+  export let trackingLoading = false;
+  export let trackingError = "";
   export let onSubmit: (payload: IdeaClosePayload) => Promise<boolean> = async () => false;
   export let onCancel: () => void = () => {};
 
@@ -28,7 +30,19 @@
   let submitError = "";
 
   $: current = tracking && tracking.idea_id === idea.idea_id ? tracking : null;
-  $: summary = current?.summary ?? null;
+  // Sin la serie recién reconstruida, se muestra el último titular guardado con su fecha.
+  $: stored = idea.tracking?.snapshot ?? null;
+  $: summary = current?.summary ?? (stored && stored.net_return != null ? { ...stored, cost_drag: null } : null);
+  $: benchmarkSymbol = current?.benchmark.symbol ?? stored?.benchmark ?? "SPY";
+  $: realizedState = !idea.tracking?.segments.length
+    ? "No tracked record"
+    : trackingLoading
+      ? "Loading…"
+      : trackingError
+        ? "Tracking unavailable"
+        : current
+          ? "No priced sessions yet"
+          : "Not computed yet";
   $: draftError = closeDraftError(draft);
 
   async function submit() {
@@ -78,10 +92,10 @@
         {#if summary && summary.net_return != null}
           <span>Net <strong class={returnTone(summary.net_return)}>{formatTrackingReturn(summary.net_return)}</strong></span>
           <span>Gross <strong class={returnTone(summary.gross_return)}>{formatTrackingReturn(summary.gross_return)}</strong></span>
-          <span>{current?.benchmark.symbol} <strong class={returnTone(summary.benchmark_return)}>{formatTrackingReturn(summary.benchmark_return)}</strong></span>
-          <span class="meta">as of {summary.as_of}; the exit is the next close after closing</span>
+          <span>{benchmarkSymbol} <strong class={returnTone(summary.benchmark_return)}>{formatTrackingReturn(summary.benchmark_return)}</strong></span>
+          <span class="meta">as of {summary.as_of}{current ? "" : " (last stored figure)"}; the exit is the next close after closing</span>
         {:else}
-          <span class="absent">{current ? "No priced sessions yet" : idea.tracking?.segments.length ? "Loading…" : "No tracked record"}</span>
+          <span class="absent">{realizedState}</span>
         {/if}
       </div>
     </div>

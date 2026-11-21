@@ -56,6 +56,7 @@ from src.models.ideas import (
     ObservableRef,
     normalize_tags,
     tracking_positions,
+    tracking_signature,
     prepare_captured_values,
     thaw_captured_values,
 )
@@ -746,11 +747,20 @@ class IdeaService:
 
         return self.store.update(idea_id, mutate)
 
-    def store_tracking_snapshot(self, idea_id: str, snapshot: IdeaTrackingSnapshot) -> Idea:
-        """Keep the latest computed headline for the Board without touching ``updated_at``."""
+    def store_tracking_snapshot(
+        self, idea_id: str, snapshot: IdeaTrackingSnapshot, *, basis: tuple[Any, ...] | None = None
+    ) -> Idea:
+        """Keep the latest computed headline for the Board without touching ``updated_at``.
+
+        ``basis`` is the ``tracking_signature`` of the record the series was
+        computed from; if the record changed meanwhile (a leg edit, an archive,
+        a cost change), the headline describes another book and is dropped.
+        """
 
         def mutate(current: Idea) -> Idea:
             if current.tracking is None or snapshot.same_figures(current.tracking.snapshot):
+                return current
+            if basis is not None and tracking_signature(current.tracking) != basis:
                 return current
             return replace(current, tracking=replace(current.tracking, snapshot=snapshot))
 
@@ -780,7 +790,8 @@ class IdeaService:
             tracking = tracking.with_open_segment_closed(at=now, reason=end_reason)
             closed_number = open_segment.number
         opened = None
-        if is_active and after.legs and tracking.open_segment is None:
+        # Solo se abre un segmento al activar, restaurar o reabrir, o si las patas cambian.
+        if is_active and after.legs and tracking.open_segment is None and (not was_active or positions_changed):
             if not was_active:
                 start_reason = {"draft": "activated", "closed": "reopened"}.get(before.status, "restored")
             else:

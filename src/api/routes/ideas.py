@@ -44,7 +44,7 @@ from src.api.schemas.ideas import (
     ObservableRefModel,
     ObservableRegistryResponseModel,
 )
-from src.models.ideas import Idea, IdeaValidationError
+from src.models.ideas import Idea, IdeaSourceUnavailableError, IdeaValidationError
 from src.services.idea_explanations import list_explanations
 from src.services.idea_store import IdeaConflictError, IdeaNotFoundError
 from src.utils.time import now_utc
@@ -85,6 +85,8 @@ def _raise(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, IdeaConflictError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, IdeaSourceUnavailableError):
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if isinstance(exc, (IdeaValidationError, ValueError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     raise exc

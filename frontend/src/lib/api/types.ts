@@ -5117,6 +5117,8 @@ export interface IdeaTrackingSnapshot {
   gaps: number;
   partial: boolean;
   final?: boolean;
+  /** The provider's last close when it stopped answering; the record stops there. */
+  stale_since?: string | null;
 }
 
 export interface IdeaTrackingHeadline {
@@ -5252,6 +5254,7 @@ export interface IdeaTrackingResponse {
     gaps: number;
     partial: boolean;
     final?: boolean;
+    stale_since?: string | null;
     first_session: string | null;
     as_of: string | null;
   };

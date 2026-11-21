@@ -31,6 +31,7 @@ from src.models.ideas import (
     Idea,
     IdeaRiskEpisode,
     IdeaRiskSnapshot,
+    IdeaSourceUnavailableError,
     IdeaTestSnapshot,
     IdeaTrackedLeg,
     IdeaValidationError,
@@ -185,7 +186,7 @@ class IdeaAnalysisService:
             freshness_label="derived",
             transformation_note="Notional research book for the idea's legs; risk is reported as a share of the book.",
         )
-        payload = self.risk_service.compute(
+        payload = self._call_source("Risk", lambda: self.risk_service.compute(
             RiskComputeRequest(
                 snapshot=book,
                 alpha=RISK_ALPHA,
@@ -207,7 +208,7 @@ class IdeaAnalysisService:
                 research_book_legs=list(composition.risk_legs or []),
             ),
             data_provider=self.research_provider,
-        )
+        ))
         results = payload.results
         value = float(results.portfolio_value or RISK_NOTIONAL) or RISK_NOTIONAL
 
@@ -332,13 +333,28 @@ class IdeaAnalysisService:
         except ResearchValidationError as exc:
             errors = getattr(exc, "errors", None) or [str(exc)]
             raise IdeaValidationError("Strategy Lab could not compose the legs: " + "; ".join(str(item) for item in errors)) from exc
+        except IdeaValidationError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - un fallo del proveedor se nombra, no es un 500
+            raise IdeaSourceUnavailableError(f"Strategy Lab could not read the prices: {exc}") from exc
+
+    @staticmethod
+    def _call_source(name: str, action: Callable[[], Any]) -> Any:
+        try:
+            return action()
+        except IdeaValidationError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise IdeaSourceUnavailableError(f"{name} failed: {exc}") from exc
 
     def _crypto_points(self, leg: IdeaTrackedLeg, *, lookback_days: int, now: datetime) -> list[Any]:
         from src.models.research_lab import ResearchObjectReturnPoint
 
         if self.crypto_prices is None:
             raise IdeaValidationError(f"{leg.entity.label}: crypto history is not available.")
-        closes = self.crypto_prices.leg_closes(leg, since=now.date() - timedelta(days=lookback_days), now=now)
+        closes = self._call_source(
+            "CoinGecko", lambda: self.crypto_prices.leg_closes(leg, since=now.date() - timedelta(days=lookback_days), now=now)
+        )
         if closes.unavailable_reason or not closes.closes:
             raise IdeaValidationError(f"{leg.entity.label}: {closes.unavailable_reason or 'no daily closes'}")
         return [ResearchObjectReturnPoint(timestamp=close.session.isoformat(), value=close.price) for close in closes.closes]

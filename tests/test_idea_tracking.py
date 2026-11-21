@@ -8,6 +8,7 @@ activation and after "now" on purpose: the series must use neither.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import math
 from datetime import date, datetime, timedelta
 
@@ -545,3 +546,106 @@ def test_tracking_routes_rebuild_the_series_from_demo_closes(demo_client):
     assert exported["tracking_series"]["label"] == TRACKING_LABEL
     assert len(exported["tracking_series"]["points"]) == 5
     assert demo_client.get("/ideas/missing/tracking").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Regressions from the stack review (2026-11-21)
+# ---------------------------------------------------------------------------
+
+
+def test_a_v2_file_that_cannot_migrate_is_quarantined_not_fatal(tmp_path):
+    clock, service, _, _, _, idea_id = _setup(tmp_path)
+    good = service.create_idea(IdeaCreateRequest(title="Untouched", thesis="x"))
+    base = tmp_path / "ideas"
+    path = base / "items" / f"{idea_id}.json"
+    legacy = _as_v2(json.loads(path.read_text(encoding="utf-8")))
+    legacy["legs"][0]["weight"] = 500  # fuera de rango: IdeaLeg lo rechaza al migrar
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    (base / "index.json").unlink()
+
+    store = IdeaStore(base)  # no debe lanzar
+    assert store.get(idea_id) is None and store.get(good.idea_id) is not None
+    assert list((base / "quarantine").glob(f"{idea_id}.json.migration-failed-v2.*.preserved"))
+    assert any("could not be migrated" in item.message for item in store.storage_warnings())
+
+
+def test_a_slow_rebuild_never_overwrites_the_headline_of_a_changed_record(tmp_path):
+    clock, service, tracker, _, prices, idea_id = _setup(tmp_path)
+    original = prices.leg_closes
+    edited = {"done": False}
+
+    def edit_while_reading(leg, *, since, now):
+        if not edited["done"]:
+            edited["done"] = True
+            clock.set(datetime(2026, 11, 13, 15, 0))
+            service.update_idea(idea_id, IdeaPatchRequest(legs=(_leg("AAPL", 1.0),)))
+        return original(leg, since=since, now=now)
+
+    prices.leg_closes = edit_while_reading
+    tracker.compute(idea_id)
+    stored = service.get_idea(idea_id).tracking
+    assert len(stored.segments) == 2 and stored.snapshot is None, "the headline of the old book is dropped"
+    prices.leg_closes = original
+    tracker.compute(idea_id)
+    assert service.get_idea(idea_id).tracking.snapshot is not None
+
+
+def test_consecutive_segments_never_hold_two_books_at_once(tmp_path):
+    msft = {day: price for day, price in MSFT.items() if day != WED}
+    clock, service, tracker, _, _, idea_id = _setup(tmp_path, closes={"AAPL": AAPL, "MSFT": msft})
+    clock.set(datetime(2026, 11, 11, 15, 0))  # miércoles: se quita MSFT, que no cierra ese día
+    service.update_idea(idea_id, IdeaPatchRequest(legs=(_leg("AAPL", 1.0),)))
+    result = tracker.compute(idea_id)
+    first, second = result.segments
+    assert first.exit_session == THU, "the old book can only exit when MSFT prices again"
+    assert second.entry_session == THU, "the new book is bought at the close where the old one is sold"
+    sessions = [point.session for point in result.points]
+    assert len(sessions) == len(set(sessions))
+    assert result.net_return == pytest.approx((1 + first.net_return) * (1 + second.net_return) - 1)
+
+
+def test_a_segment_waits_while_the_previous_one_cannot_exit(tmp_path):
+    msft = {day: price for day, price in MSFT.items() if day <= TUE}
+    clock, service, tracker, _, _, idea_id = _setup(tmp_path, closes={"AAPL": AAPL, "MSFT": msft})
+    clock.set(datetime(2026, 11, 11, 15, 0))
+    service.update_idea(idea_id, IdeaPatchRequest(legs=(_leg("AAPL", 1.0),)))
+    result = tracker.compute(idea_id)
+    assert result.segments[0].status == "exiting"
+    assert result.segments[1].status == "waiting"
+    assert "Enters at the close where segment 1 exits" in (result.segments[1].reason or "")
+
+
+def test_a_provider_that_stops_is_named_not_shown_as_current(tmp_path):
+    def until_wednesday(series):
+        return {day: price for day, price in series.items() if day <= WED}
+
+    _, service, tracker, tracking_clock, _, idea_id = _setup(
+        tmp_path, closes={"AAPL": until_wednesday(AAPL), "MSFT": until_wednesday(MSFT)}
+    )
+    tracking_clock.set(datetime(2026, 11, 20, 12, 0))  # viernes siguiente: cinco sesiones sin cierre
+    result = tracker.compute(idea_id)
+    assert result.stale_since == WED and result.as_of == WED
+    assert "no close since 2026-11-11" in (result.status_reason or "")
+    assert any("No close from the provider for AAPL Corp since 2026-11-11" in item for item in result.warnings)
+    assert service.get_idea(idea_id).tracking.snapshot.stale_since == WED
+    tracking_clock.set(datetime(2026, 11, 14, 12, 0))
+    assert tracker.compute(idea_id).stale_since is None, "two quiet sessions are not stale yet"
+
+
+def test_an_unchanged_headline_is_not_rewritten(tmp_path):
+    _, service, tracker, _, _, idea_id = _setup(tmp_path)
+    tracker.compute(idea_id)
+    path = tmp_path / "ideas" / "items" / f"{idea_id}.json"
+    before = (path.stat().st_mtime_ns, (tmp_path / "ideas" / "index.json").stat().st_mtime_ns)
+    tracker.compute(idea_id)
+    assert (path.stat().st_mtime_ns, (tmp_path / "ideas" / "index.json").stat().st_mtime_ns) == before
+
+
+def test_a_non_leg_edit_never_opens_a_segment(tmp_path):
+    clock, service, _, _, _, idea_id = _setup(tmp_path)
+    service.store.update(idea_id, lambda idea: replace(idea, tracking=None))
+    clock.set(datetime(2026, 11, 12, 15, 0))
+    edited = service.update_idea(idea_id, IdeaPatchRequest(title="Renamed pair"))
+    assert edited.tracking is None and edited.journal[-1].kind == "edited"
+    added = service.update_idea(idea_id, IdeaPatchRequest(legs=(_leg("AAPL", 1.0),)))
+    assert added.tracking.segments[-1].start_reason == "legs_added"

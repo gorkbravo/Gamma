@@ -124,6 +124,7 @@ export function boardTrackingCell(row: Pick<IdeaSummary, "tracking">): BoardTrac
     };
   }
   const parts = [`as of ${snapshot.as_of ?? "N/A"}`];
+  if (snapshot.stale_since) parts.push("provider stopped");
   if (snapshot.gaps) parts.push(`${snapshot.gaps} ${snapshot.gaps === 1 ? "gap" : "gaps"}`);
   if (snapshot.partial) parts.push("partial");
   if (snapshot.status === "stopped") parts.push("stopped");
@@ -242,5 +243,6 @@ export function trackingMetaText(response: IdeaTrackingResponse | null): string 
   const parts = [`${summary.sessions} ${summary.sessions === 1 ? "session" : "sessions"}`];
   if (summary.gaps) parts.push(`${summary.gaps} ${summary.gaps === 1 ? "gap" : "gaps"}`);
   if (summary.as_of) parts.push(`as of ${summary.as_of}`);
+  if (summary.stale_since) parts.push(`no close since ${summary.stale_since}`);
   return parts.join(" · ");
 }

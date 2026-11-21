@@ -306,6 +306,9 @@ class IdeaStore:
         with self._lock:
             current = self.require(idea_id)
             updated = mutate(current)
+            if updated is current:
+                # La mutación no cambió nada: no se reescribe el fichero ni el índice.
+                return current
             if updated.idea_id != current.idea_id:
                 raise IdeaValidationError("An update cannot change the idea id.")
             assert_journal_append_only(current.journal, updated.journal)
@@ -387,7 +390,15 @@ class IdeaStore:
             )
             return None
         if version < IDEA_SCHEMA_VERSION:
-            migrated = self._migrate_unlocked(payload, version)
+            try:
+                migrated = self._migrate_unlocked(payload, version)
+            except Exception as exc:  # noqa: BLE001 - un fichero que no migra va a cuarentena, nunca impide arrancar
+                self._quarantine_unlocked(
+                    path,
+                    reason=f"migration-failed-v{version}",
+                    message=f"could not be migrated from schema version {version} ({exc.__class__.__name__}: {exc})",
+                )
+                return None
             if migrated is None:
                 self._quarantine_unlocked(
                     path,

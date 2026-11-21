@@ -176,6 +176,8 @@ describe("tracking chart data", () => {
   });
 });
 
+const responseFor = () => response();
+
 describe("board tracking cell", () => {
   const headline = {
     label: TRACKING_LABEL,
@@ -203,6 +205,16 @@ describe("board tracking cell", () => {
     expect(cell.meta).toBe("as of 2026-11-13 · 1 gap");
     expect(cell.title).toContain(TRACKING_LABEL);
     expect(cell.title).toContain("SPY +3.00%");
+  });
+
+  it("says when the provider stopped instead of showing the figure as current", () => {
+    const stale = { ...headline, snapshot: { ...headline.snapshot, stale_since: "2026-11-11" } };
+    expect(boardTrackingCell({ tracking: stale }).meta).toBe("as of 2026-11-13 · provider stopped · 1 gap");
+    const response = {
+      ...responseFor(),
+      summary: { ...responseFor().summary, stale_since: "2026-11-11" },
+    };
+    expect(trackingMetaText(response)).toBe("4 sessions · 1 gap · as of 2026-11-13 · no close since 2026-11-11");
   });
 
   it("keeps not tracked, not computed and waiting apart", () => {
