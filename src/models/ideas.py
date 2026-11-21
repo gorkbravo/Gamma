@@ -1,4 +1,4 @@
-"""Domain model for Workstream 12 - Ideas (checkpoints I1, I2, I3a and I3b).
+"""Domain model for Workstream 12 - Ideas (checkpoints I1, I2, I3a, I3b and I3c).
 
 An Idea joins Gamma's tabs into one research workflow: a written thesis,
 evidence pinned from any tab with its provenance frozen at capture, criteria
@@ -30,7 +30,8 @@ from src.utils.time import now_utc
 # (``migrate_idea_v1_to_v2``), so an older build skips them instead of dropping criteria.
 # Version 3 (I3a) added ``tracking`` (``migrate_idea_v2_to_v3``).
 # Version 4 (I3b) added ``reviews`` (``migrate_idea_v3_to_v4``).
-IDEA_SCHEMA_VERSION = 4
+# Version 5 (I3c) added ``tests`` and ``risks`` (``migrate_idea_v4_to_v5``).
+IDEA_SCHEMA_VERSION = 5
 
 IDEA_STANCES = ("long", "short", "relative", "event", "neutral")
 # ``closed`` belongs to I3 (close requires a review); it is a valid stored state
@@ -69,6 +70,9 @@ JOURNAL_SYSTEM_KINDS = (
     # I3a: apertura y cierre de segmentos de seguimiento, y cambios de supuestos (costes, benchmark).
     "tracking_segment",
     "tracking_settings",
+    # I3c: snapshots de test y riesgo recalculados a petición del usuario.
+    "test_refreshed",
+    "risk_refreshed",
 )
 JOURNAL_KINDS = JOURNAL_USER_KINDS + JOURNAL_SYSTEM_KINDS
 JOURNAL_AUTHORS = ("user", "system")
@@ -170,6 +174,13 @@ EVIDENCE_VERDICTS = ("held", "failed", "unclear")
 REVIEW_TEXT_MAX = 4_000
 REVIEW_LESSON_MIN = 3
 IDEA_REVIEWS_MAX = 50
+
+# Test and risk snapshots (I3c): recomputed only when the user asks; kept with their date.
+IDEA_SNAPSHOTS_MAX = 20
+SNAPSHOT_STALE_DAYS = 7
+SNAPSHOT_SERIES_MAX_POINTS = 260
+SNAPSHOT_WARNINGS_MAX = 12
+SNAPSHOT_EPISODES_MAX = 16
 
 # Exchange suffixes (Yahoo style) with the local closing time Gamma uses for each market.
 # Times are at or before the official close: a session whose close might precede the
@@ -1618,6 +1629,297 @@ class IdeaReview:
         )
 
 
+# ---------------------------------------------------------------------------
+# Test and risk snapshots (I3c)
+# ---------------------------------------------------------------------------
+
+
+def _frozen_numbers(raw: Mapping[str, Any] | None, name: str) -> Mapping[str, float | None]:
+    values: dict[str, float | None] = {}
+    for key, value in dict(raw or {}).items():
+        key_text = str(key or "").strip()
+        _require_text(key_text, f"{name} key")
+        _require_max(key_text, OBSERVABLE_PARAM_VALUE_MAX, f"{name} key")
+        values[key_text] = _finite_or_none(value)
+    if len(values) > IDEA_LEGS_MAX * 4:
+        raise IdeaValidationError(f"{name} holds too many values.")
+    return MappingProxyType(dict(sorted(values.items())))
+
+
+def _frozen_series(raw: Sequence[Any] | None, name: str) -> tuple[tuple[str, float], ...]:
+    points: list[tuple[str, float]] = []
+    for item in raw or ():
+        if isinstance(item, Mapping):
+            stamp, value = item.get("date"), item.get("value")
+        else:
+            stamp, value = item[0], item[1]
+        day = _parse_date(stamp)
+        number = _finite_or_none(value)
+        if day is None or number is None:
+            continue
+        points.append((day.isoformat(), number))
+    kept, _ = downsample_series_points(points, SNAPSHOT_SERIES_MAX_POINTS) if len(points) > SNAPSHOT_SERIES_MAX_POINTS else (points, None)
+    return tuple(kept)
+
+
+def _frozen_text_list(raw: Sequence[Any] | None, limit: int) -> tuple[str, ...]:
+    items = [" ".join(str(item or "").split())[:CRITERION_REASON_MAX] for item in raw or ()]
+    return tuple(item for item in items if item)[:limit]
+
+
+@dataclass(frozen=True)
+class IdeaSnapshotBase:
+    """What a test and a risk snapshot share: who ran what, on which legs, over which window."""
+
+    snapshot_id: str
+    idea_id: str
+    created_at: datetime
+    legs: tuple[IdeaTrackedLeg, ...]
+    benchmark: str
+    lookback_days: int
+    window_start: date | None = None
+    window_end: date | None = None
+    observations: int = 0
+    source: str = "idea_legs"
+    source_ids: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    provenance: ProvenanceRecord | None = None
+    warnings: tuple[str, ...] = ()
+    schema_version: int = IDEA_SCHEMA_VERSION
+
+    def _validate_base(self) -> None:
+        _require_text(self.snapshot_id, "snapshot_id")
+        _require_text(self.idea_id, "idea_id")
+        legs = tuple(self.legs)
+        if not legs or any(not isinstance(leg, IdeaTrackedLeg) or leg.weight is None for leg in legs):
+            raise IdeaValidationError("A snapshot needs the legs and weights it was run on.")
+        object.__setattr__(self, "legs", legs[:IDEA_LEGS_MAX])
+        benchmark = str(self.benchmark or "").strip().upper()
+        _require_text(benchmark, "snapshot benchmark")
+        object.__setattr__(self, "benchmark", benchmark[:TRACKING_BENCHMARK_MAX])
+        object.__setattr__(self, "lookback_days", max(1, int(self.lookback_days)))
+        object.__setattr__(self, "observations", max(0, int(self.observations)))
+        if self.source not in {"idea_legs"}:
+            raise IdeaValidationError("A snapshot source must be idea_legs.")
+        ids = {str(key): str(value)[:OBSERVABLE_PARAM_VALUE_MAX] for key, value in dict(self.source_ids or {}).items() if str(value or "").strip()}
+        object.__setattr__(self, "source_ids", MappingProxyType(dict(sorted(ids.items()))))
+        if self.provenance is not None and not isinstance(self.provenance, ProvenanceRecord):
+            raise IdeaValidationError("snapshot provenance must be a ProvenanceRecord.")
+        object.__setattr__(self, "warnings", _frozen_text_list(self.warnings, SNAPSHOT_WARNINGS_MAX))
+        _check_schema_version(self.schema_version)
+
+    def positions(self) -> tuple[Any, ...]:
+        return tuple(sorted((leg.key, round(float(leg.weight or 0.0), 10)) for leg in self.legs))
+
+    def _base_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "snapshot_id": self.snapshot_id,
+            "idea_id": self.idea_id,
+            "created_at": self.created_at.isoformat(),
+            "legs": [leg.to_dict() for leg in self.legs],
+            "benchmark": self.benchmark,
+            "lookback_days": self.lookback_days,
+            "window_start": self.window_start.isoformat() if self.window_start else None,
+            "window_end": self.window_end.isoformat() if self.window_end else None,
+            "observations": self.observations,
+            "source": self.source,
+            "source_ids": dict(self.source_ids),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+            "warnings": list(self.warnings),
+        }
+
+    @staticmethod
+    def _base_kwargs(payload: Mapping[str, Any]) -> dict[str, Any]:
+        created_at = _parse_instant(payload.get("created_at"))
+        if created_at is None:
+            raise IdeaValidationError("A snapshot needs created_at.")
+        provenance = payload.get("provenance")
+        source_ids = payload.get("source_ids")
+        return {
+            "schema_version": _schema_version(payload.get("schema_version")),
+            "snapshot_id": str(payload.get("snapshot_id") or ""),
+            "idea_id": str(payload.get("idea_id") or ""),
+            "created_at": created_at,
+            "legs": tuple(IdeaTrackedLeg.from_dict(item) for item in _list(payload.get("legs"), "snapshot.legs")),
+            "benchmark": str(payload.get("benchmark") or ""),
+            "lookback_days": int(payload.get("lookback_days") or 1),
+            "window_start": _parse_date(payload.get("window_start")),
+            "window_end": _parse_date(payload.get("window_end")),
+            "observations": int(payload.get("observations") or 0),
+            "source": str(payload.get("source") or "idea_legs"),
+            "source_ids": dict(source_ids) if isinstance(source_ids, Mapping) else {},
+            "provenance": provenance_from_dict(provenance) if isinstance(provenance, Mapping) else None,
+            "warnings": tuple(str(item) for item in _list(payload.get("warnings"), "snapshot.warnings")),
+        }
+
+
+@dataclass(frozen=True)
+class IdeaTestSnapshot(IdeaSnapshotBase):
+    """A Strategy Lab composition of the idea's legs, frozen when the user ran it (I3c).
+
+    The backtest is in-sample and carries no costs; both are stated on the
+    snapshot (``costs_included`` is always False here) so no figure reads as
+    more than it is.
+    """
+
+    metrics: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    leg_contributions: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    equity_curve: tuple[tuple[str, float], ...] = ()
+    benchmark_curve: tuple[tuple[str, float], ...] = ()
+    costs_included: bool = False
+    sample: str = "in_sample"
+
+    def __post_init__(self) -> None:
+        self._validate_base()
+        object.__setattr__(self, "metrics", _frozen_numbers(self.metrics, "test metrics"))
+        object.__setattr__(self, "leg_contributions", _frozen_numbers(self.leg_contributions, "leg contributions"))
+        object.__setattr__(self, "equity_curve", _frozen_series(self.equity_curve, "equity curve"))
+        object.__setattr__(self, "benchmark_curve", _frozen_series(self.benchmark_curve, "benchmark curve"))
+        if self.sample not in {"in_sample"}:
+            raise IdeaValidationError("A test sample must be in_sample until out-of-sample splits exist (I4).")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._base_dict(),
+            "metrics": dict(self.metrics),
+            "leg_contributions": dict(self.leg_contributions),
+            "equity_curve": [list(point) for point in self.equity_curve],
+            "benchmark_curve": [list(point) for point in self.benchmark_curve],
+            "costs_included": self.costs_included,
+            "sample": self.sample,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTestSnapshot":
+        metrics = payload.get("metrics")
+        contributions = payload.get("leg_contributions")
+        return cls(
+            **cls._base_kwargs(payload),
+            metrics=dict(metrics) if isinstance(metrics, Mapping) else {},
+            leg_contributions=dict(contributions) if isinstance(contributions, Mapping) else {},
+            equity_curve=tuple(_list(payload.get("equity_curve"), "equity_curve")),
+            benchmark_curve=tuple(_list(payload.get("benchmark_curve"), "benchmark_curve")),
+            costs_included=payload.get("costs_included") is True,
+            sample=str(payload.get("sample") or "in_sample"),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaRiskEpisode:
+    episode_id: str
+    label: str
+    start: date
+    end: date
+    status: str
+    book_return: float | None = None
+    benchmark_return: float | None = None
+    max_drawdown: float | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.episode_id, "episode_id")
+        object.__setattr__(self, "label", " ".join(str(self.label or "").split())[:OBSERVABLE_LABEL_MAX] or self.episode_id)
+        if self.status not in {"full", "partial", "unavailable"}:
+            raise IdeaValidationError("An episode status must be full, partial or unavailable.")
+        for name in ("book_return", "benchmark_return", "max_drawdown"):
+            object.__setattr__(self, name, _finite_or_none(getattr(self, name)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "episode_id": self.episode_id,
+            "label": self.label,
+            "start": self.start.isoformat(),
+            "end": self.end.isoformat(),
+            "status": self.status,
+            "book_return": self.book_return,
+            "benchmark_return": self.benchmark_return,
+            "max_drawdown": self.max_drawdown,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaRiskEpisode":
+        start = _parse_date(payload.get("start"))
+        end = _parse_date(payload.get("end"))
+        if start is None or end is None:
+            raise IdeaValidationError("An episode needs start and end dates.")
+        return cls(
+            episode_id=str(payload.get("episode_id") or ""),
+            label=str(payload.get("label") or ""),
+            start=start,
+            end=end,
+            status=str(payload.get("status") or "unavailable"),
+            book_return=_finite_or_none(payload.get("book_return")),
+            benchmark_return=_finite_or_none(payload.get("benchmark_return")),
+            max_drawdown=_finite_or_none(payload.get("max_drawdown")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaRiskSnapshot(IdeaSnapshotBase):
+    """A Risk result on the idea's research book, frozen when the user ran it (I3c).
+
+    ``metrics`` are shares of the book (a 1-day VaR of 0.021 is 2.1%), so the
+    figures do not depend on a notional. ``episodes`` replay the book's
+    weights through documented stress episodes.
+    """
+
+    alpha: float = 0.95
+    horizon_days: int = 1
+    metrics: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    episodes: tuple[IdeaRiskEpisode, ...] = ()
+
+    def __post_init__(self) -> None:
+        self._validate_base()
+        alpha = _finite_or_none(self.alpha)
+        if alpha is None or not 0.5 <= alpha < 1:
+            raise IdeaValidationError("A risk confidence level must be between 0.5 and 1.")
+        object.__setattr__(self, "alpha", alpha)
+        object.__setattr__(self, "horizon_days", max(1, int(self.horizon_days)))
+        object.__setattr__(self, "metrics", _frozen_numbers(self.metrics, "risk metrics"))
+        episodes = tuple(self.episodes)
+        if any(not isinstance(item, IdeaRiskEpisode) for item in episodes):
+            raise IdeaValidationError("episodes must be IdeaRiskEpisode records.")
+        object.__setattr__(self, "episodes", episodes[:SNAPSHOT_EPISODES_MAX])
+
+    @property
+    def worst_episode(self) -> IdeaRiskEpisode | None:
+        priced = [item for item in self.episodes if item.status != "unavailable" and item.book_return is not None]
+        return min(priced, key=lambda item: float(item.book_return or 0.0), default=None)
+
+    def to_dict(self) -> dict[str, Any]:
+        worst = self.worst_episode
+        return {
+            **self._base_dict(),
+            "alpha": self.alpha,
+            "horizon_days": self.horizon_days,
+            "metrics": dict(self.metrics),
+            "episodes": [item.to_dict() for item in self.episodes],
+            "worst_episode_id": worst.episode_id if worst else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaRiskSnapshot":
+        metrics = payload.get("metrics")
+        return cls(
+            **cls._base_kwargs(payload),
+            alpha=float(payload.get("alpha") or 0.95),
+            horizon_days=int(payload.get("horizon_days") or 1),
+            metrics=dict(metrics) if isinstance(metrics, Mapping) else {},
+            episodes=tuple(IdeaRiskEpisode.from_dict(item) for item in _list(payload.get("episodes"), "episodes")),
+        )
+
+
+def snapshot_staleness(snapshot: IdeaSnapshotBase, idea: "Idea", now: datetime) -> str | None:
+    """Why a snapshot no longer describes the idea, or ``None`` while it still does."""
+    frozen, untracked = freeze_tracking_legs(idea.legs, idea.stance) if idea.legs else ((), "no legs")
+    current = tuple(sorted((leg.key, round(float(leg.weight or 0.0), 10)) for leg in frozen)) if not untracked else ()
+    if current != snapshot.positions():
+        return "The legs or weights changed after this run."
+    age = now - snapshot.created_at
+    if age.days >= SNAPSHOT_STALE_DAYS:
+        return f"Run {age.days} days ago."
+    return None
+
+
 @dataclass(frozen=True)
 class Idea:
     """A thesis with its pinned evidence, criteria and journal."""
@@ -1642,6 +1944,9 @@ class Idea:
     tracking: IdeaTracking | None = None
     # I3b: revisiones escritas al cerrar; solo crecen (reabrir conserva la anterior).
     reviews: tuple[IdeaReview, ...] = ()
+    # I3c: snapshots de test (Strategy Lab) y de riesgo (Risk), del más antiguo al más reciente.
+    tests: tuple[IdeaTestSnapshot, ...] = ()
+    risks: tuple[IdeaRiskSnapshot, ...] = ()
     schema_version: int = IDEA_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -1707,6 +2012,13 @@ class Idea:
         if len({review.review_id for review in reviews}) != len(reviews):
             raise IdeaValidationError("Review ids must be unique within an idea.")
         object.__setattr__(self, "reviews", reviews)
+        for name, kind in (("tests", IdeaTestSnapshot), ("risks", IdeaRiskSnapshot)):
+            items = tuple(getattr(self, name))
+            if any(not isinstance(item, kind) or item.idea_id != self.idea_id for item in items):
+                raise IdeaValidationError(f"Every {name[:-1]} snapshot must belong to this idea.")
+            if len({item.snapshot_id for item in items}) != len(items):
+                raise IdeaValidationError(f"{name.capitalize()} snapshot ids must be unique.")
+            object.__setattr__(self, name, items[-IDEA_SNAPSHOTS_MAX:])
         # Cerrar exige una revisión: la última corresponde a este cierre.
         if self.status == "closed" and (not reviews or reviews[-1].closed_at != self.closed_at):
             raise IdeaValidationError("A closed idea needs the review written at its close.")
@@ -1786,6 +2098,8 @@ class Idea:
             "journal": [entry.to_dict() for entry in self.journal],
             "tracking": self.tracking.to_dict() if self.tracking else None,
             "reviews": [review.to_dict() for review in self.reviews],
+            "tests": [item.to_dict() for item in self.tests],
+            "risks": [item.to_dict() for item in self.risks],
         }
 
     @classmethod
@@ -1810,6 +2124,8 @@ class Idea:
             journal=tuple(IdeaJournalEntry.from_dict(item) for item in _list(payload.get("journal"), "journal")),
             tracking=IdeaTracking.from_dict(payload["tracking"]) if isinstance(payload.get("tracking"), Mapping) else None,
             reviews=tuple(IdeaReview.from_dict(item) for item in _list(payload.get("reviews"), "reviews")),
+            tests=tuple(IdeaTestSnapshot.from_dict(item) for item in _list(payload.get("tests"), "tests")),
+            risks=tuple(IdeaRiskSnapshot.from_dict(item) for item in _list(payload.get("risks"), "risks")),
         )
 
 
@@ -1883,6 +2199,18 @@ def migrate_idea_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
         items = migrated.get(key)
         if isinstance(items, list):
             migrated[key] = [dict(item, schema_version=4) if isinstance(item, Mapping) else item for item in items]
+    return migrated
+
+
+def migrate_idea_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 5 adds ``tests`` and ``risks`` (empty: no snapshot existed before I3c)."""
+    migrated = dict(payload)
+    migrated["tests"] = list(migrated.get("tests") or [])
+    migrated["risks"] = list(migrated.get("risks") or [])
+    for key in ("evidence", "journal", "criteria", "reviews", "tests", "risks"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=5) if isinstance(item, Mapping) else item for item in items]
     return migrated
 
 

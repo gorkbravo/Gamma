@@ -42,6 +42,7 @@ from src.models.ideas import (
     migrate_idea_v1_to_v2,
     migrate_idea_v2_to_v3,
     migrate_idea_v3_to_v4,
+    migrate_idea_v4_to_v5,
 )
 from src.utils.time import now_utc
 
@@ -55,6 +56,7 @@ DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {
     1: migrate_idea_v1_to_v2,
     2: migrate_idea_v2_to_v3,
     3: migrate_idea_v3_to_v4,
+    4: migrate_idea_v4_to_v5,
 }
 
 

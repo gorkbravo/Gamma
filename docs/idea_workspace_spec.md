@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking) is done on branch `claude/laughing-gauss-4b5d02` and I3b (close and review) on `claude/ideas-i3b-close-review`, stacked on it; neither is merged, both await review (see [I3a](#i3a-implementation-notes) and [I3b implementation notes](#i3b-implementation-notes)). I3c-I3d and I4-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking), I3b (close and review) and I3c (test and risk snapshots) are done on stacked branches `claude/laughing-gauss-4b5d02`, `claude/ideas-i3b-close-review` and `claude/ideas-i3c-test-risk`. None is merged; all await review (see the [I3a](#i3a-implementation-notes), [I3b](#i3b-implementation-notes) and [I3c](#i3c-implementation-notes) notes). I3d and I4-I6 are not started.
 
 ## Goal
 
@@ -312,7 +312,7 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 | I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review. Split on 2026-11-21 into the four slices below |
 | I3a: forward tracking | `IdeaTracking` with segments, the canonical daily series, the per-asset-class cost model, `GET`/`PATCH /ideas/{id}/tracking`, the tracking chart in the Idea view, the Board column | A legs idea tracks for five trading days with no backfill and no TWS; an edit opens a new segment; gaps stay gaps; costs are applied and shown. **Status: done on branch `claude/laughing-gauss-4b5d02`, not merged** (see [I3a implementation notes](#i3a-implementation-notes)) |
 | I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date. **Status: done on branch `claude/ideas-i3b-close-review` (stacked on I3a), not merged** (see [I3b implementation notes](#i3b-implementation-notes)) |
-| I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale |
+| I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale. **Status: done on branch `claude/ideas-i3c-test-risk` (stacked on I3b), not merged** (see [I3c implementation notes](#i3c-implementation-notes)) |
 | I3d: TWS intraday layer | IBKR marks for the legs while TWS is connected | With TWS, the intraday layer records and shows its gaps without changing the daily series |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
@@ -481,6 +481,34 @@ Recorded 2026-11-21 for review. Branch `claude/ideas-i3b-close-review`, cut from
   - Light and dark at 1440, 1000 and 390 px: no console errors and no horizontal page overflow.
   - From the UI: the Close button stayed disabled until the outcome and lesson were filled in. The idea closed and its tracking showed "Stopped". Review listed it. Reopen returned it to active with the earlier review shown.
 - **Left for later:** Copilot's `review_idea` (I5); counting every close of a reopened idea, not just the current one, in the statistics; per-episode returns for a reopened idea (the record since activation chains every segment).
+
+### I3c implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3c-test-risk`, cut from the I3b branch at 6da1839; not merged and not pushed.
+
+- **Model (schema v5):** `Idea.tests` holds `IdeaTestSnapshot` records and `Idea.risks` holds `IdeaRiskSnapshot` records; they are the spec's `IdeaTest` and `IdeaRisk`.
+  - Each snapshot keeps the legs and signed shares of gross exposure it ran on (the same frozen legs as tracking), the benchmark, the lookback, the window and observation count, the source ids (the composition and its origin), the provenance and the data warnings. Strategy Lab's generic disclaimers are left out of the warnings.
+  - Version 4 files migrate on load with none. An idea keeps the last 20 of each, and the journal keeps every run (`test_refreshed`, `risk_refreshed`).
+- **Recomputed only when asked:**
+  - `POST /ideas/{id}/test` composes the idea's legs in Strategy Lab (`ResearchService.compose_strategy_lab_portfolio`, 756-session lookback, the idea's benchmark). It keeps total and annual return, volatility, Sharpe, Sortino, maximum drawdown, the benchmark's return and the excess, beta and correlation, per-leg contributions, and the equity and benchmark curves, each at most 260 points.
+  - A backtest is labelled in-sample with no costs (`sample = in_sample`, `costs_included = false`) wherever its figures appear. Out-of-sample splits and trial counts arrive with I4.
+  - `POST /ideas/{id}/risk` runs the Risk service on that research book (`source_scope = research_book`, 252 sessions, 95%, one day, no Monte Carlo). It keeps historical and parametric VaR and expected shortfall as shares of the book (shown as losses), volatility, beta, correlation and drawdown. It also replays the same signed weights through the documented stress episodes, keeping each episode's status, and names the worst priced one.
+  - Equity and ETF legs resolve through research market data. Crypto legs reach Strategy Lab as inline CoinGecko daily closes. Legs this slice cannot price, missing weights, an unknown symbol, or an idea that is not a draft or active answer 422 with the reason.
+- **Stale snapshots:** a snapshot is stale when the idea's legs or shares of gross changed after the run (scaling every weight keeps it fresh) or when it is 7 days old or more. The API serves `stale_reason`, and the UI tags it "Stale" beside the run date.
+- **UI:** `IdeaAnalysisPanel.svelte` ("Test and risk") sits between the criteria and the tracking panel, as the spec orders the Idea view.
+  - It has "Run test" and "Run risk" buttons for draft and active ideas with legs, and the latest backtest with its "No costs" and "In-sample only" tags, run date, window, legs, metrics and a 160 px curve against the benchmark.
+  - Below that: the latest risk run, with VaR, ES, volatility, beta, the worst replayed episode and the priced episodes table.
+  - Each part carries the shared provenance badge.
+  - Exports carry the snapshots: in the JSON idea, and a "Test and risk snapshots" section in Markdown.
+- **Tests:**
+  - `tests/test_idea_analysis.py` (8) covers: the backtest and risk snapshots on the demo runtime (window, metrics, curves, provenance, no boilerplate, journal, VaR written as a loss, episodes and the worst one, exports); staleness after a leg edit; refusals for legless, unpriceable and unknown legs; crypto legs as inline closes (with a fake Strategy Lab); the 20-snapshot cap with the journal kept; staleness by age and by rescaled weights; archived ideas refused; record validation and round trip; the v4 → v5 migration.
+  - Frontend: `IdeaAnalysisPanel.test.ts` (helpers, labels, losses, worst episode, stale and empty states).
+  - Full suites on 2026-11-21: backend 1293 passed, 5 skipped; frontend 726 passed; `tsc` clean.
+- **Browser check, 2026-11-21:** same worktree-only mock fixture (its v4 idea files migrated to v5 on start).
+  - From the UI at 1440 px in the light theme, the panel started empty. "Run test" and "Run risk" filled it, and the journal recorded both runs.
+  - Light and dark at 1440, 1000 and 390 px: labels shown, no horizontal page overflow, and no console errors once the backend was up.
+  - On the demo sample, the backtest covers 2024-12-24 to 2026-01-27. Only the 2025 tariff episode falls inside the sample; the older ones are unavailable and stay out of the table.
+- **Left for later:** "Attach to idea" from Strategy Lab and Risk results (the snapshots here run from the idea itself); out-of-sample validation and trial counts (I4); costs inside the backtest; Monte Carlo for signed books.
 
 ## Non-goals
 

@@ -309,7 +309,7 @@ def test_v3_files_migrate_with_no_reviews(tmp_path):
     path.write_text(json.dumps(legacy), encoding="utf-8")
     (tmp_path / "ideas" / "index.json").unlink()
     migrated = IdeaStore(tmp_path / "ideas").require(idea_id)
-    assert migrated.schema_version == IDEA_SCHEMA_VERSION == 4
+    assert migrated.schema_version == IDEA_SCHEMA_VERSION
     assert migrated.reviews == () and migrated.tracking.open_segment is not None
 
 

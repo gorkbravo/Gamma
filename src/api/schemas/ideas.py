@@ -1,4 +1,4 @@
-"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1, I2, I3a and I3b)."""
+"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c)."""
 
 from __future__ import annotations
 
@@ -48,11 +48,14 @@ from src.models.ideas import (
     IdeaLeg,
     IdeaOrigin,
     IdeaReview,
+    IdeaRiskSnapshot,
+    IdeaTestSnapshot,
     IdeaTracking,
     ObservableRef,
     envelope_from_dict,
     freshness_from_dict,
     provenance_from_dict,
+    snapshot_staleness,
     thaw_captured_values,
 )
 from src.services.idea_store import IdeaStorageWarning, IdeaSummary
@@ -444,6 +447,9 @@ class IdeaModel(BaseModel):
     tracking: "IdeaTrackingRecordModel | None" = None
     # I3b: revisiones escritas al cerrar (la última es la del cierre vigente si la idea está cerrada).
     reviews: list["IdeaReviewModel"] = Field(default_factory=list)
+    # I3c: snapshots de test y riesgo (del más antiguo al más reciente), con su motivo de obsolescencia.
+    tests: list["IdeaTestSnapshotModel"] = Field(default_factory=list)
+    risks: list["IdeaRiskSnapshotModel"] = Field(default_factory=list)
     # ``origin`` above is the idea's domain origin, so the record's own
     # provenance travels as one nested object instead of top-level fields.
     provenance: dict[str, Any]
@@ -472,6 +478,8 @@ class IdeaModel(BaseModel):
             criteria_counts=idea.criteria_counts(),
             tracking=IdeaTrackingRecordModel.from_domain(idea.tracking) if idea.tracking else None,
             reviews=[IdeaReviewModel.from_domain(item) for item in idea.reviews],
+            tests=[IdeaTestSnapshotModel.from_domain(item, idea, retrieved_at) for item in idea.tests],
+            risks=[IdeaRiskSnapshotModel.from_domain(item, idea, retrieved_at) for item in idea.risks],
             provenance={
                 "source_provider": "gamma_ideas",
                 "retrieved_at": retrieved_at.isoformat(),
@@ -1021,6 +1029,73 @@ class IdeaReviewStatsResponseModel(BaseModel):
             invalidation=result.invalidation,
             retrieved_at=result.retrieved_at,
         )
+
+
+# ---------------------------------------------------------------------------
+# Test and risk snapshots (I3c)
+# ---------------------------------------------------------------------------
+
+
+class IdeaSnapshotModelBase(BaseModel):
+    snapshot_id: str
+    created_at: datetime
+    legs: list[IdeaTrackedLegModel]
+    benchmark: str
+    lookback_days: int
+    window_start: date | None = None
+    window_end: date | None = None
+    observations: int = 0
+    source: str = "idea_legs"
+    source_ids: dict[str, str] = Field(default_factory=dict)
+    provenance: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+    stale_reason: str | None = None
+
+    @staticmethod
+    def _payload(snapshot: IdeaTestSnapshot | IdeaRiskSnapshot, idea: Idea, now: datetime) -> dict[str, Any]:
+        payload = snapshot.to_dict()
+        payload.pop("schema_version", None)
+        payload.pop("idea_id", None)
+        for leg_payload, leg in zip(payload["legs"], snapshot.legs):
+            leg_payload["key"] = leg.key
+        payload["stale_reason"] = snapshot_staleness(snapshot, idea, now)
+        return payload
+
+
+class IdeaTestSnapshotModel(IdeaSnapshotModelBase):
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    leg_contributions: dict[str, float | None] = Field(default_factory=dict)
+    equity_curve: list[tuple[date, float]] = Field(default_factory=list)
+    benchmark_curve: list[tuple[date, float]] = Field(default_factory=list)
+    costs_included: bool = False
+    sample: str = "in_sample"
+
+    @classmethod
+    def from_domain(cls, snapshot: IdeaTestSnapshot, idea: Idea, now: datetime) -> "IdeaTestSnapshotModel":
+        return cls(**cls._payload(snapshot, idea, now))
+
+
+class IdeaRiskEpisodeModel(BaseModel):
+    episode_id: str
+    label: str
+    start: date
+    end: date
+    status: str
+    book_return: float | None = None
+    benchmark_return: float | None = None
+    max_drawdown: float | None = None
+
+
+class IdeaRiskSnapshotModel(IdeaSnapshotModelBase):
+    alpha: float
+    horizon_days: int = 1
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    episodes: list[IdeaRiskEpisodeModel] = Field(default_factory=list)
+    worst_episode_id: str | None = None
+
+    @classmethod
+    def from_domain(cls, snapshot: IdeaRiskSnapshot, idea: Idea, now: datetime) -> "IdeaRiskSnapshotModel":
+        return cls(**cls._payload(snapshot, idea, now))
 
 
 IdeaModel.model_rebuild()

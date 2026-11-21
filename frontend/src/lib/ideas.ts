@@ -65,6 +65,8 @@ const JOURNAL_KIND_LABELS: Record<IdeaJournalKind, string> = {
   criterion_acknowledged: "Acknowledged",
   tracking_segment: "Tracking",
   tracking_settings: "Costs",
+  test_refreshed: "Test",
+  risk_refreshed: "Risk",
 };
 
 /** Board filter presets; "open" is every idea that is neither archived nor closed. */

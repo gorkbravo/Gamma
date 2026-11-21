@@ -2505,7 +2505,7 @@ At the end of Beta Readiness, Gamma should be installable and testable by truste
 
 ## Workstream 12 - Ideas
 
-_Status: In progress. I1 (2026-11-14) and I2 (2026-11-15) merged into main on 2026-11-21 after review. Spec approved on 2026-11-14: [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md). I3 is split into I3a-I3d; I3a (hypothetical forward tracking with segments, the canonical daily series and the per-asset-class cost model) and I3b (close with a required review, reopen, Review mode) are done on stacked branches, not merged (2026-11-21). I3c-I3d and I4-I6 not started._
+_Status: In progress. I1 (2026-11-14) and I2 (2026-11-15) merged into main on 2026-11-21 after review. Spec approved on 2026-11-14: [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md). I3 is split into I3a-I3d; I3a (hypothetical forward tracking with segments, the canonical daily series and the per-asset-class cost model), I3b (close with a required review, reopen, Review mode) and I3c (test and risk snapshots of the legs) are done on stacked branches, not merged (2026-11-21). I3d and I4-I6 not started._
 _Dependency marker: Foundation for cross-tab workflow; builds on the handoff envelope, provenance records, Saved Research, Strategy Lab, Risk and the Copilot context contract_
 _Parallelization note: I1 (the object, evidence pins, journal and the Ideas tab) can start now; criteria, tracking and the quant layer follow in order; the Copilot checkpoint needs the Copilot plan and a dated OpenAI guidance review first._
 
@@ -2778,7 +2778,7 @@ Prepare Gamma for external testing by turning the existing mock/demo, diagnostic
 
 ### Workstream 12 - Ideas
 
-In progress: I1 and I2 merged into main on 2026-11-21; I3a (forward tracking) and I3b (close and review) done on stacked branches, not merged; I3c-I3d and I4-I6 not started. Join the tabs into one research workflow around an Idea: thesis, pinned evidence with frozen provenance, criteria stated in advance, tests and risk, honest hypothetical forward tracking, journal and review, for retail and quant users at different depths. Spec: [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md).
+In progress: I1 and I2 merged into main on 2026-11-21; I3a (forward tracking), I3b (close and review) and I3c (test and risk snapshots) done on stacked branches, not merged; I3d and I4-I6 not started. Join the tabs into one research workflow around an Idea: thesis, pinned evidence with frozen provenance, criteria stated in advance, tests and risk, honest hypothetical forward tracking, journal and review, for retail and quant users at different depths. Spec: [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md).
 
 ---
 

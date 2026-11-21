@@ -1,4 +1,4 @@
-"""Application service for Ideas (Workstream 12, checkpoints I1, I2, I3a and I3b).
+"""Application service for Ideas (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
 
 The service owns the rules around the store: every edit, pin, unpin,
 criterion change and lifecycle change writes a system journal entry; the
@@ -41,6 +41,8 @@ from src.models.ideas import (
     IdeaCriterionAtClose,
     IdeaEvidenceVerdict,
     IdeaReview,
+    IdeaRiskSnapshot,
+    IdeaTestSnapshot,
     IdeaEvidence,
     IdeaCriterion,
     IdeaHorizon,
@@ -610,6 +612,48 @@ class IdeaService:
 
         return self.store.update(idea_id, mutate)
 
+    # -- test and risk snapshots (I3c) ------------------------------------------
+
+    def add_test_snapshot(self, idea_id: str, snapshot: IdeaTestSnapshot) -> Idea:
+        """Keep a backtest snapshot the user asked for; journaled with its headline."""
+
+        def mutate(current: Idea) -> Idea:
+            _require_snapshot_status(current)
+            now = self._clock()
+            total = snapshot.metrics.get("total_return")
+            body = (
+                f"Ran a backtest of the legs ({snapshot.window_start or 'N/A'} to {snapshot.window_end or 'N/A'}, "
+                f"{snapshot.observations} observations): total {_pct(total)}, max drawdown {_pct(snapshot.metrics.get('max_drawdown'))}, "
+                f"{snapshot.benchmark} {_pct(snapshot.metrics.get('benchmark_total_return'))}. In-sample, no costs."
+            )
+            updated = replace(current, tests=(*current.tests, snapshot), updated_at=now)
+            return updated.with_journal_entry(
+                self._system_entry(idea_id, "test_refreshed", body, now, {"snapshot_id": snapshot.snapshot_id}),
+                touched_at=now,
+            )
+
+        return self.store.update(idea_id, mutate)
+
+    def add_risk_snapshot(self, idea_id: str, snapshot: IdeaRiskSnapshot) -> Idea:
+        """Keep a risk snapshot the user asked for; journaled with its headline."""
+
+        def mutate(current: Idea) -> Idea:
+            _require_snapshot_status(current)
+            now = self._clock()
+            worst = snapshot.worst_episode
+            body = (
+                f"Ran risk on the legs ({snapshot.observations} observations): {int(snapshot.alpha * 100)}% one-day historical VaR "
+                f"{_pct(_loss(snapshot.metrics.get('historical_var')))}, expected shortfall {_pct(_loss(snapshot.metrics.get('historical_es')))}"
+                + (f"; worst replayed episode {worst.label} {_pct(worst.book_return)}." if worst else "; no stress episode in the available history.")
+            )
+            updated = replace(current, risks=(*current.risks, snapshot), updated_at=now)
+            return updated.with_journal_entry(
+                self._system_entry(idea_id, "risk_refreshed", body, now, {"snapshot_id": snapshot.snapshot_id}),
+                touched_at=now,
+            )
+
+        return self.store.update(idea_id, mutate)
+
     def review_statistics(self) -> IdeaReviewStatistics:
         return build_review_statistics(self.store.list_summaries(), retrieved_at=self._clock())
 
@@ -876,6 +920,11 @@ def _segment_note(reason: str, before: Idea, after: Idea) -> str:
     return text
 
 
+def _require_snapshot_status(idea: Idea) -> None:
+    if idea.status not in {"draft", "active"}:
+        raise IdeaLifecycleError(f"Tests and risk run on a draft or active idea; this one is {idea.status}.")
+
+
 def _episode_opened_at(idea: Idea) -> datetime:
     """When the current episode began: the activation, or the reopen after an earlier close."""
     for entry in reversed(idea.journal):
@@ -1139,6 +1188,7 @@ def render_idea_markdown(
     else:
         lines.append("_No criteria._")
     lines += _tracking_markdown(idea, tracking_result)
+    lines += _snapshots_markdown(idea, exported_at)
     lines += _reviews_markdown(idea)
     lines += ["", "## Journal", ""]
     if idea.journal:
@@ -1238,6 +1288,56 @@ def _tracking_markdown(idea: Idea, result: Mapping[str, Any] | None) -> list[str
         lines += ["", "Warnings:"]
         lines += [f"- {_md(item)}" for item in list(warnings)[:20]]
     return lines
+
+
+def _snapshots_markdown(idea: Idea, exported_at: datetime) -> list[str]:
+    from src.models.ideas import snapshot_staleness
+
+    test = idea.tests[-1] if idea.tests else None
+    risk = idea.risks[-1] if idea.risks else None
+    if test is None and risk is None:
+        return []
+    lines = ["", "## Test and risk snapshots", ""]
+    if test is not None:
+        stale = snapshot_staleness(test, idea, exported_at)
+        metrics = test.metrics
+        lines += [
+            f"### Backtest · run {_ts(test.created_at)}" + (f" · stale: {stale}" if stale else ""),
+            "",
+            "- In-sample only, no costs (Strategy Lab composition of the idea's legs).",
+            f"- Window {test.window_start or 'N/A'} to {test.window_end or 'N/A'} · {test.observations} observations · legs "
+            + "; ".join(f"{leg.entity.label} {leg.weight * 100:+.0f}%" for leg in test.legs if leg.weight is not None),
+            f"- Total {_pct(metrics.get('total_return'))} · annual {_pct(metrics.get('annual_return'))} · volatility "
+            f"{_pct(metrics.get('annual_volatility'))} · Sharpe {_ratio(metrics.get('sharpe_ratio'))} · max drawdown {_pct(metrics.get('max_drawdown'))}",
+            f"- {test.benchmark} {_pct(metrics.get('benchmark_total_return'))} · excess {_pct(metrics.get('excess_total_return'))}",
+            "",
+        ]
+    if risk is not None:
+        stale = snapshot_staleness(risk, idea, exported_at)
+        metrics = risk.metrics
+        worst = risk.worst_episode
+        lines += [
+            f"### Risk · run {_ts(risk.created_at)}" + (f" · stale: {stale}" if stale else ""),
+            "",
+            f"- {int(risk.alpha * 100)}% one-day VaR: historical {_pct(_loss(metrics.get('historical_var')))}, parametric "
+            f"{_pct(_loss(metrics.get('parametric_var')))} · expected shortfall {_pct(_loss(metrics.get('historical_es')))} (losses as shares of the book)",
+            f"- Volatility {_pct(metrics.get('annual_volatility'))} · beta {_ratio(metrics.get('beta'))} · window "
+            f"{risk.window_start or 'N/A'} to {risk.window_end or 'N/A'}",
+            f"- Worst replayed episode: {worst.label} {_pct(worst.book_return)}" if worst else "- Worst replayed episode: none in the available history",
+            "",
+        ]
+    return lines
+
+
+def _loss(value: Any) -> float | None:
+    """VaR and expected shortfall are losses: shown negative, never as a gain."""
+    return None if value is None else -abs(float(value))
+
+
+def _ratio(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.2f}"
 
 
 def _reviews_markdown(idea: Idea) -> list[str]:

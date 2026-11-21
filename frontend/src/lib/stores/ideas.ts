@@ -1,4 +1,4 @@
-// Ideas store (Workstream 12, checkpoints I1, I2, I3a and I3b).
+// Ideas store (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
 //
 // One place that talks to /ideas, so the Ideas tab, the shared Pin to idea
 // action, Sitrep ("Promote to idea", "Your ideas") and the notification center
@@ -48,6 +48,9 @@ export const ideaTrackingLoading = writable(false);
 export const ideaTrackingError = writable("");
 /** I3b: the Review mode's closed record and statistics. */
 export const ideaReviewStats = writable<IdeaReviewStatsResponse | null>(null);
+/** I3c: which snapshot is running for the selected idea, and the last run error. */
+export const ideaAnalysisBusy = writable<"" | "test" | "risk">("");
+export const ideaAnalysisError = writable("");
 
 /** Every idea the board knows about, newest change first. */
 export const ideaSummaries = derived(ideaList, ($list): IdeaSummary[] => $list?.items ?? []);
@@ -181,6 +184,36 @@ export async function closeIdea(ideaId: string, payload: IdeaClosePayload): Prom
     await Promise.all([loadIdeas(), loadIdeaNotifications(), loadIdeaReview()]);
   }
   return idea;
+}
+
+// ── Test and risk snapshots (I3c) ──────────────────────────────────────────
+
+async function runSnapshot(ideaId: string, kind: "test" | "risk"): Promise<Idea | null> {
+  if (get(ideaAnalysisBusy)) return null;
+  ideaAnalysisBusy.set(kind);
+  ideaAnalysisError.set("");
+  try {
+    const idea = await postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/${kind}`, {});
+    applyIdea(idea);
+    await loadIdeas();
+    return idea;
+  } catch (error) {
+    // Un fallo de Strategy Lab o Risk queda en la sección, no en la línea de error de Ideas.
+    ideaAnalysisError.set(messageOf(error));
+    return null;
+  } finally {
+    ideaAnalysisBusy.set("");
+  }
+}
+
+/** Backtest the idea's legs in Strategy Lab and keep the snapshot (in-sample, no costs). */
+export function runIdeaTest(ideaId: string): Promise<Idea | null> {
+  return runSnapshot(ideaId, "test");
+}
+
+/** Run Risk on the idea's research book and keep the snapshot. */
+export function runIdeaRisk(ideaId: string): Promise<Idea | null> {
+  return runSnapshot(ideaId, "risk");
 }
 
 export async function loadIdeaReview(): Promise<IdeaReviewStatsResponse | null> {

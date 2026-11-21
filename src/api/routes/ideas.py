@@ -1,4 +1,4 @@
-"""``/ideas`` routes (Workstream 12, checkpoints I1, I2, I3a and I3b).
+"""``/ideas`` routes (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
 
 Local research records plus read-only criterion evaluation and hypothetical
 forward tracking. Evaluation and tracking read prices and observables through
@@ -70,6 +70,10 @@ def _scheduler(request: Request):
 
 def _tracking(request: Request):
     return request.app.state.runtime.idea_tracking
+
+
+def _analysis(request: Request):
+    return request.app.state.runtime.idea_analysis
 
 
 def _idea_response(idea: Idea) -> IdeaModel:
@@ -280,6 +284,26 @@ def close_idea(idea_id: str, payload: IdeaCloseRequestModel, request: Request) -
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
     return _idea_response(closed)
+
+
+@router.post("/ideas/{idea_id}/test", response_model=IdeaModel)
+def run_idea_test(idea_id: str, request: Request) -> IdeaModel:
+    """Backtest the idea's legs in Strategy Lab and keep the snapshot (in-sample, no costs)."""
+    try:
+        idea = _analysis(request).run_test(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.post("/ideas/{idea_id}/risk", response_model=IdeaModel)
+def run_idea_risk(idea_id: str, request: Request) -> IdeaModel:
+    """Run Risk on the idea's research book (VaR, expected shortfall, stress replay) and keep the snapshot."""
+    try:
+        idea = _analysis(request).run_risk(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
 
 
 @router.post("/ideas/{idea_id}/reopen", response_model=IdeaModel)

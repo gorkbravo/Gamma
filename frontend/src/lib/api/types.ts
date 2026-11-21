@@ -4711,7 +4711,9 @@ export type IdeaJournalKind =
   | "criterion_triggered"
   | "criterion_acknowledged"
   | "tracking_segment"
-  | "tracking_settings";
+  | "tracking_settings"
+  | "test_refreshed"
+  | "risk_refreshed";
 
 export type IdeaCriterionKind = "invalidate" | "confirm" | "review";
 export type IdeaCriterionCondition =
@@ -4992,6 +4994,9 @@ export interface Idea {
   tracking?: IdeaTrackingRecord | null;
   /** I3b: reviews written at close; the last one is the current close's when the idea is closed. */
   reviews?: IdeaReview[];
+  /** I3c: test and risk snapshots, oldest first; recomputed only when the user asks. */
+  tests?: IdeaTestSnapshot[];
+  risks?: IdeaRiskSnapshot[];
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
 }
 
@@ -5379,4 +5384,51 @@ export interface IdeaReviewStatsResponse {
   retrieved_at: string;
   origin: string;
   transformation_note: string | null;
+}
+
+// ── Ideas: test and risk snapshots (Workstream 12, I3c) ──────────────────────
+
+interface IdeaSnapshotBase {
+  snapshot_id: string;
+  created_at: string;
+  legs: IdeaTrackedLeg[];
+  benchmark: string;
+  lookback_days: number;
+  window_start: string | null;
+  window_end: string | null;
+  observations: number;
+  source: "idea_legs";
+  source_ids: Record<string, string>;
+  provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null } | null;
+  warnings: string[];
+  /** Why the snapshot no longer describes the idea (legs changed, or run days ago), or null. */
+  stale_reason: string | null;
+}
+
+export interface IdeaTestSnapshot extends IdeaSnapshotBase {
+  metrics: Record<string, number | null>;
+  leg_contributions: Record<string, number | null>;
+  equity_curve: Array<[string, number]>;
+  benchmark_curve: Array<[string, number]>;
+  costs_included: boolean;
+  sample: "in_sample";
+}
+
+export interface IdeaRiskEpisode {
+  episode_id: string;
+  label: string;
+  start: string;
+  end: string;
+  status: "full" | "partial" | "unavailable";
+  book_return: number | null;
+  benchmark_return: number | null;
+  max_drawdown: number | null;
+}
+
+export interface IdeaRiskSnapshot extends IdeaSnapshotBase {
+  alpha: number;
+  horizon_days: number;
+  metrics: Record<string, number | null>;
+  episodes: IdeaRiskEpisode[];
+  worst_episode_id: string | null;
 }

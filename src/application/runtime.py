@@ -23,6 +23,7 @@ from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.idea_evaluation import IdeaEvaluationScheduler, IdeaEvaluationService
 from src.application.idea_observables import ObservableRegistry
+from src.application.idea_analysis import IdeaAnalysisService
 from src.application.idea_service import IdeaService
 from src.application.idea_tracking import IdeaTrackingService, ProviderTrackingPrices
 from src.application.iv_service import IVService
@@ -201,6 +202,8 @@ class ApplicationRuntime:
     idea_scheduler: IdeaEvaluationScheduler | None = None
     # I3a: serie diaria canónica del seguimiento hipotético (reconstruida desde cierres de proveedor).
     idea_tracking: IdeaTrackingService | None = None
+    # I3c: snapshots de test (Strategy Lab) y riesgo (Risk) de las patas de una idea, a petición.
+    idea_analysis: IdeaAnalysisService | None = None
     desktop: DesktopRuntimeState | None = None
     # Preferencias del asistente de primer arranque y origen de cada ajuste de inicio.
     setup_store: SetupStore | None = None
@@ -548,10 +551,8 @@ def build_runtime(
     idea_service.criteria_registry = idea_observables
     idea_evaluation = IdeaEvaluationService(idea_store, idea_observables)
     # Workstream 12 - Ideas (I3a): seguimiento hipotético con cierres de los mismos proveedores de lectura.
-    idea_tracking = IdeaTrackingService(
-        idea_service,
-        ProviderTrackingPrices(research_provider=research_provider, crypto_service=crypto_service),
-    )
+    idea_tracking_prices = ProviderTrackingPrices(research_provider=research_provider, crypto_service=crypto_service)
+    idea_tracking = IdeaTrackingService(idea_service, idea_tracking_prices)
     copilot_provider = trace_provider(
         _build_copilot_provider(allow_mock=bool(mock_mode)),
         provider_usage,
@@ -623,6 +624,13 @@ def build_runtime(
         idea_observables=idea_observables,
         idea_evaluation=idea_evaluation,
         idea_tracking=idea_tracking,
+        idea_analysis=IdeaAnalysisService(
+            idea_service,
+            research_service_factory=lambda: research_service,
+            risk_service=risk_service,
+            research_provider=research_provider,
+            crypto_prices=idea_tracking_prices,
+        ),
         setup_store=setup_store,
         startup_settings=startup_settings,
         sec_fundamentals_adapter=sec_fundamentals_adapter,

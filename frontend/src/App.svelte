@@ -48,6 +48,8 @@
     ideaNotifications,
     ideaObservables,
     closeIdea,
+    ideaAnalysisBusy,
+    ideaAnalysisError,
     ideaOpenRequest,
     ideaReviewStats,
     ideaSummaries,
@@ -71,6 +73,8 @@
     unpinEvidence,
     updateCriterion,
     updateIdeaTracking,
+    runIdeaRisk,
+    runIdeaTest,
   } from "./lib/stores/ideas";
   import type { Idea, IdeaCriterionPayload } from "./lib/api/types";
   import IdeaNotificationCenter from "./components/IdeaNotificationCenter.svelte";
@@ -3342,6 +3346,10 @@
             reviewStats={$ideaReviewStats}
             onLoadReview={loadIdeaReview}
             onCloseIdea={closeIdea}
+            analysisBusy={$ideaAnalysisBusy}
+            analysisError={$ideaAnalysisError}
+            onRunTest={runIdeaTest}
+            onRunRisk={runIdeaRisk}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component

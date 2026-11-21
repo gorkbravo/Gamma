@@ -6,6 +6,7 @@
   // when closed, its hypothetical tracking and its append-only journal; Review
   // describes the closed record. The backend evaluates criteria and rebuilds
   // the tracked series read-only; this view never calls a provider itself.
+  import IdeaAnalysisPanel from "../components/IdeaAnalysisPanel.svelte";
   import IdeaCloseForm from "../components/IdeaCloseForm.svelte";
   import IdeaCriteriaPanel from "../components/IdeaCriteriaPanel.svelte";
   import IdeaReviewMode from "../components/IdeaReviewMode.svelte";
@@ -99,6 +100,11 @@
   export let reviewStats: IdeaReviewStatsResponse | null = null;
   export let onLoadReview: () => Promise<unknown> | void = () => {};
   export let onCloseIdea: (ideaId: string, payload: IdeaClosePayload) => Promise<Idea | null> = async () => null;
+  // I3c: test and risk snapshots, run only when the user asks.
+  export let analysisBusy: "" | "test" | "risk" = "";
+  export let analysisError = "";
+  export let onRunTest: (ideaId: string) => Promise<unknown> | void = () => {};
+  export let onRunRisk: (ideaId: string) => Promise<unknown> | void = () => {};
 
   const modes: Array<{ id: "board" | "idea" | "review"; label: string }> = [
     { id: "board", label: "Board" },
@@ -784,6 +790,8 @@
           onPreview={onPreviewObservable}
           {onLoadEvents}
         />
+
+        <IdeaAnalysisPanel {idea} busy={analysisBusy} error={analysisError} {onRunTest} {onRunRisk} />
 
         <IdeaTrackingPanel
           {idea}
