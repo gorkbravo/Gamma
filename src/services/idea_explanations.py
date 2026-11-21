@@ -484,6 +484,39 @@ _ENTRIES: tuple[IdeaExplanation, ...] = (
         ),
         computed="From the review date in the idea's horizon and today's date in UTC.",
     ),
+    IdeaExplanation(
+        key="stat.forward_return",
+        title="Forward return since activation (hypothetical)",
+        measures="What a book with the idea's legs and weights would have returned since activation, after costs. Nothing was executed.",
+        why=_why(
+            "Shows whether the long view has paid since you committed to it, not since the best entry in hindsight.",
+            "Shows whether the short view has paid since you committed to it, not since the best entry in hindsight.",
+            "Shows the spread between the legs since you committed to it; compare it with the benchmark, not with zero.",
+            "Shows how the positioning around the event has done so far; the event itself is judged by the criteria.",
+            "The record of the legs as written, for reference.",
+        ),
+        computed=(
+            "Rebuilt from provider daily closes: fixed quantities from the first close after the legs were frozen, "
+            "weights scaled to 100% gross exposure, segments chained across leg edits, gaps left as gaps."
+        ),
+        source="Research market data (equities and ETFs), CoinGecko (crypto)",
+    ),
+    IdeaExplanation(
+        key="stat.tracking_costs",
+        title="Tracking costs",
+        measures="The per-side cost assumed for each leg's asset class, charged on entry and on closing at the latest close.",
+        why=_why(
+            "A return without costs overstates what a real book would have kept.",
+            "Shorts pay the same per-side costs; borrow fees are not included.",
+            "Two legs pay costs on both sides of the spread.",
+            "Short holding periods make costs a larger share of the result.",
+            "A return without costs overstates what a real book would have kept.",
+        ),
+        computed=(
+            "Basis points per side by asset class, checked against official broker and venue fee schedules on "
+            "2026-11-21; editable, and every change is journaled. The gross record never depends on them."
+        ),
+    ),
 )
 
 EXPLANATIONS: Mapping[str, IdeaExplanation] = MappingProxyType({entry.key: entry for entry in _ENTRIES})

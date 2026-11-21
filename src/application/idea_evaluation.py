@@ -459,8 +459,11 @@ class IdeaEvaluationScheduler:
         clock: Callable[[], datetime] = now_utc,
         tick_seconds: float = SCHEDULER_TICK_SECONDS,
         startup_delay: float = STARTUP_DELAY_SECONDS,
+        tracking: Any = None,
     ) -> None:
         self.service = service
+        # I3a: tras la pasada de arranque y la de cierre se refresca el titular de seguimiento del tablero.
+        self.tracking = tracking
         self._clock = clock
         self._tick = tick_seconds
         self._startup_delay = startup_delay
@@ -498,10 +501,20 @@ class IdeaEvaluationScheduler:
         # The start pass covers every cadence, including the latest close.
         self.last_daily_session = last_daily_close_session(now)
         try:
-            return self.service.evaluate_all(trigger="startup")
+            result = self.service.evaluate_all(trigger="startup")
         except Exception:  # noqa: BLE001
             logger.exception("Idea evaluation at start failed")
-            return None
+            result = None
+        self._refresh_tracking()
+        return result
+
+    def _refresh_tracking(self) -> None:
+        if self.tracking is None:
+            return
+        try:
+            self.tracking.refresh_all()
+        except Exception:  # noqa: BLE001 - el seguimiento nunca detiene el planificador
+            logger.exception("Idea tracking refresh failed")
 
     def tick(self) -> list[EvaluationPassResult]:
         now = self._clock()
@@ -510,6 +523,7 @@ class IdeaEvaluationScheduler:
         if self.last_daily_session is None or session > self.last_daily_session:
             self.last_daily_session = session
             results.append(self.service.evaluate_all(trigger="daily_close"))
+            self._refresh_tracking()
         due_intraday = self.last_intraday_at is None or (now - self.last_intraday_at).total_seconds() >= INTRADAY_PASS_SECONDS
         if due_intraday and self.service.registry.tws_connected() and self.service.has_intraday_criteria():
             self.last_intraday_at = now

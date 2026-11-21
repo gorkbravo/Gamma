@@ -1,4 +1,4 @@
-"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1 and I2)."""
+"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1, I2 and I3a)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from src.application.idea_service import (
     IdeaEvidenceCreateRequest,
     IdeaListResult,
     IdeaPatchRequest,
+    IdeaTrackingSettingsRequest,
 )
 from src.models.handoff import HandoffEntity
 from src.models.ideas import (
@@ -32,6 +33,9 @@ from src.models.ideas import (
     OBSERVABLE_PARAMS_MAX,
     ORIGIN_LABEL_MAX,
     ORIGIN_REF_MAX,
+    TRACKING_BENCHMARK_MAX,
+    TRACKING_COST_BP_MAX,
+    TRACKING_LABEL,
     CriterionEvaluation,
     Idea,
     IdeaCriterion,
@@ -40,6 +44,7 @@ from src.models.ideas import (
     IdeaJournalEntry,
     IdeaLeg,
     IdeaOrigin,
+    IdeaTracking,
     ObservableRef,
     envelope_from_dict,
     freshness_from_dict,
@@ -431,6 +436,8 @@ class IdeaModel(BaseModel):
     journal: list[IdeaJournalEntryModel]
     evidence_counts: dict[str, int]
     criteria_counts: dict[str, int] = Field(default_factory=dict)
+    # I3a: segmentos, supuestos de coste y último titular; la serie se pide a /tracking.
+    tracking: "IdeaTrackingRecordModel | None" = None
     # ``origin`` above is the idea's domain origin, so the record's own
     # provenance travels as one nested object instead of top-level fields.
     provenance: dict[str, Any]
@@ -457,6 +464,7 @@ class IdeaModel(BaseModel):
             journal=[IdeaJournalEntryModel.from_domain(entry) for entry in idea.journal],
             evidence_counts=idea.evidence_counts(),
             criteria_counts=idea.criteria_counts(),
+            tracking=IdeaTrackingRecordModel.from_domain(idea.tracking) if idea.tracking else None,
             provenance={
                 "source_provider": "gamma_ideas",
                 "retrieved_at": retrieved_at.isoformat(),
@@ -493,6 +501,7 @@ class IdeaSummaryModel(BaseModel):
     criteria_counts: dict[str, int] = Field(default_factory=dict)
     criteria_total: int = 0
     unacknowledged_triggers: int = 0
+    tracking: "IdeaTrackingHeadlineModel | None" = None
 
     @classmethod
     def from_domain(cls, summary: IdeaSummary) -> "IdeaSummaryModel":
@@ -664,3 +673,218 @@ class IdeaExplanationsResponseModel(BaseModel):
     retrieved_at: datetime
     source_provider: str = "gamma_ideas"
     origin: str = "idea_explanations.registry"
+
+
+# ---------------------------------------------------------------------------
+# Forward tracking (I3a)
+# ---------------------------------------------------------------------------
+
+
+class IdeaTrackedLegModel(BaseModel):
+    entity: IdeaEntityModel
+    stated_weight: float | None = None
+    weight: float | None = None
+    weight_source: str
+    asset_class: str
+    market: str
+    key: str
+
+
+class IdeaTrackingSegmentRecordModel(BaseModel):
+    segment_id: str
+    number: int
+    started_at: datetime
+    start_reason: str
+    start_note: str = ""
+    stance: str
+    legs: list[IdeaTrackedLegModel]
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    end_note: str = ""
+    untracked_reason: str | None = None
+
+
+class IdeaTrackingSnapshotModel(BaseModel):
+    status: str
+    computed_at: datetime
+    as_of: date | None = None
+    net_return: float | None = None
+    gross_return: float | None = None
+    benchmark_return: float | None = None
+    benchmark: str | None = None
+    sessions: int = 0
+    gaps: int = 0
+    partial: bool = False
+
+
+class IdeaCostModelRecordModel(BaseModel):
+    per_side_bp: dict[str, float]
+    leg_classes: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+
+
+class IdeaTrackingRecordModel(BaseModel):
+    label: str = TRACKING_LABEL
+    benchmark: str
+    cost_model: IdeaCostModelRecordModel
+    segments: list[IdeaTrackingSegmentRecordModel] = Field(default_factory=list)
+    snapshot: IdeaTrackingSnapshotModel | None = None
+
+    @classmethod
+    def from_domain(cls, tracking: IdeaTracking) -> "IdeaTrackingRecordModel":
+        payload = tracking.to_dict()
+        for segment, record in zip(payload["segments"], tracking.segments):
+            for leg_payload, leg in zip(segment["legs"], record.legs):
+                leg_payload["key"] = leg.key
+        return cls(**payload)
+
+
+class IdeaTrackingHeadlineModel(BaseModel):
+    label: str = TRACKING_LABEL
+    segments: int
+    open: bool
+    started_at: datetime
+    snapshot: IdeaTrackingSnapshotModel | None = None
+
+
+class IdeaTrackingSettingsRequestModel(BaseModel):
+    per_side_bp: dict[str, float] | None = None
+    leg_classes: dict[str, str | None] | None = None
+    benchmark: str | None = Field(default=None, min_length=1, max_length=TRACKING_BENCHMARK_MAX)
+
+    def to_domain(self) -> IdeaTrackingSettingsRequest:
+        if self.per_side_bp is not None:
+            for name, value in self.per_side_bp.items():
+                if not (0 <= float(value) <= TRACKING_COST_BP_MAX):
+                    raise ValueError(f"The {name} cost must be between 0 and {TRACKING_COST_BP_MAX:g} bp per side.")
+        return IdeaTrackingSettingsRequest(
+            per_side_bp=None if self.per_side_bp is None else dict(self.per_side_bp),
+            leg_classes=None if self.leg_classes is None else dict(self.leg_classes),
+            benchmark=self.benchmark,
+        )
+
+
+class TrackingSummaryModel(BaseModel):
+    net_return: float | None = None
+    gross_return: float | None = None
+    cost_drag: float | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    max_drawdown: float | None = None
+    sessions: int = 0
+    gaps: int = 0
+    partial: bool = False
+    first_session: date | None = None
+    as_of: date | None = None
+
+
+class TrackingBenchmarkModel(BaseModel):
+    symbol: str
+    available: bool
+    reason: str | None = None
+
+
+class TrackingCostClassModel(BaseModel):
+    asset_class: str
+    label: str
+    basis: str
+    per_side_bp: float | None = None
+    default_bp: float | None = None
+    editable: bool
+    source: Literal["stated", "quote", "none"]
+    edited: bool = False
+
+
+class TrackingCostModelViewModel(BaseModel):
+    classes: list[TrackingCostClassModel]
+    leg_classes: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+    edited: bool = False
+
+
+class TrackingSegmentLegModel(BaseModel):
+    key: str
+    label: str
+    entity_type: str
+    normalized_id: str
+    stated_weight: float | None = None
+    weight: float | None = None
+    weight_source: str
+    asset_class: str
+    detected_class: str
+    cost_bp: float | None = None
+    market: str
+    entry_price: float | None = None
+    last_price: float | None = None
+
+
+class TrackingSegmentModel(BaseModel):
+    segment_id: str
+    number: int
+    status: Literal["untracked", "unavailable", "waiting", "never_entered", "tracking", "exiting", "closed"]
+    reason: str | None = None
+    started_at: datetime
+    start_reason: str
+    start_note: str = ""
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    stance: str
+    entry_session: date | None = None
+    exit_session: date | None = None
+    last_session: date | None = None
+    sessions: int = 0
+    gaps: int = 0
+    gross_return: float | None = None
+    net_return: float | None = None
+    entry_cost: float | None = None
+    exit_cost: float | None = None
+    cost: float | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    max_drawdown: float | None = None
+    legs: list[TrackingSegmentLegModel] = Field(default_factory=list)
+
+
+class TrackingPointModel(BaseModel):
+    session: date
+    segment: int
+    net_return: float | None = None
+    gross_return: float | None = None
+    benchmark_return: float | None = None
+    drawdown: float | None = None
+    gap: bool = False
+    missing: list[str] = Field(default_factory=list)
+
+
+class TrackingProvenanceModel(BaseModel):
+    key: str
+    label: str
+    role: Literal["leg", "benchmark"]
+    source_provider: str | None = None
+    retrieved_at: datetime | None = None
+    origin: str | None = None
+    transformation_note: str | None = None
+    available: bool = True
+
+
+class IdeaTrackingResponseModel(BaseModel):
+    idea_id: str
+    label: str = TRACKING_LABEL
+    status: Literal["not_started", "waiting", "tracking", "stopped", "unavailable"]
+    status_reason: str | None = None
+    methodology: str
+    summary: TrackingSummaryModel
+    benchmark: TrackingBenchmarkModel
+    cost_model: TrackingCostModelViewModel
+    segments: list[TrackingSegmentModel] = Field(default_factory=list)
+    points: list[TrackingPointModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    provenance: list[TrackingProvenanceModel] = Field(default_factory=list)
+    computed_at: datetime
+    source_provider: str = "gamma_ideas"
+    origin: str = "idea_tracking.compute"
+    transformation_note: str | None = None
+
+
+IdeaModel.model_rebuild()
+IdeaSummaryModel.model_rebuild()

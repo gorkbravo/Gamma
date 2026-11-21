@@ -1,10 +1,12 @@
 <script lang="ts">
-  // Ideas tab (Workstream 12, checkpoints I1 and I2): Board lists every idea in
-  // one dense table with its criterion states; Idea shows one thesis with its
-  // frozen evidence grouped by stance, its criteria and their live state, and
-  // its append-only journal. The backend evaluates criteria read-only; this
-  // view never calls a provider itself.
+  // Ideas tab (Workstream 12, checkpoints I1, I2 and I3a): Board lists every
+  // idea in one dense table with its criterion states and its hypothetical
+  // forward return; Idea shows one thesis with its frozen evidence grouped by
+  // stance, its criteria and their live state, its hypothetical tracking and
+  // its append-only journal. The backend evaluates criteria and rebuilds the
+  // tracked series read-only; this view never calls a provider itself.
   import IdeaCriteriaPanel from "../components/IdeaCriteriaPanel.svelte";
+  import IdeaTrackingPanel from "../components/IdeaTrackingPanel.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import WhatIsThis from "../components/WhatIsThis.svelte";
   import type {
@@ -23,6 +25,8 @@
     IdeaPatchPayload,
     IdeaStance,
     IdeaSummary,
+    IdeaTrackingResponse,
+    IdeaTrackingSettingsPayload,
   } from "../lib/api/types";
   import {
     EVIDENCE_STANCE_LABELS,
@@ -48,6 +52,7 @@
   import { toProvenanceBadge } from "../lib/provenance";
   import { activateRowOnKey } from "../lib/row-activation";
   import { CRITERION_STATE_LABELS, criteriaSummary, daysToReview, daysToReviewText } from "../lib/idea-criteria";
+  import { TRACKING_LABEL, boardTrackingCell } from "../lib/idea-tracking";
 
   export let mode: "board" | "idea" = "board";
   export let list: IdeaListResponse | null = null;
@@ -76,6 +81,13 @@
   export let onEvaluateIdea: (ideaId: string) => Promise<unknown> = async () => null;
   export let onPreviewObservable: (observable: IdeaObservableRef) => Promise<IdeaObservablePreview | null> = async () => null;
   export let onLoadEvents: () => Promise<Array<{ event_id: string; title: string; scheduled_at: string; region: string }>> = async () => [];
+  // I3a: hypothetical forward tracking of the selected idea.
+  export let tracking: IdeaTrackingResponse | null = null;
+  export let trackingLoading = false;
+  export let trackingError = "";
+  export let onLoadTracking: (ideaId: string) => Promise<unknown> | void = () => {};
+  export let onUpdateTracking: (ideaId: string, payload: IdeaTrackingSettingsPayload) => Promise<IdeaTrackingResponse | null> =
+    async () => null;
 
   const modes: Array<{ id: "board" | "idea"; label: string }> = [
     { id: "board", label: "Board" },
@@ -435,6 +447,7 @@
               <th>Legs</th>
               <th>Status</th>
               <th>Criteria</th>
+              <th class="num" title={`${TRACKING_LABEL}: net return since activation, after costs`}>Since activation <span class="hyp">(hyp.)</span></th>
               <th class="num">Review</th>
               <th class="num">Supports</th>
               <th class="num">Challenges</th>
@@ -444,6 +457,7 @@
           </thead>
           <tbody>
             {#each boardRows as row (row.idea_id)}
+              {@const trackingCell = boardTrackingCell(row)}
               <tr
                 class="board-row"
                 tabindex="0"
@@ -470,6 +484,10 @@
                     None
                   {/if}
                 </td>
+                <td class="num tracking-cell" class:absent={trackingCell.absent} title={trackingCell.title}>
+                  <span class={trackingCell.tone}>{trackingCell.text}</span>
+                  {#if trackingCell.meta}<span class="meta">{trackingCell.meta}</span>{/if}
+                </td>
                 <td class="num" class:absent={!row.review_date} class:warning={(daysToReview(row.review_date) ?? 1) < 0}>{daysToReviewText(daysToReview(row.review_date))}</td>
                 <td class="num" class:absent={!row.evidence_counts.supports}>{row.evidence_counts.supports}</td>
                 <td class="num" class:absent={!row.evidence_counts.challenges}>{row.evidence_counts.challenges}</td>
@@ -478,7 +496,7 @@
               </tr>
             {:else}
               <tr class="empty-row">
-                <td colspan="10">
+                <td colspan="11">
                   {#if loading && !list}
                     Loading…
                   {:else if summaries.length}
@@ -711,6 +729,15 @@
           onPreview={onPreviewObservable}
           {onLoadEvents}
         />
+
+        <IdeaTrackingPanel
+          {idea}
+          {tracking}
+          loading={trackingLoading}
+          error={trackingError}
+          onLoad={onLoadTracking}
+          onUpdate={onUpdateTracking}
+        />
       </div>
 
       <div class="support-column">
@@ -844,6 +871,29 @@
 
   .criteria-cell {
     min-width: 8rem;
+  }
+
+  /* I3a: rentabilidad hipotética desde la activación, con su sesión as of debajo. */
+  .tracking-cell {
+    min-width: 7.5rem;
+    white-space: nowrap;
+  }
+
+  .tracking-cell > span:first-child {
+    display: block;
+  }
+
+  .tracking-cell .positive {
+    color: var(--positive);
+  }
+
+  .tracking-cell .negative {
+    color: var(--negative);
+  }
+
+  .hyp {
+    color: var(--text-2);
+    font-weight: 400;
   }
 
   .criteria-cell .tag + .tag {

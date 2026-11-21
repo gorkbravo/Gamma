@@ -1,20 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { colorWithAlpha, resolveChartColor } from "../lib/chart-colors";
-  import { normalizeChartData } from "../lib/chart-data";
+  import { normalizeChartData, splitAtGaps } from "../lib/chart-data";
   import { resolvedTheme } from "../lib/stores/appearance";
   import {
     AreaSeries,
     CandlestickSeries,
     ColorType,
     createChart,
+    createSeriesMarkers,
     CrosshairMode,
     HistogramSeries,
     LineSeries,
     LineStyle,
     type IChartApi,
     type ISeriesApi,
-    type UTCTimestamp
+    type UTCTimestamp,
+    type WhitespaceData
   } from "lightweight-charts";
 
   export interface ChartPoint {
@@ -34,6 +36,12 @@
 
   export type AnyChartPoint = ChartPoint | CandlestickChartPoint;
 
+  /** A labelled mark on a series (e.g. where a new tracking segment starts). */
+  export interface ChartMarker {
+    time: UTCTimestamp;
+    text: string;
+  }
+
   export interface ChartSeries {
     id: string;
     label: string;
@@ -44,6 +52,14 @@
     showPointMarkers?: boolean;
     pointMarkerRadius?: number;
     invertFilledArea?: boolean;
+    /**
+     * Keep a non-finite value as a break in the line instead of dropping it, so
+     * a missing observation is never drawn as continuity (line and area only).
+     */
+    breakOnGaps?: boolean;
+    /** Axis labels as percentages ("2.35%") instead of plain numbers. */
+    valueFormat?: "price" | "percent";
+    markers?: ChartMarker[];
     data: AnyChartPoint[];
   }
 
@@ -91,6 +107,30 @@
 
   function normalizeValueData(data: readonly AnyChartPoint[]): ChartPoint[] {
     return normalizeChartData(data.filter(isValuePoint));
+  }
+
+  /**
+   * Tramos continuos de una serie con huecos. lightweight-charts une la línea a
+   * través de un punto en blanco, así que cada tramo es su propia serie; el
+   * primero lleva los huecos como whitespace para que su fecha siga en el eje.
+   */
+  function gapRuns(item: ChartSeries): Array<Array<ChartPoint | WhitespaceData<UTCTimestamp>>> {
+    const points = item.data.filter((point): point is ChartPoint => "value" in point && Number.isFinite(point.time));
+    const { runs, gaps } = splitAtGaps(points);
+    const whitespace = gaps.map((time) => ({ time: time as UTCTimestamp }));
+    if (!runs.length) return [whitespace];
+    return runs.map((run, index) =>
+      index === 0 ? [...run, ...whitespace].sort((left, right) => left.time - right.time) : run
+    );
+  }
+
+  function priceFormatFor(item: ChartSeries, normalizedData: readonly ChartPoint[]) {
+    const precision = inferPricePrecision(normalizedData);
+    return {
+      type: item.valueFormat === "percent" ? ("percent" as const) : ("price" as const),
+      precision,
+      minMove: 10 ** -precision
+    };
   }
 
   function normalizeCandlestickData(data: readonly AnyChartPoint[]): CandlestickChartPoint[] {
@@ -185,6 +225,23 @@
     seriesMap = new Map();
   }
 
+  function attachMarkers(api: ISeriesApi<"Line" | "Area">, markers: ChartMarker[], computedStyle: CSSStyleDeclaration) {
+    const markerColor = resolveChartColor("var(--text-1)", computedStyle);
+    createSeriesMarkers(
+      api,
+      [...markers]
+        .sort((left, right) => left.time - right.time)
+        .map((marker) => ({
+          time: marker.time,
+          position: "aboveBar" as const,
+          shape: "circle" as const,
+          size: 0.5,
+          color: markerColor,
+          text: marker.text
+        }))
+    );
+  }
+
   function syncChart(fitContent = true) {
     if (!chart) {
       return;
@@ -203,25 +260,50 @@
       const positiveColor = resolveChartColor("var(--positive)", computedStyle);
       const negativeColor = resolveChartColor("var(--negative)", computedStyle);
 
+      const chartApi = chart;
+      const addValueSeries = (): ISeriesApi<"Line" | "Area"> =>
+        item.type === "line"
+          ? chartApi.addSeries(LineSeries, {
+              color: resolvedColor,
+              priceScaleId: item.priceScaleId,
+              lineWidth: 2,
+              lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
+              pointMarkersVisible: item.showPointMarkers ?? false,
+              pointMarkersRadius: item.pointMarkerRadius ?? 3,
+              priceFormat: priceFormatFor(item, normalizedData),
+              lastValueVisible: false,
+              priceLineVisible: false
+            })
+          : chartApi.addSeries(AreaSeries, {
+              lineColor: resolvedColor,
+              priceScaleId: item.priceScaleId,
+              topColor: colorWithAlpha(resolvedColor, 0.09),
+              bottomColor: colorWithAlpha(resolvedColor, 0.09),
+              invertFilledArea: item.invertFilledArea ?? false,
+              lineWidth: 2,
+              pointMarkersVisible: item.showPointMarkers ?? false,
+              pointMarkersRadius: item.pointMarkerRadius ?? 3,
+              priceFormat: priceFormatFor(item, normalizedData),
+              lastValueVisible: false,
+              priceLineVisible: false
+            });
+
       let api: ISeriesApi<"Line" | "Area" | "Candlestick" | "Histogram">;
-      if (item.type === "line") {
-        api = chart.addSeries(LineSeries, {
-          color: resolvedColor,
-          priceScaleId: item.priceScaleId,
-          lineWidth: 2,
-          lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
-          pointMarkersVisible: item.showPointMarkers ?? false,
-          pointMarkersRadius: item.pointMarkerRadius ?? 3,
-          priceFormat: {
-            type: "price",
-            precision: inferPricePrecision(normalizedData),
-            minMove: 10 ** -inferPricePrecision(normalizedData)
-          },
-          lastValueVisible: false,
-          priceLineVisible: false
+      if (item.type !== "candlestick" && item.type !== "histogram") {
+        const runs = item.breakOnGaps ? gapRuns(item) : [normalizedData];
+        runs.forEach((run, index) => {
+          const runApi = addValueSeries();
+          runApi.setData(run);
+          const valued = run.filter((point): point is ChartPoint => "value" in point);
+          const first = valued[0]?.time ?? Number.NEGATIVE_INFINITY;
+          const last = valued.at(-1)?.time ?? Number.POSITIVE_INFINITY;
+          const markers = (item.markers ?? []).filter((marker) => runs.length === 1 || (marker.time >= first && marker.time <= last));
+          if (markers.length) attachMarkers(runApi, markers, computedStyle);
+          seriesMap.set(index === 0 ? item.id : `${item.id}#run${index}`, runApi);
         });
-        api.setData(normalizedData);
-      } else if (item.type === "candlestick") {
+        continue;
+      }
+      if (item.type === "candlestick") {
         const candleData = normalizeCandlestickData(item.data);
         api = chart.addSeries(CandlestickSeries, {
           priceScaleId: item.priceScaleId,
@@ -235,7 +317,7 @@
           priceLineVisible: false
         });
         api.setData(candleData);
-      } else if (item.type === "histogram") {
+      } else {
         api = chart.addSeries(HistogramSeries, {
           color: colorWithAlpha(resolvedColor, 0.35),
           priceScaleId: item.priceScaleId,
@@ -251,25 +333,6 @@
             scaleMargins: { top: 0.78, bottom: 0 }
           });
         }
-      } else {
-        api = chart.addSeries(AreaSeries, {
-          lineColor: resolvedColor,
-          priceScaleId: item.priceScaleId,
-          topColor: colorWithAlpha(resolvedColor, 0.09),
-          bottomColor: colorWithAlpha(resolvedColor, 0.09),
-          invertFilledArea: item.invertFilledArea ?? false,
-          lineWidth: 2,
-          pointMarkersVisible: item.showPointMarkers ?? false,
-          pointMarkersRadius: item.pointMarkerRadius ?? 3,
-          priceFormat: {
-            type: "price",
-            precision: inferPricePrecision(normalizedData),
-            minMove: 10 ** -inferPricePrecision(normalizedData)
-          },
-          lastValueVisible: false,
-          priceLineVisible: false
-        });
-        api.setData(normalizedData);
       }
       seriesMap.set(item.id, api);
     }
@@ -344,6 +407,9 @@
         item.showPointMarkers ?? false,
         item.pointMarkerRadius ?? null,
         item.invertFilledArea ?? false,
+        item.breakOnGaps ?? false,
+        item.valueFormat ?? "price",
+        (item.markers ?? []).map((marker) => `${marker.time}:${marker.text}`).join("|"),
         item.data.length,
         item.data.at(0)?.time ?? null,
         item.data.at(-1)?.time ?? null,

@@ -63,6 +63,8 @@ const JOURNAL_KIND_LABELS: Record<IdeaJournalKind, string> = {
   criterion_removed: "Criterion",
   criterion_triggered: "Triggered",
   criterion_acknowledged: "Acknowledged",
+  tracking_segment: "Tracking",
+  tracking_settings: "Costs",
 };
 
 /** Board filter presets; "open" is every idea that is neither archived nor closed. */

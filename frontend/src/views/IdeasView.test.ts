@@ -29,6 +29,24 @@ const LIST: IdeaListResponse = {
       criteria_counts: { pending: 0, holding: 2, triggered: 1, unavailable: 0, stale: 0 },
       criteria_total: 3,
       unacknowledged_triggers: 1,
+      tracking: {
+        label: "Hypothetical, not executed",
+        segments: 1,
+        open: true,
+        started_at: "2026-11-09T14:00:00",
+        snapshot: {
+          status: "tracking",
+          computed_at: "2026-11-14T12:00:00",
+          as_of: "2026-11-13",
+          net_return: -0.0215,
+          gross_return: -0.02,
+          benchmark_return: 0.01,
+          benchmark: "SPY",
+          sessions: 5,
+          gaps: 0,
+          partial: false,
+        },
+      },
     },
     {
       idea_id: "i2",
@@ -130,6 +148,11 @@ describe("IdeasView", () => {
     expect(body).toMatch(/<th class="num">Challenges<\/th>/);
     // I2: criterion states (triggered first) and days to review.
     expect(body).toContain("<th>Criteria</th>");
+    // I3a: rentabilidad hipotética desde la activación, con su sesión y el rótulo en la cabecera.
+    expect(body).toContain("Since activation");
+    expect(body).toContain('title="Hypothetical, not executed: net return since activation, after costs"');
+    expect(body).toMatch(/<span class="negative[^"]*">-2\.15%<\/span>/);
+    expect(body).toContain("as of 2026-11-13");
     expect(body.indexOf("1 triggered")).toBeLessThan(body.indexOf("2 holding"));
     expect(body).toContain("overdue");
     // The default "Open" filter hides archived ideas.

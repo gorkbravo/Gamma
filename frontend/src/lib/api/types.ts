@@ -4709,7 +4709,9 @@ export type IdeaJournalKind =
   | "criterion_edited"
   | "criterion_removed"
   | "criterion_triggered"
-  | "criterion_acknowledged";
+  | "criterion_acknowledged"
+  | "tracking_segment"
+  | "tracking_settings";
 
 export type IdeaCriterionKind = "invalidate" | "confirm" | "review";
 export type IdeaCriterionCondition =
@@ -4986,6 +4988,8 @@ export interface Idea {
   journal: IdeaJournalEntry[];
   evidence_counts: Record<IdeaEvidenceStance, number>;
   criteria_counts: Record<IdeaCriterionState, number>;
+  /** I3a: segments, cost assumptions and the last headline; the series comes from /tracking. */
+  tracking?: IdeaTrackingRecord | null;
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
 }
 
@@ -5016,6 +5020,8 @@ export interface IdeaSummary {
   criteria_counts: Record<IdeaCriterionState, number>;
   criteria_total: number;
   unacknowledged_triggers: number;
+  /** I3a: Board headline ("forward return since activation"), hypothetical. */
+  tracking?: IdeaTrackingHeadline | null;
 }
 
 export interface IdeaStorageWarning {
@@ -5068,4 +5074,195 @@ export interface IdeaEvidenceCreatePayload extends IdeaPinDraft {
 export interface IdeaPinResponse {
   idea: Idea;
   evidence: IdeaEvidence;
+}
+
+// ── Ideas: hypothetical forward tracking (Workstream 12, I3a) ────────────────
+
+export type IdeaTrackingStatus = "not_started" | "waiting" | "tracking" | "stopped" | "unavailable";
+export type IdeaTrackingSegmentStatus =
+  | "untracked"
+  | "unavailable"
+  | "waiting"
+  | "never_entered"
+  | "tracking"
+  | "exiting"
+  | "closed";
+export type IdeaTrackingCostClass =
+  | "us_equity_liquid"
+  | "equity_other"
+  | "futures"
+  | "options"
+  | "crypto_spot"
+  | "prediction_contract"
+  | "non_tradable";
+
+export interface IdeaTrackingSnapshot {
+  status: IdeaTrackingStatus;
+  computed_at: string;
+  as_of: string | null;
+  net_return: number | null;
+  gross_return: number | null;
+  benchmark_return: number | null;
+  benchmark: string | null;
+  sessions: number;
+  gaps: number;
+  partial: boolean;
+}
+
+export interface IdeaTrackingHeadline {
+  label: string;
+  segments: number;
+  open: boolean;
+  started_at: string;
+  snapshot: IdeaTrackingSnapshot | null;
+}
+
+export interface IdeaTrackedLeg {
+  entity: CrossTabHandoffEntity;
+  stated_weight: number | null;
+  weight: number | null;
+  weight_source: "stated" | "stance";
+  asset_class: IdeaTrackingCostClass;
+  market: string;
+  key: string;
+}
+
+export interface IdeaTrackingSegmentRecord {
+  segment_id: string;
+  number: number;
+  started_at: string;
+  start_reason: string;
+  start_note: string;
+  stance: IdeaStance;
+  legs: IdeaTrackedLeg[];
+  ended_at: string | null;
+  end_reason: string | null;
+  end_note: string;
+  untracked_reason: string | null;
+}
+
+export interface IdeaTrackingRecord {
+  label: string;
+  benchmark: string;
+  cost_model: { per_side_bp: Record<string, number>; leg_classes: Record<string, string>; updated_at: string | null };
+  segments: IdeaTrackingSegmentRecord[];
+  snapshot: IdeaTrackingSnapshot | null;
+}
+
+export interface IdeaTrackingCostClassView {
+  asset_class: IdeaTrackingCostClass;
+  label: string;
+  basis: string;
+  per_side_bp: number | null;
+  default_bp: number | null;
+  editable: boolean;
+  source: "stated" | "quote" | "none";
+  edited: boolean;
+}
+
+export interface IdeaTrackingSegmentLeg {
+  key: string;
+  label: string;
+  entity_type: string;
+  normalized_id: string;
+  stated_weight: number | null;
+  weight: number | null;
+  weight_source: "stated" | "stance";
+  asset_class: IdeaTrackingCostClass;
+  detected_class: IdeaTrackingCostClass;
+  cost_bp: number | null;
+  market: string;
+  entry_price: number | null;
+  last_price: number | null;
+}
+
+export interface IdeaTrackingSegment {
+  segment_id: string;
+  number: number;
+  status: IdeaTrackingSegmentStatus;
+  reason: string | null;
+  started_at: string;
+  start_reason: string;
+  start_note: string;
+  ended_at: string | null;
+  end_reason: string | null;
+  stance: IdeaStance;
+  entry_session: string | null;
+  exit_session: string | null;
+  last_session: string | null;
+  sessions: number;
+  gaps: number;
+  gross_return: number | null;
+  net_return: number | null;
+  entry_cost: number | null;
+  exit_cost: number | null;
+  cost: number | null;
+  benchmark_return: number | null;
+  excess_return: number | null;
+  max_drawdown: number | null;
+  legs: IdeaTrackingSegmentLeg[];
+}
+
+export interface IdeaTrackingPoint {
+  session: string;
+  segment: number;
+  net_return: number | null;
+  gross_return: number | null;
+  benchmark_return: number | null;
+  drawdown: number | null;
+  gap: boolean;
+  missing: string[];
+}
+
+export interface IdeaTrackingProvenance {
+  key: string;
+  label: string;
+  role: "leg" | "benchmark";
+  source_provider: string | null;
+  retrieved_at: string | null;
+  origin: string | null;
+  transformation_note: string | null;
+  available: boolean;
+}
+
+export interface IdeaTrackingResponse {
+  idea_id: string;
+  label: string;
+  status: IdeaTrackingStatus;
+  status_reason: string | null;
+  methodology: string;
+  summary: {
+    net_return: number | null;
+    gross_return: number | null;
+    cost_drag: number | null;
+    benchmark_return: number | null;
+    excess_return: number | null;
+    max_drawdown: number | null;
+    sessions: number;
+    gaps: number;
+    partial: boolean;
+    first_session: string | null;
+    as_of: string | null;
+  };
+  benchmark: { symbol: string; available: boolean; reason: string | null };
+  cost_model: {
+    classes: IdeaTrackingCostClassView[];
+    leg_classes: Record<string, string>;
+    updated_at: string | null;
+    edited: boolean;
+  };
+  segments: IdeaTrackingSegment[];
+  points: IdeaTrackingPoint[];
+  warnings: string[];
+  provenance: IdeaTrackingProvenance[];
+  computed_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface IdeaTrackingSettingsPayload {
+  per_side_bp?: Record<string, number>;
+  leg_classes?: Record<string, string | null>;
+  benchmark?: string;
 }

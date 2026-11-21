@@ -1,4 +1,4 @@
-// Ideas store (Workstream 12, checkpoints I1 and I2).
+// Ideas store (Workstream 12, checkpoints I1, I2 and I3a).
 //
 // One place that talks to /ideas, so the Ideas tab, the shared Pin to idea
 // action, Sitrep ("Promote to idea", "Your ideas") and the notification center
@@ -23,6 +23,8 @@ import type {
   IdeaPatchPayload,
   IdeaPinResponse,
   IdeaSummary,
+  IdeaTrackingResponse,
+  IdeaTrackingSettingsPayload,
 } from "../api/types";
 
 export const ideaList = writable<IdeaListResponse | null>(null);
@@ -38,6 +40,10 @@ export const ideaObservables = writable<IdeaObservableRegistryResponse | null>(n
 /** "What is this?" texts by key, loaded once. */
 export const ideaExplanations = writable<Record<string, IdeaExplanation>>({});
 export const criteriaBusy = writable(false);
+/** I3a: the selected idea's hypothetical forward record, rebuilt by the backend on each read. */
+export const ideaTracking = writable<IdeaTrackingResponse | null>(null);
+export const ideaTrackingLoading = writable(false);
+export const ideaTrackingError = writable("");
 
 /** Every idea the board knows about, newest change first. */
 export const ideaSummaries = derived(ideaList, ($list): IdeaSummary[] => $list?.items ?? []);
@@ -263,6 +269,49 @@ export async function previewObservable(observable: IdeaObservableRef): Promise<
     return await postJson<IdeaObservablePreview>("/ideas/observables/preview", { observable });
   } catch (error) {
     ideasError.set(messageOf(error));
+    return null;
+  }
+}
+
+// ── Hypothetical forward tracking (I3a) ─────────────────────────────────────
+
+let trackingRequest = 0;
+
+/** Rebuild the selected idea's series. Errors stay in the tracking panel, not the Ideas error line. */
+export async function loadIdeaTracking(ideaId: string): Promise<IdeaTrackingResponse | null> {
+  const request = ++trackingRequest;
+  ideaTrackingLoading.set(true);
+  if (get(ideaTracking)?.idea_id !== ideaId) ideaTracking.set(null);
+  try {
+    const response = await getJson<IdeaTrackingResponse>(`/ideas/${encodeURIComponent(ideaId)}/tracking`);
+    if (request !== trackingRequest) return response;
+    ideaTracking.set(response);
+    ideaTrackingError.set("");
+    // El servidor guarda el titular del tablero al reconstruir la serie; el tablero lo recoge ya.
+    void loadIdeas();
+    return response;
+  } catch (error) {
+    if (request === trackingRequest) ideaTrackingError.set(messageOf(error));
+    return null;
+  } finally {
+    if (request === trackingRequest) ideaTrackingLoading.set(false);
+  }
+}
+
+/** Change the cost assumptions or the benchmark (journaled); returns the recomputed record. */
+export async function updateIdeaTracking(
+  ideaId: string,
+  payload: IdeaTrackingSettingsPayload
+): Promise<IdeaTrackingResponse | null> {
+  try {
+    const response = await patchJson<IdeaTrackingResponse>(`/ideas/${encodeURIComponent(ideaId)}/tracking`, payload);
+    ideaTracking.set(response);
+    ideaTrackingError.set("");
+    // El cambio queda en el diario de la idea.
+    await Promise.all([loadIdea(ideaId), loadIdeas()]);
+    return response;
+  } catch (error) {
+    ideaTrackingError.set(messageOf(error));
     return null;
   }
 }

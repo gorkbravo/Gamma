@@ -1,8 +1,10 @@
-"""``/ideas`` routes (Workstream 12, checkpoints I1 and I2).
+"""``/ideas`` routes (Workstream 12, checkpoints I1, I2 and I3a).
 
-Local research records plus read-only criterion evaluation. Evaluation reads
-observables through existing read-only services (the observable registry);
-no route here can place, stage or route an order, or touch an account.
+Local research records plus read-only criterion evaluation and hypothetical
+forward tracking. Evaluation and tracking read prices and observables through
+existing read-only services; the tracked book is labelled "Hypothetical, not
+executed". No route here can place, stage or route an order, or touch an
+account.
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ from src.api.schemas.ideas import (
     IdeaNotificationModel,
     IdeaNotificationsResponseModel,
     IdeaPinResponseModel,
+    IdeaTrackingResponseModel,
+    IdeaTrackingSettingsRequestModel,
     ObservableDefinitionModel,
     ObservablePreviewRequestModel,
     ObservablePreviewResponseModel,
@@ -59,6 +63,10 @@ def _observables(request: Request):
 
 def _scheduler(request: Request):
     return getattr(request.app.state.runtime, "idea_scheduler", None)
+
+
+def _tracking(request: Request):
+    return request.app.state.runtime.idea_tracking
 
 
 def _idea_response(idea: Idea) -> IdeaModel:
@@ -319,6 +327,29 @@ def acknowledge_criterion(idea_id: str, criterion_id: str, request: Request) -> 
     return _idea_response(idea)
 
 
+@router.get("/ideas/{idea_id}/tracking", response_model=IdeaTrackingResponseModel)
+def get_idea_tracking(idea_id: str, request: Request) -> IdeaTrackingResponseModel:
+    """The hypothetical forward record, rebuilt from provider closes on every read."""
+    try:
+        result = _tracking(request).compute(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return IdeaTrackingResponseModel(**result.to_dict())
+
+
+@router.patch("/ideas/{idea_id}/tracking", response_model=IdeaTrackingResponseModel)
+def update_idea_tracking(
+    idea_id: str, payload: IdeaTrackingSettingsRequestModel, request: Request
+) -> IdeaTrackingResponseModel:
+    """Change the cost assumptions or the benchmark (journaled); returns the recomputed record."""
+    try:
+        _service(request).update_tracking_settings(idea_id, payload.to_domain())
+        result = _tracking(request).compute(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return IdeaTrackingResponseModel(**result.to_dict())
+
+
 @router.get("/ideas/{idea_id}/export")
 def export_idea(
     idea_id: str,
@@ -328,11 +359,19 @@ def export_idea(
     service = _service(request)
     try:
         idea = service.get_idea(idea_id)
+        tracking_result = None
+        if idea.tracking is not None and idea.tracking.segments:
+            try:
+                tracking_result = _tracking(request).compute_for(idea, persist=False).to_dict()
+            except Exception:  # noqa: BLE001 - la exportación sale igual, con el último titular guardado
+                tracking_result = None
         if format == "json":
-            content = json.dumps(service.export_json(idea_id), indent=2, ensure_ascii=False, allow_nan=False)
+            content = json.dumps(
+                service.export_json(idea_id, tracking_result=tracking_result), indent=2, ensure_ascii=False, allow_nan=False
+            )
             media_type = "application/json; charset=utf-8"
         else:
-            content = service.export_markdown(idea_id)
+            content = service.export_markdown(idea_id, tracking_result=tracking_result)
             media_type = "text/markdown; charset=utf-8"
     except Exception as exc:  # noqa: BLE001
         _raise(exc)

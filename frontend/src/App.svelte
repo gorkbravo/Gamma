@@ -49,11 +49,15 @@
     ideaObservables,
     ideaOpenRequest,
     ideaSummaries,
+    ideaTracking,
+    ideaTrackingError,
+    ideaTrackingLoading,
     ideasError,
     ideasLoading,
     loadIdea,
     loadIdeaNotifications,
     loadIdeaObservables,
+    loadIdeaTracking,
     loadIdeas,
     loadMacroEventOptions,
     patchIdea,
@@ -63,6 +67,7 @@
     transitionIdea,
     unpinEvidence,
     updateCriterion,
+    updateIdeaTracking,
   } from "./lib/stores/ideas";
   import type { Idea, IdeaCriterionPayload } from "./lib/api/types";
   import IdeaNotificationCenter from "./components/IdeaNotificationCenter.svelte";
@@ -3326,6 +3331,11 @@
             onEvaluateIdea={(ideaId: string) => evaluateIdea(ideaId, "manual")}
             onPreviewObservable={previewObservable}
             onLoadEvents={() => loadMacroEventOptions("US")}
+            tracking={$ideaTracking}
+            trackingLoading={$ideaTrackingLoading}
+            trackingError={$ideaTrackingError}
+            onLoadTracking={loadIdeaTracking}
+            onUpdateTracking={updateIdeaTracking}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component

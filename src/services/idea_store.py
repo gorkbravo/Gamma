@@ -36,17 +36,20 @@ from src.models.ideas import (
     IDEA_SCHEMA_VERSION,
     Idea,
     IdeaValidationError,
+    TRACKING_LABEL,
     assert_journal_append_only,
     migrate_idea_v1_to_v2,
+    migrate_idea_v2_to_v3,
 )
 from src.utils.time import now_utc
 
-# Version 2 (I2) added the criteria columns to each board row.
-IDEA_INDEX_SCHEMA_VERSION = 2
+# Version 2 (I2) added the criteria columns to each board row; version 3 (I3a) the
+# tracking headline ("forward return since activation").
+IDEA_INDEX_SCHEMA_VERSION = 3
 IdeaMigration = Callable[[dict[str, Any]], dict[str, Any]]
 
 # from_version -> function returning the payload at from_version + 1.
-DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {1: migrate_idea_v1_to_v2}
+DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {1: migrate_idea_v1_to_v2, 2: migrate_idea_v2_to_v3}
 
 
 class IdeaStoreError(RuntimeError):
@@ -108,6 +111,8 @@ class IdeaSummary:
     criteria_counts: Mapping[str, int] = field(default_factory=dict)
     criteria_total: int = 0
     unacknowledged_triggers: int = 0
+    # Titular del seguimiento hipotético (I3a): último snapshot calculado, con su sesión ``as_of``.
+    tracking: Mapping[str, Any] | None = None
     schema_version: int = IDEA_SCHEMA_VERSION
 
     @classmethod
@@ -141,6 +146,7 @@ class IdeaSummary:
             criteria_counts=idea.criteria_counts(),
             criteria_total=len(idea.criteria),
             unacknowledged_triggers=idea.unacknowledged_triggers,
+            tracking=_tracking_headline(idea),
             schema_version=idea.schema_version,
         )
 
@@ -173,6 +179,7 @@ class IdeaSummary:
             "criteria_counts": {state: int(self.criteria_counts.get(state, 0)) for state in CRITERION_STATES},
             "criteria_total": self.criteria_total,
             "unacknowledged_triggers": self.unacknowledged_triggers,
+            "tracking": dict(self.tracking) if self.tracking else None,
             "schema_version": self.schema_version,
         }
 
@@ -208,6 +215,7 @@ class IdeaSummary:
             criteria_counts={state: int(criteria_counts.get(state) or 0) for state in CRITERION_STATES},
             criteria_total=int(payload.get("criteria_total") or 0),
             unacknowledged_triggers=int(payload.get("unacknowledged_triggers") or 0),
+            tracking=dict(payload["tracking"]) if isinstance(payload.get("tracking"), Mapping) else None,
             schema_version=int(payload.get("schema_version") or IDEA_SCHEMA_VERSION),
         )
 
@@ -504,6 +512,21 @@ class IdeaStore:
             os.replace(temporary, path)
         finally:
             Path(temporary).unlink(missing_ok=True)
+
+
+def _tracking_headline(idea: Idea) -> dict[str, Any] | None:
+    """Board figure: the last computed snapshot plus the segment count, or ``None``."""
+    tracking = idea.tracking
+    if tracking is None or not tracking.segments:
+        return None
+    snapshot = tracking.snapshot.to_dict() if tracking.snapshot else None
+    return {
+        "label": TRACKING_LABEL,
+        "segments": len(tracking.segments),
+        "open": tracking.open_segment is not None,
+        "started_at": tracking.segments[0].started_at.isoformat(),
+        "snapshot": snapshot,
+    }
 
 
 def _file_stat(path: Path) -> tuple[int, int]:

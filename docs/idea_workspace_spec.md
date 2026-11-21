@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I3-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking) is done on branch `claude/laughing-gauss-4b5d02`, not merged, awaiting review (see [I3a implementation notes](#i3a-implementation-notes)). I3b-I3d and I4-I6 are not started.
 
 ## Goal
 
@@ -118,17 +118,40 @@ The registry orders observables for the reference retail user: the ones that nee
 | `trial_count` | Number of Script runs and sweep points attached to this idea before the current signal. It is shown next to every performance statistic |
 | `cost_model` | Explicit cost and slippage assumptions per leg, from the per-asset-class defaults below; always shown, editable, never zero by default |
 
-**Default cost model (decision 5):** costs are per side, set by asset class, and shown wherever a return appears. The values below are **starting assumptions**, not measured figures. They should be checked against current broker and venue fee schedules before I3 ships.
+**Default cost model (decision 5):** costs are per side, set by asset class, and shown wherever a return appears. The defaults were checked on **2026-11-21** against the official broker, venue and tax pages listed below. They remain **assumptions**: a fee schedule gives the commission and the fees, but the half spread is an estimate, and every user's broker differs. Two starting values were raised after the check: other equities from 10 to 15 bp, and spot crypto from 25 to 50 bp.
 
-| Asset class | Default per side | Basis |
+| Asset class | Default per side | Basis (checked 2026-11-21) |
 | --- | --- | --- |
-| Liquid US equities and ETFs (index members) | 5 bp | Commission plus half a typical spread |
-| Other equities and ETFs (small caps, non-US, UCITS) | 10 bp | Wider spreads, FX and venue fees |
-| Futures | 3 bp of notional | Half a tick plus commission on liquid contracts |
-| Options | Half the quoted bid-ask at the mark | Taken from the chain; marked unavailable without a quote |
-| Spot crypto | 25 bp | Taker fee plus spread |
-| Prediction market contracts | Half the quoted spread, plus the venue fee where the venue charges one | Taken from the book |
+| Liquid US equities and ETFs (index members) | 5 bp | Commission $0 online at Schwab [2] and Fidelity [3] and at IBKR Lite; IBKR Pro Fixed $0.005 per share, $1 minimum, 1% maximum (about 1-2 bp on a typical order) [1]. SEC Section 31 fee $20.60 per million of sales since 2026-04-04 (0.21 bp, sales only) [4]. FINRA TAF $0 from 2026-10-01 to 2026-12-31 [5], otherwise $0.000195 per share sold, at most $9.79 per trade [6]. **Assumption:** half spread of 1-3 bp for index members; 5 bp is a conservative sum |
+| Other equities and ETFs (small caps, non-US, UCITS) | 15 bp | IBKR Europe 0.05% per order (5 bp) with a EUR 3 minimum (Fixed) [1]. **Assumption:** half spread of about 10 bp for small caps, non-US listings and UCITS ETFs. **Not included:** buy-side taxes, which a user can add by raising the class cost: UK stamp duty or SDRT 0.5% [7], French TTF 0.4% since 2025-04-01 [8], Spanish ITF 0.2% on companies above EUR 1,000 M [9], Italian FTT 0.4% (0.2% on regulated markets and MTFs) [10] |
+| Futures | 3 bp of notional | IBKR $0.85 per E-mini contract; its ES example totals $2.24 with exchange and regulatory fees, Micro E-mini $0.25 plus fees [11]. ES is $50 × the index with a 0.25-point tick worth $12.50 [12]. **Assumption:** at an index level near 6,000 that is about 0.3 bp per side for ES; 3 bp is kept to cover less liquid contracts. Not priced in I3a |
+| Options | Half the quoted bid-ask at the mark | Taken from the chain; marked unavailable without a quote. Commission at IBKR Pro $0.65 per contract (premium of $0.10 or more), $1 minimum per order [13]; $0.65 at Schwab and Fidelity [2][3]. Not priced in I3a |
+| Spot crypto | 50 bp | Entry-tier taker fees: Coinbase Advanced 0.50% in the EU and UK and 0.90% in the US [14]; Kraken Pro 0.80% [15]; Binance 0.10%, not available to US residents [16]. **Assumption:** market orders at an EU/UK entry tier; a US or Kraken user pays more and a Binance user less |
+| Prediction market contracts | Half the quoted spread, plus the venue fee where the venue charges one | Taken from the book. Polymarket charges takers C × rate × p × (1 − p) with a rate of 0.05 or 0.01 by category, makers nothing, geopolitics exempt [17]. **Kalshi not verified:** its fee schedule page refused connections; its help page confirms maker fees on some markets but not the formula [18]. Not priced in I3a |
 | Macro series and other non-tradable observables | None | They are criteria, not legs |
+
+Sources, all read on 2026-11-21:
+
+1. IBKR stock commissions: <https://www.interactivebrokers.com/en/pricing/commissions-stocks.php>
+2. Charles Schwab pricing: <https://www.schwab.com/pricing>
+3. Fidelity commissions: <https://www.fidelity.com/trading/commissions-margin-rates>
+4. SEC Fee Rate Advisory 2026-2 (issued 2026-02-27): <https://www.sec.gov/rules-regulations/fee-rate-advisories/2026-2>
+5. FINRA billing FAQ (TAF suspension): <https://www.finra.org/rules-guidance/guidance/faqs/finra-billingcollections>
+6. FINRA fee adjustment schedule (SR-FINRA-2024-019): <https://www.finra.org/rules-guidance/rule-filings/sr-finra-2024-019/fee-adjustment-schedule>. FINRA's rulebook page still shows the older $0.000166 and $8.30.
+7. GOV.UK, tax when you buy shares: <https://www.gov.uk/tax-buy-shares>
+8. BOFiP, French TTF at 0.4% (ACTU-2025-00034): <https://bofip.impots.gouv.fr/bofip/14605-PGP.html/ACTU-2025-00034>
+9. BOE, Ley 5/2020 (Impuesto sobre las Transacciones Financieras), art. 7: <https://www.boe.es/buscar/act.php?id=BOE-A-2020-12356>
+10. Agenzia delle Entrate, imposta sulle transazioni finanziarie: <https://www.agenziaentrate.gov.it/portale/schede/pagamenti/imposta-sulle-transazioni-finanziarie/infogen-imposta-transazioni-finanziarie>
+11. IBKR futures commissions: <https://www.interactivebrokers.com/en/pricing/commissions-futures.php>
+12. CME Group, E-mini S&P 500 contract specs: <https://www.cmegroup.com/markets/equities/sp/e-mini-sandp500.contractSpecs.html>
+13. IBKR options commissions: <https://www.interactivebrokers.com/en/pricing/commissions-options.php>
+14. Coinbase Advanced fee tiers: <https://www.coinbase.com/advanced-vip> and the 2026-09-16 announcement <https://www.coinbase.com/blog/were-lowering-fees-for-many-active-traders-on-coinbase-advanced> (the signed-in fee page was not read)
+15. Kraken Pro fees: <https://www.kraken.com/pro/fees>
+16. Binance fee schedule: <https://www.binance.com/en/fee/schedule>
+17. Polymarket trading fees: <https://docs.polymarket.com/trading/fees>
+18. Kalshi help, fees: <https://help.kalshi.com/trading/fees> (the fee schedule at kalshi.com could not be read)
+
+Fee schedules change; check these pages again before relying on a default. The figures are for research costs on a hypothetical book, not advice.
 
 ### `IdeaTest` and `IdeaRisk`
 
@@ -286,7 +309,11 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 | --- | --- | --- |
 | I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done, merged 2026-11-21** (see [I1 implementation notes](#i1-implementation-notes)) |
 | I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done, merged 2026-11-21** (see [I2 implementation notes](#i2-implementation-notes)) |
-| I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review |
+| I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review. Split on 2026-11-21 into the four slices below |
+| I3a: forward tracking | `IdeaTracking` with segments, the canonical daily series, the per-asset-class cost model, `GET`/`PATCH /ideas/{id}/tracking`, the tracking chart in the Idea view, the Board column | A legs idea tracks for five trading days with no backfill and no TWS; an edit opens a new segment; gaps stay gaps; costs are applied and shown. **Status: done on branch `claude/laughing-gauss-4b5d02`, not merged** (see [I3a implementation notes](#i3a-implementation-notes)) |
+| I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date |
+| I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale |
+| I3d: TWS intraday layer | IBKR marks for the legs while TWS is connected | With TWS, the intraday layer records and shows its gaps without changing the daily series |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
 | I5: Copilot | Ideas context builder, draft, review and explain tools | Copilot plan updated with a dated OpenAI guidance review; draft-from-card needs user acceptance; no execution authority |
@@ -365,6 +392,58 @@ A backend and a frontend code review of I1+I2 found these defects. They were fix
 - **Equity Research pins** store the lookback and benchmark of the run that produced the figures (`researchResultBasis`), in the title, the captured metrics and the reopen ids, and reopening runs exactly that analysis. Older pins reopen as before. The scope form now follows external draft changes, so after any handoff it shows the ticker, benchmark and lookback of the analysis on screen.
 - Still open, small: a "What is this?" button sits inside a `<label>` in the criteria form, and the legs editor table is not inside a `.table-scroll` wrapper at 390 px.
 
+### I3a implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/laughing-gauss-4b5d02`, cut from local `main` at b5b7ccd; not merged and not pushed.
+
+- **Model (schema v3):** `IdeaTracking` in `src/models/ideas.py` holds the benchmark (SPY by default), the `IdeaCostModel`, the segments and the last computed `IdeaTrackingSnapshot`. A segment freezes its legs as `IdeaTrackedLeg` records: the stated weight, the signed share of gross exposure (absolute shares add up to 1), where the weight came from, the detected asset class and the market. Segments only grow, and only the last one can be open.
+- **Weights:** with no stated weights, a `long` or `short` idea is an equal-weight book with that sign. A relative, event or neutral idea needs a signed weight on every leg, and a mix of stated and missing weights is refused rather than guessed. Such a segment, or one with a leg type this slice cannot price (commodity, prediction contract, FX, rates, macro), still opens with its `untracked_reason`. The period stays visible as a state.
+- **Segments:**
+  - Activation opens segment 1; restoring an archived idea opens a new one (reason `restored`).
+  - A leg edit that changes the book closes the open segment and opens the next one. That covers a new instrument, a different share of gross, or a stance change that alters a default weight. Renaming a leg or scaling all weights (1/−1 to 2/−2) keeps the segment.
+  - Archiving or removing every leg closes the segment.
+  - Every change writes a `tracking_segment` journal entry that starts with "Hypothetical, not executed".
+- **Entry and exit:**
+  - A segment's book enters at the first session where every leg has a close *after* the freeze instant, and exits at the first such close after its end. Consecutive segments chain at the same close.
+  - Each listing's close is placed at its exchange's closing time (`TRACKING_EXCHANGES`, at or before the official close). An unknown exchange suffix is taken to close at the start of its UTC day, so a close known before the freeze is never used.
+  - A segment edited again before its first close is `never_entered` and holds nothing.
+  - Nothing before a freeze is ever added.
+- **Canonical daily series** (`src/application/idea_tracking.py`):
+  - It is rebuilt on every read from provider closes. Equities and ETFs come from research market data, the read path of Strategy Lab and the `equity_close` observable (Yahoo Finance, then IBKR when configured; demo sample history in mock mode). Crypto comes from CoinGecko daily closes stamped at 00:00 UTC; the current-price point is not a close and is dropped.
+  - A session counts only once its close is final (20 minutes after the close; crypto at the next UTC midnight).
+  - The book buys fixed quantities at the entry close. Gross return is Σ share × (price / entry price − 1), in each instrument's own currency (no FX conversion in this slice).
+  - Net return subtracts the per-side cost of entering and of closing at the latest close (mark to liquidation).
+  - Benchmark, excess return and maximum drawdown (on the net path) are computed on the same sessions. Segments chain into one record "since activation".
+- **Gaps stay gaps:**
+  - Each market's calendar is the set of sessions on which any leg of that market, or a benchmark on the same market, has a close. Crypto trades every day.
+  - A session in a leg's calendar without that leg's close is a gap: no value, a warning naming the leg and the date, and a break in the chart line. Later sessions are valued from the entry prices, so nothing is interpolated.
+  - A market that was closed while another leg's market traded (an equity on a weekend in a crypto book) keeps its last close; that is not a gap.
+  - **Limitation:** without an exchange holiday calendar, a day that every source misses cannot be told from a holiday and is not shown as a gap.
+- **Costs:**
+  - Per side, by asset class (table above), never zero by default. The four stated-cost classes are editable from 0 to 500 bp, and a tracked leg can be moved to another stated-cost class. Options and prediction contracts take their cost from a live quote, which daily tracking does not read.
+  - The gross record never depends on the costs. A change is journaled (`tracking_settings`), recomputes the net figures and drops the stored Board headline, so a figure computed with other assumptions is never shown.
+- **Board headline:** rebuilding the series stores the snapshot on the idea without touching `updated_at`. The scheduler does it at start-up and after each daily close, together with the criteria passes; `GAMMA_IDEAS_EVALUATION=off` turns off both. The index (schema v3) serves it, and the Board's "Since activation (hyp.)" column shows the net return with its as-of session, gaps and "stopped" or "partial". It reads "Not tracked" or "Not computed" when there is no figure.
+- **Migration v2 → v3:** an active idea with legs gets one open segment, frozen at the later of its last activation or restore and its last leg edit (both read from the journal), with start reason `migrated`. Its legs have not changed since that instant, so nothing earlier is added. Earlier active periods are not reconstructed, because version 2 journals describe old legs only as text. Drafts and archived ideas get none.
+- **API and exports:**
+  - `GET /ideas/{id}/tracking` returns the rebuilt series: status, summary, segments with their legs and costs, points with gaps, cost classes with their basis, warnings and per-source provenance. `PATCH /ideas/{id}/tracking` changes the costs, leg classes or benchmark and returns the recomputed record.
+  - The idea and the Board rows carry the tracking record and headline.
+  - JSON export (format v3) adds `tracking_label` and the rebuilt `tracking_series`. Markdown adds "Tracking — Hypothetical, not executed" with the summary, the segments, the cost assumptions and the method.
+- **UI:**
+  - `IdeaTrackingPanel.svelte` sits after the criteria in the Idea view. Its title row has the label tag "Hypothetical, not executed", the session count and as-of date, and the shared provenance badge, whose tooltip holds the method.
+  - The panel shows net, gross, costs (with the per-side range), the benchmark, excess and maximum drawdown. Below them: a 220 px chart of the net record against the benchmark with S1, S2 … markers at segment entries, the segments table with the reason each one opened, an inline cost editor and the warnings.
+  - `TimeSeriesChart` gained opt-in `breakOnGaps`, `valueFormat: "percent"` and `markers`. lightweight-charts draws across whitespace points, so with `breakOnGaps` each continuous run is its own series and the gap keeps its slot on the axis.
+  - Two "What is this?" entries were added: `stat.forward_return` and `stat.tracking_costs`.
+- **Tests:**
+  - `tests/test_idea_tracking.py` (19, injected clock and prices, no network, no TWS) covers five trading days with no backfill, activation after the close, waiting for the first close, a leg edit opening segment 2 and chaining, renames and scaled weights, never-entered segments, archive and restore, gaps that stay gaps, closed markets that are not gaps, crypto with equities over a weekend, costs and their edits, asset classes, untrackable legs and weights, provider failures, close instants and DST, CoinGecko closes, the v2 → v3 migration, and the routes against the demo runtime.
+  - Frontend: `idea-tracking.test.ts`, `IdeaTrackingPanel.test.ts`, the Board column in `IdeasView.test.ts`, and the gap helpers in `chart-data.test.ts`.
+  - Full suites on 2026-11-21: backend 1275 passed, 5 skipped (`GAMMA_IDEAS_EVALUATION=off`); frontend 712 passed; `tsc` clean; production build OK.
+- **Browser check, 2026-11-21:**
+  - Mock backend with its `data/`, `cache/` and a copy of the sample data in the worktree. One MSFT close (2026-01-21) was removed to show a real gap. Ideas were seeded with an injected clock in January 2026, the range the demo sample covers.
+  - Headless Playwright in the light and dark themes at 1440, 1000 and 390 px: no console errors and no horizontal page overflow. The table scrolls inside its box at 390 px.
+  - What was seen: the pair idea's two segments with their markers, the gap as a break in both lines, the SPY idea entering the session after an after-close activation, the migrated v2 idea, and the commodity idea as "Not tracked" with its reason.
+  - A cost edit from the UI moved the net from −1.58% to −1.78%, left the gross at −1.38%, and wrote the journal entry.
+- **Left for later slices:** close, review and Review mode (I3b); test and risk snapshots (I3c); the TWS intraday layer (I3d). Also deferred: pricing commodity, futures, option and prediction legs; FX conversion of non-USD legs; exchange holiday calendars, so a day every source misses becomes a gap; borrow costs for shorts.
+
 ## Non-goals
 
 - Orders, execution, broker-side alerts, paper trading through the broker, automatic deployment.
@@ -383,8 +462,8 @@ Settled by the product owner on 2026-11-14:
 | 2 | Place | A **Research tab** after Sitrep (Board, Idea, Review); "Pin to idea" works from every panel | Surfaces |
 | 3 | Notifications | **In-app only**: notification center and Sitrep "Your ideas"; Tauri desktop notifications later; no off-machine channels | Surfaces |
 | 4 | Tracking resolution | **IBKR marks while TWS is connected, daily closes otherwise**: a canonical daily series for all statistics, plus an intraday layer recorded only while TWS is connected | `IdeaTracking`, I3 |
-| 5 | Default costs | **Per asset class**, shown and editable; values are starting assumptions to check against fee schedules before I3 | `IdeaSignal`, I3 |
+| 5 | Default costs | **Per asset class**, shown and editable; values are starting assumptions to check against fee schedules before I3 (checked 2026-11-21: other equities 15 bp, spot crypto 50 bp) | `IdeaSignal`, I3 |
 | 6 | Python client | **In this repo (`clients/python/`), after I4** | Quant bridge, I4b |
 | 7 | Reference retail user | **Any broker, no TWS**: the default path needs no IBKR; IBKR observables are enhancements | Personas, observable registry, I6 |
 
-Still to settle during implementation: the exact cost values (decision 5) and the client's API shape (I4b).
+Still to settle during implementation: the client's API shape (I4b). The per-side cost values (decision 5) were checked against official fee schedules on 2026-11-21 (see the default cost model); they stay assumptions the user can edit.
