@@ -946,6 +946,18 @@
   });
 
   $: parsedSynthetic = parseSyntheticText(syntheticText);
+  // Un cambio externo del borrador (reabrir un pin de idea, un handoff de Copilot o Sitrep)
+  // se refleja en el formulario; antes solo se leía al montar la vista y el formulario
+  // mostraba otro símbolo o lookback que el análisis en pantalla.
+  $: if (!workingAnalysis) syncFormFromDraft($researchDraft);
+  function syncFormFromDraft(draft: typeof initialDraft) {
+    if (draft.scopeType !== scopeType) scopeType = draft.scopeType;
+    if (draft.primarySymbol !== primarySymbol) primarySymbol = draft.primarySymbol;
+    if (draft.benchmarkSymbol !== benchmarkSymbol) benchmarkSymbol = draft.benchmarkSymbol;
+    if (draft.lookbackDays !== lookbackDays) lookbackDays = draft.lookbackDays;
+    if (draft.syntheticText !== syntheticText) syntheticText = draft.syntheticText;
+    if (draft.selectedPreset !== selectedPreset) selectedPreset = draft.selectedPreset;
+  }
   $: if (!workingAnalysis) setResearchDraft({
     scopeType,
     primarySymbol,
