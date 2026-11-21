@@ -584,6 +584,9 @@ class CriterionEvaluation:
     cadence_note: str | None = None
     provenance: ProvenanceRecord | None = None
     warnings: tuple[str, ...] = ()
+    # Solo ``event_occurs``: el evento ya estaba resuelto en la primera lectura tras armar
+    # la regla, así que no es una observación nueva y la regla no puede dispararse.
+    known_at_arming: bool = False
 
     def __post_init__(self) -> None:
         if self.state not in CRITERION_EVALUATION_STATES:
@@ -633,6 +636,7 @@ class CriterionEvaluation:
             "cadence_note": self.cadence_note,
             "provenance": self.provenance.to_dict() if self.provenance else None,
             "warnings": list(self.warnings),
+            "known_at_arming": self.known_at_arming,
         }
 
     @classmethod
@@ -654,6 +658,8 @@ class CriterionEvaluation:
             cadence_note=_optional_text(payload.get("cadence_note")),
             provenance=provenance_from_dict(provenance) if isinstance(provenance, Mapping) else None,
             warnings=tuple(str(item) for item in _list(payload.get("warnings"), "evaluation.warnings")),
+            # Ausente en ficheros anteriores al 2026-11-21: equivale a False.
+            known_at_arming=payload.get("known_at_arming") is True,
         )
 
 

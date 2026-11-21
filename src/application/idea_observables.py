@@ -409,6 +409,7 @@ class ObservableRegistry:
                 event_time=_naive_utc(detail.close_time or detail.end_time) if (detail.close_time or detail.end_time) else None,
                 value_display=status_display,
                 warnings=tuple(warnings),
+                instant_points=True,
             )
         return ObservableReading(
             value=value,
@@ -421,6 +422,7 @@ class ObservableRegistry:
             event_released=released,
             event_time=_naive_utc(detail.close_time or detail.end_time) if (detail.close_time or detail.end_time) else None,
             event_value=value,
+            instant_points=True,
         )
 
     def _read_crypto_price(self, ref: ObservableRef, now: datetime) -> ObservableReading:
@@ -447,6 +449,7 @@ class ObservableRegistry:
             value_display=self.format_value(ref, points[-1].value),
             provenance=provenance,
             stale_reason=_stale_reason(points[-1].at, now, 3, "price"),
+            instant_points=True,
         )
 
     def _read_commodity_price(self, ref: ObservableRef, now: datetime) -> ObservableReading:
@@ -494,6 +497,7 @@ class ObservableRegistry:
             provenance=provenance,
             stale_reason=_stale_reason(as_of, now, 7, "observation"),
             warnings=tuple(match.warnings or []),
+            instant_points=True,
         )
 
     def _read_macro_event(self, ref: ObservableRef, now: datetime) -> ObservableReading:
@@ -665,6 +669,7 @@ class ObservableRegistry:
             provenance=provenance,
             stale_reason=_stale_reason(as_of, now, 1, "snapshot"),
             warnings=tuple(warnings),
+            instant_points=True,
         )
 
     # -- internals -----------------------------------------------------------
