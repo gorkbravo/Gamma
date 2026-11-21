@@ -1789,27 +1789,43 @@
     ] ?? $researchDraft.lookbackDays;
   }
 
-  async function ensureSingleEquityResearch(symbol: string, timeframe?: string | null) {
+  async function ensureSingleEquityResearch(
+    symbol: string,
+    timeframe?: string | null,
+    basis?: { lookbackDays?: number | null; benchmarkSymbol?: string | null }
+  ) {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!normalizedSymbol) {
       return;
     }
+    // Un pin de idea trae el lookback y el benchmark exactos de su análisis; prevalecen sobre la ventana.
+    const lookbackDays = basis?.lookbackDays ?? sitrepLookbackDays(timeframe);
+    const benchmarkSymbol =
+      basis?.benchmarkSymbol?.trim().toUpperCase() || $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY";
     setResearchDraft({
       ...$researchDraft,
       scopeType: "single_ticker",
       primarySymbol: normalizedSymbol,
-      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
-      lookbackDays: sitrepLookbackDays(timeframe)
+      benchmarkSymbol,
+      lookbackDays
     });
-    if (researchResultMatchesSingleEquity(normalizedSymbol) && !timeframe) {
+    if (researchResultMatchesSingleEquity(normalizedSymbol) && !timeframe && !basis) {
       return;
     }
     await runResearch({
       scopeType: "single_ticker",
       primarySymbol: normalizedSymbol,
-      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
-      lookbackDays: sitrepLookbackDays(timeframe)
+      benchmarkSymbol,
+      lookbackDays
     });
+  }
+
+  /** Lookback y benchmark guardados por un pin de Equity Research (ausentes en pins anteriores). */
+  function equityResearchBasisFromHandoff(handoff: CrossTabHandoffEnvelope) {
+    const days = Number(copilotHandoffId(handoff, ["lookback_days"]));
+    const benchmark = copilotHandoffId(handoff, ["benchmark"]);
+    if (!(Number.isInteger(days) && days > 0) && !benchmark) return undefined;
+    return { lookbackDays: Number.isInteger(days) && days > 0 ? days : null, benchmarkSymbol: benchmark };
   }
 
   async function applySharedEquityToTab(tab: TabId) {
@@ -2577,7 +2593,11 @@
     await selectTab(targetTab);
 
     if (targetTab === "equity_research" && equitySymbol) {
-      await ensureSingleEquityResearch(equitySymbol, handoff.selected_timeframe?.label);
+      await ensureSingleEquityResearch(
+        equitySymbol,
+        handoff.selected_timeframe?.label,
+        equityResearchBasisFromHandoff(handoff)
+      );
     } else if (targetTab === "macro") {
       const mode = (handoff.intended_target_mode ?? "snapshot") as MacroContextState["mode"];
       await loadMacroWorkspace({

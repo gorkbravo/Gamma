@@ -127,6 +127,7 @@ import {
   saveResearchItem,
   deleteSavedResearchItem,
   runResearch,
+  researchResultBasis,
   clearSharedEquitySelection,
   setBaseCurrency,
   setMarketDataMode,
@@ -674,6 +675,8 @@ describe("app store orchestration", () => {
     expect(get(researchResult)?.scope_type).toBe("single_ticker");
     expect(get(researchResult)?.snapshot?.positions.map((position) => position.symbol)).toEqual(["AAPL"]);
     expect(get(riskResult)).toBeNull();
+    // El pin de idea guarda el lookback y el benchmark de la ejecución, no la ventana del gráfico.
+    expect(get(researchResultBasis)).toEqual({ lookbackDays: 252, benchmarkSymbol: "SPY" });
 
     riskResult.set({
       source_scope: "research",

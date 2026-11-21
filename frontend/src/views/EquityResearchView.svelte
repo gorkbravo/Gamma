@@ -31,6 +31,7 @@
   } from "../lib/api/types";
   import {
     researchDraft,
+    researchResultBasis,
     setResearchDraft,
     type ResearchOverviewLoadOptions,
     type ResearchRunOptions,
@@ -1019,19 +1020,28 @@
     : deriveCoverageFromResearchResult(result);
   $: scopeBadge = result ? toProvenanceBadge(result) : null;
   // Pin to idea: the scope's headline figures as shown. A single ticker
-  // reopens on the same symbol and timeframe; a synthetic basket reopens the
-  // mode, since the handoff carries no weights.
+  // reopens on the same symbol, lookback and benchmark that produced the
+  // figures (not the chart window); a synthetic basket reopens the mode,
+  // since the handoff carries no weights.
   $: scopePinDraft = ((): IdeaPinDraft | null => {
     if (!result) return null;
     const single = result.scope_type === "single_ticker" && Boolean(result.primary_symbol);
     const symbol = single ? String(result.primary_symbol).trim().toUpperCase() : "";
     const label = activePrimaryScopeLabel(result);
     const source = pinSourceFromProvenance(result, "equity_research_view.scope_analysis");
+    // Lookback y benchmark de la ejecución que produjo `result`, no del borrador actual.
+    const basis = $researchResultBasis;
+    const pinnedBenchmark = (result.benchmark_symbol || basis?.benchmarkSymbol || "").trim().toUpperCase();
+    const pinnedLookback = basis?.lookbackDays ?? null;
+    const titleBasis = [pinnedLookback ? `${pinnedLookback}D` : null, pinnedBenchmark ? `vs ${pinnedBenchmark}` : null]
+      .filter(Boolean)
+      .join(" ");
     return {
       kind: "metric",
-      title: `${label} scope · ${timeframe}`,
+      title: `${label} scope${titleBasis ? ` · ${titleBasis}` : ""}`,
       captured_values: {
         metrics: [
+          ...(pinnedLookback ? [captureMetric("Lookback", `${pinnedLookback} days`, pinnedLookback)] : []),
           captureMetric("Lookback return", pct(result.summary.total_return), result.summary.total_return),
           captureMetric("Latest day", pct(result.latest_daily_return), result.latest_daily_return),
           captureMetric("Annual return", pct(result.summary.annual_return), result.summary.annual_return),
@@ -1050,8 +1060,15 @@
         entity: single
           ? { entity_type: "equity", label: symbol, normalized_id: symbol, metadata: { symbol } }
           : { entity_type: "research_scope", label, normalized_id: `scope:${result.scope_type}` },
-        timeframe,
-        normalizedIds: single ? { symbol } : {},
+        // Con lookback guardado, la ventana del gráfico no describe el análisis: no se envía.
+        timeframe: single && pinnedLookback ? null : timeframe,
+        normalizedIds: single
+          ? {
+              symbol,
+              lookback_days: pinnedLookback ? String(pinnedLookback) : null,
+              benchmark: pinnedBenchmark || null,
+            }
+          : {},
         provider: source.provenance?.source_provider ?? null,
         warnings: result.warnings ?? [],
       }),

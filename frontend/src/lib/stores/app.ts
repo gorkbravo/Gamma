@@ -448,6 +448,8 @@ export const sitrepIndicesOverview = writable<ResearchOverviewResponse | null>(n
 export const sitrepFollowUps = writable<SitrepFollowUp[]>([]);
 export const sitrepWorkspaceMeta = writable<SitrepWorkspaceMeta | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
+/** Petición que produjo `researchResult`: el borrador puede cambiar sin volver a ejecutar. */
+export const researchResultBasis = writable<{ lookbackDays: number; benchmarkSymbol: string } | null>(null);
 export const strategyLabResult = writable<StrategyLabResult | null>(null);
 export const strategyLabComposition = writable<StrategyLabCompositionResult | null>(null);
 // Un fallo de composición conserva el último resultado correcto (ver auditoría 2026-10-06),
@@ -2012,6 +2014,7 @@ export async function runResearch(options: ResearchRunOptions) {
       const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload, { signal });
       if (signal.aborted) return null;
       researchResult.set(nextResearchResult);
+      researchResultBasis.set({ lookbackDays: payload.lookback_days, benchmarkSymbol: payload.benchmark_symbol });
       strategyLabComposition.set(null);
       researchCompareResult.set(null);
       riskResult.set(null);
