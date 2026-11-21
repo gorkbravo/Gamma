@@ -115,7 +115,8 @@ export async function patchIdea(ideaId: string, patch: IdeaPatchPayload): Promis
   const idea = await guarded(() => patchJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}`, patch));
   if (idea) {
     applyIdea(idea);
-    await loadIdeas();
+    // La fecha de revisión puede cambiar: el centro de notificaciones y Sitrep se refrescan ya.
+    await Promise.all([loadIdeas(), loadIdeaNotifications()]);
   }
   return idea;
 }
@@ -273,7 +274,8 @@ export async function deleteIdea(ideaId: string): Promise<boolean> {
     selectedIdeaId.set(null);
     activeIdea.set(null);
   }
-  await loadIdeas();
+  // Sin esto, los avisos de la idea borrada siguen visibles hasta el siguiente sondeo y abren un 404.
+  await Promise.all([loadIdeas(), loadIdeaNotifications()]);
   return true;
 }
 

@@ -25,6 +25,7 @@ import {
   ideaOpenRequest,
   ideasError,
   loadIdea,
+  patchIdea,
   pinEvidence,
   pinnableIdeas,
   requestOpenIdea,
@@ -95,6 +96,21 @@ describe("ideas store", () => {
     client.getText.mockResolvedValue("# Idea");
     expect(await exportIdea("b", "md")).toBe("# Idea");
     expect(client.getText).toHaveBeenCalledWith("/ideas/b/export?format=md");
+  });
+
+  it("refreshes the notifications after deleting or editing an idea", async () => {
+    // Regresión: los avisos de una idea borrada o con nueva fecha de revisión seguían visibles hasta el siguiente sondeo.
+    client.getJson.mockImplementation(async (path: string) =>
+      path === "/ideas" ? LIST : path === "/ideas/notifications" ? { items: [], triggered: 0, reviews_due: 0 } : { idea_id: "a" }
+    );
+    client.deleteJson.mockResolvedValue({ success: true });
+    await deleteIdea("a");
+    expect(client.getJson).toHaveBeenCalledWith("/ideas/notifications");
+
+    client.getJson.mockClear();
+    client.patchJson.mockResolvedValue({ idea_id: "b", title: "Active idea" });
+    await patchIdea("b", { title: "Active idea" });
+    expect(client.getJson).toHaveBeenCalledWith("/ideas/notifications");
   });
 
   it("adds a criterion, then refreshes the board and the notifications", async () => {

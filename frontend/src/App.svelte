@@ -2583,9 +2583,12 @@
       await loadMacroWorkspace({
         mode,
         timeframe: handoff.selected_timeframe?.label as MacroContextState["timeframe"] | undefined,
-        region: copilotHandoffMetadata(handoff, "region") as MacroContextState["region"] | undefined,
+        // Los follow-ups de Sitrep promovidos guardan región y tema en normalized_ids, sin entidad.
+        region: (copilotHandoffMetadata(handoff, "region") ??
+          copilotHandoffId(handoff, ["region"])) as MacroContextState["region"] | undefined,
         theme: (copilotHandoffMetadata(handoff, "lens") ??
-          copilotHandoffMetadata(handoff, "theme")) as MacroContextState["theme"] | undefined
+          copilotHandoffMetadata(handoff, "theme") ??
+          copilotHandoffId(handoff, ["theme", "lens"])) as MacroContextState["theme"] | undefined
       });
       return;
     } else if (targetTab === "commodities") {
@@ -2653,6 +2656,8 @@
   async function openIdea(ideaId: string) {
     workspaceMode = "research";
     ideasMode = "idea";
+    // Mientras carga la idea pedida no se muestra la anterior (con Edit/Archive/Delete activos).
+    if ($activeIdea?.idea_id !== ideaId) activeIdea.set(null);
     selectedIdeaId.set(ideaId);
     if ($activeTab !== "ideas") {
       await selectTab("ideas");
@@ -2688,10 +2693,21 @@
   ) as Record<string, string>;
 
   /** "Promote to idea": carry the follow-up's title, note and handoff across; the follow-up stays. */
+  // Promociones en curso por follow-up: un doble clic reutiliza la misma petición en vez de crear dos ideas.
+  const promotionsInFlight = new Map<string, Promise<string | null>>();
+
   async function promoteSitrepFollowUp(followUp: SitrepFollowUp) {
-    await loadIdeas();
-    const existing = findPromotedIdea($ideaSummaries, followUp.id);
-    const ideaId = existing?.idea_id ?? (await createIdea(buildPromotePayload(followUp)))?.idea_id ?? null;
+    let pending = promotionsInFlight.get(followUp.id);
+    if (!pending) {
+      pending = (async () => {
+        await loadIdeas();
+        const existing = findPromotedIdea($ideaSummaries, followUp.id);
+        return existing?.idea_id ?? (await createIdea(buildPromotePayload(followUp)))?.idea_id ?? null;
+      })();
+      promotionsInFlight.set(followUp.id, pending);
+      void pending.finally(() => promotionsInFlight.delete(followUp.id));
+    }
+    const ideaId = await pending;
     if (ideaId) {
       await openIdea(ideaId);
     }

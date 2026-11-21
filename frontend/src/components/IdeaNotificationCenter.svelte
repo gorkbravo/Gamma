@@ -34,9 +34,22 @@
     open = true;
     place();
     addListeners();
+    // El popover se renderiza al final de <body>: se le da el foco para que el teclado llegue a él.
+    await tick();
+    popover?.focus();
     await onRefresh();
     await tick();
     place();
+  }
+
+  /**
+   * Llevar el foco con Tab a otro elemento de la página cierra el popover.
+   * Sin destino (p. ej. al reconocer un aviso y desaparecer su botón) se mantiene abierto.
+   */
+  function handleFocusOut(event: FocusEvent) {
+    const next = event.relatedTarget as Node | null;
+    if (!next || popover?.contains(next) || trigger?.contains(next)) return;
+    hide(false);
   }
 
   function hide(returnFocus = true) {
@@ -101,7 +114,16 @@
 </button>
 
 {#if open}
-  <div bind:this={popover} use:portal class="notice-popover" style={position} role="dialog" aria-label="Idea notifications">
+  <div
+    bind:this={popover}
+    use:portal
+    class="notice-popover"
+    style={position}
+    role="dialog"
+    aria-label="Idea notifications"
+    tabindex="-1"
+    on:focusout={handleFocusOut}
+  >
     <div class="notice-head">
       <strong>Idea notifications</strong>
       <span>{triggered} triggered · {notifications?.reviews_due ?? 0} reviews due</span>

@@ -41,6 +41,7 @@
   import { toProvenanceBadge } from "../lib/provenance";
   import ProvenanceBadge from "./ProvenanceBadge.svelte";
   import WhatIsThis from "./WhatIsThis.svelte";
+  import { tick } from "svelte";
 
   export let idea: Idea;
   export let registry: IdeaObservableRegistryResponse | null = null;
@@ -160,6 +161,11 @@
       cadence = criterion.cadence;
       labelText = criterion.label;
       labelTouched = true;
+      if (observableId === "macro_event") void loadEvents();
+      // Una etiqueta que coincide con la generada sigue siendo automática: si se cambia
+      // el símbolo o el umbral, se regenera en vez de guardar la descripción antigua.
+      await tick();
+      labelTouched = criterion.label !== generatedLabel;
     } else {
       editingId = null;
       kind = "invalidate";
@@ -215,7 +221,8 @@
   function setParam(name: string, value: string) {
     params = { ...params, [name]: value };
     preview = null;
-    if (definition?.params.find((param) => param.name === name)?.kind === "contract") observableLabel = contractLabel(value);
+    // Cambiar un parámetro invalida la etiqueta del observable guardada (p. ej. "XOM close" tras pasar a CVX).
+    observableLabel = definition?.params.find((param) => param.name === name)?.kind === "contract" ? contractLabel(value) : "";
   }
 
   async function checkNow() {

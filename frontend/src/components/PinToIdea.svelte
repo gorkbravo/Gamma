@@ -100,6 +100,8 @@
         }
         ideaId = created.idea_id;
         title = created.title;
+        // Si el pin falla, un reintento apunta a la idea recién creada en lugar de crear otra vacía.
+        target = ideaId;
       }
       const response = await pinEvidence(ideaId, { ...snapshot, stance, note: note.trim() });
       if (!response) {
