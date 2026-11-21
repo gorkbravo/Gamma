@@ -352,6 +352,7 @@ class CriterionEvaluationModel(BaseModel):
     cadence_note: str | None = None
     provenance: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
+    known_at_arming: bool = False
 
     @classmethod
     def from_domain(cls, evaluation: CriterionEvaluation) -> "CriterionEvaluationModel":

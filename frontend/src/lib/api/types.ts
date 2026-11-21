@@ -4746,6 +4746,8 @@ export interface IdeaCriterionEvaluation {
   cadence_note: string | null;
   provenance: IdeaProvenanceRecord | null;
   warnings: string[];
+  /** event_occurs: the event had already resolved at the first reading after arming, so the rule cannot trigger. */
+  known_at_arming?: boolean;
 }
 
 export interface IdeaCriterion {

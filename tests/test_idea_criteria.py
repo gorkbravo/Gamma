@@ -288,10 +288,78 @@ def test_date_and_event_conditions():
         observable=ObservableRef("prediction_probability", {"market_id": "kalshi:FED"}),
     )
     open_market = ObservableReading(value=40, as_of=T0, event_released=False, event_time=datetime(2026, 12, 1))
-    assert evaluate_criterion(event_rule, open_market, armed_from=T0, now=T0).state == "holding"
+    seen_open = evaluate_criterion(event_rule, open_market, armed_from=T0, now=T0)
+    assert seen_open.state == "holding" and not seen_open.known_at_arming
     resolved = ObservableReading(value=100, as_of=T0, event_released=True, event_time=datetime(2026, 11, 12))
-    occurred = evaluate_criterion(event_rule, resolved, armed_from=T0, now=datetime(2026, 11, 13))
+    watched = replace(event_rule, last_evaluation=seen_open)
+    occurred = evaluate_criterion(watched, resolved, armed_from=T0, now=datetime(2026, 11, 13))
     assert occurred.state == "triggered" and occurred.first_met_at == datetime(2026, 11, 12)
+
+
+def test_an_event_already_resolved_when_armed_holds_and_never_triggers():
+    # Regresión de la revisión del 2026-11-21: un contrato ya resuelto se disparaba al armar la regla.
+    event_rule = replace(
+        _rule(condition="event_occurs", threshold=None),
+        observable=ObservableRef("prediction_probability", {"market_id": "kalshi:FED"}),
+    )
+    resolved = ObservableReading(value=100, as_of=T0, event_released=True, event_time=datetime(2026, 11, 5))
+    first = evaluate_criterion(event_rule, resolved, armed_from=T0, now=T0)
+    assert first.state == "holding" and first.known_at_arming and "already resolved" in first.reason
+    assert CriterionEvaluation.from_dict(first.to_dict()).known_at_arming, "the flag survives a restart"
+
+    later = evaluate_criterion(replace(event_rule, last_evaluation=first), resolved, armed_from=T0, now=T0 + timedelta(days=2))
+    assert later.state == "holding" and later.known_at_arming
+
+    # Una evaluación anterior al armado actual (p. ej. antes de reactivar) no cuenta como vista abierta.
+    old_open = evaluate_criterion(
+        event_rule,
+        ObservableReading(value=40, as_of=T0, event_released=False),
+        armed_from=T0 - timedelta(days=10),
+        now=T0 - timedelta(days=10),
+    )
+    rearmed = evaluate_criterion(replace(event_rule, last_evaluation=old_open), resolved, armed_from=T0, now=T0)
+    assert rearmed.state == "holding" and rearmed.known_at_arming
+
+
+def test_instant_points_before_the_arming_moment_never_count():
+    # Regresión de la revisión: BTC 99k el 19/11, 101k el 20/11 a las 00:00; la regla
+    # «crosses above 100k» armada el 20/11 a las 15:00 se disparaba con first_met_at anterior a ella.
+    armed = datetime(2026, 11, 20, 15)
+    rule = _rule(condition="crosses_above", threshold=100_000, armed=armed)
+    history = (ObservablePoint(datetime(2026, 11, 19), 99_000), ObservablePoint(datetime(2026, 11, 20), 101_000))
+    known = ObservableReading(history=history, instant_points=True)
+    assert evaluate_criterion(rule, known, armed_from=armed, now=armed).state == "holding"
+    assert latest_known_before(known, armed) == datetime(2026, 11, 20)
+
+    dip_and_cross = ObservableReading(
+        history=(*history, ObservablePoint(datetime(2026, 11, 20, 18), 99_500), ObservablePoint(datetime(2026, 11, 21), 100_500)),
+        instant_points=True,
+    )
+    result = evaluate_criterion(rule, dip_and_cross, armed_from=armed, now=datetime(2026, 11, 21, 9))
+    assert result.state == "triggered" and result.first_met_at == datetime(2026, 11, 21)
+
+    level = _rule(condition="above", threshold=100_000, armed=armed)
+    assert evaluate_criterion(level, known, armed_from=armed, now=armed).state == "holding", (
+        "a level already met when the rule was armed holds until a new observation meets it"
+    )
+    # Los cierres diarios (sin hora) siguen contando por día: el cierre del día de armado aún no se conocía.
+    daily = ObservableReading(history=history)
+    assert evaluate_criterion(level, daily, armed_from=armed, now=armed).state == "triggered"
+
+
+def test_readers_with_timestamped_points_mark_them_as_instants():
+    registry = ObservableRegistry(
+        client=SimpleNamespace(is_connected=lambda: True),
+        iv_service=SimpleNamespace(is_running=lambda: False),
+        crypto_service=SimpleNamespace(
+            get_price_history=lambda token_id, days=365: [
+                SimpleNamespace(timestamp=datetime(2026, 11, 20), price=101_000.0, source_provider="coingecko", retrieved_at=T0, origin="x", transformation_note=None)
+            ]
+        ),
+        env=lambda key: None,
+    )
+    reading = registry.read(ObservableRef("crypto_price", {"token_id": "bitcoin"}), now=datetime(2026, 11, 20, 15))
+    assert reading.instant_points and reading.value == 101_000.0
 
 
 def test_generated_labels_read_as_plain_language():

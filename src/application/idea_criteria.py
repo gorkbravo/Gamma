@@ -79,6 +79,10 @@ class ObservableReading:
     event_time: datetime | None = None
     event_released: bool | None = None
     event_value: float | None = None
+    # True cuando cada punto lleva el instante en que se observó (cripto, probabilidad de un
+    # contrato, IV, spreads). False cuando lleva la fecha del periodo que describe (cierres
+    # diarios, series FRED): esos se publican después de su fecha y usan la línea base.
+    instant_points: bool = False
 
     @property
     def is_unavailable(self) -> bool:
@@ -132,6 +136,10 @@ def evaluate_criterion(
     common = {**base, "value": latest.value, "value_display": display, "as_of": latest.at}
 
     def counts(point: ObservablePoint) -> bool:
+        if reading.instant_points:
+            # Un punto con hora solo es nuevo si se observó después de armar la regla:
+            # el precio de las 00:00 del mismo día ya se conocía a las 15:00.
+            return point.at > armed_from
         return point.at.date() >= since or (known_until is not None and point.at > known_until)
 
     if condition in ("above", "below"):
@@ -206,6 +214,9 @@ def latest_known_before(reading: ObservableReading, armed_from: datetime) -> dat
     arming, anything published in between and dated before the arming day is
     treated as known; that is the conservative side of no look-back.
     """
+    if reading.instant_points:
+        known = [point.at for point in _usable_points(reading) if point.at <= armed_from]
+        return max(known) if known else None
     since = armed_from.date()
     known = [point.at for point in _usable_points(reading) if point.at.date() < since]
     return max(known) if known else None
@@ -271,6 +282,24 @@ def _evaluate_event(criterion: IdeaCriterion, reading: ObservableReading, *, arm
         "as_of": target,
     }
     if reading.event_released:
+        # Sin hora de resolución en la fuente, «nuevo» significa: alguna lectura correcta desde
+        # que se armó la regla lo vio sin resolver. Si la primera ya lo ve resuelto, era un hecho
+        # conocido al armarla y la regla se mantiene (la especificación: no hay observación nueva).
+        last = criterion.last_evaluation
+        seen_open = (
+            last is not None
+            and last.evaluated_at >= armed_from
+            and last.state in ("holding", "stale")
+            and not last.known_at_arming
+        )
+        if not seen_open:
+            note = "The event had already resolved Yes when this rule was armed, so it cannot trigger."
+            return CriterionEvaluation(
+                state="holding",
+                reason=note,
+                known_at_arming=True,
+                **{**common, "warnings": (note, *common["warnings"])},
+            )
         return CriterionEvaluation(
             state="triggered",
             first_met_at=max(target or now, armed_from),
