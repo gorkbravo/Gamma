@@ -3,6 +3,7 @@ export type WorkspaceMode = "portfolio" | "research";
 export type TabId =
   | "portfolio"
   | "sitrep"
+  | "ideas"
   | "equity_research"
   | "strategy_lab"
   | "macro"
@@ -4676,4 +4677,393 @@ export interface IvSessionStatus {
   market_data_mode: string;
   surface: IvSurface;
   messages: string[];
+}
+
+// ── Ideas (Workstream 12, checkpoint I1) ────────────────────────────────────
+
+export type IdeaStance = "long" | "short" | "relative" | "event" | "neutral";
+export type IdeaStatus = "draft" | "active" | "closed" | "archived";
+export type IdeaEvidenceStance = "supports" | "challenges" | "context";
+export type IdeaEvidenceKind =
+  | "metric"
+  | "series"
+  | "table"
+  | "filing"
+  | "news"
+  | "prediction_contract"
+  | "research_card"
+  | "script_output"
+  | "backtest"
+  | "risk_result"
+  | "note";
+export type IdeaOriginKind = "manual" | "sitrep_follow_up" | "copilot" | "handoff" | "import";
+export type IdeaJournalKind =
+  | "note"
+  | "decision"
+  | "created"
+  | "edited"
+  | "status_changed"
+  | "evidence_pinned"
+  | "evidence_unpinned"
+  | "criterion_added"
+  | "criterion_edited"
+  | "criterion_removed"
+  | "criterion_triggered"
+  | "criterion_acknowledged";
+
+export type IdeaCriterionKind = "invalidate" | "confirm" | "review";
+export type IdeaCriterionCondition =
+  | "above"
+  | "below"
+  | "crosses_above"
+  | "crosses_below"
+  | "change_over_window"
+  | "date_reached"
+  | "event_occurs";
+export type IdeaCriterionCadence = "on_open" | "daily_close" | "intraday";
+export type IdeaCriterionState = "pending" | "holding" | "triggered" | "unavailable" | "stale";
+export type IdeaCriterionWindow = "1d" | "5d" | "1m" | "3m" | "6m" | "1y";
+
+export interface IdeaObservableRef {
+  observable_id: string;
+  params: Record<string, string>;
+  label: string;
+}
+
+export interface IdeaCriterionEvaluation {
+  state: Exclude<IdeaCriterionState, "pending">;
+  evaluated_at: string;
+  value: number | null;
+  value_display: string | null;
+  as_of: string | null;
+  met_value: number | null;
+  met_display: string | null;
+  reference_value: number | null;
+  change: number | null;
+  first_met_at: string | null;
+  reason: string | null;
+  effective_cadence: IdeaCriterionCadence;
+  cadence_note: string | null;
+  provenance: IdeaProvenanceRecord | null;
+  warnings: string[];
+}
+
+export interface IdeaCriterion {
+  schema_version: number;
+  criterion_id: string;
+  idea_id: string;
+  kind: IdeaCriterionKind;
+  label: string;
+  observable: IdeaObservableRef;
+  condition: IdeaCriterionCondition;
+  threshold: number | null;
+  window: IdeaCriterionWindow | null;
+  cadence: IdeaCriterionCadence;
+  state: IdeaCriterionState;
+  last_evaluation: IdeaCriterionEvaluation | null;
+  trigger_evaluation: IdeaCriterionEvaluation | null;
+  triggered_at: string | null;
+  acknowledged_at: string | null;
+  armed_at: string;
+  created_at: string;
+  /** Newest observation already known when the rule was armed; later ones count even if dated earlier. */
+  baseline_as_of?: string | null;
+  baseline_for?: string | null;
+}
+
+export interface IdeaCriterionPayload {
+  kind: IdeaCriterionKind;
+  observable: IdeaObservableRef;
+  condition: IdeaCriterionCondition;
+  threshold: number | null;
+  window: IdeaCriterionWindow | null;
+  cadence: IdeaCriterionCadence;
+  label?: string | null;
+}
+
+export interface IdeaCriterionResponse {
+  idea: Idea;
+  criterion: IdeaCriterion;
+}
+
+export interface IdeaObservableParam {
+  name: string;
+  label: string;
+  kind: string;
+  required: boolean;
+  placeholder: string | null;
+  options: Array<{ value: string; label: string; unit?: string | null }>;
+}
+
+export interface IdeaObservableDefinition {
+  observable_id: string;
+  label: string;
+  group: string;
+  source: string;
+  params: IdeaObservableParam[];
+  conditions: IdeaCriterionCondition[];
+  cadences: IdeaCriterionCadence[];
+  change_unit: "percent" | "points";
+  value_unit: string;
+  needs_tws: boolean;
+  needs_keys: string[];
+  intraday_capable: boolean;
+  available: boolean;
+  unavailable_reason: string | null;
+  dependency_label: string | null;
+  order: number;
+}
+
+export interface IdeaObservableRegistryResponse {
+  items: IdeaObservableDefinition[];
+  tws_connected: boolean;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+}
+
+export interface IdeaObservablePreview {
+  observable: IdeaObservableRef;
+  available: boolean;
+  value: number | null;
+  value_display: string | null;
+  as_of: string | null;
+  reason: string | null;
+  stale_reason: string | null;
+  history_points: number;
+  event_time: string | null;
+  event_released: boolean | null;
+  provenance: IdeaProvenanceRecord | null;
+  warnings: string[];
+  retrieved_at: string;
+}
+
+export interface IdeaNotification {
+  notification_id: string;
+  kind: "criterion_triggered" | "review_due";
+  idea_id: string;
+  idea_title: string;
+  created_at: string;
+  criterion_id: string | null;
+  criterion_kind: IdeaCriterionKind | null;
+  label: string;
+  value_display: string | null;
+  first_met_at: string | null;
+  review_date: string | null;
+  days_overdue: number | null;
+  provenance: IdeaProvenanceRecord | null;
+}
+
+export interface IdeaNotificationsResponse {
+  items: IdeaNotification[];
+  triggered: number;
+  reviews_due: number;
+  evaluation_running: boolean;
+  last_pass: Record<string, unknown> | null;
+  limitation: string;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+}
+
+export interface IdeaExplanation {
+  key: string;
+  title: string;
+  measures: string;
+  why: Record<IdeaStance, string>;
+  computed: string;
+  source: string | null;
+}
+
+export interface IdeaExplanationsResponse {
+  items: IdeaExplanation[];
+  retrieved_at: string;
+  source_provider: string;
+  origin: string;
+}
+
+export interface IdeaLeg {
+  entity: CrossTabHandoffEntity;
+  weight: number | null;
+}
+
+export interface IdeaHorizon {
+  review_date: string | null;
+  holding_window: string | null;
+}
+
+export interface IdeaOrigin {
+  kind: IdeaOriginKind;
+  source_ref: string | null;
+  label: string | null;
+  handoff: CrossTabHandoffEnvelope | null;
+}
+
+/** One frozen metric row inside a pin's captured values. */
+export interface IdeaCapturedMetric {
+  label: string;
+  value?: number | string | boolean | null;
+  display?: string | null;
+  unit?: string | null;
+}
+
+/** The capture convention the Ideas tab renders; other keys are kept as-is. */
+export interface IdeaCapturedValues {
+  metrics?: IdeaCapturedMetric[];
+  table?: { columns: string[]; rows: Array<Array<string | number | null>> };
+  series?: {
+    label: string;
+    points: Array<{ timestamp: string; value: number | null }>;
+    downsampling?: { method: string; original_points: number; kept_points: number };
+  };
+  text?: string;
+  [key: string]: unknown;
+}
+
+export interface IdeaProvenanceRecord {
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface IdeaFreshnessRecord {
+  label: string;
+  retrieved_at: string | null;
+  source_timestamp: string | null;
+  evaluated_at: string | null;
+  age_seconds: number | null;
+  ttl_seconds: number | null;
+  is_stale: boolean;
+  warnings: string[];
+}
+
+export interface IdeaEvidence {
+  schema_version: number;
+  evidence_id: string;
+  idea_id: string;
+  kind: IdeaEvidenceKind;
+  stance: IdeaEvidenceStance;
+  title: string;
+  captured_values: IdeaCapturedValues;
+  provenance: IdeaProvenanceRecord | null;
+  freshness: IdeaFreshnessRecord | null;
+  reopen: CrossTabHandoffEnvelope | null;
+  captured_at: string;
+  note: string;
+}
+
+export interface IdeaJournalEntry {
+  schema_version: number;
+  entry_id: string;
+  idea_id: string;
+  kind: IdeaJournalKind;
+  author: "user" | "system";
+  body: string;
+  created_at: string;
+  details: Record<string, unknown>;
+}
+
+export interface Idea {
+  schema_version: number;
+  idea_id: string;
+  title: string;
+  thesis: string;
+  notes: string;
+  stance: IdeaStance;
+  legs: IdeaLeg[];
+  horizon: IdeaHorizon;
+  status: IdeaStatus;
+  origin: IdeaOrigin;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  evidence: IdeaEvidence[];
+  criteria: IdeaCriterion[];
+  journal: IdeaJournalEntry[];
+  evidence_counts: Record<IdeaEvidenceStance, number>;
+  criteria_counts: Record<IdeaCriterionState, number>;
+  provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
+}
+
+export interface IdeaLegSummary {
+  label: string;
+  entity_type: string;
+  normalized_id: string;
+  weight: number | null;
+}
+
+export interface IdeaSummary {
+  idea_id: string;
+  title: string;
+  thesis: string;
+  stance: IdeaStance;
+  status: IdeaStatus;
+  tags: string[];
+  legs: IdeaLegSummary[];
+  evidence_counts: Record<IdeaEvidenceStance, number>;
+  evidence_total: number;
+  last_evidence_at: string | null;
+  journal_count: number;
+  origin_kind: IdeaOriginKind;
+  origin_ref: string | null;
+  review_date: string | null;
+  created_at: string;
+  updated_at: string;
+  criteria_counts: Record<IdeaCriterionState, number>;
+  criteria_total: number;
+  unacknowledged_triggers: number;
+}
+
+export interface IdeaStorageWarning {
+  action: string;
+  file_name: string;
+  message: string;
+  created_at: string;
+}
+
+export interface IdeaListResponse {
+  items: IdeaSummary[];
+  total: number;
+  status_counts: Record<IdeaStatus, number>;
+  tags: string[];
+  storage_warnings: IdeaStorageWarning[];
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface IdeaCreatePayload {
+  title: string;
+  thesis?: string;
+  notes?: string;
+  stance?: IdeaStance;
+  legs?: IdeaLeg[];
+  horizon?: IdeaHorizon | null;
+  tags?: string[];
+  origin?: IdeaOrigin | null;
+}
+
+export type IdeaPatchPayload = Partial<Pick<Idea, "title" | "thesis" | "notes" | "stance" | "legs" | "horizon" | "tags">>;
+
+/** What a panel offers to pin: everything except the stance the user picks. */
+export interface IdeaPinDraft {
+  kind: IdeaEvidenceKind;
+  title: string;
+  captured_values: IdeaCapturedValues;
+  provenance: IdeaProvenanceRecord | null;
+  freshness: Partial<IdeaFreshnessRecord> | null;
+  reopen: CrossTabHandoffEnvelope | null;
+}
+
+export interface IdeaEvidenceCreatePayload extends IdeaPinDraft {
+  stance: IdeaEvidenceStance;
+  note?: string;
+}
+
+export interface IdeaPinResponse {
+  idea: Idea;
+  evidence: IdeaEvidence;
 }

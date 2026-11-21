@@ -246,6 +246,99 @@ describe("SitrepView", () => {
     expect(body).toContain("Dismiss follow-up");
   });
 
+  it("offers Promote to idea on a follow-up, and Open once it has been promoted", () => {
+    const followUp = {
+      id: "uuid-open",
+      row_id: "evt-cpi",
+      source: "Event",
+      tone: "warning",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      note: "",
+      status: "open" as const,
+      handoff: { targetTab: "macro" as const, targetMode: "events_regimes" },
+      saved_at: "2026-07-12T00:00:00Z",
+    };
+    const baseProps = {
+      overview: null,
+      indicesOverview: null,
+      news: null,
+      macro: null,
+      commodities: null,
+      prediction: null,
+      loading: false,
+      onLoadNews: vi.fn(),
+      onLoadOverview: vi.fn(),
+      onLoadIndicesOverview: vi.fn(),
+      onLoadMacro: vi.fn(),
+      onLoadCommodities: vi.fn(),
+      onLoadPrediction: vi.fn(),
+      onOpenHandoff: vi.fn(),
+      followUps: [followUp],
+      onPromoteFollowUp: vi.fn(),
+    };
+
+    const fresh = render(SitrepView, { props: baseProps }).body;
+    expect(fresh).toContain('aria-label="Promote CPI release to an idea"');
+    expect(fresh).toContain("◇");
+
+    const promoted = render(SitrepView, { props: { ...baseProps, promotedFollowUps: { "uuid-open": "idea-1" } } }).body;
+    expect(promoted).toContain('aria-label="Open the idea promoted from CPI release"');
+    expect(promoted).toContain("◆");
+    // Pin to idea stays disabled while the market panels have nothing loaded.
+    expect(promoted).toContain('title="Nothing on this panel to pin yet."');
+  });
+
+  it("lists triggered criteria and reviews due under Your ideas", () => {
+    const props = {
+      overview: null,
+      indicesOverview: null,
+      news: null,
+      macro: null,
+      commodities: null,
+      prediction: null,
+      loading: false,
+      onLoadNews: vi.fn(),
+      onLoadOverview: vi.fn(),
+      onLoadIndicesOverview: vi.fn(),
+      onLoadMacro: vi.fn(),
+      onLoadCommodities: vi.fn(),
+      onLoadPrediction: vi.fn(),
+      onOpenIdea: vi.fn(),
+      onAcknowledgeIdeaCriterion: vi.fn(),
+      ideaNotificationLimitation: "Criteria are evaluated only while Gamma runs.",
+      ideaNotifications: [
+        {
+          notification_id: "trigger:i:c",
+          kind: "criterion_triggered" as const,
+          idea_id: "i",
+          idea_title: "XOM holds its dividend",
+          created_at: "2026-11-15T09:00:00",
+          criterion_id: "c",
+          criterion_kind: "invalidate" as const,
+          label: "XOM close below 100",
+          value_display: "99.00",
+          first_met_at: "2026-11-12T00:00:00",
+          review_date: null,
+          days_overdue: null,
+          provenance: null,
+        },
+      ],
+    };
+    const body = render(SitrepView, { props }).body;
+    expect(body).toContain('aria-label="Your ideas"');
+    expect(body).toContain("Invalidate triggered");
+    expect(body).toContain("XOM close below 100");
+    expect(body).toContain("XOM holds its dividend · 99.00 · first met 2026-11-12");
+    expect(body).toContain('aria-label="Acknowledge XOM close below 100"');
+    expect(body).toContain("1 triggered / 0 reviews due");
+    expect(body.indexOf('aria-label="Your ideas"')).toBeLessThan(body.indexOf("Follow-Ups"));
+
+    const empty = render(SitrepView, { props: { ...props, ideaNotifications: [] } }).body;
+    expect(empty).toContain("No triggered criteria or reviews due.");
+  });
+
   it("renders clickable news ticker chips and keeps per-item provenance off the row", () => {
     const { body } = render(SitrepView, {
       props: {

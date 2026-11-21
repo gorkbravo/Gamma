@@ -8,6 +8,9 @@
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromProvenance } from "../lib/ideas";
+  import type { IdeaPinDraft } from "../lib/api/types";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -1015,6 +1018,45 @@
     ? (result?.coverage ?? emptyCoverage)
     : deriveCoverageFromResearchResult(result);
   $: scopeBadge = result ? toProvenanceBadge(result) : null;
+  // Pin to idea: the scope's headline figures as shown. A single ticker
+  // reopens on the same symbol and timeframe; a synthetic basket reopens the
+  // mode, since the handoff carries no weights.
+  $: scopePinDraft = ((): IdeaPinDraft | null => {
+    if (!result) return null;
+    const single = result.scope_type === "single_ticker" && Boolean(result.primary_symbol);
+    const symbol = single ? String(result.primary_symbol).trim().toUpperCase() : "";
+    const label = activePrimaryScopeLabel(result);
+    const source = pinSourceFromProvenance(result, "equity_research_view.scope_analysis");
+    return {
+      kind: "metric",
+      title: `${label} scope · ${timeframe}`,
+      captured_values: {
+        metrics: [
+          captureMetric("Lookback return", pct(result.summary.total_return), result.summary.total_return),
+          captureMetric("Latest day", pct(result.latest_daily_return), result.latest_daily_return),
+          captureMetric("Annual return", pct(result.summary.annual_return), result.summary.annual_return),
+          captureMetric("Annual vol", pct(result.summary.annual_vol), result.summary.annual_vol),
+          captureMetric("Max drawdown", pct(result.summary.max_drawdown), result.summary.max_drawdown),
+          captureMetric("Beta", fmt(result.summary.beta, 3), result.summary.beta),
+          captureMetric("Correlation", fmt(result.summary.correlation, 3), result.summary.correlation),
+          captureMetric("Benchmark", result.benchmark_symbol ?? "N/A"),
+        ],
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "equity_research",
+        mode: "scope_analysis",
+        entity: single
+          ? { entity_type: "equity", label: symbol, normalized_id: symbol, metadata: { symbol } }
+          : { entity_type: "research_scope", label, normalized_id: `scope:${result.scope_type}` },
+        timeframe,
+        normalizedIds: single ? { symbol } : {},
+        provider: source.provenance?.source_provider ?? null,
+        warnings: result.warnings ?? [],
+      }),
+    };
+  })();
   $: overviewBadge = overview ? toProvenanceBadge(overview) : null;
   $: weightBars = (result?.weights ?? []).map((weight) => ({
     label: weight.display_symbol ?? weight.symbol,
@@ -1487,6 +1529,10 @@
             </p>
           </div>
           <div class="header-actions">
+            <div class="pin-actions">
+              <ProvenanceBadge variant="dot" data={scopeBadge} label="Source" />
+              <PinToIdea draft={scopePinDraft} disabledReason="Run a scope before pinning it." />
+            </div>
             <label class="inline-field timeframe-field">
               <span>Timeframe</span>
               <select class="form-control is-large" bind:value={timeframe}>
@@ -2610,6 +2656,13 @@
     align-items: end;
     justify-content: flex-end;
     flex-wrap: wrap;
+  }
+
+  .pin-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 2rem;
   }
 
   .view-field {

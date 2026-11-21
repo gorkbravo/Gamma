@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromProvenance } from "../lib/ideas";
+  import { toProvenanceBadge } from "../lib/provenance";
+  import type { IdeaPinDraft } from "../lib/api/types";
   import CommodityCurveHistory from "../components/CommodityCurveHistory.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import Sparkline from "../components/Sparkline.svelte";
@@ -90,6 +95,56 @@
   $: selectedInventories = filterInventoriesForInstrument(workspace?.inventories ?? [], selectedInstrumentId);
   $: selectedInventory = selectedInventories[0] ?? findSelectedInventory(workspace, selectedInstrumentId);
   $: selectedInstrument = selectedSummary?.instrument ?? findSelectedInstrument(workspace, selectedInstrumentId);
+  // The selected market's headline through the shared badge, and the Pin to
+  // idea draft built from the figures shown for it in this mode.
+  // A market summary carries no freshness label of its own; the workspace coverage does.
+  $: selectedSummaryBadge = selectedSummary
+    ? toProvenanceBadge(
+        { ...selectedSummary, freshness_label: workspace?.coverage.freshness_label ?? null },
+        { sourceTimestamp: selectedBasis?.source_timestamp ?? null, warnings: selectedSummary.warnings }
+      )
+    : null;
+  $: commodityPinDraft = ((): IdeaPinDraft | null => {
+    if (!selectedSummary || !selectedInstrument) return null;
+    const source = pinSourceFromProvenance(
+      {
+        ...selectedSummary,
+        freshness_label: workspace?.coverage.freshness_label ?? null,
+        source_timestamp: selectedBasis?.source_timestamp ?? null,
+      },
+      `commodities_view.${mode}`
+    );
+    const unit = selectedInstrument.quote_unit || null;
+    return {
+      kind: "metric",
+      title: `${selectedInstrument.name} · ${modes.find((item) => item.id === mode)?.label ?? mode}`,
+      captured_values: {
+        metrics: [
+          captureMetric("Last", formatNumber(selectedSummary.latest_price), selectedSummary.latest_price, unit),
+          captureMetric("Change", formatNumber(selectedSummary.latest_change), selectedSummary.latest_change),
+          captureMetric("Change %", formatPct(selectedSummary.latest_change_pct), selectedSummary.latest_change_pct),
+          captureMetric("Curve", selectedCurve?.shape_label ?? selectedSummary.curve_state ?? null),
+          captureMetric("M1-M6", formatNumber(selectedCurve?.m1_m6_spread, 3), selectedCurve?.m1_m6_spread ?? null),
+          captureMetric("Roll", formatPct(selectedCurve?.roll_yield_proxy_pct, false), selectedCurve?.roll_yield_proxy_pct ?? null),
+          captureMetric("Headline basis", selectedBasis ? compactBasisLabel(selectedBasis) : null),
+        ],
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "commodities",
+        mode,
+        entity: {
+          entity_type: "commodity",
+          label: selectedInstrument.name,
+          normalized_id: selectedInstrument.instrument_id,
+          metadata: { symbol: selectedInstrument.symbol, family: selectedInstrument.family },
+        },
+        normalizedIds: { commodity_id: selectedInstrument.instrument_id, instrument_id: selectedInstrument.instrument_id },
+        provider: selectedSummary.source_provider,
+      }),
+    };
+  })();
   $: energySummaries = (workspace?.market_summaries ?? []).filter((summary) => summary.instrument.family === "energy");
   $: metalsSummaries = (workspace?.market_summaries ?? []).filter((summary) => summary.instrument.family === "metals");
   $: metalsNotes = metalsFallbackNotes(workspace?.warnings);
@@ -1410,6 +1465,8 @@
           >
             Add & Open
           </button>
+          <ProvenanceBadge variant="dot" data={selectedSummaryBadge} label="Source" />
+          <PinToIdea draft={commodityPinDraft} disabledReason="Select a market before pinning it." />
         </div>
       {/if}
       <button type="button" class="btn is-small refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>

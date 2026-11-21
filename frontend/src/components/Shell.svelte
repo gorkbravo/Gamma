@@ -158,6 +158,8 @@
           <button type="button" aria-label={selectedPortfolio.variant === "research" ? "Clear research scope" : "Clear portfolio focus"} on:click={onClearSelectedPortfolio}>×</button>
         </div>
       {/if}
+      <!-- Acciones de la app junto a Copilot (p. ej. el centro de notificaciones de Ideas, I2). -->
+      <slot name="actions" />
       <button
         class="copilot-trigger"
         class:open={copilotOpen}

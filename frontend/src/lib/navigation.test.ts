@@ -35,6 +35,7 @@ describe("navigation tab ordering", () => {
     expect(getDefaultTabOrder("portfolio")).toEqual(["portfolio", "risk", "iv"]);
     expect(getDefaultTabOrder("research")).toEqual([
       "sitrep",
+      "ideas",
       "equity_research",
       "strategy_lab",
       "macro",
@@ -57,6 +58,7 @@ describe("navigation tab ordering", () => {
       "iv",
       "macro",
       "prediction_markets",
+      "ideas",
       "strategy_lab",
       "crypto",
       "fundamentals",
@@ -72,6 +74,7 @@ describe("navigation tab ordering", () => {
       "equity_research",
       "risk",
       "macro",
+      "ideas",
       "strategy_lab",
       "prediction_markets",
       "crypto",
@@ -176,6 +179,7 @@ describe("navigation tab ordering", () => {
       "crypto",
       "equity_research",
       "fundamentals",
+      "ideas",
       "iv",
       "macro",
       "maritime",
@@ -249,6 +253,23 @@ describe("navigation tab ordering", () => {
     expect(getTabLabel("iv")).toBe("Options");
   });
 
+  it("registers Ideas right after Sitrep with Board and Idea modes", () => {
+    const orderState = normalizeWorkspaceTabOrderState(null);
+
+    expect(getDefaultTabOrder("research").indexOf("ideas")).toBe(1);
+    expect(getTabLabel("ideas")).toBe("Ideas");
+    expect(getTabByShortcutIndex("research", orderState, 2)).toBe("ideas");
+    expect(getTabModes("ideas").map((mode) => mode.id)).toEqual(["board", "idea"]);
+    expect(getModeShortcutHint("ideas", "idea")).toBe("Shift+2");
+    expect(getModeByShortcutIndex("ideas", 1)?.id).toBe("board");
+    expect(hasRegisteredModes("ideas")).toBe(true);
+    expect(getModeRegistrySnapshot().ideas?.map((mode) => mode.label)).toEqual(["Board", "Idea"]);
+    expect(resolveNavigationPath("research", orderState, "/ideas")?.tab.id).toBe("ideas");
+    expect(resolveNavigationPath("research", orderState, "/Ideas/Board")?.mode?.id).toBe("board");
+    expect(resolveNavigationPath("research", orderState, "/ideas/idea")?.mode?.id).toBe("idea");
+    expect(resolveNavigationPath("portfolio", orderState, "/ideas")).toBeNull();
+  });
+
   it("reorders draggable tabs without moving the pinned first slot", () => {
     expect(moveWorkspaceTab("portfolio", ["portfolio", "risk", "iv"], "iv", 1)).toEqual(["portfolio", "iv", "risk"]);
     expect(moveWorkspaceTab("portfolio", ["portfolio", "risk", "iv"], "portfolio", 2)).toEqual(["portfolio", "risk", "iv"]);
@@ -265,6 +286,7 @@ describe("workspace tab-order persistence", () => {
     expect(get(store).research).toEqual([
       "sitrep",
       "risk",
+      "ideas",
       "equity_research",
       "strategy_lab",
       "macro",
@@ -282,6 +304,7 @@ describe("workspace tab-order persistence", () => {
     expect(get(reloadedStore).research).toEqual([
       "sitrep",
       "risk",
+      "ideas",
       "equity_research",
       "strategy_lab",
       "macro",

@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromBadge } from "../lib/ideas";
+  import { toProvenanceBadge } from "../lib/provenance";
+  import type { IdeaPinDraft } from "../lib/api/types";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import { apiInstantDate } from "../lib/time";
@@ -610,6 +615,53 @@
   })();
 
   $: daysToResolution = daysUntil(detail?.end_time);
+  // The contract's own provenance through the shared badge, and the Pin to
+  // idea draft built from the figures the contract panel shows.
+  $: contractBadge = detail
+    ? toProvenanceBadge({
+        source_provider: detail.source_provider,
+        retrieved_at: detail.retrieved_at,
+        freshness_label: detail.freshness?.status ?? null,
+        transformation_note: detail.transformation_note,
+        warnings: detail.freshness?.reason ? [detail.freshness.reason] : [],
+      })
+    : null;
+  $: contractPinDraft = ((): IdeaPinDraft | null => {
+    if (!detail) return null;
+    const source = pinSourceFromBadge(contractBadge, "prediction_markets_view.contract");
+    const range = historyRange.toUpperCase();
+    return {
+      kind: "prediction_contract",
+      title: detail.title,
+      captured_values: {
+        metrics: [
+          captureMetric("Prob", pct(detail.current_probability), detail.current_probability),
+          captureMetric(`Window Δ (${range})`, signedPct(historyStats?.change), historyStats?.change ?? null),
+          captureMetric("Hi / Lo", `${pct(historyStats?.high)} / ${pct(historyStats?.low)}`),
+          captureMetric("Daily vol", pct(historyStats?.daily_volatility), historyStats?.daily_volatility ?? null),
+          captureMetric("24H vol", fmt(detail.volume_24h), detail.volume_24h),
+          captureMetric("Liquidity", fmt(detail.liquidity), detail.liquidity),
+          captureMetric("Resolves", `${daysLabel(daysToResolution)} · ${dayStamp(detail.end_time)}`),
+          captureMetric("Spread", pct(depth?.spread ?? detail.spread, 1), depth?.spread ?? detail.spread ?? null),
+        ],
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "prediction_markets",
+        mode: "contract",
+        entity: {
+          entity_type: "prediction_market",
+          label: detail.title,
+          normalized_id: detail.market_id,
+          metadata: { venue: detail.venue },
+        },
+        timeframe: range,
+        normalizedIds: { market_id: detail.market_id, venue: detail.venue },
+        provider: detail.source_provider,
+      }),
+    };
+  })();
   $: topWallet = wallet?.participants?.[0] ?? null;
   $: biggestGap =
     related?.related?.slice().sort((left, right) => (right.price_gap ?? -1) - (left.price_gap ?? -1))[0] ?? null;
@@ -1197,6 +1249,8 @@
                 disabled={!detail}
                 on:click={() => detail && toggleCompare(detail.market_id)}>Compare</button
               >
+              <span class="contract-source"><ProvenanceBadge variant="dot" data={contractBadge} label="Source" /></span>
+              <PinToIdea draft={contractPinDraft} disabledReason="Select a contract before pinning it." />
             </div>
           </div>
 
@@ -2632,8 +2686,15 @@
 
   .nav-actions {
     display: flex;
+    align-items: center;
     gap: var(--space-2);
     margin-left: auto;
+  }
+
+  .contract-source {
+    display: inline-flex;
+    align-items: center;
+    padding-inline: var(--space-2);
   }
 
   .nav-actions button {

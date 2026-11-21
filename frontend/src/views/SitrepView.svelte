@@ -5,6 +5,11 @@
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromBadge } from "../lib/ideas";
+  import type { ProvenanceBadgeData } from "../lib/provenance";
+  import type { IdeaNotification, IdeaPinDraft } from "../lib/api/types";
+  import { CRITERION_KIND_LABELS, notificationDetail, notificationTone } from "../lib/idea-criteria";
   import Tooltip from "../components/Tooltip.svelte";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
@@ -71,6 +76,14 @@
     | ((id: string, patch: { note?: string; status?: SitrepFollowUpStatus }) => Promise<unknown> | void)
     | null = null;
   export let onDismissFollowUp: ((id: string) => Promise<unknown> | void) | null = null;
+  /** Follow-up id -> the idea promoted from it, so the row offers "open" instead of a second promote. */
+  export let promotedFollowUps: Record<string, string> = {};
+  export let onPromoteFollowUp: ((item: SitrepFollowUp) => Promise<unknown> | void) | null = null;
+  /** Workstream 12, I2: the same items as the notification center (triggered criteria, reviews due). */
+  export let ideaNotifications: IdeaNotification[] = [];
+  export let ideaNotificationLimitation = "";
+  export let onOpenIdea: ((ideaId: string) => Promise<unknown> | void) | null = null;
+  export let onAcknowledgeIdeaCriterion: ((ideaId: string, criterionId: string) => Promise<unknown> | void) | null = null;
 
   const bloombergStreamUrl = "https://www.bloomberg.com/media-manifest/streams/phoenix-us.m3u8";
   const bloombergWatchUrl = "https://www.bloomberg.com/live";
@@ -1523,6 +1536,45 @@
         warnings: warningsByDomain.news ?? []
       })
     : null;
+
+  // Pin to idea: each market panel pins the rows it shows, frozen with the
+  // panel's provenance; reopening returns to Sitrep on the same section.
+  function sitrepRowsPinDraft(
+    section: string,
+    title: string,
+    rows: SitrepMarketRow[],
+    badge: ProvenanceBadgeData | null,
+    lens: string | null
+  ): IdeaPinDraft | null {
+    // Nothing to freeze when every row is a placeholder or unavailable.
+    const hasValue = (value: string | undefined) => Boolean(value && value !== "N/A");
+    if (!rows.some((row) => hasValue(row.last) || hasValue(row.change))) return null;
+    const source = pinSourceFromBadge(badge, `sitrep_view.${section}`);
+    return {
+      kind: "table",
+      title: `Sitrep · ${title}${lens ? ` (${lens})` : ""}`,
+      captured_values: {
+        metrics: rows
+          .slice(0, 24)
+          .map((row) => captureMetric(row.label, [row.last, row.change, row.changePct].filter((part) => part && part !== "N/A").join(" · ") || "N/A")),
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "sitrep",
+        mode: null,
+        entity: { entity_type: "sitrep_section", label: title, normalized_id: `sitrep:${section}` },
+        timeframe: lens,
+        normalizedIds: { section },
+        provider: badge?.provider ?? null,
+      }),
+    };
+  }
+
+  $: indicesPinDraft = sitrepRowsPinDraft("indices", "Worldwide indices", indexRows, indicesProvenance, "Latest day");
+  $: fxPinDraft = sitrepRowsPinDraft("fx", "FX pairs", fxRows, fxProvenance, macroWindowLabel);
+  $: ratesPinDraft = sitrepRowsPinDraft("rates", "Rates", yieldRows, ratesProvenance, macroWindowLabel);
+  $: commoditiesPinDraft = sitrepRowsPinDraft("commodities", "Commodities", commodityRows, commoditiesProvenance, "1D");
   $: tvStatus =
     bloombergPlaybackStatus === "ready"
       ? "LIVE"
@@ -1630,9 +1682,12 @@
               <span>Worldwide Indices</span>
               <ProvenanceBadge variant="dot" data={indicesProvenance} label={indicesOverview?.source_provider ?? "not loaded"} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={indicesPinDraft} />
             <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")} aria-label={refreshTitle("indices")} title={refreshTitle("indices")}>
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
@@ -1643,9 +1698,12 @@
               <span>FX Pairs</span>
               <ProvenanceBadge variant="dot" data={fxProvenance} label={formatFxSourceMix(fxRows, macro)} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={fxPinDraft} />
             <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")} aria-label={refreshTitle("fx")} title={refreshTitle("fx")}>
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("Chg", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("% chg", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
@@ -1656,9 +1714,12 @@
               <span>Rates</span>
               <ProvenanceBadge variant="dot" data={ratesProvenance} label={macro?.rates_policy?.source_provider ?? "not loaded"} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={ratesPinDraft} />
             <button type="button" class="reload-button" on:click={refreshRates} disabled={refreshing.rates || isCoolingDown("rates")} aria-label={refreshTitle("rates")} title={refreshTitle("rates")}>
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
@@ -1669,9 +1730,12 @@
               <span>Commodities</span>
               <ProvenanceBadge variant="dot" data={commoditiesProvenance} label={formatCommodityProviderMix(commodities)} />
             </div>
+            <div class="table-actions">
+              <PinToIdea draft={commoditiesPinDraft} />
             <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")} aria-label={refreshTitle("commodities")} title={refreshTitle("commodities")}>
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
+            </div>
           </div>
           <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="Chg (1D)" pctChangeLabel="% chg (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
@@ -1831,6 +1895,49 @@
         </div>
       </article>
 
+      <article class="panel is-flush tape-panel your-ideas-panel" aria-label="Your ideas">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Your ideas</span>
+            <small>{ideaNotifications.filter((item) => item.kind === "criterion_triggered").length} triggered / {ideaNotifications.filter((item) => item.kind === "review_due").length} reviews due</small>
+          </div>
+        </div>
+        <div class="tape-list">
+          {#each ideaNotifications as item (item.notification_id)}
+            <div class="tape-row-wrap">
+              <button
+                type="button"
+                class="idea-notice"
+                disabled={!onOpenIdea}
+                on:click={() => onOpenIdea?.(item.idea_id)}
+                title={`Open ${item.idea_title}`}
+              >
+                <span class="idea-notice-line">
+                  <span class="tag {notificationTone(item)}"
+                    >{item.kind === "review_due" ? "Review due" : `${CRITERION_KIND_LABELS[item.criterion_kind ?? "review"]} triggered`}</span
+                  >
+                  <strong>{item.label}</strong>
+                </span>
+                <span class="idea-notice-detail">{item.idea_title} · {notificationDetail(item)}</span>
+              </button>
+              {#if item.kind === "criterion_triggered" && item.criterion_id}
+                <button
+                  type="button"
+                  class="tape-pin"
+                  disabled={!onAcknowledgeIdeaCriterion}
+                  on:click={() => item.criterion_id && onAcknowledgeIdeaCriterion?.(item.idea_id, item.criterion_id)}
+                  aria-label={`Acknowledge ${item.label}`}
+                  title="Acknowledge"
+                >✓</button>
+              {/if}
+            </div>
+          {:else}
+            <p class="news-empty">No triggered criteria or reviews due.</p>
+          {/each}
+        </div>
+        {#if ideaNotificationLimitation}<p class="ideas-limitation">{ideaNotificationLimitation}</p>{/if}
+      </article>
+
       <article class="panel is-flush tape-panel follow-up-panel">
         <div class="table-header">
           <div class="table-title">
@@ -1868,6 +1975,15 @@
                   aria-label={item.note ? "Edit follow-up note" : "Add follow-up note"}
                   title={item.note ? "Edit follow-up note" : "Add follow-up note"}
                 >✎</button>
+                <button
+                  type="button"
+                  class="tape-pin promote-pin"
+                  class:active={Boolean(promotedFollowUps[item.id])}
+                  disabled={!onPromoteFollowUp}
+                  on:click={() => onPromoteFollowUp?.(item)}
+                  aria-label={promotedFollowUps[item.id] ? `Open the idea promoted from ${item.title}` : `Promote ${item.title} to an idea`}
+                  title={promotedFollowUps[item.id] ? "Open the idea promoted from this follow-up" : "Promote to idea"}
+                >{promotedFollowUps[item.id] ? "◆" : "◇"}</button>
                 <button
                   type="button"
                   class="tape-pin"
@@ -2047,6 +2163,13 @@
   .media-links a:hover,
   .video-state a:hover {
     text-decoration: underline;
+  }
+
+  .table-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-shrink: 0;
   }
 
   .reload-button {
@@ -2310,6 +2433,65 @@
 
   .tape-pin.active {
     color: var(--accent);
+  }
+
+  .your-ideas-panel .tape-list {
+    overflow: auto;
+    max-height: 16rem;
+  }
+
+  .idea-notice {
+    appearance: none;
+    display: grid;
+    flex: 1;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-3) var(--space-5);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-family: var(--font-ui);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .idea-notice:hover,
+  .idea-notice:focus-visible {
+    background: var(--hover-bg);
+  }
+
+  .idea-notice:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .idea-notice-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .idea-notice-line strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .idea-notice-detail {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .ideas-limitation {
+    margin: 0;
+    padding: var(--space-2) var(--space-5) var(--space-3);
+    color: var(--text-2);
+    font-size: var(--text-2xs);
   }
 
   .follow-up-panel .tape-list {

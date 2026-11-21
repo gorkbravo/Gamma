@@ -4,6 +4,9 @@
   import IvSnapshotComparison from "../components/IvSnapshotComparison.svelte";
   import CopilotOptionsWorkingAnalysis from "../components/CopilotOptionsWorkingAnalysis.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import PinToIdea from "../components/PinToIdea.svelte";
+  import { buildReopenEnvelope, captureMetric, pinSourceFromBadge } from "../lib/ideas";
+  import type { IdeaPinDraft } from "../lib/api/types";
   import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CopilotWorkingAnalysis,
@@ -254,6 +257,35 @@
     ? toProvenanceBadge(result, { qualityLabel: result.market_session === "closed" ? "closed · last session" : null })
     : null;
   $: historyBadge = optionsHistoryMatches && underlyingHistory ? toProvenanceBadge(underlyingHistory) : null;
+  // Pin to idea: the surface headline as shown in the source strip, frozen with
+  // the surface provenance; reopening loads the same underlying in this mode.
+  $: surfacePinDraft = ((): IdeaPinDraft | null => {
+    if (!result?.symbol) return null;
+    const symbol = result.symbol.trim().toUpperCase();
+    const source = pinSourceFromBadge(surfaceBadge, "iv_view.surface_headline");
+    return {
+      kind: "metric",
+      title: `${symbol} options surface`,
+      captured_values: {
+        metrics: [
+          captureMetric("Spot", money(result.spot), result.spot),
+          captureMetric("ATM IV", pct(surfaceStats.frontAtmIv), surfaceStats.frontAtmIv),
+          captureMetric("Term", signedPct(surfaceStats.termSlope), surfaceStats.termSlope),
+          captureMetric("Expiry", formatExpiry(activeExpiry)),
+          captureMetric("Depth", depthLabel(result.collection?.depth_preset)),
+        ],
+      },
+      provenance: source.provenance,
+      freshness: source.freshness,
+      reopen: buildReopenEnvelope({
+        tab: "iv",
+        mode,
+        entity: { entity_type: "equity", label: symbol, normalized_id: symbol, metadata: { symbol } },
+        normalizedIds: { symbol, expiry: activeExpiry ?? null },
+        provider: source.provenance?.source_provider ?? null,
+      }),
+    };
+  })();
   $: researchHistoryMatches = Boolean(
     historySymbol && researchPrimarySymbol?.trim().toUpperCase() === historySymbol && underlyingPricePoints.length
   );
@@ -737,6 +769,7 @@
         <div><span>Expiry</span><strong class:absent={formatExpiry(activeExpiry) === "N/A"}>{formatExpiry(activeExpiry)}</strong></div>
         <div><span>Depth</span><strong class:absent={depthLabel(result?.collection?.depth_preset) === "N/A"}>{depthLabel(result?.collection?.depth_preset)}</strong></div>
         <div><span>Source</span><ProvenanceBadge data={surfaceBadge} /></div>
+        <div class="pin-cell"><PinToIdea draft={surfacePinDraft} disabledReason="Load a surface before pinning it." /></div>
       </div>
     </div>
   </article>
@@ -1686,6 +1719,11 @@
     flex: 1;
     justify-content: flex-end;
     flex-wrap: wrap;
+  }
+
+  .source-strip > div.pin-cell {
+    min-width: 0;
+    align-self: center;
   }
 
   .source-strip > div {

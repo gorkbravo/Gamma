@@ -1,0 +1,665 @@
+"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1 and I2)."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from src.application.idea_service import (
+    IdeaCreateRequest,
+    IdeaCriterionRequest,
+    IdeaEvidenceCreateRequest,
+    IdeaListResult,
+    IdeaPatchRequest,
+)
+from src.models.handoff import HandoffEntity
+from src.models.ideas import (
+    CRITERION_LABEL_MAX,
+    EVIDENCE_NOTE_MAX,
+    EVIDENCE_TITLE_MAX,
+    IDEA_HOLDING_WINDOW_MAX,
+    IDEA_LEGS_MAX,
+    IDEA_NOTES_MAX,
+    IDEA_TAGS_MAX,
+    IDEA_THESIS_MAX,
+    IDEA_TITLE_MAX,
+    JOURNAL_BODY_MAX,
+    OBSERVABLE_ID_MAX,
+    OBSERVABLE_LABEL_MAX,
+    OBSERVABLE_PARAM_VALUE_MAX,
+    OBSERVABLE_PARAMS_MAX,
+    ORIGIN_LABEL_MAX,
+    ORIGIN_REF_MAX,
+    CriterionEvaluation,
+    Idea,
+    IdeaCriterion,
+    IdeaEvidence,
+    IdeaHorizon,
+    IdeaJournalEntry,
+    IdeaLeg,
+    IdeaOrigin,
+    ObservableRef,
+    envelope_from_dict,
+    freshness_from_dict,
+    provenance_from_dict,
+    thaw_captured_values,
+)
+from src.services.idea_store import IdeaStorageWarning, IdeaSummary
+
+IdeaStanceLiteral = Literal["long", "short", "relative", "event", "neutral"]
+IdeaStatusLiteral = Literal["draft", "active", "closed", "archived"]
+EvidenceStanceLiteral = Literal["supports", "challenges", "context"]
+EvidenceKindLiteral = Literal[
+    "metric",
+    "series",
+    "table",
+    "filing",
+    "news",
+    "prediction_contract",
+    "research_card",
+    "script_output",
+    "backtest",
+    "risk_result",
+    "note",
+]
+OriginKindLiteral = Literal["manual", "sitrep_follow_up", "copilot", "handoff", "import"]
+CriterionKindLiteral = Literal["invalidate", "confirm", "review"]
+CriterionConditionLiteral = Literal[
+    "above",
+    "below",
+    "crosses_above",
+    "crosses_below",
+    "change_over_window",
+    "date_reached",
+    "event_occurs",
+]
+CriterionCadenceLiteral = Literal["on_open", "daily_close", "intraday"]
+CriterionWindowLiteral = Literal["1d", "5d", "1m", "3m", "6m", "1y"]
+
+
+# ---------------------------------------------------------------------------
+# Shared parts
+# ---------------------------------------------------------------------------
+
+
+class IdeaEntityModel(BaseModel):
+    entity_type: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=200)
+    normalized_id: str = Field(min_length=1, max_length=200)
+    provider_id: str | None = Field(default=None, max_length=200)
+    native_id: str | None = Field(default=None, max_length=200)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def to_domain(self) -> HandoffEntity:
+        return HandoffEntity(
+            entity_type=self.entity_type.strip(),
+            label=self.label.strip(),
+            normalized_id=self.normalized_id.strip(),
+            provider_id=self.provider_id,
+            native_id=self.native_id,
+            metadata=dict(self.metadata),
+        )
+
+    @classmethod
+    def from_domain(cls, entity: HandoffEntity) -> "IdeaEntityModel":
+        return cls(**entity.to_dict())
+
+
+class IdeaLegModel(BaseModel):
+    entity: IdeaEntityModel
+    weight: float | None = None
+
+    def to_domain(self) -> IdeaLeg:
+        return IdeaLeg(entity=self.entity.to_domain(), weight=self.weight)
+
+    @classmethod
+    def from_domain(cls, leg: IdeaLeg) -> "IdeaLegModel":
+        return cls(entity=IdeaEntityModel.from_domain(leg.entity), weight=leg.weight)
+
+
+class IdeaHorizonModel(BaseModel):
+    review_date: date | None = None
+    holding_window: str | None = Field(default=None, max_length=IDEA_HOLDING_WINDOW_MAX)
+
+    def to_domain(self) -> IdeaHorizon:
+        return IdeaHorizon(review_date=self.review_date, holding_window=self.holding_window)
+
+    @classmethod
+    def from_domain(cls, horizon: IdeaHorizon) -> "IdeaHorizonModel":
+        return cls(review_date=horizon.review_date, holding_window=horizon.holding_window)
+
+
+class IdeaOriginModel(BaseModel):
+    kind: OriginKindLiteral = "manual"
+    source_ref: str | None = Field(default=None, max_length=ORIGIN_REF_MAX)
+    label: str | None = Field(default=None, max_length=ORIGIN_LABEL_MAX)
+    handoff: dict[str, Any] | None = None
+
+    def to_domain(self) -> IdeaOrigin:
+        return IdeaOrigin(
+            kind=self.kind,
+            source_ref=(self.source_ref or "").strip() or None,
+            label=(self.label or "").strip() or None,
+            handoff=envelope_from_dict(self.handoff) if self.handoff else None,
+        )
+
+    @classmethod
+    def from_domain(cls, origin: IdeaOrigin) -> "IdeaOriginModel":
+        return cls(
+            kind=origin.kind,  # type: ignore[arg-type]
+            source_ref=origin.source_ref,
+            label=origin.label,
+            handoff=origin.handoff.to_dict() if origin.handoff else None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Requests
+# ---------------------------------------------------------------------------
+
+
+class IdeaCreateRequestModel(BaseModel):
+    title: str = Field(min_length=1, max_length=IDEA_TITLE_MAX)
+    thesis: str = Field(default="", max_length=IDEA_THESIS_MAX)
+    notes: str = Field(default="", max_length=IDEA_NOTES_MAX)
+    stance: IdeaStanceLiteral = "neutral"
+    legs: list[IdeaLegModel] = Field(default_factory=list, max_length=IDEA_LEGS_MAX)
+    horizon: IdeaHorizonModel | None = None
+    tags: list[str] = Field(default_factory=list, max_length=IDEA_TAGS_MAX)
+    origin: IdeaOriginModel | None = None
+
+    def to_domain(self) -> IdeaCreateRequest:
+        return IdeaCreateRequest(
+            title=self.title,
+            thesis=self.thesis,
+            notes=self.notes,
+            stance=self.stance,
+            legs=tuple(leg.to_domain() for leg in self.legs),
+            horizon=self.horizon.to_domain() if self.horizon else IdeaHorizon(),
+            tags=tuple(self.tags),
+            origin=self.origin.to_domain() if self.origin else IdeaOrigin(),
+        )
+
+
+class IdeaPatchRequestModel(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=IDEA_TITLE_MAX)
+    thesis: str | None = Field(default=None, max_length=IDEA_THESIS_MAX)
+    notes: str | None = Field(default=None, max_length=IDEA_NOTES_MAX)
+    stance: IdeaStanceLiteral | None = None
+    legs: list[IdeaLegModel] | None = Field(default=None, max_length=IDEA_LEGS_MAX)
+    horizon: IdeaHorizonModel | None = None
+    tags: list[str] | None = Field(default=None, max_length=IDEA_TAGS_MAX)
+
+    def to_domain(self) -> IdeaPatchRequest:
+        return IdeaPatchRequest(
+            title=self.title,
+            thesis=self.thesis,
+            notes=self.notes,
+            stance=self.stance,
+            legs=None if self.legs is None else tuple(leg.to_domain() for leg in self.legs),
+            horizon=None if self.horizon is None else self.horizon.to_domain(),
+            tags=None if self.tags is None else tuple(self.tags),
+        )
+
+
+class IdeaEvidenceCreateRequestModel(BaseModel):
+    kind: EvidenceKindLiteral
+    # Required on purpose: disconfirming evidence is first-class, never a default.
+    stance: EvidenceStanceLiteral
+    title: str = Field(min_length=1, max_length=EVIDENCE_TITLE_MAX)
+    captured_values: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] | None = None
+    freshness: dict[str, Any] | None = None
+    reopen: dict[str, Any] | None = None
+    note: str = Field(default="", max_length=EVIDENCE_NOTE_MAX)
+
+    def to_domain(self) -> IdeaEvidenceCreateRequest:
+        return IdeaEvidenceCreateRequest(
+            kind=self.kind,
+            stance=self.stance,
+            title=self.title,
+            captured_values=dict(self.captured_values),
+            provenance=provenance_from_dict(self.provenance) if self.provenance else None,
+            freshness=freshness_from_dict(self.freshness) if self.freshness else None,
+            reopen=envelope_from_dict(self.reopen) if self.reopen else None,
+            note=self.note,
+        )
+
+
+class ObservableRefModel(BaseModel):
+    observable_id: str = Field(min_length=1, max_length=OBSERVABLE_ID_MAX)
+    params: dict[str, str] = Field(default_factory=dict, max_length=OBSERVABLE_PARAMS_MAX)
+    label: str = Field(default="", max_length=OBSERVABLE_LABEL_MAX)
+
+    def to_domain(self) -> ObservableRef:
+        for value in self.params.values():
+            if len(value) > OBSERVABLE_PARAM_VALUE_MAX:
+                raise ValueError(f"observable params are limited to {OBSERVABLE_PARAM_VALUE_MAX} characters.")
+        return ObservableRef(observable_id=self.observable_id, params=dict(self.params), label=self.label)
+
+    @classmethod
+    def from_domain(cls, ref: ObservableRef) -> "ObservableRefModel":
+        return cls(**ref.to_dict())
+
+
+class IdeaCriterionRequestModel(BaseModel):
+    kind: CriterionKindLiteral
+    observable: ObservableRefModel
+    condition: CriterionConditionLiteral
+    threshold: float | None = None
+    window: CriterionWindowLiteral | None = None
+    cadence: CriterionCadenceLiteral = "daily_close"
+    # Blank means "generate it from the rule"; the user may edit it.
+    label: str | None = Field(default=None, max_length=CRITERION_LABEL_MAX)
+
+    def to_domain(self) -> IdeaCriterionRequest:
+        return IdeaCriterionRequest(
+            kind=self.kind,
+            observable=self.observable.to_domain(),
+            condition=self.condition,
+            threshold=self.threshold,
+            window=self.window,
+            cadence=self.cadence,
+            label=self.label,
+        )
+
+
+class ObservablePreviewRequestModel(BaseModel):
+    observable: ObservableRefModel
+
+
+class IdeaJournalCreateRequestModel(BaseModel):
+    kind: Literal["note", "decision"] = "note"
+    body: str = Field(min_length=1, max_length=JOURNAL_BODY_MAX)
+
+
+# ---------------------------------------------------------------------------
+# Responses
+# ---------------------------------------------------------------------------
+
+
+class IdeaEvidenceModel(BaseModel):
+    schema_version: int
+    evidence_id: str
+    idea_id: str
+    kind: str
+    stance: str
+    title: str
+    captured_values: dict[str, Any]
+    provenance: dict[str, Any] | None = None
+    freshness: dict[str, Any] | None = None
+    reopen: dict[str, Any] | None = None
+    captured_at: datetime
+    note: str = ""
+
+    @classmethod
+    def from_domain(cls, item: IdeaEvidence) -> "IdeaEvidenceModel":
+        return cls(
+            schema_version=item.schema_version,
+            evidence_id=item.evidence_id,
+            idea_id=item.idea_id,
+            kind=item.kind,
+            stance=item.stance,
+            title=item.title,
+            captured_values=thaw_captured_values(item.captured_values),
+            provenance=item.provenance.to_dict() if item.provenance else None,
+            freshness=item.freshness.to_dict() if item.freshness else None,
+            reopen=item.reopen.to_dict() if item.reopen else None,
+            captured_at=item.captured_at,
+            note=item.note,
+        )
+
+
+class IdeaJournalEntryModel(BaseModel):
+    schema_version: int
+    entry_id: str
+    idea_id: str
+    kind: str
+    author: str
+    body: str
+    created_at: datetime
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, entry: IdeaJournalEntry) -> "IdeaJournalEntryModel":
+        return cls(
+            schema_version=entry.schema_version,
+            entry_id=entry.entry_id,
+            idea_id=entry.idea_id,
+            kind=entry.kind,
+            author=entry.author,
+            body=entry.body,
+            created_at=entry.created_at,
+            details=thaw_captured_values(entry.details),
+        )
+
+
+class CriterionEvaluationModel(BaseModel):
+    state: str
+    evaluated_at: datetime
+    value: float | None = None
+    value_display: str | None = None
+    as_of: datetime | None = None
+    met_value: float | None = None
+    met_display: str | None = None
+    reference_value: float | None = None
+    change: float | None = None
+    first_met_at: datetime | None = None
+    reason: str | None = None
+    effective_cadence: str
+    cadence_note: str | None = None
+    provenance: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, evaluation: CriterionEvaluation) -> "CriterionEvaluationModel":
+        return cls(**evaluation.to_dict())
+
+
+class IdeaCriterionModel(BaseModel):
+    schema_version: int
+    criterion_id: str
+    idea_id: str
+    kind: str
+    label: str
+    observable: ObservableRefModel
+    condition: str
+    threshold: float | None = None
+    window: str | None = None
+    cadence: str
+    state: str
+    last_evaluation: CriterionEvaluationModel | None = None
+    trigger_evaluation: CriterionEvaluationModel | None = None
+    triggered_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    armed_at: datetime
+    created_at: datetime
+    baseline_as_of: datetime | None = None
+    baseline_for: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, criterion: IdeaCriterion) -> "IdeaCriterionModel":
+        return cls(
+            schema_version=criterion.schema_version,
+            criterion_id=criterion.criterion_id,
+            idea_id=criterion.idea_id,
+            kind=criterion.kind,
+            label=criterion.label,
+            observable=ObservableRefModel.from_domain(criterion.observable),
+            condition=criterion.condition,
+            threshold=criterion.threshold,
+            window=criterion.window,
+            cadence=criterion.cadence,
+            state=criterion.state,
+            last_evaluation=(
+                CriterionEvaluationModel.from_domain(criterion.last_evaluation) if criterion.last_evaluation else None
+            ),
+            trigger_evaluation=(
+                CriterionEvaluationModel.from_domain(criterion.trigger_evaluation)
+                if criterion.trigger_evaluation
+                else None
+            ),
+            triggered_at=criterion.triggered_at,
+            acknowledged_at=criterion.acknowledged_at,
+            armed_at=criterion.armed_at,
+            created_at=criterion.created_at,
+            baseline_as_of=criterion.baseline_as_of,
+            baseline_for=criterion.baseline_for,
+        )
+
+
+class IdeaModel(BaseModel):
+    schema_version: int
+    idea_id: str
+    title: str
+    thesis: str
+    notes: str
+    stance: str
+    legs: list[IdeaLegModel]
+    horizon: IdeaHorizonModel
+    status: str
+    origin: IdeaOriginModel
+    tags: list[str]
+    created_at: datetime
+    updated_at: datetime
+    closed_at: datetime | None = None
+    evidence: list[IdeaEvidenceModel]
+    criteria: list[IdeaCriterionModel] = Field(default_factory=list)
+    journal: list[IdeaJournalEntryModel]
+    evidence_counts: dict[str, int]
+    criteria_counts: dict[str, int] = Field(default_factory=dict)
+    # ``origin`` above is the idea's domain origin, so the record's own
+    # provenance travels as one nested object instead of top-level fields.
+    provenance: dict[str, Any]
+
+    @classmethod
+    def from_domain(cls, idea: Idea, *, retrieved_at: datetime) -> "IdeaModel":
+        return cls(
+            schema_version=idea.schema_version,
+            idea_id=idea.idea_id,
+            title=idea.title,
+            thesis=idea.thesis,
+            notes=idea.notes,
+            stance=idea.stance,
+            legs=[IdeaLegModel.from_domain(leg) for leg in idea.legs],
+            horizon=IdeaHorizonModel.from_domain(idea.horizon),
+            status=idea.status,
+            origin=IdeaOriginModel.from_domain(idea.origin),
+            tags=list(idea.tags),
+            created_at=idea.created_at,
+            updated_at=idea.updated_at,
+            closed_at=idea.closed_at,
+            evidence=[IdeaEvidenceModel.from_domain(item) for item in idea.evidence],
+            criteria=[IdeaCriterionModel.from_domain(item) for item in idea.criteria],
+            journal=[IdeaJournalEntryModel.from_domain(entry) for entry in idea.journal],
+            evidence_counts=idea.evidence_counts(),
+            criteria_counts=idea.criteria_counts(),
+            provenance={
+                "source_provider": "gamma_ideas",
+                "retrieved_at": retrieved_at.isoformat(),
+                "origin": "idea_store",
+                "transformation_note": None,
+            },
+        )
+
+
+class IdeaLegSummaryModel(BaseModel):
+    label: str
+    entity_type: str
+    normalized_id: str
+    weight: float | None = None
+
+
+class IdeaSummaryModel(BaseModel):
+    idea_id: str
+    title: str
+    thesis: str
+    stance: str
+    status: str
+    tags: list[str]
+    legs: list[IdeaLegSummaryModel]
+    evidence_counts: dict[str, int]
+    evidence_total: int
+    last_evidence_at: datetime | None = None
+    journal_count: int
+    origin_kind: str
+    origin_ref: str | None = None
+    review_date: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    criteria_counts: dict[str, int] = Field(default_factory=dict)
+    criteria_total: int = 0
+    unacknowledged_triggers: int = 0
+
+    @classmethod
+    def from_domain(cls, summary: IdeaSummary) -> "IdeaSummaryModel":
+        payload = summary.to_dict()
+        payload.pop("schema_version", None)
+        return cls(**payload)
+
+
+class IdeaStorageWarningModel(BaseModel):
+    action: str
+    file_name: str
+    message: str
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, warning: IdeaStorageWarning) -> "IdeaStorageWarningModel":
+        return cls(
+            action=warning.action,
+            file_name=warning.file_name,
+            message=warning.message,
+            created_at=warning.created_at,
+        )
+
+
+class IdeaListResponseModel(BaseModel):
+    items: list[IdeaSummaryModel] = Field(default_factory=list)
+    total: int = 0
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
+    storage_warnings: list[IdeaStorageWarningModel] = Field(default_factory=list)
+    source_provider: str = "gamma_ideas"
+    retrieved_at: datetime
+    origin: str = "idea_service.list_ideas"
+    transformation_note: str | None = "Board rows come from the local idea index."
+
+    @classmethod
+    def from_domain(cls, result: IdeaListResult) -> "IdeaListResponseModel":
+        return cls(
+            items=[IdeaSummaryModel.from_domain(item) for item in result.items],
+            total=result.total,
+            status_counts=result.status_counts,
+            tags=result.tags,
+            storage_warnings=[IdeaStorageWarningModel.from_domain(item) for item in result.storage_warnings],
+            retrieved_at=result.retrieved_at,
+        )
+
+
+class IdeaPinResponseModel(BaseModel):
+    idea: IdeaModel
+    evidence: IdeaEvidenceModel
+
+
+class IdeaDeleteResponseModel(BaseModel):
+    success: bool
+    recoverable: bool = True
+
+
+
+class IdeaCriterionResponseModel(BaseModel):
+    idea: IdeaModel
+    criterion: IdeaCriterionModel
+
+
+class IdeaNotificationModel(BaseModel):
+    notification_id: str
+    kind: Literal["criterion_triggered", "review_due"]
+    idea_id: str
+    idea_title: str
+    created_at: datetime
+    criterion_id: str | None = None
+    criterion_kind: str | None = None
+    label: str = ""
+    value_display: str | None = None
+    first_met_at: datetime | None = None
+    review_date: date | None = None
+    days_overdue: int | None = None
+    provenance: dict[str, Any] | None = None
+
+
+class IdeaNotificationsResponseModel(BaseModel):
+    items: list[IdeaNotificationModel] = Field(default_factory=list)
+    triggered: int = 0
+    reviews_due: int = 0
+    evaluation_running: bool = False
+    last_pass: dict[str, Any] | None = None
+    limitation: str = (
+        "Criteria are evaluated only while Gamma runs: at start, when an idea is opened, "
+        "after each US close and, with Trader Workstation connected, intraday."
+    )
+    source_provider: str = "gamma_ideas"
+    retrieved_at: datetime
+    origin: str = "idea_evaluation.notifications"
+
+
+class EvaluationPassModel(BaseModel):
+    trigger: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    ideas_evaluated: int = 0
+    criteria_evaluated: int = 0
+    readings_taken: int = 0
+    new_triggers: list[dict[str, Any]] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class ObservableParamModel(BaseModel):
+    name: str
+    label: str
+    kind: str
+    required: bool = True
+    placeholder: str | None = None
+    options: list[dict[str, str | None]] = Field(default_factory=list)
+
+
+class ObservableDefinitionModel(BaseModel):
+    observable_id: str
+    label: str
+    group: str
+    source: str
+    params: list[ObservableParamModel]
+    conditions: list[str]
+    cadences: list[str]
+    change_unit: str
+    value_unit: str
+    needs_tws: bool
+    needs_keys: list[str] = Field(default_factory=list)
+    intraday_capable: bool = False
+    available: bool
+    unavailable_reason: str | None = None
+    dependency_label: str | None = None
+    order: int
+
+
+class ObservableRegistryResponseModel(BaseModel):
+    items: list[ObservableDefinitionModel] = Field(default_factory=list)
+    tws_connected: bool = False
+    source_provider: str = "gamma_ideas"
+    retrieved_at: datetime
+    origin: str = "idea_observables.registry"
+
+
+class ObservablePreviewResponseModel(BaseModel):
+    observable: ObservableRefModel
+    available: bool
+    value: float | None = None
+    value_display: str | None = None
+    as_of: datetime | None = None
+    reason: str | None = None
+    stale_reason: str | None = None
+    history_points: int = 0
+    event_time: datetime | None = None
+    event_released: bool | None = None
+    provenance: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+    retrieved_at: datetime
+
+
+class IdeaExplanationModel(BaseModel):
+    key: str
+    title: str
+    measures: str
+    why: dict[str, str]
+    computed: str
+    source: str | None = None
+
+
+class IdeaExplanationsResponseModel(BaseModel):
+    items: list[IdeaExplanationModel] = Field(default_factory=list)
+    retrieved_at: datetime
+    source_provider: str = "gamma_ideas"
+    origin: str = "idea_explanations.registry"

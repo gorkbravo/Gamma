@@ -21,6 +21,9 @@ from src.application.commodities_service import CommoditiesService
 from src.services.commodity_curve_store import CommodityCurveStore
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
+from src.application.idea_evaluation import IdeaEvaluationScheduler, IdeaEvaluationService
+from src.application.idea_observables import ObservableRegistry
+from src.application.idea_service import IdeaService
 from src.application.iv_service import IVService
 from src.services.iv_snapshot_store import IVSnapshotStore
 from src.application.macro_service import MacroService
@@ -107,6 +110,7 @@ from src.services.saved_research_store import SavedResearchStore
 from src.services.prediction_research_store import PredictionResearchStore
 from src.services.setup_store import SetupStore
 from src.services.sitrep_follow_up_store import SitrepFollowUpStore
+from src.services.idea_store import IdeaStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
 from src.utils.logging_config import setup_logging
@@ -187,6 +191,13 @@ class ApplicationRuntime:
     risk_service: RiskService
     iv_service: IVService
     iv_snapshot_store: IVSnapshotStore
+    # Workstream 12 - Ideas: local research records (thesis, pinned evidence, criteria, journal).
+    idea_store: IdeaStore
+    idea_service: IdeaService
+    # I2: read-only observable registry and criterion evaluation (runs only while Gamma runs).
+    idea_observables: ObservableRegistry
+    idea_evaluation: IdeaEvaluationService
+    idea_scheduler: IdeaEvaluationScheduler | None = None
     desktop: DesktopRuntimeState | None = None
     # Preferencias del asistente de primer arranque y origen de cada ajuste de inicio.
     setup_store: SetupStore | None = None
@@ -237,6 +248,9 @@ class ApplicationRuntime:
         return normalized
 
     def shutdown(self) -> None:
+        scheduler = getattr(self, "idea_scheduler", None)
+        if scheduler is not None:
+            scheduler.stop()
         try:
             self.client.shutdown()
         except Exception:
@@ -328,6 +342,8 @@ def build_runtime(
     research_script_store = ResearchScriptStore(base_dir=resolved_history_dir / "research_scripts")
     research_script_runtime = _build_research_script_runtime()
     copilot_store = CopilotStore(base_dir=resolved_history_dir / "copilot")
+    idea_store = IdeaStore(base_dir=resolved_history_dir / "ideas")
+    idea_service = IdeaService(idea_store)
     risk_free_service = RiskFreeRateService(cache=cache)
 
     portfolio_provider = PortfolioDataProvider(
@@ -513,6 +529,21 @@ def build_runtime(
                           "commodities": commodities_service, "crypto": crypto_service,
                           "prediction": prediction_market_service},
     )
+    # Workstream 12 - Ideas (I2): criteria read observables only through these read-only services.
+    idea_observables = ObservableRegistry(
+        research_provider=research_provider,
+        macro_service=macro_service,
+        prediction_service=prediction_market_service,
+        commodities_service=commodities_service,
+        iv_service=iv_service,
+        crypto_service=crypto_service,
+        script_service=research_script_service,
+        client=client,
+        mock_mode=bool(mock_mode),
+        market_data_mode=lambda: getattr(iv_service, "market_data_mode", "delayed"),
+    )
+    idea_service.criteria_registry = idea_observables
+    idea_evaluation = IdeaEvaluationService(idea_store, idea_observables)
     copilot_provider = trace_provider(
         _build_copilot_provider(allow_mock=bool(mock_mode)),
         provider_usage,
@@ -579,6 +610,10 @@ def build_runtime(
         iv_service=iv_service,
         desktop=desktop,
         iv_snapshot_store=iv_snapshot_store,
+        idea_store=idea_store,
+        idea_service=idea_service,
+        idea_observables=idea_observables,
+        idea_evaluation=idea_evaluation,
         setup_store=setup_store,
         startup_settings=startup_settings,
         sec_fundamentals_adapter=sec_fundamentals_adapter,
@@ -615,6 +650,27 @@ def reset_runtime() -> None:
 
 def ib_auto_connect_enabled() -> bool:
     return _parse_bool_env(IB_AUTO_CONNECT_ENV, False)
+
+
+def start_idea_evaluation(runtime: ApplicationRuntime) -> IdeaEvaluationScheduler | None:
+    """Start the Ideas criterion scheduler (Workstream 12, I2) in a daemon thread.
+
+    It evaluates every active idea's criteria shortly after start, after each US
+    close and, with Trader Workstation connected, intraday. Never under pytest,
+    and never for an injected runtime (``create_app`` only calls this when it
+    owns the runtime). ``GAMMA_IDEAS_EVALUATION=off`` disables it.
+    """
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
+    if str(os.getenv("GAMMA_IDEAS_EVALUATION", "on")).strip().lower() in {"0", "off", "false", "no"}:
+        logger.info("Ideas criterion evaluation is off (GAMMA_IDEAS_EVALUATION).")
+        return None
+    if runtime.idea_scheduler is not None:
+        return runtime.idea_scheduler
+    scheduler = IdeaEvaluationScheduler(runtime.idea_evaluation)
+    runtime.idea_scheduler = scheduler
+    scheduler.start()
+    return scheduler
 
 
 def start_ib_auto_connect(runtime: ApplicationRuntime) -> IbAutoConnectState | None:
