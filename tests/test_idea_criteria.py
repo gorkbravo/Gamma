@@ -524,6 +524,48 @@ def test_scheduler_runs_start_daily_close_and_intraday_passes(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_a_review_date_before_1970_does_not_break_notifications(tmp_path):
+    # Regresión: el orden usaba -created_at.timestamp(), que en Windows lanza OSError antes de 1970.
+    clock, store, registry, service, evaluation = _setup(tmp_path)
+    from src.models.ideas import IdeaHorizon
+
+    typo = _active_idea(service, title="Typo in the review date")
+    service.update_idea(typo.idea_id, IdeaPatchRequest(horizon=IdeaHorizon(review_date=date(202, 11, 9))))
+    recent = _active_idea(service, title="Recent review")
+    service.update_idea(recent.idea_id, IdeaPatchRequest(horizon=IdeaHorizon(review_date=date(2026, 11, 9))))
+    notes = evaluation.notifications()
+    assert [note.idea_title for note in notes] == ["Recent review", "Typo in the review date"]
+
+
+def test_an_idea_archived_during_a_read_gets_no_trigger(tmp_path):
+    clock, store, registry, service, evaluation = _setup(tmp_path)
+    idea = _active_idea(service)
+    idea, criterion = service.add_criterion(idea.idea_id, _criterion())
+
+    def slow_read(ref, *, now, intraday=False):
+        service.archive(idea.idea_id)
+        return ObservableReading(history=_closes((10, 70)))
+
+    registry.read = slow_read
+    evaluation.evaluate_idea(idea.idea_id)
+    current = store.require(idea.idea_id)
+    assert current.status == "archived"
+    assert current.criterion(criterion.criterion_id).triggered_at is None
+    assert not any(entry.kind == "criterion_triggered" for entry in current.journal)
+
+
+def test_a_loading_live_surface_for_the_same_symbol_is_never_stopped():
+    # Regresión: con el stream de SPY arrancado pero sin primer snapshot, se llamaba a
+    # get_surface(), que detiene el stream en vivo de Options.
+    def must_not_run(request):
+        raise AssertionError("get_surface would stop the live stream")
+
+    iv = SimpleNamespace(is_running=lambda: True, active_symbol=lambda: "SPY", latest_snapshot=lambda: None, get_surface=must_not_run)
+    registry = ObservableRegistry(client=SimpleNamespace(is_connected=lambda: True), iv_service=iv, env=lambda key: None)
+    reading = registry.read(ObservableRef("option_atm_iv", {"symbol": "SPY"}), now=T0)
+    assert reading.is_unavailable and "still loading" in reading.unavailable_reason
+
+
 def test_registry_orders_validates_and_states_dependencies():
     client = SimpleNamespace(is_connected=lambda: False)
     iv = SimpleNamespace(is_running=lambda: True, active_symbol=lambda: "QQQ", latest_snapshot=lambda: None)

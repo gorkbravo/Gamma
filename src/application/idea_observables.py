@@ -625,6 +625,12 @@ class ObservableRegistry:
                     f"Options is streaming {active or 'another symbol'}; Gamma does not interrupt a live surface to read {symbol}."
                 )
             snapshot = self.iv_service.latest_snapshot()
+            if snapshot is None:
+                # El stream de este símbolo aún no ha emitido su primer snapshot.
+                # get_surface() lo detendría, así que se espera a la siguiente pasada.
+                return ObservableReading.unavailable(
+                    f"Options is still loading the live {symbol} surface; Gamma does not interrupt it and will read it on the next pass."
+                )
         if snapshot is None:
             mode = self._market_data_mode() if callable(self._market_data_mode) else self._market_data_mode
             result = self.iv_service.get_surface(IVSurfaceRequest(symbol=symbol, market_data_mode=str(mode or "delayed")))

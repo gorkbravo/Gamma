@@ -388,6 +388,39 @@ def test_store_recovers_an_interrupted_write(tmp_path):
     assert not temp.exists()
 
 
+def test_store_quarantines_a_non_object_entry_instead_of_failing_to_start(tmp_path):
+    # Regresión: un elemento del diario que no es un objeto lanzaba AttributeError
+    # desde IdeaStore.__init__ y el backend no arrancaba.
+    base = tmp_path / "ideas"
+    service = _service(tmp_path, IdeaStore(base))
+    good = service.create_idea(IdeaCreateRequest(title="Good"))
+    bad = service.create_idea(IdeaCreateRequest(title="Bad"))
+    path = base / "items" / f"{bad.idea_id}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["journal"] = [None]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    (base / "index.json").unlink()
+
+    restarted = IdeaStore(base)
+    assert [item.idea_id for item in restarted.list_summaries()] == [good.idea_id]
+    assert list((base / "quarantine").glob(f"{bad.idea_id}.json.invalid.*.preserved"))
+
+
+def test_store_rejects_altered_ids_without_touching_the_real_file(tmp_path):
+    # Regresión: en NTFS un id en mayúsculas abría el fichero real y lo mandaba a cuarentena;
+    # y _safe_id eliminaba caracteres, de modo que "a/b" se convertía en otro id.
+    base = tmp_path / "ideas"
+    service = _service(tmp_path, IdeaStore(base))
+    idea = service.create_idea(IdeaCreateRequest(title="Case"))
+    altered = idea.idea_id.upper() if idea.idea_id.upper() != idea.idea_id else idea.idea_id + "X"
+    assert service.store.get(altered) is None
+    assert service.store.delete(altered) is False
+    assert service.store.get(f"{idea.idea_id[:2]}/{idea.idea_id[2:]}") is None
+    assert service.store.get(idea.idea_id) is not None
+    assert not list((base / "quarantine").iterdir())
+    assert [item.idea_id for item in IdeaStore(base).list_summaries()] == [idea.idea_id]
+
+
 def test_delete_moves_the_file_to_trash(tmp_path):
     base = tmp_path / "ideas"
     service = _service(tmp_path, IdeaStore(base))

@@ -298,7 +298,9 @@ class IdeaStore:
             return False
         with self._lock:
             path = self.items_dir / f"{safe_id}.json"
-            if not path.exists():
+            # Se carga antes de mover: confirma que el fichero es exactamente esta idea
+            # (un id con otra capitalización no debe borrar la real y dejar una fila fantasma).
+            if self._load_item_unlocked(path) is None:
                 return False
             stamp = now_utc().strftime("%Y%m%dT%H%M%S%f")
             os.replace(path, self.trash_dir / f"{safe_id}.{stamp}.json")
@@ -325,9 +327,13 @@ class IdeaStore:
             return None
         try:
             idea = Idea.from_dict(payload)
-        except (IdeaValidationError, ValueError, TypeError, KeyError) as exc:
-            self._quarantine_unlocked(path, reason="invalid", message=f"failed validation ({exc})")
+        except Exception as exc:  # noqa: BLE001 - cualquier JSON mal formado (p. ej. AttributeError) va a cuarentena, nunca impide arrancar
+            self._quarantine_unlocked(path, reason="invalid", message=f"failed validation ({exc.__class__.__name__}: {exc})")
             self._forget_unlocked(path.stem)
+            return None
+        if idea.idea_id != path.stem and idea.idea_id.casefold() == path.stem.casefold():
+            # Sistema de ficheros sin distinción de mayúsculas (NTFS): se pidió el id con otra
+            # capitalización. El fichero es válido; no se toca y se responde como no encontrado.
             return None
         if idea.idea_id != path.stem:
             self._quarantine_unlocked(path, reason="id-mismatch", message="names a different idea id than its file")
@@ -517,4 +523,13 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 
 def _safe_id(value: str | None) -> str:
-    return "".join(ch for ch in str(value or "").strip() if ch.isalnum() or ch in {"_", "-"})
+    """Devuelve el id solo si ya es seguro tal cual; si no, cadena vacía.
+
+    No elimina caracteres: ``"a/b"`` no debe convertirse en ``"ab"`` y abrir otra idea.
+    """
+    text = str(value or "")
+    if not text or len(text) > 128:
+        return ""
+    if all((ch.isascii() and ch.isalnum()) or ch in {"_", "-"} for ch in text):
+        return text
+    return ""

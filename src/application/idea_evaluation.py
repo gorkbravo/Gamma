@@ -176,10 +176,11 @@ class IdeaEvaluationService:
             for summary in self.store.list_summaries():
                 if summary.status != "active" or not summary.criteria_total:
                     continue
-                idea = self.store.get(summary.idea_id)
-                if idea is None:
-                    continue
                 try:
+                    # La lectura va dentro del try: un fichero dañado no debe abortar la pasada entera.
+                    idea = self.store.get(summary.idea_id)
+                    if idea is None:
+                        continue
                     self._evaluate(idea, trigger=trigger, readings=readings, result=result)
                 except Exception as exc:  # noqa: BLE001 - one bad idea must not stop the pass
                     logger.exception("Idea evaluation failed for %s", summary.idea_id)
@@ -279,6 +280,9 @@ class IdeaEvaluationService:
         result: EvaluationPassResult,
     ) -> Idea:
         def mutate(current: Idea) -> Idea:
+            # Una idea archivada o cerrada durante una lectura lenta no recibe triggers ni diario.
+            if current.status != "active":
+                return current
             now = self._clock()
             criteria: list[IdeaCriterion] = []
             entries: list[IdeaJournalEntry] = []
@@ -397,7 +401,10 @@ class IdeaEvaluationService:
                         days_overdue=(today - review_date).days,
                     )
                 )
-        items.sort(key=lambda item: (item.kind != "criterion_triggered", -item.created_at.timestamp()))
+        # Dos ordenaciones estables en lugar de ``-created_at.timestamp()``: en Windows,
+        # ``timestamp()`` lanza OSError con fechas anteriores a 1970 (una review_date mal tecleada).
+        items.sort(key=lambda item: item.created_at, reverse=True)
+        items.sort(key=lambda item: item.kind != "criterion_triggered")
         return items
 
     def acknowledge(self, idea_id: str, criterion_id: str) -> Idea:
