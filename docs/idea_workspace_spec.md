@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 and I2 done on branches, not merged (I2 on 2026-11-15).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I3-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I3-I6 are not started.
 
 ## Goal
 
@@ -284,8 +284,8 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 
 | Checkpoint | Scope | Acceptance |
 | --- | --- | --- |
-| I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done on branch, not merged** (see [I1 implementation notes](#i1-implementation-notes)) |
-| I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done on branch, not merged** (see [I2 implementation notes](#i2-implementation-notes)) |
+| I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done, merged 2026-11-21** (see [I1 implementation notes](#i1-implementation-notes)) |
+| I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done, merged 2026-11-21** (see [I2 implementation notes](#i2-implementation-notes)) |
 | I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
@@ -294,7 +294,7 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 
 ### I1 implementation notes
 
-Recorded 2026-11-14 for review; the branch is not merged.
+Recorded 2026-11-14 for review; merged into main on 2026-11-21.
 
 - **Model:** `src/models/ideas.py`. `title` is required; `thesis` may be empty while the idea is a draft, and activation requires it. Evidence `stance` is required. `captured_values` are deep-frozen, JSON-strict and bounded (24 KiB, nesting depth 5, 500 items per list or object, 2,000 characters per string); a `series` longer than 260 points is downsampled at a uniform stride that keeps both ends, and the method is stored beside it. The journal is append-only and the store refuses any write that edits or drops an entry.
 - **Lifecycle in I1:** `draft` -> `active` -> `archived`, plus restore (back to the status the idea had when archived) and delete (the file moves to `data/ideas/trash/`). `closed` and `closed_at` are valid stored values reserved for I3; no I1 route reaches them.
@@ -344,6 +344,25 @@ Recorded 2026-11-15 for review and updated on 2026-11-16 after the live FRED che
     - "Headline CPI YoY above 4.00%" triggered on the October print, first met 2026-10-01, at 4.08 %.
     - "US 10Y Treasury Yield above 5.00%" triggered at 5.15 %, first met 2026-10-19.
 - **Left for later checkpoints:** native desktop notifications (Tauri), commodity curve points, IBKR intraday marks for equities, and a history for ATM IV and skew (so crossings and changes on them), which needs stored snapshots.
+
+### Review before merge, 2026-11-21
+
+A backend and a frontend code review of I1+I2 found these defects. They were fixed on the branch with regression tests, and the label and notification-center fixes were checked in a mock browser run before the merge:
+
+- An IV criterion no longer calls `get_surface` while Options is still loading the same symbol's live stream (that call stops the stream); the reading is `unavailable` until the next pass.
+- The store rejects ids that are not already safe instead of stripping characters, and a case-only mismatch (NTFS) is "not found" instead of quarantining the real file. `delete` checks the file before moving it.
+- Any malformed item payload is quarantined instead of failing store start-up, and a bad file no longer aborts a whole evaluation pass.
+- Notifications are sorted without `datetime.timestamp()`, which raises on Windows for dates before 1970.
+- An idea archived during a slow read gets no trigger or journal entry.
+- Editing a criterion regenerates its labels when a parameter changes, and an edited `macro_event` rule loads its events.
+- A promoted Sitrep macro follow-up reopens with its region and theme. A double click on "Promote to idea" creates one idea, and a failed pin retries against the idea it already created.
+- Deleting or editing an idea refreshes the notifications. Opening another idea clears the previous one while it loads. The notification popover takes focus and closes when focus leaves it.
+
+**Open design questions for I3** (not changed):
+
+- No look-back compares dates, not instants. An intraday point taken on the arming day before the rule was armed (a crypto price, a contract probability, IV) can trigger it at once. A rule already met when armed should hold until a new observation meets it. The fix needs a per-observable rule, because FRED daily and monthly points are dated at midnight and rely on the day comparison and the baseline. For the same reason, `event_occurs` on a contract that has already resolved triggers at once.
+- An Equity Research pin stores the chart window ("1Y"), not the analysis lookback (126, 252 or 504 days) or the benchmark, so reopening can run a different analysis.
+- Smaller accessibility items: a "What is this?" button sits inside a `<label>` in the criteria form, and the legs editor table is not inside a `.table-scroll` wrapper at 390 px.
 
 ## Non-goals
 
