@@ -358,11 +358,12 @@ A backend and a frontend code review of I1+I2 found these defects. They were fix
 - A promoted Sitrep macro follow-up reopens with its region and theme. A double click on "Promote to idea" creates one idea, and a failed pin retries against the idea it already created.
 - Deleting or editing an idea refreshes the notifications. Opening another idea clears the previous one while it loads. The notification popover takes focus and closes when focus leaves it.
 
-**Open design questions for I3** (not changed):
+**Follow-ups closed on 2026-11-21** (the review's open design questions):
 
-- No look-back compares dates, not instants. An intraday point taken on the arming day before the rule was armed (a crypto price, a contract probability, IV) can trigger it at once. A rule already met when armed should hold until a new observation meets it. The fix needs a per-observable rule, because FRED daily and monthly points are dated at midnight and rely on the day comparison and the baseline. For the same reason, `event_occurs` on a contract that has already resolved triggers at once.
-- An Equity Research pin stores the chart window ("1Y"), not the analysis lookback (126, 252 or 504 days) or the benchmark, so reopening can run a different analysis.
-- Smaller accessibility items: a "What is this?" button sits inside a `<label>` in the criteria form, and the legs editor table is not inside a `.table-scroll` wrapper at 390 px.
+- **No look-back by instant for timestamped data.** Readers whose points carry the moment they were observed (crypto price, contract probability, ATM IV and skew, commodity spreads) set `instant_points`, and only points after the arming instant count. Daily closes, commodity daily prices, Script signals and FRED series keep the day rule and the baseline, because they publish after the date they carry. A level already met when a rule is armed holds until a new observation meets it.
+- **`event_occurs` on an already-resolved contract.** The venues give no resolution time, so a resolution counts only after a successful reading since arming has seen the contract open. If the first reading after arming already shows it resolved Yes, the rule holds with that reason (`known_at_arming` on the evaluation) and never triggers; a re-activation re-arms it the same way.
+- **Equity Research pins** store the lookback and benchmark of the run that produced the figures (`researchResultBasis`), in the title, the captured metrics and the reopen ids, and reopening runs exactly that analysis. Older pins reopen as before. The scope form now follows external draft changes, so after any handoff it shows the ticker, benchmark and lookback of the analysis on screen.
+- Still open, small: a "What is this?" button sits inside a `<label>` in the criteria form, and the legs editor table is not inside a `.table-scroll` wrapper at 390 px.
 
 ## Non-goals
 
