@@ -1,4 +1,4 @@
-"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1, I2 and I3a)."""
+"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1, I2, I3a and I3b)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,10 @@ from src.application.idea_service import (
     IdeaCreateRequest,
     IdeaCriterionRequest,
     IdeaEvidenceCreateRequest,
+    IdeaCloseRequest,
     IdeaListResult,
     IdeaPatchRequest,
+    IdeaReviewStatistics,
     IdeaTrackingSettingsRequest,
 )
 from src.models.handoff import HandoffEntity
@@ -33,6 +35,7 @@ from src.models.ideas import (
     OBSERVABLE_PARAMS_MAX,
     ORIGIN_LABEL_MAX,
     ORIGIN_REF_MAX,
+    REVIEW_TEXT_MAX,
     TRACKING_BENCHMARK_MAX,
     TRACKING_COST_BP_MAX,
     TRACKING_LABEL,
@@ -44,6 +47,7 @@ from src.models.ideas import (
     IdeaJournalEntry,
     IdeaLeg,
     IdeaOrigin,
+    IdeaReview,
     IdeaTracking,
     ObservableRef,
     envelope_from_dict,
@@ -438,6 +442,8 @@ class IdeaModel(BaseModel):
     criteria_counts: dict[str, int] = Field(default_factory=dict)
     # I3a: segmentos, supuestos de coste y último titular; la serie se pide a /tracking.
     tracking: "IdeaTrackingRecordModel | None" = None
+    # I3b: revisiones escritas al cerrar (la última es la del cierre vigente si la idea está cerrada).
+    reviews: list["IdeaReviewModel"] = Field(default_factory=list)
     # ``origin`` above is the idea's domain origin, so the record's own
     # provenance travels as one nested object instead of top-level fields.
     provenance: dict[str, Any]
@@ -465,6 +471,7 @@ class IdeaModel(BaseModel):
             evidence_counts=idea.evidence_counts(),
             criteria_counts=idea.criteria_counts(),
             tracking=IdeaTrackingRecordModel.from_domain(idea.tracking) if idea.tracking else None,
+            reviews=[IdeaReviewModel.from_domain(item) for item in idea.reviews],
             provenance={
                 "source_provider": "gamma_ideas",
                 "retrieved_at": retrieved_at.isoformat(),
@@ -502,6 +509,7 @@ class IdeaSummaryModel(BaseModel):
     criteria_total: int = 0
     unacknowledged_triggers: int = 0
     tracking: "IdeaTrackingHeadlineModel | None" = None
+    review: "IdeaReviewHeadlineModel | None" = None
 
     @classmethod
     def from_domain(cls, summary: IdeaSummary) -> "IdeaSummaryModel":
@@ -715,6 +723,7 @@ class IdeaTrackingSnapshotModel(BaseModel):
     sessions: int = 0
     gaps: int = 0
     partial: bool = False
+    final: bool = False
 
 
 class IdeaCostModelRecordModel(BaseModel):
@@ -774,6 +783,7 @@ class TrackingSummaryModel(BaseModel):
     sessions: int = 0
     gaps: int = 0
     partial: bool = False
+    final: bool = False
     first_session: date | None = None
     as_of: date | None = None
 
@@ -884,6 +894,133 @@ class IdeaTrackingResponseModel(BaseModel):
     source_provider: str = "gamma_ideas"
     origin: str = "idea_tracking.compute"
     transformation_note: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Close and review (I3b)
+# ---------------------------------------------------------------------------
+
+ReviewOutcomeLiteral = Literal["confirmed", "invalidated", "abandoned", "expired"]
+EvidenceVerdictLiteral = Literal["held", "failed", "unclear"]
+
+
+class IdeaCloseRequestModel(BaseModel):
+    outcome: ReviewOutcomeLiteral
+    lesson: str = Field(min_length=1, max_length=REVIEW_TEXT_MAX)
+    expected: str | None = Field(default=None, max_length=REVIEW_TEXT_MAX)
+    realized_note: str = Field(default="", max_length=REVIEW_TEXT_MAX)
+    evidence_verdicts: dict[str, EvidenceVerdictLiteral] = Field(default_factory=dict)
+
+    def to_domain(self) -> IdeaCloseRequest:
+        return IdeaCloseRequest(
+            outcome=self.outcome,
+            lesson=self.lesson,
+            expected=self.expected,
+            realized_note=self.realized_note,
+            evidence_verdicts=dict(self.evidence_verdicts),
+        )
+
+
+class IdeaEvidenceVerdictModel(BaseModel):
+    evidence_id: str
+    verdict: str
+    title: str
+    stance: str
+
+
+class IdeaCriterionAtCloseModel(BaseModel):
+    criterion_id: str
+    kind: str
+    label: str
+    state: str
+    triggered_at: datetime | None = None
+    first_met_at: datetime | None = None
+
+
+class IdeaReviewModel(BaseModel):
+    review_id: str
+    outcome: str
+    lesson: str
+    expected: str = ""
+    realized_note: str = ""
+    opened_at: datetime
+    closed_at: datetime
+    holding_days: float
+    evidence_verdicts: list[IdeaEvidenceVerdictModel] = Field(default_factory=list)
+    criteria_at_close: list[IdeaCriterionAtCloseModel] = Field(default_factory=list)
+    realized: IdeaTrackingSnapshotModel | None = None
+    first_invalidation_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, review: IdeaReview) -> "IdeaReviewModel":
+        payload = review.to_dict()
+        payload.pop("schema_version", None)
+        payload.pop("idea_id", None)
+        return cls(**payload, holding_days=review.holding_days, first_invalidation_at=review.first_invalidation_at)
+
+
+class IdeaReviewHeadlineModel(BaseModel):
+    review_id: str
+    outcome: str
+    opened_at: datetime
+    closed_at: datetime
+    holding_days: float
+    expected: str = ""
+    lesson: str = ""
+    invalidation_criteria: int = 0
+    first_invalidation_at: datetime | None = None
+    evidence_verdicts: dict[str, int] = Field(default_factory=dict)
+    realized_at_close: IdeaTrackingSnapshotModel | None = None
+
+
+class IdeaReviewRowModel(BaseModel):
+    idea_id: str
+    title: str
+    stance: str
+    status: str
+    tags: list[str] = Field(default_factory=list)
+    outcome: str
+    opened_at: datetime
+    closed_at: datetime
+    holding_days: float
+    expected: str = ""
+    lesson: str = ""
+    net_return: float | None = None
+    benchmark: str | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    realized_final: bool = False
+    realized_as_of: date | None = None
+    tracked: bool = False
+    invalidation_criteria: int = 0
+    first_invalidation_at: datetime | None = None
+    evidence_verdicts: dict[str, int] = Field(default_factory=dict)
+
+
+class IdeaReviewStatsResponseModel(BaseModel):
+    rows: list[IdeaReviewRowModel] = Field(default_factory=list)
+    outcomes: dict[str, int] = Field(default_factory=dict)
+    holding_days: dict[str, Any] = Field(default_factory=dict)
+    realized: dict[str, Any] = Field(default_factory=dict)
+    invalidation: dict[str, Any] = Field(default_factory=dict)
+    label: str = TRACKING_LABEL
+    source_provider: str = "gamma_ideas"
+    retrieved_at: datetime
+    origin: str = "idea_service.review_statistics"
+    transformation_note: str | None = (
+        "Your own closed ideas only: the review of each current close, with the hypothetical tracking record. No score."
+    )
+
+    @classmethod
+    def from_domain(cls, result: IdeaReviewStatistics) -> "IdeaReviewStatsResponseModel":
+        return cls(
+            rows=[IdeaReviewRowModel(**row) for row in result.rows],
+            outcomes=result.outcomes,
+            holding_days=result.holding_days,
+            realized=result.realized,
+            invalidation=result.invalidation,
+            retrieved_at=result.retrieved_at,
+        )
 
 
 IdeaModel.model_rebuild()

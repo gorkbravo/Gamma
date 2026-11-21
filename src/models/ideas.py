@@ -1,4 +1,4 @@
-"""Domain model for Workstream 12 - Ideas (checkpoints I1 and I2).
+"""Domain model for Workstream 12 - Ideas (checkpoints I1, I2, I3a and I3b).
 
 An Idea joins Gamma's tabs into one research workflow: a written thesis,
 evidence pinned from any tab with its provenance frozen at capture, criteria
@@ -29,7 +29,8 @@ from src.utils.time import now_utc
 # Version 2 (I2) added ``criteria``; version 1 files migrate on load
 # (``migrate_idea_v1_to_v2``), so an older build skips them instead of dropping criteria.
 # Version 3 (I3a) added ``tracking`` (``migrate_idea_v2_to_v3``).
-IDEA_SCHEMA_VERSION = 3
+# Version 4 (I3b) added ``reviews`` (``migrate_idea_v3_to_v4``).
+IDEA_SCHEMA_VERSION = 4
 
 IDEA_STANCES = ("long", "short", "relative", "event", "neutral")
 # ``closed`` belongs to I3 (close requires a review); it is a valid stored state
@@ -154,7 +155,7 @@ DEFAULT_TRACKING_COST_BP: dict[str, float] = {
     "crypto_spot": 50.0,
 }
 TRACKING_COST_BP_MAX = 500.0
-TRACKING_START_REASONS = ("activated", "legs_edited", "legs_added", "restored", "migrated")
+TRACKING_START_REASONS = ("activated", "legs_edited", "legs_added", "restored", "reopened", "migrated")
 TRACKING_END_REASONS = ("legs_edited", "legs_removed", "archived", "closed")
 TRACKING_STATUSES = ("not_started", "waiting", "tracking", "stopped", "unavailable")
 TRACKING_WEIGHT_SOURCES = ("stated", "stance")
@@ -162,6 +163,13 @@ TRACKING_SEGMENTS_MAX = 200
 TRACKING_NOTE_MAX = 500
 TRACKING_BENCHMARK_MAX = 24
 DEFAULT_TRACKING_BENCHMARK = "SPY"
+
+# Close and review (I3b). Closing requires a review; reviews only grow.
+REVIEW_OUTCOMES = ("confirmed", "invalidated", "abandoned", "expired")
+EVIDENCE_VERDICTS = ("held", "failed", "unclear")
+REVIEW_TEXT_MAX = 4_000
+REVIEW_LESSON_MIN = 3
+IDEA_REVIEWS_MAX = 50
 
 # Exchange suffixes (Yahoo style) with the local closing time Gamma uses for each market.
 # Times are at or before the official close: a session whose close might precede the
@@ -1181,6 +1189,8 @@ class IdeaTrackingSnapshot:
     sessions: int = 0
     gaps: int = 0
     partial: bool = False
+    # I3b: no hay segmento abierto ni salida pendiente; la cifra ya no cambiará.
+    final: bool = False
 
     def __post_init__(self) -> None:
         if self.status not in TRACKING_STATUSES:
@@ -1217,6 +1227,7 @@ class IdeaTrackingSnapshot:
             "sessions": self.sessions,
             "gaps": self.gaps,
             "partial": self.partial,
+            "final": self.final,
         }
 
     @classmethod
@@ -1232,6 +1243,7 @@ class IdeaTrackingSnapshot:
             sessions=int(payload.get("sessions") or 0),
             gaps=int(payload.get("gaps") or 0),
             partial=payload.get("partial") is True,
+            final=payload.get("final") is True,
         )
 
 
@@ -1406,6 +1418,206 @@ def tracking_positions(legs: Sequence[IdeaLeg], stance: str) -> tuple[Any, ...]:
     return (tuple(positions), untracked)
 
 
+# ---------------------------------------------------------------------------
+# Close and review (I3b)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IdeaEvidenceVerdict:
+    """Whether a pin held up, as the user judged it at close; title and stance frozen then."""
+
+    evidence_id: str
+    verdict: str
+    title: str
+    stance: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.evidence_id, "evidence_id")
+        if self.verdict not in EVIDENCE_VERDICTS:
+            raise IdeaValidationError(f"An evidence verdict must be one of {EVIDENCE_VERDICTS}, got {self.verdict!r}.")
+        if self.stance not in EVIDENCE_STANCES:
+            raise IdeaValidationError(f"An evidence stance must be one of {EVIDENCE_STANCES}.")
+        title = str(self.title or "").strip()
+        _require_text(title, "evidence title")
+        object.__setattr__(self, "title", title[:EVIDENCE_TITLE_MAX])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"evidence_id": self.evidence_id, "verdict": self.verdict, "title": self.title, "stance": self.stance}
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaEvidenceVerdict":
+        return cls(
+            evidence_id=str(payload.get("evidence_id") or ""),
+            verdict=str(payload.get("verdict") or "").strip().lower(),
+            title=str(payload.get("title") or ""),
+            stance=str(payload.get("stance") or "").strip().lower(),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaCriterionAtClose:
+    """A criterion's state when the idea was closed, kept for the review statistics."""
+
+    criterion_id: str
+    kind: str
+    label: str
+    state: str
+    triggered_at: datetime | None = None
+    first_met_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.criterion_id, "criterion_id")
+        if self.kind not in CRITERION_KINDS:
+            raise IdeaValidationError(f"Criterion kind must be one of {CRITERION_KINDS}.")
+        if self.state not in CRITERION_STATES:
+            raise IdeaValidationError(f"Criterion state must be one of {CRITERION_STATES}.")
+        label = " ".join(str(self.label or "").split())
+        _require_text(label, "criterion label")
+        object.__setattr__(self, "label", label[:CRITERION_LABEL_MAX])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "criterion_id": self.criterion_id,
+            "kind": self.kind,
+            "label": self.label,
+            "state": self.state,
+            "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
+            "first_met_at": self.first_met_at.isoformat() if self.first_met_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaCriterionAtClose":
+        return cls(
+            criterion_id=str(payload.get("criterion_id") or ""),
+            kind=str(payload.get("kind") or "").strip().lower(),
+            label=str(payload.get("label") or ""),
+            state=str(payload.get("state") or "").strip().lower(),
+            triggered_at=_parse_instant(payload.get("triggered_at")),
+            first_met_at=_parse_instant(payload.get("first_met_at")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaReview:
+    """Written at close (I3b): what was expected against what happened, and the lesson.
+
+    ``realized`` is the hypothetical tracking headline as it stood when the
+    idea was closed (its exit close may still be pending); the live record
+    stays on ``Idea.tracking``. ``opened_at`` is when this episode began (the
+    activation, or the reopen after an earlier close). Reviews only grow: a
+    reopened idea keeps the review of its earlier close.
+    """
+
+    review_id: str
+    idea_id: str
+    outcome: str
+    lesson: str
+    opened_at: datetime
+    closed_at: datetime
+    expected: str = ""
+    realized_note: str = ""
+    evidence_verdicts: tuple[IdeaEvidenceVerdict, ...] = ()
+    criteria_at_close: tuple[IdeaCriterionAtClose, ...] = ()
+    realized: IdeaTrackingSnapshot | None = None
+    schema_version: int = IDEA_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_text(self.review_id, "review_id")
+        _require_text(self.idea_id, "idea_id")
+        if self.outcome not in REVIEW_OUTCOMES:
+            raise IdeaValidationError(f"A review outcome must be one of {REVIEW_OUTCOMES}, got {self.outcome!r}.")
+        lesson = str(self.lesson or "").strip()
+        if len(lesson) < REVIEW_LESSON_MIN:
+            raise IdeaValidationError("Closing an idea needs a review: write the lesson.")
+        for name, value in (("lesson", lesson), ("expected", self.expected), ("realized_note", self.realized_note)):
+            _require_max(str(value or "").strip(), REVIEW_TEXT_MAX, f"review {name}")
+        object.__setattr__(self, "lesson", lesson)
+        object.__setattr__(self, "expected", str(self.expected or "").strip())
+        object.__setattr__(self, "realized_note", str(self.realized_note or "").strip())
+        if self.closed_at < self.opened_at:
+            raise IdeaValidationError("A review cannot close before its episode opened.")
+        verdicts = tuple(self.evidence_verdicts)
+        if any(not isinstance(item, IdeaEvidenceVerdict) for item in verdicts):
+            raise IdeaValidationError("evidence_verdicts must be IdeaEvidenceVerdict records.")
+        if len({item.evidence_id for item in verdicts}) != len(verdicts):
+            raise IdeaValidationError("Each pin takes at most one verdict.")
+        object.__setattr__(self, "evidence_verdicts", verdicts[:IDEA_EVIDENCE_MAX])
+        criteria = tuple(self.criteria_at_close)
+        if any(not isinstance(item, IdeaCriterionAtClose) for item in criteria):
+            raise IdeaValidationError("criteria_at_close must be IdeaCriterionAtClose records.")
+        object.__setattr__(self, "criteria_at_close", criteria[:IDEA_CRITERIA_MAX])
+        if self.realized is not None and not isinstance(self.realized, IdeaTrackingSnapshot):
+            raise IdeaValidationError("review realized must be a tracking snapshot.")
+        _check_schema_version(self.schema_version)
+
+    @property
+    def holding_days(self) -> float:
+        return (self.closed_at - self.opened_at).total_seconds() / 86_400
+
+    @property
+    def invalidation_criteria(self) -> int:
+        return sum(1 for item in self.criteria_at_close if item.kind == "invalidate")
+
+    @property
+    def first_invalidation_at(self) -> datetime | None:
+        """The earliest invalidation trigger before the close, if any fired."""
+        moments = [
+            item.first_met_at or item.triggered_at
+            for item in self.criteria_at_close
+            if item.kind == "invalidate" and item.triggered_at is not None and item.triggered_at <= self.closed_at
+        ]
+        return min((moment for moment in moments if moment is not None), default=None)
+
+    def verdict_counts(self) -> dict[str, int]:
+        counts = {verdict: 0 for verdict in EVIDENCE_VERDICTS}
+        for item in self.evidence_verdicts:
+            counts[item.verdict] += 1
+        return counts
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "review_id": self.review_id,
+            "idea_id": self.idea_id,
+            "outcome": self.outcome,
+            "lesson": self.lesson,
+            "expected": self.expected,
+            "realized_note": self.realized_note,
+            "opened_at": self.opened_at.isoformat(),
+            "closed_at": self.closed_at.isoformat(),
+            "evidence_verdicts": [item.to_dict() for item in self.evidence_verdicts],
+            "criteria_at_close": [item.to_dict() for item in self.criteria_at_close],
+            "realized": self.realized.to_dict() if self.realized else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaReview":
+        opened_at = _parse_instant(payload.get("opened_at"))
+        closed_at = _parse_instant(payload.get("closed_at"))
+        if opened_at is None or closed_at is None:
+            raise IdeaValidationError("A review needs opened_at and closed_at.")
+        realized = payload.get("realized")
+        return cls(
+            schema_version=_schema_version(payload.get("schema_version")),
+            review_id=str(payload.get("review_id") or ""),
+            idea_id=str(payload.get("idea_id") or ""),
+            outcome=str(payload.get("outcome") or "").strip().lower(),
+            lesson=str(payload.get("lesson") or ""),
+            expected=str(payload.get("expected") or ""),
+            realized_note=str(payload.get("realized_note") or ""),
+            opened_at=opened_at,
+            closed_at=closed_at,
+            evidence_verdicts=tuple(
+                IdeaEvidenceVerdict.from_dict(item) for item in _list(payload.get("evidence_verdicts"), "evidence_verdicts")
+            ),
+            criteria_at_close=tuple(
+                IdeaCriterionAtClose.from_dict(item) for item in _list(payload.get("criteria_at_close"), "criteria_at_close")
+            ),
+            realized=IdeaTrackingSnapshot.from_dict(realized) if isinstance(realized, Mapping) else None,
+        )
+
+
 @dataclass(frozen=True)
 class Idea:
     """A thesis with its pinned evidence, criteria and journal."""
@@ -1428,6 +1640,8 @@ class Idea:
     journal: tuple[IdeaJournalEntry, ...] = ()
     # I3a: registro hipotético de seguimiento; None mientras la idea nunca estuvo activa con patas.
     tracking: IdeaTracking | None = None
+    # I3b: revisiones escritas al cerrar; solo crecen (reabrir conserva la anterior).
+    reviews: tuple[IdeaReview, ...] = ()
     schema_version: int = IDEA_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -1484,6 +1698,18 @@ class Idea:
             raise IdeaValidationError("A closed idea needs closed_at.")
         if self.tracking is not None and not isinstance(self.tracking, IdeaTracking):
             raise IdeaValidationError("tracking must be an IdeaTracking record.")
+        reviews = tuple(self.reviews)
+        if len(reviews) > IDEA_REVIEWS_MAX:
+            raise IdeaValidationError(f"An idea holds at most {IDEA_REVIEWS_MAX} reviews.")
+        for review in reviews:
+            if not isinstance(review, IdeaReview) or review.idea_id != self.idea_id:
+                raise IdeaValidationError("Every review must belong to this idea.")
+        if len({review.review_id for review in reviews}) != len(reviews):
+            raise IdeaValidationError("Review ids must be unique within an idea.")
+        object.__setattr__(self, "reviews", reviews)
+        # Cerrar exige una revisión: la última corresponde a este cierre.
+        if self.status == "closed" and (not reviews or reviews[-1].closed_at != self.closed_at):
+            raise IdeaValidationError("A closed idea needs the review written at its close.")
         _check_schema_version(self.schema_version)
 
     # -- derived views -----------------------------------------------------
@@ -1507,6 +1733,18 @@ class Idea:
     @property
     def unacknowledged_triggers(self) -> int:
         return sum(1 for item in self.criteria if item.needs_acknowledgement)
+
+    @property
+    def latest_review(self) -> IdeaReview | None:
+        return self.reviews[-1] if self.reviews else None
+
+    @property
+    def current_review(self) -> IdeaReview | None:
+        """The review of the idea's current close (closed, or archived after closing)."""
+        review = self.latest_review
+        if review is None or self.closed_at is None or review.closed_at != self.closed_at:
+            return None
+        return review
 
     @property
     def activated_at(self) -> datetime | None:
@@ -1547,6 +1785,7 @@ class Idea:
             "criteria": [item.to_dict() for item in self.criteria],
             "journal": [entry.to_dict() for entry in self.journal],
             "tracking": self.tracking.to_dict() if self.tracking else None,
+            "reviews": [review.to_dict() for review in self.reviews],
         }
 
     @classmethod
@@ -1570,6 +1809,7 @@ class Idea:
             criteria=tuple(IdeaCriterion.from_dict(item) for item in _list(payload.get("criteria"), "criteria")),
             journal=tuple(IdeaJournalEntry.from_dict(item) for item in _list(payload.get("journal"), "journal")),
             tracking=IdeaTracking.from_dict(payload["tracking"]) if isinstance(payload.get("tracking"), Mapping) else None,
+            reviews=tuple(IdeaReview.from_dict(item) for item in _list(payload.get("reviews"), "reviews")),
         )
 
 
@@ -1633,6 +1873,26 @@ def migrate_idea_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
     tracking = IdeaTracking().with_open_segment(legs=legs, stance=stance, at=frozen_at, reason="migrated", note=note)
     migrated["tracking"] = tracking.to_dict()
     return migrated
+
+
+def migrate_idea_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 4 adds ``reviews``. No version 3 idea can be closed, so none needs one."""
+    migrated = dict(payload)
+    migrated["reviews"] = list(migrated.get("reviews") or [])
+    for key in ("evidence", "journal", "criteria", "reviews"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=4) if isinstance(item, Mapping) else item for item in items]
+    return migrated
+
+
+def assert_reviews_append_only(previous: Sequence[IdeaReview], current: Sequence[IdeaReview]) -> None:
+    """Refuse any change that edits or drops a review written at an earlier close."""
+    if len(current) < len(previous):
+        raise IdeaValidationError("Idea reviews are kept; a review cannot be removed.")
+    for index, review in enumerate(previous):
+        if current[index].to_dict() != review.to_dict():
+            raise IdeaValidationError("Idea reviews are kept as written; an earlier review cannot be edited.")
 
 
 def assert_journal_append_only(previous: Sequence[IdeaJournalEntry], current: Sequence[IdeaJournalEntry]) -> None:

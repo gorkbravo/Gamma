@@ -457,7 +457,7 @@ def test_v2_active_ideas_migrate_with_a_segment_from_their_last_freeze(tmp_path)
 
     store = IdeaStore(base)
     migrated = store.require(idea_id)
-    assert migrated.schema_version == IDEA_SCHEMA_VERSION == 3
+    assert migrated.schema_version == IDEA_SCHEMA_VERSION
     (segment,) = migrated.tracking.segments
     assert segment.start_reason == "migrated" and segment.is_open
     # Patas sin cambios desde la última edición (martes 15:00): el registro empieza ahí, no antes.

@@ -1,4 +1,4 @@
-// Ideas store (Workstream 12, checkpoints I1, I2 and I3a).
+// Ideas store (Workstream 12, checkpoints I1, I2, I3a and I3b).
 //
 // One place that talks to /ideas, so the Ideas tab, the shared Pin to idea
 // action, Sitrep ("Promote to idea", "Your ideas") and the notification center
@@ -9,6 +9,7 @@ import { derived, get, writable } from "svelte/store";
 import { deleteJson, getJson, getText, patchJson, postJson } from "../api/client";
 import type {
   Idea,
+  IdeaClosePayload,
   IdeaCreatePayload,
   IdeaCriterionPayload,
   IdeaCriterionResponse,
@@ -22,6 +23,7 @@ import type {
   IdeaObservableRegistryResponse,
   IdeaPatchPayload,
   IdeaPinResponse,
+  IdeaReviewStatsResponse,
   IdeaSummary,
   IdeaTrackingResponse,
   IdeaTrackingSettingsPayload,
@@ -44,6 +46,8 @@ export const criteriaBusy = writable(false);
 export const ideaTracking = writable<IdeaTrackingResponse | null>(null);
 export const ideaTrackingLoading = writable(false);
 export const ideaTrackingError = writable("");
+/** I3b: the Review mode's closed record and statistics. */
+export const ideaReviewStats = writable<IdeaReviewStatsResponse | null>(null);
 
 /** Every idea the board knows about, newest change first. */
 export const ideaSummaries = derived(ideaList, ($list): IdeaSummary[] => $list?.items ?? []);
@@ -158,13 +162,31 @@ export async function addIdeaJournalEntry(ideaId: string, kind: "note" | "decisi
   return idea;
 }
 
-export async function transitionIdea(ideaId: string, action: "activate" | "archive" | "restore") {
+export async function transitionIdea(ideaId: string, action: "activate" | "archive" | "restore" | "reopen") {
   const idea = await guarded(() => postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/${action}`, {}));
   if (idea) {
     applyIdea(idea);
-    await Promise.all([loadIdeas(), loadIdeaNotifications()]);
+    await Promise.all([loadIdeas(), loadIdeaNotifications(), loadIdeaReview()]);
   }
   return idea;
+}
+
+// ── Close and review (I3b) ──────────────────────────────────────────────────
+
+/** Close an active idea with its review (required); the tracking record stops at the next close. */
+export async function closeIdea(ideaId: string, payload: IdeaClosePayload): Promise<Idea | null> {
+  const idea = await guarded(() => postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/close`, payload));
+  if (idea) {
+    applyIdea(idea);
+    await Promise.all([loadIdeas(), loadIdeaNotifications(), loadIdeaReview()]);
+  }
+  return idea;
+}
+
+export async function loadIdeaReview(): Promise<IdeaReviewStatsResponse | null> {
+  const response = await guarded(() => getJson<IdeaReviewStatsResponse>("/ideas/review"));
+  if (response) ideaReviewStats.set(response);
+  return response;
 }
 
 // ── Criteria, evaluation and notifications (I2) ─────────────────────────────

@@ -1,9 +1,10 @@
-"""Application service for Ideas (Workstream 12, checkpoints I1, I2 and I3a).
+"""Application service for Ideas (Workstream 12, checkpoints I1, I2, I3a and I3b).
 
 The service owns the rules around the store: every edit, pin, unpin,
 criterion change and lifecycle change writes a system journal entry; the
 journal only grows; and the lifecycle is ``draft`` -> ``active`` ->
-``archived`` (plus restore and delete; close and review are I3b). A pin stores
+``closed`` -> ``archived`` (plus reopen, restore and delete). Closing needs a
+review (I3b), and reviews only grow: reopening keeps the earlier one. A pin stores
 exactly what the user saw, with the provenance they saw. Criteria are
 validated against the observable registry here; evaluating them is the job of
 ``IdeaEvaluationService`` (``src/application/idea_evaluation.py``).
@@ -18,6 +19,7 @@ The canonical series itself is rebuilt from provider closes by
 from __future__ import annotations
 
 import json
+import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -28,13 +30,17 @@ from src.models.handoff import CrossTabHandoffEnvelope
 from src.models.ideas import (
     CRITERION_CADENCES,
     EVIDENCE_STANCES,
-    IDEA_I1_STATUSES,
+    EVIDENCE_VERDICTS,
+    REVIEW_OUTCOMES,
     IDEA_SCHEMA_VERSION,
     IDEA_STATUSES,
     TRACKING_BP_CLASSES,
     TRACKING_LABEL,
     Idea,
     IdeaCostModel,
+    IdeaCriterionAtClose,
+    IdeaEvidenceVerdict,
+    IdeaReview,
     IdeaEvidence,
     IdeaCriterion,
     IdeaHorizon,
@@ -116,6 +122,35 @@ class IdeaEvidenceCreateRequest:
     freshness: FreshnessRecord | None = None
     reopen: CrossTabHandoffEnvelope | None = None
     note: str = ""
+
+
+@dataclass(frozen=True)
+class IdeaCloseRequest:
+    """The review written at close. ``expected`` defaults to the thesis.
+
+    ``evidence_verdicts`` maps a pin id to ``held``, ``failed`` or ``unclear``;
+    pins left out have no verdict. ``realized`` is the tracking headline at the
+    moment of closing, filled by the caller that can rebuild the series.
+    """
+
+    outcome: str
+    lesson: str
+    expected: str | None = None
+    realized_note: str = ""
+    evidence_verdicts: Mapping[str, str] = field(default_factory=dict)
+    realized: IdeaTrackingSnapshot | None = None
+
+
+@dataclass(frozen=True)
+class IdeaReviewStatistics:
+    """The user's own closed record (I3b Review mode). Descriptive only: no score."""
+
+    rows: list[dict[str, Any]]
+    outcomes: dict[str, int]
+    holding_days: dict[str, Any]
+    realized: dict[str, Any]
+    invalidation: dict[str, Any]
+    retrieved_at: datetime
 
 
 @dataclass(frozen=True)
@@ -492,10 +527,96 @@ class IdeaService:
 
         return self.store.update(idea_id, mutate)
 
+    def close(self, idea_id: str, request: IdeaCloseRequest) -> Idea:
+        """Close an active idea with its review; tracking exits at the next close."""
+
+        def mutate(current: Idea) -> Idea:
+            if current.status != "active":
+                raise IdeaLifecycleError(f"Only an active idea can be closed; this one is {current.status}.")
+            outcome = str(request.outcome or "").strip().lower()
+            if outcome not in REVIEW_OUTCOMES:
+                raise IdeaValidationError(f"Choose an outcome: {', '.join(REVIEW_OUTCOMES)}.")
+            pins = {item.evidence_id: item for item in current.evidence}
+            verdicts = []
+            for evidence_id, verdict in (request.evidence_verdicts or {}).items():
+                pin = pins.get(str(evidence_id))
+                if pin is None:
+                    raise IdeaValidationError(f"Evidence {evidence_id} is not pinned on this idea.")
+                value = str(verdict or "").strip().lower()
+                if not value:
+                    continue
+                if value not in EVIDENCE_VERDICTS:
+                    raise IdeaValidationError(f"An evidence verdict must be one of {EVIDENCE_VERDICTS}.")
+                verdicts.append(IdeaEvidenceVerdict(evidence_id=pin.evidence_id, verdict=value, title=pin.title, stance=pin.stance))
+            now = self._clock()
+            review = IdeaReview(
+                review_id=self._new_id(),
+                idea_id=idea_id,
+                outcome=outcome,
+                lesson=request.lesson,
+                expected=(request.expected if request.expected is not None and request.expected.strip() else current.thesis),
+                realized_note=request.realized_note,
+                opened_at=_episode_opened_at(current),
+                closed_at=now,
+                evidence_verdicts=tuple(verdicts),
+                criteria_at_close=tuple(
+                    IdeaCriterionAtClose(
+                        criterion_id=item.criterion_id,
+                        kind=item.kind,
+                        label=item.label,
+                        state=item.state,
+                        triggered_at=item.triggered_at,
+                        first_met_at=item.trigger_evaluation.first_met_at if item.trigger_evaluation else None,
+                    )
+                    for item in current.criteria
+                ),
+                realized=request.realized,
+            )
+            closed = replace(current, status="closed", closed_at=now, reviews=(*current.reviews, review), updated_at=now)
+            closed = closed.with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "status_changed",
+                    f"Closed the idea as {outcome}. Lesson: {_clip(review.lesson, 400)}",
+                    now,
+                    {"from": "active", "to": "closed", "outcome": outcome, "review_id": review.review_id},
+                ),
+                touched_at=now,
+            )
+            return self._reconcile_tracking(current, closed, now)
+
+        return self.store.update(idea_id, mutate)
+
+    def reopen(self, idea_id: str) -> Idea:
+        """Return a closed idea to active; the review of the close stays, tracking opens a new segment."""
+
+        def mutate(current: Idea) -> Idea:
+            if current.status != "closed":
+                raise IdeaLifecycleError(f"Only a closed idea can be reopened; this one is {current.status}.")
+            now = self._clock()
+            review = current.current_review
+            kept = f" The review of {review.closed_at.strftime('%Y-%m-%d')} ({review.outcome}) stays in the record." if review else ""
+            reopened = replace(current, status="active", closed_at=None, updated_at=now).with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "status_changed",
+                    "Reopened the idea." + kept,
+                    now,
+                    {"from": "closed", "to": "active", "review_id": review.review_id if review else None},
+                ),
+                touched_at=now,
+            )
+            return self._reconcile_tracking(current, reopened, now)
+
+        return self.store.update(idea_id, mutate)
+
+    def review_statistics(self) -> IdeaReviewStatistics:
+        return build_review_statistics(self.store.list_summaries(), retrieved_at=self._clock())
+
     def archive(self, idea_id: str) -> Idea:
         def mutate(current: Idea) -> Idea:
-            if current.status not in {"draft", "active"}:
-                raise IdeaLifecycleError(f"Only a draft or active idea can be archived; this one is {current.status}.")
+            if current.status not in {"draft", "active", "closed"}:
+                raise IdeaLifecycleError(f"Only a draft, active or closed idea can be archived; this one is {current.status}.")
             archived = self._transition(current, "archived", f"Archived the idea (was {current.status}).")
             return self._reconcile_tracking(current, archived, archived.updated_at)
 
@@ -512,7 +633,8 @@ class IdeaService:
                 if entry.kind == "status_changed" and entry.details.get("to") == "archived":
                     previous = str(entry.details.get("from") or "draft")
                     break
-            if previous not in IDEA_I1_STATUSES or previous == "archived":
+            # Una idea cerrada vuelve cerrada solo si conserva el cierre y su revisión.
+            if previous not in {"draft", "active", "closed"} or (previous == "closed" and current.current_review is None):
                 previous = "draft"
             restored = self._transition(current, previous, f"Restored the idea from the archive to {previous}.")
             return self._reconcile_tracking(current, restored, restored.updated_at)
@@ -616,7 +738,7 @@ class IdeaService:
         opened = None
         if is_active and after.legs and tracking.open_segment is None:
             if not was_active:
-                start_reason = "activated" if before.status == "draft" else "restored"
+                start_reason = {"draft": "activated", "closed": "reopened"}.get(before.status, "restored")
             else:
                 start_reason = "legs_edited" if closed_number is not None else "legs_added"
             note = _segment_note(start_reason, before, after)
@@ -712,6 +834,7 @@ _END_REASON_TEXT = {
 }
 _START_REASON_TEXT = {
     "activated": "Activated",
+    "reopened": "Reopened after a close",
     "legs_edited": "Legs edited",
     "legs_added": "Legs added",
     "restored": "Restored from the archive",
@@ -751,6 +874,111 @@ def _segment_note(reason: str, before: Idea, after: Idea) -> str:
     if reason in {"legs_edited", "legs_added"}:
         return f"{text}: {_legs_text(before)} → {_legs_text(after)}"
     return text
+
+
+def _episode_opened_at(idea: Idea) -> datetime:
+    """When the current episode began: the activation, or the reopen after an earlier close."""
+    for entry in reversed(idea.journal):
+        if entry.kind == "status_changed" and entry.details.get("to") == "active" and entry.details.get("from") in {"draft", "closed"}:
+            return entry.created_at
+    return idea.activated_at or idea.created_at
+
+
+def _median(values: Sequence[float]) -> float | None:
+    return float(statistics.median(values)) if values else None
+
+
+def _mean(values: Sequence[float]) -> float | None:
+    return float(statistics.fmean(values)) if values else None
+
+
+def build_review_statistics(summaries: Sequence[IdeaSummary], *, retrieved_at: datetime) -> IdeaReviewStatistics:
+    """Describe the closed record: outcomes, holding time, realized returns, invalidations.
+
+    Only the review of each idea's current close counts (closed, or archived
+    after closing). The realized return is the tracking headline as it stands
+    now (final once the exit close is priced), falling back to the figure at
+    close. Every statistic carries its sample size; nothing is scored.
+    """
+    rows: list[dict[str, Any]] = []
+    for summary in summaries:
+        review = summary.review
+        if not review:
+            continue
+        snapshot = (summary.tracking or {}).get("snapshot") if summary.tracking else None
+        at_close = review.get("realized_at_close") or None
+        source = snapshot if snapshot and snapshot.get("net_return") is not None else at_close
+        net = source.get("net_return") if source else None
+        benchmark = source.get("benchmark_return") if source else None
+        rows.append(
+            {
+                "idea_id": summary.idea_id,
+                "title": summary.title,
+                "stance": summary.stance,
+                "status": summary.status,
+                "tags": list(summary.tags),
+                "outcome": review["outcome"],
+                "opened_at": review["opened_at"],
+                "closed_at": review["closed_at"],
+                "holding_days": review["holding_days"],
+                "expected": review.get("expected") or "",
+                "lesson": review.get("lesson") or "",
+                "net_return": net,
+                "benchmark": (source or {}).get("benchmark"),
+                "benchmark_return": benchmark,
+                "excess_return": None if net is None or benchmark is None else net - benchmark,
+                "realized_final": bool(snapshot and snapshot.get("final") and source is snapshot),
+                "realized_as_of": (source or {}).get("as_of"),
+                "tracked": source is not None,
+                "invalidation_criteria": int(review.get("invalidation_criteria") or 0),
+                "first_invalidation_at": review.get("first_invalidation_at"),
+                "evidence_verdicts": dict(review.get("evidence_verdicts") or {}),
+            }
+        )
+    rows.sort(key=lambda row: str(row["closed_at"]), reverse=True)
+    outcomes = {outcome: sum(1 for row in rows if row["outcome"] == outcome) for outcome in REVIEW_OUTCOMES}
+    days = [float(row["holding_days"]) for row in rows]
+    by_outcome = {
+        outcome: _median([float(row["holding_days"]) for row in rows if row["outcome"] == outcome]) for outcome in REVIEW_OUTCOMES
+    }
+    priced = [row for row in rows if row["net_return"] is not None]
+    nets = [float(row["net_return"]) for row in priced]
+    excess = [float(row["excess_return"]) for row in priced if row["excess_return"] is not None]
+    losses = [row for row in priced if float(row["net_return"]) < 0]
+    with_rules = [row for row in losses if row["invalidation_criteria"] > 0]
+    fired = [row for row in losses if row["first_invalidation_at"]]
+    return IdeaReviewStatistics(
+        rows=rows,
+        outcomes=outcomes,
+        holding_days={
+            "count": len(days),
+            "median": _median(days),
+            "mean": _mean(days),
+            "min": min(days) if days else None,
+            "max": max(days) if days else None,
+            "median_by_outcome": by_outcome,
+        },
+        realized={
+            "count": len(priced),
+            "untracked": len(rows) - len(priced),
+            "median_net": _median(nets),
+            "median_excess": _median(excess),
+            "excess_count": len(excess),
+            "positive": sum(1 for value in nets if value > 0),
+            "negative": len(losses),
+            "median_net_by_outcome": {
+                outcome: _median([float(row["net_return"]) for row in priced if row["outcome"] == outcome]) for outcome in REVIEW_OUTCOMES
+            },
+        },
+        invalidation={
+            "losses": len(losses),
+            "losses_with_invalidation_criteria": len(with_rules),
+            "losses_with_trigger_before_close": len(fired),
+            "share_of_losses": (len(fired) / len(losses)) if losses else None,
+            "share_of_losses_with_criteria": (len(fired) / len(with_rules)) if with_rules else None,
+        },
+        retrieved_at=retrieved_at,
+    )
 
 
 def _require_editable_criteria(idea: Idea) -> None:
@@ -911,6 +1139,7 @@ def render_idea_markdown(
     else:
         lines.append("_No criteria._")
     lines += _tracking_markdown(idea, tracking_result)
+    lines += _reviews_markdown(idea)
     lines += ["", "## Journal", ""]
     if idea.journal:
         lines += ["| Time | Author | Kind | Entry |", "| --- | --- | --- | --- |"]
@@ -1008,6 +1237,37 @@ def _tracking_markdown(idea: Idea, result: Mapping[str, Any] | None) -> list[str
     if warnings:
         lines += ["", "Warnings:"]
         lines += [f"- {_md(item)}" for item in list(warnings)[:20]]
+    return lines
+
+
+def _reviews_markdown(idea: Idea) -> list[str]:
+    if not idea.reviews:
+        return []
+    lines = ["", "## Reviews", ""]
+    for review in reversed(idea.reviews):
+        current = " (current close)" if review is idea.current_review else ""
+        lines += [
+            f"### {review.outcome.capitalize()} · closed {_ts(review.closed_at)}{current}",
+            "",
+            f"- Held {review.holding_days:.1f} days, from {_ts(review.opened_at)}",
+            f"- Expected: {_md(review.expected) or 'not written'}",
+        ]
+        realized = review.realized
+        if realized is not None:
+            lines.append(
+                f"- Realized at close ({TRACKING_LABEL.lower()}): net {_pct(realized.net_return)}, gross {_pct(realized.gross_return)}, "
+                f"{realized.benchmark or 'benchmark'} {_pct(realized.benchmark_return)}, as of {realized.as_of.isoformat() if realized.as_of else 'N/A'}"
+            )
+        else:
+            lines.append("- Realized at close: no tracked record")
+        if review.realized_note:
+            lines.append(f"- What happened: {_md(review.realized_note)}")
+        if review.evidence_verdicts:
+            lines.append("- Evidence: " + "; ".join(f"{_md(item.title)} ({item.stance}) {item.verdict}" for item in review.evidence_verdicts))
+        fired = [item for item in review.criteria_at_close if item.triggered_at is not None]
+        if fired:
+            lines.append("- Triggered criteria at close: " + "; ".join(f"{item.kind} “{_md(item.label)}”" for item in fired))
+        lines += [f"- Lesson: {_md(review.lesson)}", ""]
     return lines
 
 

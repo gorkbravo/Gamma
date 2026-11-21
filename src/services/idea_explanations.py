@@ -517,6 +517,51 @@ _ENTRIES: tuple[IdeaExplanation, ...] = (
             "2026-11-21; editable, and every change is journaled. The gross record never depends on them."
         ),
     ),
+    IdeaExplanation(
+        key="review.outcome",
+        title="Review outcome",
+        measures=(
+            "How you judge the idea at close: confirmed (it played out), invalidated (the thesis was wrong), "
+            "abandoned (you stopped before it resolved) or expired (the horizon passed without an answer)."
+        ),
+        why=_why(
+            "A long view that was right for the wrong reason is still worth calling confirmed only if the reason held.",
+            "A short view that was right for the wrong reason is still worth calling confirmed only if the reason held.",
+            "Judge the spread, not each leg on its own.",
+            "Event ideas usually close as confirmed or invalidated once the event resolves.",
+            "Say what the record shows; the outcome is your judgment, not a score.",
+        ),
+        computed="Chosen by you when closing; the hypothetical return is shown beside it, never in place of it.",
+    ),
+    IdeaExplanation(
+        key="stat.holding_time",
+        title="Holding time",
+        measures="Days from when the idea became active (or was reopened) to when it was closed.",
+        why=_why(
+            "Long views held far beyond their horizon often outlive their thesis.",
+            "Short views carry cost while they wait; holding time shows how long they waited.",
+            "Spreads can take longer to converge than planned.",
+            "Event ideas should close soon after the event.",
+            "How long ideas stay open in practice.",
+        ),
+        computed="From the journal: the activation or reopen instant to the close instant, in days.",
+    ),
+    IdeaExplanation(
+        key="stat.invalidation_before_loss",
+        title="Invalidation before a loss",
+        measures="Of the closed ideas with a hypothetical loss, how many had an invalidation criterion fire before the close.",
+        why=_why(
+            "If invalidations fired and the losing ideas stayed open, the rules were stated but not followed.",
+            "If invalidations fired and the losing ideas stayed open, the rules were stated but not followed.",
+            "A fired invalidation on a spread that kept widening is the cheapest lesson available.",
+            "Event ideas lose fast; an invalidation that fires first is the signal to close.",
+            "Whether stated exits were heeded.",
+        ),
+        computed=(
+            "From the criteria states frozen at close and the net hypothetical return; ideas without a tracked "
+            "record are left out, and the sample size is shown."
+        ),
+    ),
 )
 
 EXPLANATIONS: Mapping[str, IdeaExplanation] = MappingProxyType({entry.key: entry for entry in _ENTRIES})

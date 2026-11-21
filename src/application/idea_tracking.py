@@ -494,6 +494,13 @@ class TrackingComputation:
     warnings: tuple[str, ...] = ()
     provenance: tuple[dict[str, Any], ...] = ()
 
+    @property
+    def final(self) -> bool:
+        """No open segment and no exit still waiting for its close: the figures will not change."""
+        return bool(self.segments) and all(
+            not result.segment.is_open and result.status not in {"exiting", "waiting"} for result in self.segments
+        )
+
     def snapshot(self) -> IdeaTrackingSnapshot:
         return IdeaTrackingSnapshot(
             status=self.status,
@@ -506,6 +513,7 @@ class TrackingComputation:
             sessions=self.sessions,
             gaps=self.gaps,
             partial=self.partial,
+            final=self.final,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -531,6 +539,7 @@ class TrackingComputation:
                 "sessions": self.sessions,
                 "gaps": self.gaps,
                 "partial": self.partial,
+                "final": self.final,
                 "first_session": self.first_session.isoformat() if self.first_session else None,
                 "as_of": self.as_of.isoformat() if self.as_of else None,
             },
@@ -1039,10 +1048,17 @@ class IdeaTrackingService:
         return result
 
     def refresh_all(self) -> int:
-        """Recompute every tracked active idea (start-up and daily-close passes)."""
+        """Recompute tracked ideas (start-up and daily-close passes).
+
+        Active ideas always; a closed or archived idea until its record is
+        final, so the exit close after a close or an archive is picked up.
+        """
         refreshed = 0
         for summary in self.idea_service.store.list_summaries():
-            if summary.status != "active" or not summary.tracking:
+            if not summary.tracking:
+                continue
+            snapshot = summary.tracking.get("snapshot") or {}
+            if summary.status != "active" and snapshot.get("final"):
                 continue
             try:
                 self.compute(summary.idea_id)

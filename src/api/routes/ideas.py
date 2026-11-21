@@ -1,4 +1,4 @@
-"""``/ideas`` routes (Workstream 12, checkpoints I1, I2 and I3a).
+"""``/ideas`` routes (Workstream 12, checkpoints I1, I2, I3a and I3b).
 
 Local research records plus read-only criterion evaluation and hypothetical
 forward tracking. Evaluation and tracking read prices and observables through
@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.api.schemas.ideas import (
     EvaluationPassModel,
+    IdeaCloseRequestModel,
+    IdeaReviewStatsResponseModel,
     IdeaCreateRequestModel,
     IdeaCriterionModel,
     IdeaCriterionRequestModel,
@@ -179,6 +182,12 @@ def list_idea_explanations() -> IdeaExplanationsResponseModel:
     )
 
 
+@router.get("/ideas/review", response_model=IdeaReviewStatsResponseModel)
+def review_statistics(request: Request) -> IdeaReviewStatsResponseModel:
+    """Review mode: the user's closed ideas and descriptive statistics of that record."""
+    return IdeaReviewStatsResponseModel.from_domain(_service(request).review_statistics())
+
+
 @router.post("/ideas/evaluate", response_model=EvaluationPassModel)
 def evaluate_all_ideas(request: Request) -> EvaluationPassModel:
     result = _evaluation(request).evaluate_all(trigger="manual")
@@ -244,6 +253,39 @@ def activate_idea(idea_id: str, request: Request) -> IdeaModel:
         # Activation arms every criterion; evaluate them once now.
         if idea.criteria:
             idea = _evaluation(request).evaluate_idea(idea_id, trigger="activated")
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.post("/ideas/{idea_id}/close", response_model=IdeaModel)
+def close_idea(idea_id: str, payload: IdeaCloseRequestModel, request: Request) -> IdeaModel:
+    """Close an active idea; the review is required and freezes the tracking record as it stands."""
+    service = _service(request)
+    try:
+        idea = service.get_idea(idea_id)
+        realized = None
+        if idea.tracking is not None and idea.tracking.segments:
+            try:
+                realized = _tracking(request).compute_for(idea, persist=False).snapshot()
+            except Exception:  # noqa: BLE001 - sin precios, la revisión dice que no había registro
+                realized = None
+        closed = service.close(idea_id, replace(payload.to_domain(), realized=realized))
+        if closed.tracking is not None and closed.tracking.segments:
+            try:
+                _tracking(request).compute(idea_id)
+            except Exception:  # noqa: BLE001 - el titular se rehace en la siguiente lectura
+                pass
+        closed = service.get_idea(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(closed)
+
+
+@router.post("/ideas/{idea_id}/reopen", response_model=IdeaModel)
+def reopen_idea(idea_id: str, request: Request) -> IdeaModel:
+    try:
+        idea = _service(request).reopen(idea_id)
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
     return _idea_response(idea)

@@ -47,7 +47,9 @@
     ideaList,
     ideaNotifications,
     ideaObservables,
+    closeIdea,
     ideaOpenRequest,
+    ideaReviewStats,
     ideaSummaries,
     ideaTracking,
     ideaTrackingError,
@@ -57,6 +59,7 @@
     loadIdea,
     loadIdeaNotifications,
     loadIdeaObservables,
+    loadIdeaReview,
     loadIdeaTracking,
     loadIdeas,
     loadMacroEventOptions,
@@ -404,7 +407,7 @@
   );
   let optionsMode: OptionsMode = persistedMode(restoredWorkspaceState, "iv", "overview");
   let riskMode: RiskMode = persistedMode(restoredWorkspaceState, "risk", "overview");
-  let ideasMode: "board" | "idea" = persistedMode(restoredWorkspaceState, "ideas", "board");
+  let ideasMode: "board" | "idea" | "review" = persistedMode(restoredWorkspaceState, "ideas", "board");
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -3336,6 +3339,9 @@
             trackingError={$ideaTrackingError}
             onLoadTracking={loadIdeaTracking}
             onUpdateTracking={updateIdeaTracking}
+            reviewStats={$ideaReviewStats}
+            onLoadReview={loadIdeaReview}
+            onCloseIdea={closeIdea}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component

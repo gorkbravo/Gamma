@@ -253,17 +253,18 @@ describe("navigation tab ordering", () => {
     expect(getTabLabel("iv")).toBe("Options");
   });
 
-  it("registers Ideas right after Sitrep with Board and Idea modes", () => {
+  it("registers Ideas right after Sitrep with Board, Idea and Review modes", () => {
     const orderState = normalizeWorkspaceTabOrderState(null);
 
     expect(getDefaultTabOrder("research").indexOf("ideas")).toBe(1);
     expect(getTabLabel("ideas")).toBe("Ideas");
     expect(getTabByShortcutIndex("research", orderState, 2)).toBe("ideas");
-    expect(getTabModes("ideas").map((mode) => mode.id)).toEqual(["board", "idea"]);
+    expect(getTabModes("ideas").map((mode) => mode.id)).toEqual(["board", "idea", "review"]);
+    expect(getModeShortcutHint("ideas", "review")).toBe("Shift+3");
     expect(getModeShortcutHint("ideas", "idea")).toBe("Shift+2");
     expect(getModeByShortcutIndex("ideas", 1)?.id).toBe("board");
     expect(hasRegisteredModes("ideas")).toBe(true);
-    expect(getModeRegistrySnapshot().ideas?.map((mode) => mode.label)).toEqual(["Board", "Idea"]);
+    expect(getModeRegistrySnapshot().ideas?.map((mode) => mode.label)).toEqual(["Board", "Idea", "Review"]);
     expect(resolveNavigationPath("research", orderState, "/ideas")?.tab.id).toBe("ideas");
     expect(resolveNavigationPath("research", orderState, "/Ideas/Board")?.mode?.id).toBe("board");
     expect(resolveNavigationPath("research", orderState, "/ideas/idea")?.mode?.id).toBe("idea");

@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking) is done on branch `claude/laughing-gauss-4b5d02`, not merged, awaiting review (see [I3a implementation notes](#i3a-implementation-notes)). I3b-I3d and I4-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking) is done on branch `claude/laughing-gauss-4b5d02` and I3b (close and review) on `claude/ideas-i3b-close-review`, stacked on it; neither is merged, both await review (see [I3a](#i3a-implementation-notes) and [I3b implementation notes](#i3b-implementation-notes)). I3c-I3d and I4-I6 are not started.
 
 ## Goal
 
@@ -311,7 +311,7 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 | I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done, merged 2026-11-21** (see [I2 implementation notes](#i2-implementation-notes)) |
 | I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review. Split on 2026-11-21 into the four slices below |
 | I3a: forward tracking | `IdeaTracking` with segments, the canonical daily series, the per-asset-class cost model, `GET`/`PATCH /ideas/{id}/tracking`, the tracking chart in the Idea view, the Board column | A legs idea tracks for five trading days with no backfill and no TWS; an edit opens a new segment; gaps stay gaps; costs are applied and shown. **Status: done on branch `claude/laughing-gauss-4b5d02`, not merged** (see [I3a implementation notes](#i3a-implementation-notes)) |
-| I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date |
+| I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date. **Status: done on branch `claude/ideas-i3b-close-review` (stacked on I3a), not merged** (see [I3b implementation notes](#i3b-implementation-notes)) |
 | I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale |
 | I3d: TWS intraday layer | IBKR marks for the legs while TWS is connected | With TWS, the intraday layer records and shows its gaps without changing the daily series |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
@@ -443,6 +443,44 @@ Recorded 2026-11-21 for review. Branch `claude/laughing-gauss-4b5d02`, cut from 
   - What was seen: the pair idea's two segments with their markers, the gap as a break in both lines, the SPY idea entering the session after an after-close activation, the migrated v2 idea, and the commodity idea as "Not tracked" with its reason.
   - A cost edit from the UI moved the net from −1.58% to −1.78%, left the gross at −1.38%, and wrote the journal entry.
 - **Left for later slices:** close, review and Review mode (I3b); test and risk snapshots (I3c); the TWS intraday layer (I3d). Also deferred: pricing commodity, futures, option and prediction legs; FX conversion of non-USD legs; exchange holiday calendars, so a day every source misses becomes a gap; borrow costs for shorts.
+
+### I3b implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3b-close-review`, cut from the I3a branch at 1e1118e; not merged and not pushed.
+
+- **Model (schema v4):** `Idea.reviews` holds `IdeaReview` records. Each review keeps:
+  - the `outcome` (`confirmed`, `invalidated`, `abandoned`, `expired`), the `lesson` (required), `expected` (the thesis when left blank) and an optional `realized_note`;
+  - when its episode opened (the activation, or the reopen after an earlier close) and when it closed;
+  - a verdict per pin (`held`, `failed`, `unclear`) with the pin's title and stance frozen;
+  - every criterion's state at close, with its trigger time;
+  - `realized`, the hypothetical tracking headline as it stood when the idea was closed.
+
+  The model refuses a closed idea without the review of its close. The store refuses any write that edits or drops an earlier review, as it does for the journal. Version 3 files migrate on load with no reviews; no version 3 idea can be closed.
+- **Lifecycle:**
+  - `POST /ideas/{id}/close` closes an active idea and requires the review. It journals the outcome and the lesson, and closes the tracking segment with end reason `closed`. Tracking stops at the close date: the book exits at the first close after the close instant, and nothing later is added.
+  - `POST /ideas/{id}/reopen` returns a closed idea to active. It keeps the review and opens a new tracking segment (start reason `reopened`).
+  - A closed idea can be archived, and restoring it returns it closed.
+- **Realized:** the route rebuilds the series just before closing and freezes that headline into the review; its exit close may still be pending. The tracking snapshot gained `final`, set once no segment is open or waiting for its exit close. The scheduler keeps rebuilding closed and archived ideas until their record is final, so the Review mode shows the final figure once the exit close is priced, and "exit pending" with its as-of date before that.
+- **Review mode** (`GET /ideas/review`, the Ideas tab's third mode):
+  - It lists the review of each idea's current close: closed ideas, and archived ones that were closed. An idea that was reopened drops out until it is closed again; its earlier review stays on the idea.
+  - It shows the outcome mix, holding time (median, range, by outcome), the median net hypothetical return and the median excess return over the benchmark (each with its sample size), and the closed ideas with their expectation, realized return, invalidation and lesson.
+  - "Invalidation before a loss" counts the losing ideas whose invalidation criterion fired before the close, against all losses and against the losses that had an invalidation rule.
+  - It describes the user's own record only, with no score.
+- **UI:**
+  - The Idea view has Close (active) and Reopen (closed); a closed idea can also be archived.
+  - `IdeaCloseForm.svelte` asks for the outcome, the expectation (prefilled with the thesis), the hypothetical record so far, what happened, a verdict per pin and the lesson. The submit button stays disabled until there is an outcome and a lesson.
+  - `IdeaReviewSection.svelte` shows the current review, the record at close beside the record now (final or exit pending), the pin verdicts, the triggered criteria and the earlier closes.
+  - `IdeaReviewMode.svelte` is the Review mode. The Board gained a "Closed" filter.
+  - Three "What is this?" entries: `review.outcome`, `stat.holding_time`, `stat.invalidation_before_loss`. Exports carry the reviews: in the JSON idea, and a "Reviews" section in Markdown.
+- **Tests:**
+  - `tests/test_idea_review.py` (10, injected clock and prices) covers: close requires a review and an active idea; the frozen review and realized record; tracking stops at the exit close; reopen keeps the review and opens a segment; reviews cannot be rewritten; archive and restore of a closed idea; the statistics; refreshing until final; the v3 → v4 migration; the routes against the demo runtime.
+  - Frontend: `idea-review.test.ts`, `IdeaReviewSection.test.ts` (section, close form, Review mode), the Idea and Review modes in `IdeasView.test.ts`, and the mode registry in `navigation.test.ts`.
+  - Full suites on 2026-11-21: backend 1285 passed, 5 skipped; frontend 722 passed; `tsc` clean.
+- **Browser check, 2026-11-21:**
+  - Same worktree-only mock fixture as I3a, plus closed ideas: a confirmed one with pin verdicts, an invalidated one whose invalidation fired before the loss, one archived after an abandoned close, and one reopened after an expired close.
+  - Light and dark at 1440, 1000 and 390 px: no console errors and no horizontal page overflow.
+  - From the UI: the Close button stayed disabled until the outcome and lesson were filled in. The idea closed and its tracking showed "Stopped". Review listed it. Reopen returned it to active with the earlier review shown.
+- **Left for later:** Copilot's `review_idea` (I5); counting every close of a reopened idea, not just the current one, in the statistics; per-episode returns for a reopened idea (the record since activation chains every segment).
 
 ## Non-goals
 

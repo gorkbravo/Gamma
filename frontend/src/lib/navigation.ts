@@ -41,10 +41,11 @@ export interface NavigationRouteMatch {
 }
 
 export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
-  // Workstream 12 - Ideas. Review mode (closed ideas) arrives with I3.
+  // Workstream 12 - Ideas. Review (closed ideas) arrived with I3b.
   ideas: defineTabModes([
     { id: "board", label: "Board", defaultIndex: 0 },
     { id: "idea", label: "Idea", defaultIndex: 1 },
+    { id: "review", label: "Review", defaultIndex: 2 },
   ]),
   equity_research: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },

@@ -68,11 +68,12 @@ const JOURNAL_KIND_LABELS: Record<IdeaJournalKind, string> = {
 };
 
 /** Board filter presets; "open" is every idea that is neither archived nor closed. */
-export type IdeaBoardFilter = "open" | "draft" | "active" | "archived" | "all";
+export type IdeaBoardFilter = "open" | "draft" | "active" | "closed" | "archived" | "all";
 export const IDEA_BOARD_FILTERS: ReadonlyArray<{ id: IdeaBoardFilter; label: string }> = [
   { id: "open", label: "Open" },
   { id: "draft", label: "Draft" },
   { id: "active", label: "Active" },
+  { id: "closed", label: "Closed" },
   { id: "archived", label: "Archived" },
   { id: "all", label: "All" },
 ];

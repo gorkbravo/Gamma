@@ -161,6 +161,42 @@ describe("IdeasView", () => {
     expect(body).toContain("Idea file bad.json is not valid JSON.");
   });
 
+  it("offers Close on an active idea, Reopen on a closed one, and a Review mode", () => {
+    const active = render(IdeasView, { props: { mode: "idea", list: LIST, idea: IDEA } }).body;
+    expect(active).toMatch(/aria-expanded="false"[^>]*>Close<\/button>/);
+    expect(active).not.toContain("Reopen as active; the review stays in the record");
+    const closedIdea = {
+      ...IDEA,
+      status: "closed" as const,
+      closed_at: "2026-11-20T15:00:00",
+      reviews: [
+        {
+          review_id: "r1",
+          outcome: "confirmed" as const,
+          lesson: "Keep the rule.",
+          expected: "",
+          realized_note: "",
+          opened_at: "2026-11-09T14:00:00",
+          closed_at: "2026-11-20T15:00:00",
+          holding_days: 11,
+          evidence_verdicts: [],
+          criteria_at_close: [],
+          realized: null,
+          first_invalidation_at: null,
+        },
+      ],
+    };
+    const closed = render(IdeasView, { props: { mode: "idea", list: LIST, idea: closedIdea } }).body;
+    expect(closed).toContain("Reopen as active; the review stays in the record");
+    expect(closed).toContain("Keep the rule.");
+    const board = render(IdeasView, { props: { mode: "board", list: LIST } }).body;
+    expect(board).toContain(">Closed</button>");
+    const review = render(IdeasView, { props: { mode: "review", list: LIST, reviewStats: null } }).body;
+    expect(review).toContain(">Review</button>");
+    expect(review).toContain("Closed ideas · your own record");
+    expect(review).toContain("No closed ideas yet.");
+  });
+
   it("explains an empty board and the loading state in place", () => {
     const empty = render(IdeasView, { props: { mode: "board", list: { ...LIST, items: [], total: 0 } } }).body;
     expect(empty).toContain("No ideas yet.");

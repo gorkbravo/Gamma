@@ -4990,6 +4990,8 @@ export interface Idea {
   criteria_counts: Record<IdeaCriterionState, number>;
   /** I3a: segments, cost assumptions and the last headline; the series comes from /tracking. */
   tracking?: IdeaTrackingRecord | null;
+  /** I3b: reviews written at close; the last one is the current close's when the idea is closed. */
+  reviews?: IdeaReview[];
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
 }
 
@@ -5022,6 +5024,8 @@ export interface IdeaSummary {
   unacknowledged_triggers: number;
   /** I3a: Board headline ("forward return since activation"), hypothetical. */
   tracking?: IdeaTrackingHeadline | null;
+  /** I3b: the review of the current close (closed, or archived after closing). */
+  review?: IdeaReviewHeadline | null;
 }
 
 export interface IdeaStorageWarning {
@@ -5107,6 +5111,7 @@ export interface IdeaTrackingSnapshot {
   sessions: number;
   gaps: number;
   partial: boolean;
+  final?: boolean;
 }
 
 export interface IdeaTrackingHeadline {
@@ -5241,6 +5246,7 @@ export interface IdeaTrackingResponse {
     sessions: number;
     gaps: number;
     partial: boolean;
+    final?: boolean;
     first_session: string | null;
     as_of: string | null;
   };
@@ -5265,4 +5271,112 @@ export interface IdeaTrackingSettingsPayload {
   per_side_bp?: Record<string, number>;
   leg_classes?: Record<string, string | null>;
   benchmark?: string;
+}
+
+// ── Ideas: close and review (Workstream 12, I3b) ─────────────────────────────
+
+export type IdeaReviewOutcome = "confirmed" | "invalidated" | "abandoned" | "expired";
+export type IdeaEvidenceVerdict = "held" | "failed" | "unclear";
+
+export interface IdeaReview {
+  review_id: string;
+  outcome: IdeaReviewOutcome;
+  lesson: string;
+  expected: string;
+  realized_note: string;
+  opened_at: string;
+  closed_at: string;
+  holding_days: number;
+  evidence_verdicts: Array<{ evidence_id: string; verdict: IdeaEvidenceVerdict; title: string; stance: IdeaEvidenceStance }>;
+  criteria_at_close: Array<{
+    criterion_id: string;
+    kind: IdeaCriterionKind;
+    label: string;
+    state: IdeaCriterionState;
+    triggered_at: string | null;
+    first_met_at: string | null;
+  }>;
+  realized: IdeaTrackingSnapshot | null;
+  first_invalidation_at: string | null;
+}
+
+export interface IdeaReviewHeadline {
+  review_id: string;
+  outcome: IdeaReviewOutcome;
+  opened_at: string;
+  closed_at: string;
+  holding_days: number;
+  expected: string;
+  lesson: string;
+  invalidation_criteria: number;
+  first_invalidation_at: string | null;
+  evidence_verdicts: Record<IdeaEvidenceVerdict, number>;
+  realized_at_close: IdeaTrackingSnapshot | null;
+}
+
+export interface IdeaClosePayload {
+  outcome: IdeaReviewOutcome;
+  lesson: string;
+  expected?: string | null;
+  realized_note?: string;
+  evidence_verdicts?: Record<string, IdeaEvidenceVerdict>;
+}
+
+export interface IdeaReviewRow {
+  idea_id: string;
+  title: string;
+  stance: IdeaStance;
+  status: IdeaStatus;
+  tags: string[];
+  outcome: IdeaReviewOutcome;
+  opened_at: string;
+  closed_at: string;
+  holding_days: number;
+  expected: string;
+  lesson: string;
+  net_return: number | null;
+  benchmark: string | null;
+  benchmark_return: number | null;
+  excess_return: number | null;
+  realized_final: boolean;
+  realized_as_of: string | null;
+  tracked: boolean;
+  invalidation_criteria: number;
+  first_invalidation_at: string | null;
+  evidence_verdicts: Record<string, number>;
+}
+
+export interface IdeaReviewStatsResponse {
+  rows: IdeaReviewRow[];
+  outcomes: Record<IdeaReviewOutcome, number>;
+  holding_days: {
+    count: number;
+    median: number | null;
+    mean: number | null;
+    min: number | null;
+    max: number | null;
+    median_by_outcome: Record<IdeaReviewOutcome, number | null>;
+  };
+  realized: {
+    count: number;
+    untracked: number;
+    median_net: number | null;
+    median_excess: number | null;
+    excess_count: number;
+    positive: number;
+    negative: number;
+    median_net_by_outcome: Record<IdeaReviewOutcome, number | null>;
+  };
+  invalidation: {
+    losses: number;
+    losses_with_invalidation_criteria: number;
+    losses_with_trigger_before_close: number;
+    share_of_losses: number | null;
+    share_of_losses_with_criteria: number | null;
+  };
+  label: string;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
 }
