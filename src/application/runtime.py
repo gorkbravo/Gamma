@@ -24,6 +24,7 @@ from src.application.fundamentals_service import FundamentalsService
 from src.application.idea_evaluation import IdeaEvaluationScheduler, IdeaEvaluationService
 from src.application.idea_observables import ObservableRegistry
 from src.application.idea_analysis import IdeaAnalysisService
+from src.application.idea_intraday import IdeaIntradayService
 from src.application.idea_service import IdeaService
 from src.application.idea_tracking import IdeaTrackingService, ProviderTrackingPrices
 from src.application.iv_service import IVService
@@ -112,6 +113,8 @@ from src.services.saved_research_store import SavedResearchStore
 from src.services.prediction_research_store import PredictionResearchStore
 from src.services.setup_store import SetupStore
 from src.services.sitrep_follow_up_store import SitrepFollowUpStore
+from src.services.ibkr_marks import IbkrMarkReader
+from src.services.idea_intraday_store import IdeaIntradayStore
 from src.services.idea_store import IdeaStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
@@ -202,6 +205,8 @@ class ApplicationRuntime:
     idea_scheduler: IdeaEvaluationScheduler | None = None
     # I3a: serie diaria canónica del seguimiento hipotético (reconstruida desde cierres de proveedor).
     idea_tracking: IdeaTrackingService | None = None
+    # I3d: capa intradía (marcas IBKR de las patas mientras TWS está conectado).
+    idea_intraday: IdeaIntradayService | None = None
     # I3c: snapshots de test (Strategy Lab) y riesgo (Risk) de las patas de una idea, a petición.
     idea_analysis: IdeaAnalysisService | None = None
     desktop: DesktopRuntimeState | None = None
@@ -553,6 +558,20 @@ def build_runtime(
     # Workstream 12 - Ideas (I3a): seguimiento hipotético con cierres de los mismos proveedores de lectura.
     idea_tracking_prices = ProviderTrackingPrices(research_provider=research_provider, crypto_service=crypto_service)
     idea_tracking = IdeaTrackingService(idea_service, idea_tracking_prices)
+    # Workstream 12 - Ideas (I3d): marcas IBKR de las patas de segmentos abiertos, solo lectura y acotadas.
+    idea_intraday = IdeaIntradayService(
+        idea_service,
+        idea_tracking,
+        IdeaIntradayStore(resolved_history_dir / "ideas" / "intraday"),
+        IbkrMarkReader(
+            client,
+            iv_service=iv_service,
+            market_data_mode=lambda: getattr(client, "market_data_mode", "delayed"),
+            usage_ledger=provider_usage,
+        ),
+        mock_mode=bool(mock_mode),
+    )
+    idea_observables.intraday_quotes = idea_intraday.latest_quote
     copilot_provider = trace_provider(
         _build_copilot_provider(allow_mock=bool(mock_mode)),
         provider_usage,
@@ -624,6 +643,7 @@ def build_runtime(
         idea_observables=idea_observables,
         idea_evaluation=idea_evaluation,
         idea_tracking=idea_tracking,
+        idea_intraday=idea_intraday,
         idea_analysis=IdeaAnalysisService(
             idea_service,
             research_service_factory=lambda: research_service,
@@ -684,7 +704,9 @@ def start_idea_evaluation(runtime: ApplicationRuntime) -> IdeaEvaluationSchedule
         return None
     if runtime.idea_scheduler is not None:
         return runtime.idea_scheduler
-    scheduler = IdeaEvaluationScheduler(runtime.idea_evaluation, tracking=runtime.idea_tracking)
+    scheduler = IdeaEvaluationScheduler(
+        runtime.idea_evaluation, tracking=runtime.idea_tracking, intraday=getattr(runtime, "idea_intraday", None)
+    )
     runtime.idea_scheduler = scheduler
     scheduler.start()
     return scheduler

@@ -81,6 +81,34 @@ export function splitAtGaps(points: readonly TimeValuePoint[]): { runs: TimeValu
  * against the one `sessions` observations earlier (five trading sessions by
  * default). Null when the series is too short or the base is zero.
  */
+/**
+ * Axis format for a series already expressed in percent (2.468 means 2.468%).
+ * lightweight-charts' own "percent" format belongs to its percentage scale
+ * mode and does not print the value: it showed 2.468 as "2.1%" and 0.6 as
+ * "0.1%", and only whole ticks came out right. Two decimals, one above 100%.
+ */
+export function percentAxisFormat(latest: number | null | undefined): {
+  type: "custom";
+  minMove: number;
+  formatter: (value: number) => string;
+} {
+  const magnitude = Math.abs(Number(latest ?? 0));
+  const precision = Number.isFinite(magnitude) && magnitude >= 100 ? 1 : 2;
+  return {
+    type: "custom",
+    minMove: 10 ** -precision,
+    formatter: (value: number) => formatPercentAxisValue(value, precision),
+  };
+}
+
+/** "2.47%", "−4.00%" (true minus sign, like the chart's other axes), "0.00%". */
+export function formatPercentAxisValue(value: number, precision = 2): string {
+  if (!Number.isFinite(value)) return "";
+  const rounded = Number(value.toFixed(precision));
+  if (rounded === 0) return `${(0).toFixed(precision)}%`;
+  return `${rounded < 0 ? "−" : ""}${Math.abs(rounded).toFixed(precision)}%`;
+}
+
 export function weekOverWeekChange(values: ReadonlyArray<number | null | undefined>, sessions = 5): number | null {
   const series = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (series.length <= sessions) return null;

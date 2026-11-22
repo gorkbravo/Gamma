@@ -83,6 +83,10 @@ class ObservableReading:
     # contrato, IV, spreads). False cuando lleva la fecha del periodo que describe (cierres
     # diarios, series FRED): esos se publican después de su fecha y usan la línea base.
     instant_points: bool = False
+    # I3d: points at or after this instant are intraday IBKR marks appended to daily closes;
+    # they count only when observed after the rule was armed (instant rule, not the day rule).
+    intraday_from: datetime | None = None
+    intraday_note: str | None = None
 
     @property
     def is_unavailable(self) -> bool:
@@ -136,7 +140,7 @@ def evaluate_criterion(
     common = {**base, "value": latest.value, "value_display": display, "as_of": latest.at}
 
     def counts(point: ObservablePoint) -> bool:
-        if reading.instant_points:
+        if reading.instant_points or (reading.intraday_from is not None and point.at >= reading.intraday_from):
             # Un punto con hora solo es nuevo si se observó después de armar la regla:
             # el precio de las 00:00 del mismo día ya se conocía a las 15:00.
             return point.at > armed_from

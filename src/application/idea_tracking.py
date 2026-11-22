@@ -19,8 +19,8 @@ time it is read, so it has no holes when Gamma was closed:
 
 Nothing here can place, stage or route an order: the book is hypothetical and
 labelled "Hypothetical, not executed" wherever it appears. Today's live P&L
-from IBKR marks (the intraday layer) is a later slice (I3d) and never feeds
-this series.
+from IBKR marks (the intraday layer, ``idea_intraday``) is valued against this
+series and never feeds it.
 """
 
 from __future__ import annotations
@@ -72,9 +72,10 @@ METHODOLOGY = (
     "Hypothetical, not executed. Each segment buys fixed quantities at the first provider close after its legs "
     "were frozen, with signed weights scaled to 100% gross exposure, and is marked at every later close. Net "
     "figures subtract the per-side cost of entering and of closing at the latest close. Returns are in each "
-    "instrument's own currency (no FX conversion). A session where a market traded but the provider has no "
-    "close is a gap, never interpolated; a market closed while another leg's market traded keeps its last close. "
-    "Segments chain: one exits at the same close the next one enters."
+    "instrument's own currency (no FX conversion). Yahoo Finance closes are adjusted for dividends and splits, "
+    "so the record is a total return and an entry price can be restated after an ex-dividend date. A session "
+    "where a market traded but the provider has no close is a gap, never interpolated; a market closed while "
+    "another leg's market traded keeps its last close. Segments chain: one exits at the same close the next one enters."
 )
 
 # Etiqueta, coste por lado y fundamento de cada clase, para la tabla de supuestos de la UI.
@@ -1097,10 +1098,14 @@ class IdeaTrackingService:
         return self.compute_for(self.idea_service.get_idea(idea_id), persist=persist)
 
     def compute_for(self, idea: Idea, *, persist: bool = True) -> TrackingComputation:
+        return self.compute_with_prices(idea, persist=persist)[0]
+
+    def compute_with_prices(self, idea: Idea, *, persist: bool = True) -> tuple[TrackingComputation, dict[str, LegCloses]]:
+        """The canonical series plus the leg closes it was built from (the intraday layer values marks against them)."""
         now = self._clock()
         tracking = idea.tracking
         if tracking is None or not tracking.segments:
-            return compute_tracking(idea.idea_id, tracking, {}, None, now=now)
+            return compute_tracking(idea.idea_id, tracking, {}, None, now=now), {}
         since = min(segment.started_at for segment in tracking.segments).date() - timedelta(days=7)
         prices: dict[str, LegCloses] = {}
         for segment in tracking.segments:
@@ -1124,7 +1129,7 @@ class IdeaTrackingService:
                 self.idea_service.store_tracking_snapshot(idea.idea_id, result.snapshot(), basis=tracking_signature(tracking))
             except Exception:  # noqa: BLE001 - la idea pudo borrarse durante la lectura
                 logger.info("Could not store the tracking snapshot of idea %s", idea.idea_id, exc_info=True)
-        return result
+        return result, prices
 
     def refresh_all(self) -> int:
         """Recompute tracked ideas (start-up and daily-close passes).

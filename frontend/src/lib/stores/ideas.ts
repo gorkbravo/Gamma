@@ -25,6 +25,7 @@ import type {
   IdeaPinResponse,
   IdeaReviewStatsResponse,
   IdeaSummary,
+  IdeaIntradayView,
   IdeaTrackingResponse,
   IdeaTrackingSettingsPayload,
 } from "../api/types";
@@ -350,6 +351,23 @@ export async function loadIdeaTracking(ideaId: string): Promise<IdeaTrackingResp
     return null;
   } finally {
     if (request === trackingRequest) ideaTrackingLoading.set(false);
+  }
+}
+
+/**
+ * I3d: reread the intraday layer (one UTC session day, or the latest) and put it
+ * beside the daily series already loaded; the daily series is not rebuilt.
+ */
+export async function loadIdeaIntraday(ideaId: string, session?: string | null): Promise<IdeaIntradayView | null> {
+  try {
+    const query = session ? `?session=${encodeURIComponent(session)}` : "";
+    const view = await getJson<IdeaIntradayView>(`/ideas/${encodeURIComponent(ideaId)}/tracking/intraday${query}`);
+    const current = get(ideaTracking);
+    if (current && current.idea_id === ideaId) ideaTracking.set({ ...current, intraday: view });
+    return view;
+  } catch (error) {
+    ideaTrackingError.set(messageOf(error));
+    return null;
   }
 }
 

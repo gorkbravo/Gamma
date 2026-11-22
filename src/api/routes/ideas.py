@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import replace
+from datetime import date
 from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -19,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from src.api.schemas.ideas import (
     EvaluationPassModel,
     IdeaCloseRequestModel,
+    IdeaIntradayModel,
     IdeaReviewStatsResponseModel,
     IdeaCreateRequestModel,
     IdeaCriterionModel,
@@ -395,14 +397,45 @@ def acknowledge_criterion(idea_id: str, criterion_id: str, request: Request) -> 
     return _idea_response(idea)
 
 
+def _tracking_with_intraday(request: Request, idea_id: str) -> dict:
+    """The canonical daily series plus, alongside it, the intraday layer of the latest session (I3d)."""
+    idea = _service(request).get_idea(idea_id)
+    result, prices = _tracking(request).compute_with_prices(idea)
+    payload = result.to_dict()
+    intraday = getattr(request.app.state.runtime, "idea_intraday", None)
+    if intraday is not None:
+        try:
+            payload["intraday"] = intraday.view_for(idea, result, prices)
+        except Exception:  # noqa: BLE001 - la capa intradía nunca impide servir la serie diaria
+            payload["intraday"] = None
+    return payload
+
+
 @router.get("/ideas/{idea_id}/tracking", response_model=IdeaTrackingResponseModel)
 def get_idea_tracking(idea_id: str, request: Request) -> IdeaTrackingResponseModel:
     """The hypothetical forward record, rebuilt from provider closes on every read."""
     try:
-        result = _tracking(request).compute(idea_id)
+        payload = _tracking_with_intraday(request, idea_id)
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
-    return IdeaTrackingResponseModel(**result.to_dict())
+    return IdeaTrackingResponseModel(**payload)
+
+
+@router.get("/ideas/{idea_id}/tracking/intraday", response_model=IdeaIntradayModel)
+def get_idea_intraday(
+    idea_id: str,
+    request: Request,
+    session: date | None = Query(default=None, description="UTC session day (YYYY-MM-DD); the latest by default"),
+) -> IdeaIntradayModel:
+    """The intraday layer of one session: IBKR marks valued against the daily series, with explicit gaps."""
+    intraday = getattr(request.app.state.runtime, "idea_intraday", None)
+    if intraday is None:
+        raise HTTPException(status_code=503, detail="The intraday layer is not running.")
+    try:
+        view = intraday.view(_service(request).get_idea(idea_id), session=session)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return IdeaIntradayModel(**view)
 
 
 @router.patch("/ideas/{idea_id}/tracking", response_model=IdeaTrackingResponseModel)
@@ -412,10 +445,10 @@ def update_idea_tracking(
     """Change the cost assumptions or the benchmark (journaled); returns the recomputed record."""
     try:
         _service(request).update_tracking_settings(idea_id, payload.to_domain())
-        result = _tracking(request).compute(idea_id)
+        result = _tracking_with_intraday(request, idea_id)
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
-    return IdeaTrackingResponseModel(**result.to_dict())
+    return IdeaTrackingResponseModel(**result)
 
 
 @router.get("/ideas/{idea_id}/export")

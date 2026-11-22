@@ -1,6 +1,7 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
 import type { Idea, IdeaTrackingResponse } from "../lib/api/types";
+import { INTRADAY_VIEW } from "../lib/idea-intraday.fixture";
 import IdeaTrackingPanel from "./IdeaTrackingPanel.svelte";
 
 const IDEA: Idea = {
@@ -212,6 +213,20 @@ describe("IdeaTrackingPanel", () => {
     expect(body).toContain("1 gap");
     expect(body).toContain("the session is a gap, not interpolated");
     expect(body).toMatch(/<th class="num">SPY<\/th>/);
+  });
+
+  it("shows the intraday layer beside the daily record without changing it (I3d)", () => {
+    const { body } = render(IdeaTrackingPanel, { props: { idea: IDEA, tracking: { ...TRACKING, intraday: INTRADAY_VIEW } } });
+    expect(body).toContain('aria-label="Intraday, IBKR marks"');
+    expect(body).toContain("Since activation, live");
+    expect(body).toContain("height:120px");
+    // La serie diaria sigue con sus mismas cifras.
+    expect(body).toContain("4 sessions · 1 gap · as of 2026-11-13");
+    expect(body).toContain("+1.23%");
+    const notTracked = render(IdeaTrackingPanel, {
+      props: { idea: IDEA, tracking: { ...TRACKING, intraday: { ...INTRADAY_VIEW, available: false, status: "not_tracked" as const } } },
+    }).body;
+    expect(notTracked).not.toContain('aria-label="Intraday, IBKR marks"');
   });
 
   it("says why there is no record yet instead of an empty chart", () => {

@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -43,6 +43,8 @@ LEVEL_CONDITIONS = ("above", "below")
 SERIES_CONDITIONS = ("above", "below", "crosses_above", "crosses_below", "change_over_window")
 ALL_CADENCES = ("on_open", "daily_close", "intraday")
 TWS_DEPENDENCY = "Needs Trader Workstation"
+# I3d: observables whose intraday reading is the latest IBKR mark of a tracked leg.
+INTRADAY_MARK_OBSERVABLES = ("equity_close", "crypto_price")
 
 # Spread ids the Commodities service builds (calendar spreads need IBKR curves).
 COMMODITY_SPREADS: tuple[tuple[str, str], ...] = (
@@ -136,6 +138,9 @@ class ObservableRegistry:
         self._market_data_mode = market_data_mode
         self._clock = clock
         self._env = env
+        # I3d: última marca IBKR grabada por la capa intradía (observable, params) -> cotización o None.
+        # Los criterios intradía la leen; nunca piden una cotización nueva a IBKR.
+        self.intraday_quotes: Callable[..., Any] | None = None
         self._definitions = {item.observable_id: item for item in self._build_definitions()}
 
     # -- registry ------------------------------------------------------------
@@ -275,7 +280,55 @@ class ObservableRegistry:
         if not available:
             return ObservableReading.unavailable(str(reason))
         reader = getattr(self, f"_read_{definition.observable_id}")
-        return reader(ref, moment)
+        reading = reader(ref, moment)
+        if intraday and ref.observable_id in INTRADAY_MARK_OBSERVABLES and not reading.is_unavailable:
+            reading = self._with_intraday_mark(ref, reading, moment)
+        return reading
+
+    def _with_intraday_mark(self, ref: ObservableRef, reading: ObservableReading, now: datetime) -> ObservableReading:
+        """Append the latest fresh IBKR mark (live or delayed) recorded for a tracked leg.
+
+        The daily closes stay the canonical history; the mark is one more
+        observation at its instant, labelled with its quality. Without one the
+        reading is returned unchanged, with the reason the rule falls back to
+        the daily close.
+        """
+        quote = None
+        if self.intraday_quotes is not None:
+            try:
+                quote = self.intraday_quotes(ref.observable_id, dict(ref.params), now=now)
+            except Exception:  # noqa: BLE001 - una marca ilegible equivale a no tener marca
+                quote = None
+        label = ref.params.get("symbol") or ref.params.get("token_id") or ref.label
+        if quote is None:
+            return replace(
+                reading,
+                intraday_note=(
+                    f"No fresh IBKR mark for {label}: Gamma marks only the legs of tracked ideas, every 5 minutes "
+                    "while Trader Workstation is connected. Evaluated at the daily close."
+                ),
+            )
+        last = reading.history[-1].at if reading.history else None
+        if last is not None and quote.at <= last:
+            return reading
+        quality = str(quote.quality).replace("_", "-")
+        point = ObservablePoint(at=quote.at, value=float(quote.price))
+        return replace(
+            reading,
+            value=point.value,
+            as_of=point.at,
+            history=(*reading.history, point),
+            value_display=self.format_value(ref, point.value),
+            provenance=ProvenanceRecord(
+                source_provider=f"IBKR/TWS ({quality})",
+                retrieved_at=quote.at,
+                origin="ibkr.reqMktData(snapshot)",
+                transformation_note="Latest intraday IBKR mark of a tracked leg, appended to the daily history; the daily close stays canonical.",
+            ),
+            stale_reason=None,
+            warnings=(*reading.warnings, f"Intraday IBKR mark ({quality}) at {quote.at.strftime('%H:%M')} UTC."),
+            intraday_from=point.at,
+        )
 
     def _read_equity_close(self, ref: ObservableRef, now: datetime) -> ObservableReading:
         from src.models.instruments import InstrumentReference
@@ -785,6 +838,7 @@ class ObservableRegistry:
                 conditions=SERIES_CONDITIONS,
                 change_unit="percent",
                 value_unit="price",
+                intraday_capable=True,
                 stale_after_days=5,
                 dependency_label="Demo mode has sample history for AAPL, MSFT, SAP and SPY only." if self.mock_mode else None,
                 order=10,
@@ -827,6 +881,7 @@ class ObservableRegistry:
                 conditions=SERIES_CONDITIONS,
                 change_unit="percent",
                 value_unit="usd",
+                intraday_capable=True,
                 stale_after_days=3,
                 order=40,
             ),

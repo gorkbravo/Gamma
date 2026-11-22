@@ -242,6 +242,11 @@ class IdeaAnalysisService:
                         book_return=item.book_return,
                         benchmark_return=item.benchmark_return,
                         max_drawdown=item.max_drawdown,
+                        coverage=(
+                            float(item.covered_gross_weight) / float(item.gross_weight)
+                            if getattr(item, "gross_weight", 0)
+                            else None
+                        ),
                     )
                 )
         except Exception as exc:  # noqa: BLE001 - la réplica es opcional; el VaR se guarda igual

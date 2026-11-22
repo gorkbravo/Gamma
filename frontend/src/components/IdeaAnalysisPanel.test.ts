@@ -1,7 +1,7 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
 import type { Idea, IdeaRiskSnapshot, IdeaTestSnapshot } from "../lib/api/types";
-import { asLoss, formatRatio, snapshotLegsText, snapshotWindowText, worstEpisode } from "../lib/idea-analysis";
+import { asLoss, episodeCoverageText, formatRatio, snapshotLegsText, snapshotWindowText, worstEpisode } from "../lib/idea-analysis";
 import IdeaAnalysisPanel from "./IdeaAnalysisPanel.svelte";
 
 const LEGS = [
@@ -116,6 +116,20 @@ describe("idea analysis helpers", () => {
     expect(snapshotWindowText(TEST)).toBe("2024-12-24 → 2026-01-27 · 286 observations");
     expect(worstEpisode(RISK)?.episode_id).toBe("tariffs_2025");
     expect(worstEpisode({ ...RISK, worst_episode_id: null, episodes: [RISK.episodes[0]] })).toBeNull();
+  });
+
+  it("prefers a fully covered episode and says how much of the book a partial one covers (live check 2026-11-21)", () => {
+    const partial = { episode_id: "rates_2022", label: "2022 rate shock", start: "2022-01-03", end: "2022-10-12", status: "partial" as const, book_return: -0.36, benchmark_return: -0.24, max_drawdown: -0.4, coverage: 0.5 };
+    const mixed = { ...RISK, worst_episode_id: null, episodes: [...RISK.episodes, partial] };
+    expect(worstEpisode(mixed)?.episode_id).toBe("tariffs_2025");
+    expect(worstEpisode({ ...mixed, episodes: [partial] })?.episode_id).toBe("rates_2022");
+    expect(episodeCoverageText(partial)).toBe("Partial · 50% of gross");
+    expect(episodeCoverageText({ ...partial, coverage: null })).toBe("Partial");
+    expect(episodeCoverageText(RISK.episodes[1])).toBe("Full");
+    const body = render(IdeaAnalysisPanel, {
+      props: { idea: { ...IDEA, risks: [{ ...RISK, episodes: [partial], worst_episode_id: "rates_2022" }] } },
+    }).body;
+    expect(body).toContain("2022 rate shock · partial · 50% of gross");
   });
 });
 

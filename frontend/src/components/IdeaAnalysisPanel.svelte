@@ -9,7 +9,7 @@
   import type { Idea, IdeaTestSnapshot } from "../lib/api/types";
   import { formatTrackingReturn, returnTone, sessionTime } from "../lib/idea-tracking";
   import { formatIdeaInstant } from "../lib/ideas";
-  import { asLoss, formatRatio, snapshotLegsText, snapshotWindowText, worstEpisode } from "../lib/idea-analysis";
+  import { asLoss, episodeCoverageText, formatRatio, snapshotLegsText, snapshotWindowText, worstEpisode } from "../lib/idea-analysis";
   import { toProvenanceBadge } from "../lib/provenance";
 
   export let idea: Idea;
@@ -126,7 +126,7 @@
         <div class="stat">
           <span>Worst replayed episode</span>
           <strong class={returnTone(worst?.book_return)} class:absent={!worst}>{worst ? formatTrackingReturn(worst.book_return) : "N/A"}</strong>
-          <small>{worst ? worst.label : "No episode in the available history"}</small>
+          <small>{worst ? (worst.status === "full" ? worst.label : `${worst.label} · ${episodeCoverageText(worst).toLowerCase()}`) : "No episode in the available history"}</small>
         </div>
       </div>
       {#if shownEpisodes.length}
@@ -140,7 +140,7 @@
                   <td class="num">{episode.start} → {episode.end}</td>
                   <td class="num {returnTone(episode.book_return)}">{formatTrackingReturn(episode.book_return)}</td>
                   <td class="num {returnTone(episode.benchmark_return)}">{formatTrackingReturn(episode.benchmark_return)}</td>
-                  <td>{episode.status === "full" ? "Full" : "Partial"}</td>
+                  <td>{episodeCoverageText(episode)}</td>
                 </tr>
               {/each}
             </tbody>

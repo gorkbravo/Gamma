@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { UTCTimestamp } from "lightweight-charts";
 import {
+  formatPercentAxisValue,
   normalizeChartData,
+  percentAxisFormat,
   normalizeChartDataWithGaps,
   splitAtGaps,
   parseApiTimestampToUtcSeconds,
@@ -73,5 +75,20 @@ describe("splitAtGaps", () => {
     expect(runs.map((run) => run.map((point) => point.time))).toEqual([[10, 20], [40]]);
     expect(gaps).toEqual([30, 50]);
     expect(splitAtGaps([])).toEqual({ runs: [], gaps: [] });
+  });
+});
+
+describe("percentAxisFormat", () => {
+  it("prints a percent series' own value (lightweight-charts' percent format did not)", () => {
+    const format = percentAxisFormat(2.468);
+    expect(format.type).toBe("custom");
+    expect(format.minMove).toBe(0.01);
+    expect(format.formatter(2.468)).toBe("2.47%");
+    expect(format.formatter(0.6)).toBe("0.60%");
+    expect(format.formatter(0.627)).toBe("0.63%");
+    expect(format.formatter(-4)).toBe("−4.00%");
+    expect(format.formatter(-0.001)).toBe("0.00%");
+    expect(percentAxisFormat(123.4).formatter(123.45)).toBe("123.5%");
+    expect(formatPercentAxisValue(Number.NaN)).toBe("");
   });
 });

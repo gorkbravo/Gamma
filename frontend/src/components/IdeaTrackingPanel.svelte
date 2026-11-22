@@ -6,6 +6,7 @@
   // executed". Gaps stay gaps (the chart line breaks), and the gross record is
   // shown next to the net one so a cost edit can never hide what prices did.
   import TimeSeriesChart, { type ChartSeries } from "./TimeSeriesChart.svelte";
+  import IdeaIntradayStrip from "./IdeaIntradayStrip.svelte";
   import ProvenanceBadge from "./ProvenanceBadge.svelte";
   import WhatIsThis from "./WhatIsThis.svelte";
   import type {
@@ -41,6 +42,8 @@
   export let error = "";
   export let onLoad: (ideaId: string) => Promise<unknown> | void = () => {};
   export let onUpdate: (ideaId: string, payload: IdeaTrackingSettingsPayload) => Promise<IdeaTrackingResponse | null> = async () => null;
+  // I3d: relee la capa intradía (una sesión UTC concreta o la más reciente) sin reconstruir la serie diaria.
+  export let onLoadIntraday: (ideaId: string, session?: string | null) => Promise<unknown> | void = () => {};
 
   const WARNINGS_SHOWN = 4;
 
@@ -264,6 +267,10 @@
     <div class="tracking-chart">
       <TimeSeriesChart series={current?.points.length ? chartSeries : []} height={220} showLegend emptyMessage={chartMessage} />
     </div>
+
+    {#if current?.intraday && current.intraday.status !== "not_tracked"}
+      <IdeaIntradayStrip {idea} view={current.intraday} onLoadSession={onLoadIntraday} />
+    {/if}
 
     <div class="table-scroll">
       <table class="data-table is-top segments-table">

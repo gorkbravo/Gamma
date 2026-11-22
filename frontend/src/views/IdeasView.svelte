@@ -94,6 +94,7 @@
   export let trackingLoading = false;
   export let trackingError = "";
   export let onLoadTracking: (ideaId: string) => Promise<unknown> | void = () => {};
+  export let onLoadIntraday: (ideaId: string, session?: string | null) => Promise<unknown> | void = () => {};
   export let onUpdateTracking: (ideaId: string, payload: IdeaTrackingSettingsPayload) => Promise<IdeaTrackingResponse | null> =
     async () => null;
   // I3b: close with a review, and the Review mode.
@@ -799,6 +800,7 @@
           loading={trackingLoading}
           error={trackingError}
           onLoad={onLoadTracking}
+          onLoadIntraday={onLoadIntraday}
           onUpdate={onUpdateTracking}
         />
       </div>

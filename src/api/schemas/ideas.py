@@ -887,6 +887,84 @@ class TrackingProvenanceModel(BaseModel):
     available: bool = True
 
 
+IntradayQualityLiteral = Literal["live", "delayed", "frozen", "delayed_frozen"]
+
+
+class IntradayPointModel(BaseModel):
+    at: datetime
+    segment: int
+    net_return: float | None = None
+    gross_return: float | None = None
+    today_return: float | None = None
+    drawdown: float | None = None
+    quality: IntradayQualityLiteral | None = None
+    gap: bool = False
+    state: Literal["priced", "gap", "before_entry"] = "priced"
+    missing: list[str] = Field(default_factory=list)
+    carried: list[str] = Field(default_factory=list)
+
+
+class IntradayGapModel(BaseModel):
+    start: datetime
+    end: datetime | None = None
+    kind: Literal["disconnected", "skipped", "not_running", "not_recorded"]
+    reason: str
+
+
+class IntradayLegModel(BaseModel):
+    key: str
+    label: str
+    price: float | None = None
+    field: str | None = None
+    md_type: int | None = None
+    quality: IntradayQualityLiteral | None = None
+    carried: bool = False
+    reference_close: float | None = None
+    move: float | None = None
+    missing_reason: str | None = None
+
+
+class IntradaySummaryModel(BaseModel):
+    as_of: datetime | None = None
+    today_return: float | None = None
+    net_return: float | None = None
+    intraday_drawdown: float | None = None
+    quality: IntradayQualityLiteral | None = None
+    qualities: list[IntradayQualityLiteral] = Field(default_factory=list)
+    marks: int = 0
+    gaps: int = 0
+    segment: int | None = None
+
+
+class IntradayReferenceModel(BaseModel):
+    session: date
+    net_return: float | None = None
+
+
+class IdeaIntradayModel(BaseModel):
+    """I3d: the intraday layer (IBKR marks while TWS is connected); never part of the daily series."""
+
+    label: str = TRACKING_LABEL
+    available: bool = False
+    status: Literal["recording", "idle", "no_marks", "demo", "not_tracked"]
+    status_reason: str | None = None
+    tws_connected: bool = False
+    session: date | None = None
+    sessions: list[date] = Field(default_factory=list)
+    reference: IntradayReferenceModel | None = None
+    summary: IntradaySummaryModel = Field(default_factory=IntradaySummaryModel)
+    points: list[IntradayPointModel] = Field(default_factory=list)
+    gaps: list[IntradayGapModel] = Field(default_factory=list)
+    legs: list[IntradayLegModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    methodology: str = ""
+    cadence_seconds: int = 300
+    closed_cadence_seconds: int = 3600
+    source_provider: str = "IBKR/TWS market-data snapshots"
+    origin: str = "ibkr.reqMktData(snapshot)"
+    transformation_note: str | None = None
+
+
 class IdeaTrackingResponseModel(BaseModel):
     idea_id: str
     label: str = TRACKING_LABEL
@@ -904,6 +982,8 @@ class IdeaTrackingResponseModel(BaseModel):
     source_provider: str = "gamma_ideas"
     origin: str = "idea_tracking.compute"
     transformation_note: str | None = None
+    # I3d: capa intradía; no forma parte de la serie diaria ni de sus estadísticas.
+    intraday: IdeaIntradayModel | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1086,6 +1166,7 @@ class IdeaRiskEpisodeModel(BaseModel):
     book_return: float | None = None
     benchmark_return: float | None = None
     max_drawdown: float | None = None
+    coverage: float | None = None
 
 
 class IdeaRiskSnapshotModel(IdeaSnapshotModelBase):

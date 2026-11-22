@@ -26,15 +26,27 @@ export function snapshotLegsText(snapshot: IdeaTestSnapshot | IdeaRiskSnapshot):
     .join(" · ");
 }
 
-/** The worst priced episode the backend named, or the lowest book return as a fallback. */
+/**
+ * The worst episode the backend named, or as a fallback the lowest book return
+ * among fully covered episodes (a partial one only when none is full: a partial
+ * replay treats the legs without history as flat).
+ */
 export function worstEpisode(snapshot: IdeaRiskSnapshot): IdeaRiskEpisode | null {
   const priced = snapshot.episodes.filter((item) => item.status !== "unavailable" && item.book_return != null);
   const named = priced.find((item) => item.episode_id === snapshot.worst_episode_id);
   if (named) return named;
-  return priced.reduce<IdeaRiskEpisode | null>(
+  const full = priced.filter((item) => item.status === "full");
+  return (full.length ? full : priced).reduce<IdeaRiskEpisode | null>(
     (worst, item) => (worst == null || (item.book_return ?? 0) < (worst.book_return ?? 0) ? item : worst),
     null
   );
+}
+
+/** "Full", "Partial · 50% of gross" (the rest of the book is treated as flat), or "Partial". */
+export function episodeCoverageText(episode: IdeaRiskEpisode): string {
+  if (episode.status === "full") return "Full";
+  if (episode.coverage == null || !Number.isFinite(episode.coverage)) return "Partial";
+  return `Partial · ${Math.round(episode.coverage * 100)}% of gross`;
 }
 
 /** "2024-12-24 → 2026-01-27 · 286 observations". */

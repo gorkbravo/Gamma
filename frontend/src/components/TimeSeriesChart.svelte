@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { colorWithAlpha, resolveChartColor } from "../lib/chart-colors";
-  import { normalizeChartData, splitAtGaps } from "../lib/chart-data";
+  import { normalizeChartData, percentAxisFormat, splitAtGaps } from "../lib/chart-data";
   import { resolvedTheme } from "../lib/stores/appearance";
   import {
     AreaSeries,
@@ -125,9 +125,11 @@
   }
 
   function priceFormatFor(item: ChartSeries, normalizedData: readonly ChartPoint[]) {
+    // El formato "percent" de lightweight-charts es el del modo porcentaje de la escala y no imprime el valor.
+    if (item.valueFormat === "percent") return percentAxisFormat(normalizedData.at(-1)?.value ?? normalizedData[0]?.value);
     const precision = inferPricePrecision(normalizedData);
     return {
-      type: item.valueFormat === "percent" ? ("percent" as const) : ("price" as const),
+      type: "price" as const,
       precision,
       minMove: 10 ** -precision
     };

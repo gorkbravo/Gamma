@@ -62,6 +62,7 @@
     loadIdeaNotifications,
     loadIdeaObservables,
     loadIdeaReview,
+    loadIdeaIntraday,
     loadIdeaTracking,
     loadIdeas,
     loadMacroEventOptions,
@@ -3342,6 +3343,7 @@
             trackingLoading={$ideaTrackingLoading}
             trackingError={$ideaTrackingError}
             onLoadTracking={loadIdeaTracking}
+            onLoadIntraday={loadIdeaIntraday}
             onUpdateTracking={updateIdeaTracking}
             reviewStats={$ideaReviewStats}
             onLoadReview={loadIdeaReview}

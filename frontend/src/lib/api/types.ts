@@ -5273,6 +5273,77 @@ export interface IdeaTrackingResponse {
   source_provider: string;
   origin: string;
   transformation_note: string | null;
+  /** I3d: the intraday layer (IBKR marks while TWS is connected); never part of the daily series. */
+  intraday?: IdeaIntradayView | null;
+}
+
+/** How TWS served a mark: live, delayed, frozen (last price at or before the close) or both. */
+export type IdeaIntradayQuality = "live" | "delayed" | "frozen" | "delayed_frozen";
+
+export interface IdeaIntradayPoint {
+  at: string;
+  segment: number;
+  net_return: number | null;
+  gross_return: number | null;
+  today_return: number | null;
+  drawdown: number | null;
+  quality: IdeaIntradayQuality | null;
+  gap: boolean;
+  state: "priced" | "gap" | "before_entry";
+  missing: string[];
+  carried: string[];
+}
+
+export interface IdeaIntradayGap {
+  start: string;
+  end: string | null;
+  kind: "disconnected" | "skipped" | "not_running" | "not_recorded";
+  reason: string;
+}
+
+export interface IdeaIntradayLeg {
+  key: string;
+  label: string;
+  price: number | null;
+  field: string | null;
+  md_type: number | null;
+  quality: IdeaIntradayQuality | null;
+  carried: boolean;
+  reference_close: number | null;
+  move: number | null;
+  missing_reason: string | null;
+}
+
+export interface IdeaIntradayView {
+  label: string;
+  available: boolean;
+  status: "recording" | "idle" | "no_marks" | "demo" | "not_tracked";
+  status_reason: string | null;
+  tws_connected: boolean;
+  session: string | null;
+  sessions: string[];
+  reference: { session: string; net_return: number | null } | null;
+  summary: {
+    as_of: string | null;
+    today_return: number | null;
+    net_return: number | null;
+    intraday_drawdown: number | null;
+    quality: IdeaIntradayQuality | null;
+    qualities: IdeaIntradayQuality[];
+    marks: number;
+    gaps: number;
+    segment: number | null;
+  };
+  points: IdeaIntradayPoint[];
+  gaps: IdeaIntradayGap[];
+  legs: IdeaIntradayLeg[];
+  warnings: string[];
+  methodology: string;
+  cadence_seconds: number;
+  closed_cadence_seconds: number;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
 }
 
 export interface IdeaTrackingSettingsPayload {
@@ -5426,6 +5497,8 @@ export interface IdeaRiskEpisode {
   book_return: number | null;
   benchmark_return: number | null;
   max_drawdown: number | null;
+  /** Share of gross exposure with history in the episode (a partial replay treats the rest as flat). */
+  coverage?: number | null;
 }
 
 export interface IdeaRiskSnapshot extends IdeaSnapshotBase {

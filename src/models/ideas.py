@@ -1837,6 +1837,9 @@ class IdeaRiskEpisode:
     book_return: float | None = None
     benchmark_return: float | None = None
     max_drawdown: float | None = None
+    # Share of the book's gross exposure with price history in the episode; a partial
+    # replay treats the missing legs as flat, so its result must say how much it covers.
+    coverage: float | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.episode_id, "episode_id")
@@ -1845,6 +1848,8 @@ class IdeaRiskEpisode:
             raise IdeaValidationError("An episode status must be full, partial or unavailable.")
         for name in ("book_return", "benchmark_return", "max_drawdown"):
             object.__setattr__(self, name, _finite_or_none(getattr(self, name)))
+        coverage = _finite_or_none(self.coverage)
+        object.__setattr__(self, "coverage", None if coverage is None else min(1.0, max(0.0, coverage)))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1856,6 +1861,7 @@ class IdeaRiskEpisode:
             "book_return": self.book_return,
             "benchmark_return": self.benchmark_return,
             "max_drawdown": self.max_drawdown,
+            "coverage": self.coverage,
         }
 
     @classmethod
@@ -1873,6 +1879,7 @@ class IdeaRiskEpisode:
             book_return=_finite_or_none(payload.get("book_return")),
             benchmark_return=_finite_or_none(payload.get("benchmark_return")),
             max_drawdown=_finite_or_none(payload.get("max_drawdown")),
+            coverage=_finite_or_none(payload.get("coverage")),
         )
 
 
@@ -1905,8 +1912,14 @@ class IdeaRiskSnapshot(IdeaSnapshotBase):
 
     @property
     def worst_episode(self) -> IdeaRiskEpisode | None:
+        """The worst fully covered episode; a partial one only when no episode is fully covered.
+
+        A partial replay treats the legs without history as flat, so naming it
+        the worst while a full replay exists would compare different books.
+        """
         priced = [item for item in self.episodes if item.status != "unavailable" and item.book_return is not None]
-        return min(priced, key=lambda item: float(item.book_return or 0.0), default=None)
+        full = [item for item in priced if item.status == "full"]
+        return min(full or priced, key=lambda item: float(item.book_return or 0.0), default=None)
 
     def to_dict(self) -> dict[str, Any]:
         worst = self.worst_episode
