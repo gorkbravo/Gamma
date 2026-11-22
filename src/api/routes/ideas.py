@@ -1,20 +1,27 @@
-"""``/ideas`` routes (Workstream 12, checkpoints I1 and I2).
+"""``/ideas`` routes (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
 
-Local research records plus read-only criterion evaluation. Evaluation reads
-observables through existing read-only services (the observable registry);
-no route here can place, stage or route an order, or touch an account.
+Local research records plus read-only criterion evaluation and hypothetical
+forward tracking. Evaluation and tracking read prices and observables through
+existing read-only services; the tracked book is labelled "Hypothetical, not
+executed". No route here can place, stage or route an order, or touch an
+account.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
+from datetime import date
 from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.api.schemas.ideas import (
     EvaluationPassModel,
+    IdeaCloseRequestModel,
+    IdeaIntradayModel,
+    IdeaReviewStatsResponseModel,
     IdeaCreateRequestModel,
     IdeaCriterionModel,
     IdeaCriterionRequestModel,
@@ -31,13 +38,15 @@ from src.api.schemas.ideas import (
     IdeaNotificationModel,
     IdeaNotificationsResponseModel,
     IdeaPinResponseModel,
+    IdeaTrackingResponseModel,
+    IdeaTrackingSettingsRequestModel,
     ObservableDefinitionModel,
     ObservablePreviewRequestModel,
     ObservablePreviewResponseModel,
     ObservableRefModel,
     ObservableRegistryResponseModel,
 )
-from src.models.ideas import Idea, IdeaValidationError
+from src.models.ideas import Idea, IdeaSourceUnavailableError, IdeaValidationError
 from src.services.idea_explanations import list_explanations
 from src.services.idea_store import IdeaConflictError, IdeaNotFoundError
 from src.utils.time import now_utc
@@ -61,6 +70,14 @@ def _scheduler(request: Request):
     return getattr(request.app.state.runtime, "idea_scheduler", None)
 
 
+def _tracking(request: Request):
+    return request.app.state.runtime.idea_tracking
+
+
+def _analysis(request: Request):
+    return request.app.state.runtime.idea_analysis
+
+
 def _idea_response(idea: Idea) -> IdeaModel:
     return IdeaModel.from_domain(idea, retrieved_at=now_utc())
 
@@ -70,6 +87,8 @@ def _raise(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, IdeaConflictError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, IdeaSourceUnavailableError):
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if isinstance(exc, (IdeaValidationError, ValueError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     raise exc
@@ -171,6 +190,12 @@ def list_idea_explanations() -> IdeaExplanationsResponseModel:
     )
 
 
+@router.get("/ideas/review", response_model=IdeaReviewStatsResponseModel)
+def review_statistics(request: Request) -> IdeaReviewStatsResponseModel:
+    """Review mode: the user's closed ideas and descriptive statistics of that record."""
+    return IdeaReviewStatsResponseModel.from_domain(_service(request).review_statistics())
+
+
 @router.post("/ideas/evaluate", response_model=EvaluationPassModel)
 def evaluate_all_ideas(request: Request) -> EvaluationPassModel:
     result = _evaluation(request).evaluate_all(trigger="manual")
@@ -236,6 +261,59 @@ def activate_idea(idea_id: str, request: Request) -> IdeaModel:
         # Activation arms every criterion; evaluate them once now.
         if idea.criteria:
             idea = _evaluation(request).evaluate_idea(idea_id, trigger="activated")
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.post("/ideas/{idea_id}/close", response_model=IdeaModel)
+def close_idea(idea_id: str, payload: IdeaCloseRequestModel, request: Request) -> IdeaModel:
+    """Close an active idea; the review is required and freezes the tracking record as it stands."""
+    service = _service(request)
+    try:
+        idea = service.get_idea(idea_id)
+        realized = None
+        if idea.tracking is not None and idea.tracking.segments:
+            try:
+                realized = _tracking(request).compute_for(idea, persist=False).snapshot()
+            except Exception:  # noqa: BLE001 - sin precios, la revisión dice que no había registro
+                realized = None
+        closed = service.close(idea_id, replace(payload.to_domain(), realized=realized))
+        if closed.tracking is not None and closed.tracking.segments:
+            try:
+                _tracking(request).compute(idea_id)
+            except Exception:  # noqa: BLE001 - el titular se rehace en la siguiente lectura
+                pass
+        closed = service.get_idea(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(closed)
+
+
+@router.post("/ideas/{idea_id}/test", response_model=IdeaModel)
+def run_idea_test(idea_id: str, request: Request) -> IdeaModel:
+    """Backtest the idea's legs in Strategy Lab and keep the snapshot (in-sample, no costs)."""
+    try:
+        idea = _analysis(request).run_test(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.post("/ideas/{idea_id}/risk", response_model=IdeaModel)
+def run_idea_risk(idea_id: str, request: Request) -> IdeaModel:
+    """Run Risk on the idea's research book (VaR, expected shortfall, stress replay) and keep the snapshot."""
+    try:
+        idea = _analysis(request).run_risk(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.post("/ideas/{idea_id}/reopen", response_model=IdeaModel)
+def reopen_idea(idea_id: str, request: Request) -> IdeaModel:
+    try:
+        idea = _service(request).reopen(idea_id)
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
     return _idea_response(idea)
@@ -319,6 +397,60 @@ def acknowledge_criterion(idea_id: str, criterion_id: str, request: Request) -> 
     return _idea_response(idea)
 
 
+def _tracking_with_intraday(request: Request, idea_id: str) -> dict:
+    """The canonical daily series plus, alongside it, the intraday layer of the latest session (I3d)."""
+    idea = _service(request).get_idea(idea_id)
+    result, prices = _tracking(request).compute_with_prices(idea)
+    payload = result.to_dict()
+    intraday = getattr(request.app.state.runtime, "idea_intraday", None)
+    if intraday is not None:
+        try:
+            payload["intraday"] = intraday.view_for(idea, result, prices)
+        except Exception:  # noqa: BLE001 - la capa intradía nunca impide servir la serie diaria
+            payload["intraday"] = None
+    return payload
+
+
+@router.get("/ideas/{idea_id}/tracking", response_model=IdeaTrackingResponseModel)
+def get_idea_tracking(idea_id: str, request: Request) -> IdeaTrackingResponseModel:
+    """The hypothetical forward record, rebuilt from provider closes on every read."""
+    try:
+        payload = _tracking_with_intraday(request, idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return IdeaTrackingResponseModel(**payload)
+
+
+@router.get("/ideas/{idea_id}/tracking/intraday", response_model=IdeaIntradayModel)
+def get_idea_intraday(
+    idea_id: str,
+    request: Request,
+    session: date | None = Query(default=None, description="UTC session day (YYYY-MM-DD); the latest by default"),
+) -> IdeaIntradayModel:
+    """The intraday layer of one session: IBKR marks valued against the daily series, with explicit gaps."""
+    intraday = getattr(request.app.state.runtime, "idea_intraday", None)
+    if intraday is None:
+        raise HTTPException(status_code=503, detail="The intraday layer is not running.")
+    try:
+        view = intraday.view(_service(request).get_idea(idea_id), session=session)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return IdeaIntradayModel(**view)
+
+
+@router.patch("/ideas/{idea_id}/tracking", response_model=IdeaTrackingResponseModel)
+def update_idea_tracking(
+    idea_id: str, payload: IdeaTrackingSettingsRequestModel, request: Request
+) -> IdeaTrackingResponseModel:
+    """Change the cost assumptions or the benchmark (journaled); returns the recomputed record."""
+    try:
+        _service(request).update_tracking_settings(idea_id, payload.to_domain())
+        result = _tracking_with_intraday(request, idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return IdeaTrackingResponseModel(**result)
+
+
 @router.get("/ideas/{idea_id}/export")
 def export_idea(
     idea_id: str,
@@ -328,11 +460,19 @@ def export_idea(
     service = _service(request)
     try:
         idea = service.get_idea(idea_id)
+        tracking_result = None
+        if idea.tracking is not None and idea.tracking.segments:
+            try:
+                tracking_result = _tracking(request).compute_for(idea, persist=False).to_dict()
+            except Exception:  # noqa: BLE001 - la exportación sale igual, con el último titular guardado
+                tracking_result = None
         if format == "json":
-            content = json.dumps(service.export_json(idea_id), indent=2, ensure_ascii=False, allow_nan=False)
+            content = json.dumps(
+                service.export_json(idea_id, tracking_result=tracking_result), indent=2, ensure_ascii=False, allow_nan=False
+            )
             media_type = "application/json; charset=utf-8"
         else:
-            content = service.export_markdown(idea_id)
+            content = service.export_markdown(idea_id, tracking_result=tracking_result)
             media_type = "text/markdown; charset=utf-8"
     except Exception as exc:  # noqa: BLE001
         _raise(exc)

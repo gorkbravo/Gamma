@@ -1,15 +1,23 @@
 <script lang="ts">
-  // Ideas tab (Workstream 12, checkpoints I1 and I2): Board lists every idea in
-  // one dense table with its criterion states; Idea shows one thesis with its
-  // frozen evidence grouped by stance, its criteria and their live state, and
-  // its append-only journal. The backend evaluates criteria read-only; this
-  // view never calls a provider itself.
+  // Ideas tab (Workstream 12, checkpoints I1, I2, I3a and I3b): Board lists
+  // every idea in one dense table with its criterion states and its
+  // hypothetical forward return; Idea shows one thesis with its frozen
+  // evidence grouped by stance, its criteria and their live state, its review
+  // when closed, its hypothetical tracking and its append-only journal; Review
+  // describes the closed record. The backend evaluates criteria and rebuilds
+  // the tracked series read-only; this view never calls a provider itself.
+  import IdeaAnalysisPanel from "../components/IdeaAnalysisPanel.svelte";
+  import IdeaCloseForm from "../components/IdeaCloseForm.svelte";
   import IdeaCriteriaPanel from "../components/IdeaCriteriaPanel.svelte";
+  import IdeaReviewMode from "../components/IdeaReviewMode.svelte";
+  import IdeaReviewSection from "../components/IdeaReviewSection.svelte";
+  import IdeaTrackingPanel from "../components/IdeaTrackingPanel.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import WhatIsThis from "../components/WhatIsThis.svelte";
   import type {
     CrossTabHandoffEnvelope,
     Idea,
+    IdeaClosePayload,
     IdeaCreatePayload,
     IdeaCriterionPayload,
     IdeaEvidence,
@@ -21,8 +29,11 @@
     IdeaObservableRef,
     IdeaObservableRegistryResponse,
     IdeaPatchPayload,
+    IdeaReviewStatsResponse,
     IdeaStance,
     IdeaSummary,
+    IdeaTrackingResponse,
+    IdeaTrackingSettingsPayload,
   } from "../lib/api/types";
   import {
     EVIDENCE_STANCE_LABELS,
@@ -48,8 +59,10 @@
   import { toProvenanceBadge } from "../lib/provenance";
   import { activateRowOnKey } from "../lib/row-activation";
   import { CRITERION_STATE_LABELS, criteriaSummary, daysToReview, daysToReviewText } from "../lib/idea-criteria";
+  import { TRACKING_LABEL, boardTrackingCell } from "../lib/idea-tracking";
+  import { reviewKpis } from "../lib/idea-review";
 
-  export let mode: "board" | "idea" = "board";
+  export let mode: "board" | "idea" | "review" = "board";
   export let list: IdeaListResponse | null = null;
   export let idea: Idea | null = null;
   export let loading = false;
@@ -60,7 +73,7 @@
   export let onUnpinEvidence: (ideaId: string, evidenceId: string) => Promise<Idea | null> = async () => null;
   export let onAddJournalEntry: (ideaId: string, kind: "note" | "decision", body: string) => Promise<Idea | null> =
     async () => null;
-  export let onTransition: (ideaId: string, action: "activate" | "archive" | "restore") => Promise<Idea | null> =
+  export let onTransition: (ideaId: string, action: "activate" | "archive" | "restore" | "reopen") => Promise<Idea | null> =
     async () => null;
   export let onDeleteIdea: (ideaId: string) => Promise<boolean> = async () => false;
   export let onExportIdea: (ideaId: string, format: "md" | "json") => Promise<string | null> = async () => null;
@@ -76,11 +89,37 @@
   export let onEvaluateIdea: (ideaId: string) => Promise<unknown> = async () => null;
   export let onPreviewObservable: (observable: IdeaObservableRef) => Promise<IdeaObservablePreview | null> = async () => null;
   export let onLoadEvents: () => Promise<Array<{ event_id: string; title: string; scheduled_at: string; region: string }>> = async () => [];
+  // I3a: hypothetical forward tracking of the selected idea.
+  export let tracking: IdeaTrackingResponse | null = null;
+  export let trackingLoading = false;
+  export let trackingError = "";
+  export let onLoadTracking: (ideaId: string) => Promise<unknown> | void = () => {};
+  export let onLoadIntraday: (ideaId: string, session?: string | null) => Promise<unknown> | void = () => {};
+  export let onUpdateTracking: (ideaId: string, payload: IdeaTrackingSettingsPayload) => Promise<IdeaTrackingResponse | null> =
+    async () => null;
+  // I3b: close with a review, and the Review mode.
+  export let reviewStats: IdeaReviewStatsResponse | null = null;
+  export let onLoadReview: () => Promise<unknown> | void = () => {};
+  export let onCloseIdea: (ideaId: string, payload: IdeaClosePayload) => Promise<Idea | null> = async () => null;
+  // I3c: test and risk snapshots, run only when the user asks.
+  export let analysisBusy: "" | "test" | "risk" = "";
+  export let analysisError = "";
+  export let onRunTest: (ideaId: string) => Promise<unknown> | void = () => {};
+  export let onRunRisk: (ideaId: string) => Promise<unknown> | void = () => {};
 
-  const modes: Array<{ id: "board" | "idea"; label: string }> = [
+  const modes: Array<{ id: "board" | "idea" | "review"; label: string }> = [
     { id: "board", label: "Board" },
     { id: "idea", label: "Idea" },
+    { id: "review", label: "Review" },
   ];
+
+  // Review se recalcula cada vez que se entra en el modo: los cierres pueden haber cambiado.
+  // Un único disparador: al montar en Review y cada vez que se entra en el modo.
+  let previousMode: typeof mode | null = null;
+  $: if (mode !== previousMode) {
+    previousMode = mode;
+    if (mode === "review") void onLoadReview();
+  }
 
   // ── Board ──────────────────────────────────────────────────────────────
   let filter: IdeaBoardFilter = "open";
@@ -151,6 +190,14 @@
   let journalSaving = false;
   let exportError = "";
   let expandedPins: string[] = [];
+  let closing = false;
+
+  async function submitClose(payload: IdeaClosePayload): Promise<boolean> {
+    if (!idea) return false;
+    const closed = await onCloseIdea(idea.idea_id, payload);
+    if (closed) closing = false;
+    return Boolean(closed);
+  }
 
   function toggleExpanded(evidenceId: string) {
     expandedPins = expandedPins.includes(evidenceId)
@@ -163,6 +210,7 @@
   // Leaving the idea (or opening another) drops any half-finished edit.
   $: if (idea?.idea_id !== editingId) {
     editing = false;
+    closing = false;
     confirmDelete = false;
     confirmUnpin = null;
     editingId = idea?.idea_id ?? null;
@@ -322,8 +370,17 @@
   }
 
   $: ideaReviewDays = idea ? daysToReview(idea.horizon.review_date) : null;
+  $: reviewCounts = reviewKpis(reviewStats);
   $: headerKpis =
-    mode === "idea" && idea
+    mode === "review"
+      ? [
+          { label: "Reviewed", value: String(reviewCounts.reviewed), tone: "", explain: "" },
+          { label: "Confirmed", value: String(reviewCounts.confirmed), tone: "", explain: "" },
+          { label: "Invalidated", value: String(reviewCounts.invalidated), tone: "", explain: "" },
+          { label: "Abandoned", value: String(reviewCounts.abandoned), tone: "", explain: "" },
+          { label: "Expired", value: String(reviewCounts.expired), tone: "", explain: "" },
+        ]
+      : mode === "idea" && idea
       ? [
           { label: "Status", value: IDEA_STATUS_LABELS[idea.status], tone: "", explain: "" },
           {
@@ -359,7 +416,7 @@
   <article class="panel header-panel">
     <div class="header-top">
       <span class="title">Ideas</span>
-      <span class="subtitle">{mode === "idea" && idea ? idea.title : boardSubtitle()}</span>
+      <span class="subtitle">{mode === "idea" && idea ? idea.title : mode === "review" ? "Closed ideas · your own record" : boardSubtitle()}</span>
     </div>
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Ideas modes">
@@ -435,6 +492,7 @@
               <th>Legs</th>
               <th>Status</th>
               <th>Criteria</th>
+              <th class="num" title={`${TRACKING_LABEL}: net return since activation, after costs`}>Since activation <span class="hyp">(hyp.)</span></th>
               <th class="num">Review</th>
               <th class="num">Supports</th>
               <th class="num">Challenges</th>
@@ -444,6 +502,7 @@
           </thead>
           <tbody>
             {#each boardRows as row (row.idea_id)}
+              {@const trackingCell = boardTrackingCell(row)}
               <tr
                 class="board-row"
                 tabindex="0"
@@ -470,6 +529,10 @@
                     None
                   {/if}
                 </td>
+                <td class="num tracking-cell" class:absent={trackingCell.absent} title={trackingCell.title}>
+                  <span class={trackingCell.tone}>{trackingCell.text}</span>
+                  {#if trackingCell.meta}<span class="meta">{trackingCell.meta}</span>{/if}
+                </td>
                 <td class="num" class:absent={!row.review_date} class:warning={(daysToReview(row.review_date) ?? 1) < 0}>{daysToReviewText(daysToReview(row.review_date))}</td>
                 <td class="num" class:absent={!row.evidence_counts.supports}>{row.evidence_counts.supports}</td>
                 <td class="num" class:absent={!row.evidence_counts.challenges}>{row.evidence_counts.challenges}</td>
@@ -478,7 +541,7 @@
               </tr>
             {:else}
               <tr class="empty-row">
-                <td colspan="10">
+                <td colspan="11">
                   {#if loading && !list}
                     Loading…
                   {:else if summaries.length}
@@ -501,6 +564,8 @@
         </ul>
       {/if}
     </article>
+  {:else if mode === "review"}
+    <IdeaReviewMode stats={reviewStats} loading={loading} {onOpenIdea} />
   {:else if !idea}
     <article class="panel idea-empty">
       <p>{loading ? "Loading…" : "No idea selected. Open one from the Board, or create one there."}</p>
@@ -524,7 +589,17 @@
                     on:click={() => idea && onTransition(idea.idea_id, "activate")}>Activate</button
                   >
                 {/if}
-                {#if idea.status === "draft" || idea.status === "active"}
+                {#if idea.status === "active"}
+                  <button type="button" class="btn is-small is-ghost" aria-expanded={closing} on:click={() => (closing = !closing)}>Close</button>
+                {:else if idea.status === "closed"}
+                  <button
+                    type="button"
+                    class="btn is-small is-ghost"
+                    title="Reopen as active; the review stays in the record"
+                    on:click={() => idea && onTransition(idea.idea_id, "reopen")}>Reopen</button
+                  >
+                {/if}
+                {#if idea.status === "draft" || idea.status === "active" || idea.status === "closed"}
                   <button type="button" class="btn is-small is-ghost" on:click={() => idea && onTransition(idea.idea_id, "archive")}>Archive</button>
                 {:else if idea.status === "archived"}
                   <button type="button" class="btn is-small is-ghost" on:click={() => idea && onTransition(idea.idea_id, "restore")}>Restore</button>
@@ -625,6 +700,11 @@
           </div>
         </article>
 
+        {#if closing && idea.status === "active"}
+          <IdeaCloseForm {idea} {tracking} {trackingLoading} {trackingError} onSubmit={submitClose} onCancel={() => (closing = false)} />
+        {/if}
+        <IdeaReviewSection {idea} {tracking} />
+
         {#each IDEA_EVIDENCE_STANCES as stance}
           <article class="panel is-flush evidence-panel" data-stance={stance}>
             <div class="panel-title">
@@ -710,6 +790,18 @@
           onEvaluate={() => (idea ? onEvaluateIdea(idea.idea_id) : Promise.resolve(null))}
           onPreview={onPreviewObservable}
           {onLoadEvents}
+        />
+
+        <IdeaAnalysisPanel {idea} busy={analysisBusy} error={analysisError} {onRunTest} {onRunRisk} />
+
+        <IdeaTrackingPanel
+          {idea}
+          {tracking}
+          loading={trackingLoading}
+          error={trackingError}
+          onLoad={onLoadTracking}
+          onLoadIntraday={onLoadIntraday}
+          onUpdate={onUpdateTracking}
         />
       </div>
 
@@ -844,6 +936,29 @@
 
   .criteria-cell {
     min-width: 8rem;
+  }
+
+  /* I3a: rentabilidad hipotética desde la activación, con su sesión as of debajo. */
+  .tracking-cell {
+    min-width: 7.5rem;
+    white-space: nowrap;
+  }
+
+  .tracking-cell > span:first-child {
+    display: block;
+  }
+
+  .tracking-cell .positive {
+    color: var(--positive);
+  }
+
+  .tracking-cell .negative {
+    color: var(--negative);
+  }
+
+  .hyp {
+    color: var(--text-2);
+    font-weight: 400;
   }
 
   .criteria-cell .tag + .tag {

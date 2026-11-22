@@ -36,17 +36,28 @@ from src.models.ideas import (
     IDEA_SCHEMA_VERSION,
     Idea,
     IdeaValidationError,
+    TRACKING_LABEL,
     assert_journal_append_only,
+    assert_reviews_append_only,
     migrate_idea_v1_to_v2,
+    migrate_idea_v2_to_v3,
+    migrate_idea_v3_to_v4,
+    migrate_idea_v4_to_v5,
 )
 from src.utils.time import now_utc
 
-# Version 2 (I2) added the criteria columns to each board row.
-IDEA_INDEX_SCHEMA_VERSION = 2
+# Version 2 (I2) added the criteria columns to each board row; version 3 (I3a) the
+# tracking headline ("forward return since activation"); version 4 (I3b) the review.
+IDEA_INDEX_SCHEMA_VERSION = 4
 IdeaMigration = Callable[[dict[str, Any]], dict[str, Any]]
 
 # from_version -> function returning the payload at from_version + 1.
-DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {1: migrate_idea_v1_to_v2}
+DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {
+    1: migrate_idea_v1_to_v2,
+    2: migrate_idea_v2_to_v3,
+    3: migrate_idea_v3_to_v4,
+    4: migrate_idea_v4_to_v5,
+}
 
 
 class IdeaStoreError(RuntimeError):
@@ -108,6 +119,10 @@ class IdeaSummary:
     criteria_counts: Mapping[str, int] = field(default_factory=dict)
     criteria_total: int = 0
     unacknowledged_triggers: int = 0
+    # Titular del seguimiento hipotético (I3a): último snapshot calculado, con su sesión ``as_of``.
+    tracking: Mapping[str, Any] | None = None
+    # I3b: la revisión del cierre vigente (cerrada, o archivada tras cerrar), para el modo Review.
+    review: Mapping[str, Any] | None = None
     schema_version: int = IDEA_SCHEMA_VERSION
 
     @classmethod
@@ -141,6 +156,8 @@ class IdeaSummary:
             criteria_counts=idea.criteria_counts(),
             criteria_total=len(idea.criteria),
             unacknowledged_triggers=idea.unacknowledged_triggers,
+            tracking=_tracking_headline(idea),
+            review=_review_headline(idea),
             schema_version=idea.schema_version,
         )
 
@@ -173,6 +190,8 @@ class IdeaSummary:
             "criteria_counts": {state: int(self.criteria_counts.get(state, 0)) for state in CRITERION_STATES},
             "criteria_total": self.criteria_total,
             "unacknowledged_triggers": self.unacknowledged_triggers,
+            "tracking": dict(self.tracking) if self.tracking else None,
+            "review": dict(self.review) if self.review else None,
             "schema_version": self.schema_version,
         }
 
@@ -208,6 +227,8 @@ class IdeaSummary:
             criteria_counts={state: int(criteria_counts.get(state) or 0) for state in CRITERION_STATES},
             criteria_total=int(payload.get("criteria_total") or 0),
             unacknowledged_triggers=int(payload.get("unacknowledged_triggers") or 0),
+            tracking=dict(payload["tracking"]) if isinstance(payload.get("tracking"), Mapping) else None,
+            review=dict(payload["review"]) if isinstance(payload.get("review"), Mapping) else None,
             schema_version=int(payload.get("schema_version") or IDEA_SCHEMA_VERSION),
         )
 
@@ -285,9 +306,13 @@ class IdeaStore:
         with self._lock:
             current = self.require(idea_id)
             updated = mutate(current)
+            if updated is current:
+                # La mutación no cambió nada: no se reescribe el fichero ni el índice.
+                return current
             if updated.idea_id != current.idea_id:
                 raise IdeaValidationError("An update cannot change the idea id.")
             assert_journal_append_only(current.journal, updated.journal)
+            assert_reviews_append_only(current.reviews, updated.reviews)
             self._write_item_unlocked(updated)
             return updated
 
@@ -365,7 +390,15 @@ class IdeaStore:
             )
             return None
         if version < IDEA_SCHEMA_VERSION:
-            migrated = self._migrate_unlocked(payload, version)
+            try:
+                migrated = self._migrate_unlocked(payload, version)
+            except Exception as exc:  # noqa: BLE001 - un fichero que no migra va a cuarentena, nunca impide arrancar
+                self._quarantine_unlocked(
+                    path,
+                    reason=f"migration-failed-v{version}",
+                    message=f"could not be migrated from schema version {version} ({exc.__class__.__name__}: {exc})",
+                )
+                return None
             if migrated is None:
                 self._quarantine_unlocked(
                     path,
@@ -504,6 +537,47 @@ class IdeaStore:
             os.replace(temporary, path)
         finally:
             Path(temporary).unlink(missing_ok=True)
+
+
+def _tracking_headline(idea: Idea) -> dict[str, Any] | None:
+    """Board figure: the last computed snapshot plus the segment count, or ``None``."""
+    tracking = idea.tracking
+    if tracking is None or not tracking.segments:
+        return None
+    snapshot = tracking.snapshot.to_dict() if tracking.snapshot else None
+    return {
+        "label": TRACKING_LABEL,
+        "segments": len(tracking.segments),
+        "open": tracking.open_segment is not None,
+        "started_at": tracking.segments[0].started_at.isoformat(),
+        "snapshot": snapshot,
+    }
+
+
+def _clip(text: str, limit: int = 240) -> str:
+    value = " ".join(str(text or "").split())
+    return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
+def _review_headline(idea: Idea) -> dict[str, Any] | None:
+    """Review mode row: the review of the current close, or ``None``."""
+    review = idea.current_review
+    if review is None:
+        return None
+    first_invalidation = review.first_invalidation_at
+    return {
+        "review_id": review.review_id,
+        "outcome": review.outcome,
+        "opened_at": review.opened_at.isoformat(),
+        "closed_at": review.closed_at.isoformat(),
+        "holding_days": round(review.holding_days, 4),
+        "expected": _clip(review.expected),
+        "lesson": _clip(review.lesson),
+        "invalidation_criteria": review.invalidation_criteria,
+        "first_invalidation_at": first_invalidation.isoformat() if first_invalidation else None,
+        "evidence_verdicts": review.verdict_counts(),
+        "realized_at_close": review.realized.to_dict() if review.realized else None,
+    }
 
 
 def _file_stat(path: Path) -> tuple[int, int]:

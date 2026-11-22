@@ -1,4 +1,4 @@
-"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1 and I2)."""
+"""Pydantic contracts for ``/ideas`` (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,11 @@ from src.application.idea_service import (
     IdeaCreateRequest,
     IdeaCriterionRequest,
     IdeaEvidenceCreateRequest,
+    IdeaCloseRequest,
     IdeaListResult,
     IdeaPatchRequest,
+    IdeaReviewStatistics,
+    IdeaTrackingSettingsRequest,
 )
 from src.models.handoff import HandoffEntity
 from src.models.ideas import (
@@ -32,6 +35,10 @@ from src.models.ideas import (
     OBSERVABLE_PARAMS_MAX,
     ORIGIN_LABEL_MAX,
     ORIGIN_REF_MAX,
+    REVIEW_TEXT_MAX,
+    TRACKING_BENCHMARK_MAX,
+    TRACKING_COST_BP_MAX,
+    TRACKING_LABEL,
     CriterionEvaluation,
     Idea,
     IdeaCriterion,
@@ -40,10 +47,15 @@ from src.models.ideas import (
     IdeaJournalEntry,
     IdeaLeg,
     IdeaOrigin,
+    IdeaReview,
+    IdeaRiskSnapshot,
+    IdeaTestSnapshot,
+    IdeaTracking,
     ObservableRef,
     envelope_from_dict,
     freshness_from_dict,
     provenance_from_dict,
+    snapshot_staleness,
     thaw_captured_values,
 )
 from src.services.idea_store import IdeaStorageWarning, IdeaSummary
@@ -431,6 +443,13 @@ class IdeaModel(BaseModel):
     journal: list[IdeaJournalEntryModel]
     evidence_counts: dict[str, int]
     criteria_counts: dict[str, int] = Field(default_factory=dict)
+    # I3a: segmentos, supuestos de coste y último titular; la serie se pide a /tracking.
+    tracking: "IdeaTrackingRecordModel | None" = None
+    # I3b: revisiones escritas al cerrar (la última es la del cierre vigente si la idea está cerrada).
+    reviews: list["IdeaReviewModel"] = Field(default_factory=list)
+    # I3c: snapshots de test y riesgo (del más antiguo al más reciente), con su motivo de obsolescencia.
+    tests: list["IdeaTestSnapshotModel"] = Field(default_factory=list)
+    risks: list["IdeaRiskSnapshotModel"] = Field(default_factory=list)
     # ``origin`` above is the idea's domain origin, so the record's own
     # provenance travels as one nested object instead of top-level fields.
     provenance: dict[str, Any]
@@ -457,6 +476,10 @@ class IdeaModel(BaseModel):
             journal=[IdeaJournalEntryModel.from_domain(entry) for entry in idea.journal],
             evidence_counts=idea.evidence_counts(),
             criteria_counts=idea.criteria_counts(),
+            tracking=IdeaTrackingRecordModel.from_domain(idea.tracking) if idea.tracking else None,
+            reviews=[IdeaReviewModel.from_domain(item) for item in idea.reviews],
+            tests=[IdeaTestSnapshotModel.from_domain(item, idea, retrieved_at) for item in idea.tests],
+            risks=[IdeaRiskSnapshotModel.from_domain(item, idea, retrieved_at) for item in idea.risks],
             provenance={
                 "source_provider": "gamma_ideas",
                 "retrieved_at": retrieved_at.isoformat(),
@@ -493,6 +516,8 @@ class IdeaSummaryModel(BaseModel):
     criteria_counts: dict[str, int] = Field(default_factory=dict)
     criteria_total: int = 0
     unacknowledged_triggers: int = 0
+    tracking: "IdeaTrackingHeadlineModel | None" = None
+    review: "IdeaReviewHeadlineModel | None" = None
 
     @classmethod
     def from_domain(cls, summary: IdeaSummary) -> "IdeaSummaryModel":
@@ -664,3 +689,497 @@ class IdeaExplanationsResponseModel(BaseModel):
     retrieved_at: datetime
     source_provider: str = "gamma_ideas"
     origin: str = "idea_explanations.registry"
+
+
+# ---------------------------------------------------------------------------
+# Forward tracking (I3a)
+# ---------------------------------------------------------------------------
+
+
+class IdeaTrackedLegModel(BaseModel):
+    entity: IdeaEntityModel
+    stated_weight: float | None = None
+    weight: float | None = None
+    weight_source: str
+    asset_class: str
+    market: str
+    key: str
+
+
+class IdeaTrackingSegmentRecordModel(BaseModel):
+    segment_id: str
+    number: int
+    started_at: datetime
+    start_reason: str
+    start_note: str = ""
+    stance: str
+    legs: list[IdeaTrackedLegModel]
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    end_note: str = ""
+    untracked_reason: str | None = None
+
+
+class IdeaTrackingSnapshotModel(BaseModel):
+    status: str
+    computed_at: datetime
+    as_of: date | None = None
+    net_return: float | None = None
+    gross_return: float | None = None
+    benchmark_return: float | None = None
+    benchmark: str | None = None
+    sessions: int = 0
+    gaps: int = 0
+    partial: bool = False
+    final: bool = False
+    stale_since: date | None = None
+
+
+class IdeaCostModelRecordModel(BaseModel):
+    per_side_bp: dict[str, float]
+    leg_classes: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+
+
+class IdeaTrackingRecordModel(BaseModel):
+    label: str = TRACKING_LABEL
+    benchmark: str
+    cost_model: IdeaCostModelRecordModel
+    segments: list[IdeaTrackingSegmentRecordModel] = Field(default_factory=list)
+    snapshot: IdeaTrackingSnapshotModel | None = None
+
+    @classmethod
+    def from_domain(cls, tracking: IdeaTracking) -> "IdeaTrackingRecordModel":
+        payload = tracking.to_dict()
+        for segment, record in zip(payload["segments"], tracking.segments):
+            for leg_payload, leg in zip(segment["legs"], record.legs):
+                leg_payload["key"] = leg.key
+        return cls(**payload)
+
+
+class IdeaTrackingHeadlineModel(BaseModel):
+    label: str = TRACKING_LABEL
+    segments: int
+    open: bool
+    started_at: datetime
+    snapshot: IdeaTrackingSnapshotModel | None = None
+
+
+class IdeaTrackingSettingsRequestModel(BaseModel):
+    per_side_bp: dict[str, float] | None = None
+    leg_classes: dict[str, str | None] | None = None
+    benchmark: str | None = Field(default=None, min_length=1, max_length=TRACKING_BENCHMARK_MAX)
+
+    def to_domain(self) -> IdeaTrackingSettingsRequest:
+        if self.per_side_bp is not None:
+            for name, value in self.per_side_bp.items():
+                if not (0 <= float(value) <= TRACKING_COST_BP_MAX):
+                    raise ValueError(f"The {name} cost must be between 0 and {TRACKING_COST_BP_MAX:g} bp per side.")
+        return IdeaTrackingSettingsRequest(
+            per_side_bp=None if self.per_side_bp is None else dict(self.per_side_bp),
+            leg_classes=None if self.leg_classes is None else dict(self.leg_classes),
+            benchmark=self.benchmark,
+        )
+
+
+class TrackingSummaryModel(BaseModel):
+    net_return: float | None = None
+    gross_return: float | None = None
+    cost_drag: float | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    max_drawdown: float | None = None
+    sessions: int = 0
+    gaps: int = 0
+    partial: bool = False
+    final: bool = False
+    stale_since: date | None = None
+    first_session: date | None = None
+    as_of: date | None = None
+
+
+class TrackingBenchmarkModel(BaseModel):
+    symbol: str
+    available: bool
+    reason: str | None = None
+
+
+class TrackingCostClassModel(BaseModel):
+    asset_class: str
+    label: str
+    basis: str
+    per_side_bp: float | None = None
+    default_bp: float | None = None
+    editable: bool
+    source: Literal["stated", "quote", "none"]
+    edited: bool = False
+
+
+class TrackingCostModelViewModel(BaseModel):
+    classes: list[TrackingCostClassModel]
+    leg_classes: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+    edited: bool = False
+
+
+class TrackingSegmentLegModel(BaseModel):
+    key: str
+    label: str
+    entity_type: str
+    normalized_id: str
+    stated_weight: float | None = None
+    weight: float | None = None
+    weight_source: str
+    asset_class: str
+    detected_class: str
+    cost_bp: float | None = None
+    market: str
+    entry_price: float | None = None
+    last_price: float | None = None
+
+
+class TrackingSegmentModel(BaseModel):
+    segment_id: str
+    number: int
+    status: Literal["untracked", "unavailable", "waiting", "never_entered", "tracking", "exiting", "closed"]
+    reason: str | None = None
+    started_at: datetime
+    start_reason: str
+    start_note: str = ""
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    stance: str
+    entry_session: date | None = None
+    exit_session: date | None = None
+    last_session: date | None = None
+    sessions: int = 0
+    gaps: int = 0
+    gross_return: float | None = None
+    net_return: float | None = None
+    entry_cost: float | None = None
+    exit_cost: float | None = None
+    cost: float | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    max_drawdown: float | None = None
+    legs: list[TrackingSegmentLegModel] = Field(default_factory=list)
+
+
+class TrackingPointModel(BaseModel):
+    session: date
+    segment: int
+    net_return: float | None = None
+    gross_return: float | None = None
+    benchmark_return: float | None = None
+    drawdown: float | None = None
+    gap: bool = False
+    missing: list[str] = Field(default_factory=list)
+
+
+class TrackingProvenanceModel(BaseModel):
+    key: str
+    label: str
+    role: Literal["leg", "benchmark"]
+    source_provider: str | None = None
+    retrieved_at: datetime | None = None
+    origin: str | None = None
+    transformation_note: str | None = None
+    available: bool = True
+
+
+IntradayQualityLiteral = Literal["live", "delayed", "frozen", "delayed_frozen"]
+
+
+class IntradayPointModel(BaseModel):
+    at: datetime
+    segment: int
+    net_return: float | None = None
+    gross_return: float | None = None
+    today_return: float | None = None
+    drawdown: float | None = None
+    quality: IntradayQualityLiteral | None = None
+    gap: bool = False
+    state: Literal["priced", "gap", "before_entry"] = "priced"
+    missing: list[str] = Field(default_factory=list)
+    carried: list[str] = Field(default_factory=list)
+
+
+class IntradayGapModel(BaseModel):
+    start: datetime
+    end: datetime | None = None
+    kind: Literal["disconnected", "skipped", "not_running", "not_recorded"]
+    reason: str
+
+
+class IntradayLegModel(BaseModel):
+    key: str
+    label: str
+    price: float | None = None
+    field: str | None = None
+    md_type: int | None = None
+    quality: IntradayQualityLiteral | None = None
+    carried: bool = False
+    reference_close: float | None = None
+    move: float | None = None
+    missing_reason: str | None = None
+
+
+class IntradaySummaryModel(BaseModel):
+    as_of: datetime | None = None
+    today_return: float | None = None
+    net_return: float | None = None
+    intraday_drawdown: float | None = None
+    quality: IntradayQualityLiteral | None = None
+    qualities: list[IntradayQualityLiteral] = Field(default_factory=list)
+    marks: int = 0
+    gaps: int = 0
+    segment: int | None = None
+
+
+class IntradayReferenceModel(BaseModel):
+    session: date
+    net_return: float | None = None
+
+
+class IdeaIntradayModel(BaseModel):
+    """I3d: the intraday layer (IBKR marks while TWS is connected); never part of the daily series."""
+
+    label: str = TRACKING_LABEL
+    available: bool = False
+    status: Literal["recording", "idle", "no_marks", "demo", "not_tracked"]
+    status_reason: str | None = None
+    tws_connected: bool = False
+    session: date | None = None
+    sessions: list[date] = Field(default_factory=list)
+    reference: IntradayReferenceModel | None = None
+    summary: IntradaySummaryModel = Field(default_factory=IntradaySummaryModel)
+    points: list[IntradayPointModel] = Field(default_factory=list)
+    gaps: list[IntradayGapModel] = Field(default_factory=list)
+    legs: list[IntradayLegModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    methodology: str = ""
+    cadence_seconds: int = 300
+    closed_cadence_seconds: int = 3600
+    source_provider: str = "IBKR/TWS market-data snapshots"
+    origin: str = "ibkr.reqMktData(snapshot)"
+    transformation_note: str | None = None
+
+
+class IdeaTrackingResponseModel(BaseModel):
+    idea_id: str
+    label: str = TRACKING_LABEL
+    status: Literal["not_started", "waiting", "tracking", "stopped", "unavailable"]
+    status_reason: str | None = None
+    methodology: str
+    summary: TrackingSummaryModel
+    benchmark: TrackingBenchmarkModel
+    cost_model: TrackingCostModelViewModel
+    segments: list[TrackingSegmentModel] = Field(default_factory=list)
+    points: list[TrackingPointModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    provenance: list[TrackingProvenanceModel] = Field(default_factory=list)
+    computed_at: datetime
+    source_provider: str = "gamma_ideas"
+    origin: str = "idea_tracking.compute"
+    transformation_note: str | None = None
+    # I3d: capa intradía; no forma parte de la serie diaria ni de sus estadísticas.
+    intraday: IdeaIntradayModel | None = None
+
+
+# ---------------------------------------------------------------------------
+# Close and review (I3b)
+# ---------------------------------------------------------------------------
+
+ReviewOutcomeLiteral = Literal["confirmed", "invalidated", "abandoned", "expired"]
+EvidenceVerdictLiteral = Literal["held", "failed", "unclear"]
+
+
+class IdeaCloseRequestModel(BaseModel):
+    outcome: ReviewOutcomeLiteral
+    lesson: str = Field(min_length=1, max_length=REVIEW_TEXT_MAX)
+    expected: str | None = Field(default=None, max_length=REVIEW_TEXT_MAX)
+    realized_note: str = Field(default="", max_length=REVIEW_TEXT_MAX)
+    evidence_verdicts: dict[str, EvidenceVerdictLiteral] = Field(default_factory=dict)
+
+    def to_domain(self) -> IdeaCloseRequest:
+        return IdeaCloseRequest(
+            outcome=self.outcome,
+            lesson=self.lesson,
+            expected=self.expected,
+            realized_note=self.realized_note,
+            evidence_verdicts=dict(self.evidence_verdicts),
+        )
+
+
+class IdeaEvidenceVerdictModel(BaseModel):
+    evidence_id: str
+    verdict: str
+    title: str
+    stance: str
+
+
+class IdeaCriterionAtCloseModel(BaseModel):
+    criterion_id: str
+    kind: str
+    label: str
+    state: str
+    triggered_at: datetime | None = None
+    first_met_at: datetime | None = None
+
+
+class IdeaReviewModel(BaseModel):
+    review_id: str
+    outcome: str
+    lesson: str
+    expected: str = ""
+    realized_note: str = ""
+    opened_at: datetime
+    closed_at: datetime
+    holding_days: float
+    evidence_verdicts: list[IdeaEvidenceVerdictModel] = Field(default_factory=list)
+    criteria_at_close: list[IdeaCriterionAtCloseModel] = Field(default_factory=list)
+    realized: IdeaTrackingSnapshotModel | None = None
+    first_invalidation_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, review: IdeaReview) -> "IdeaReviewModel":
+        payload = review.to_dict()
+        payload.pop("schema_version", None)
+        payload.pop("idea_id", None)
+        return cls(**payload, holding_days=review.holding_days, first_invalidation_at=review.first_invalidation_at)
+
+
+class IdeaReviewHeadlineModel(BaseModel):
+    review_id: str
+    outcome: str
+    opened_at: datetime
+    closed_at: datetime
+    holding_days: float
+    expected: str = ""
+    lesson: str = ""
+    invalidation_criteria: int = 0
+    first_invalidation_at: datetime | None = None
+    evidence_verdicts: dict[str, int] = Field(default_factory=dict)
+    realized_at_close: IdeaTrackingSnapshotModel | None = None
+
+
+class IdeaReviewRowModel(BaseModel):
+    idea_id: str
+    title: str
+    stance: str
+    status: str
+    tags: list[str] = Field(default_factory=list)
+    outcome: str
+    opened_at: datetime
+    closed_at: datetime
+    holding_days: float
+    expected: str = ""
+    lesson: str = ""
+    net_return: float | None = None
+    benchmark: str | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    realized_final: bool = False
+    realized_as_of: date | None = None
+    tracked: bool = False
+    invalidation_criteria: int = 0
+    first_invalidation_at: datetime | None = None
+    evidence_verdicts: dict[str, int] = Field(default_factory=dict)
+
+
+class IdeaReviewStatsResponseModel(BaseModel):
+    rows: list[IdeaReviewRowModel] = Field(default_factory=list)
+    outcomes: dict[str, int] = Field(default_factory=dict)
+    holding_days: dict[str, Any] = Field(default_factory=dict)
+    realized: dict[str, Any] = Field(default_factory=dict)
+    invalidation: dict[str, Any] = Field(default_factory=dict)
+    label: str = TRACKING_LABEL
+    source_provider: str = "gamma_ideas"
+    retrieved_at: datetime
+    origin: str = "idea_service.review_statistics"
+    transformation_note: str | None = (
+        "Your own closed ideas only: the review of each current close, with the hypothetical tracking record. No score."
+    )
+
+    @classmethod
+    def from_domain(cls, result: IdeaReviewStatistics) -> "IdeaReviewStatsResponseModel":
+        return cls(
+            rows=[IdeaReviewRowModel(**row) for row in result.rows],
+            outcomes=result.outcomes,
+            holding_days=result.holding_days,
+            realized=result.realized,
+            invalidation=result.invalidation,
+            retrieved_at=result.retrieved_at,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test and risk snapshots (I3c)
+# ---------------------------------------------------------------------------
+
+
+class IdeaSnapshotModelBase(BaseModel):
+    snapshot_id: str
+    created_at: datetime
+    legs: list[IdeaTrackedLegModel]
+    benchmark: str
+    lookback_days: int
+    window_start: date | None = None
+    window_end: date | None = None
+    observations: int = 0
+    source: str = "idea_legs"
+    source_ids: dict[str, str] = Field(default_factory=dict)
+    provenance: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+    stale_reason: str | None = None
+
+    @staticmethod
+    def _payload(snapshot: IdeaTestSnapshot | IdeaRiskSnapshot, idea: Idea, now: datetime) -> dict[str, Any]:
+        payload = snapshot.to_dict()
+        payload.pop("schema_version", None)
+        payload.pop("idea_id", None)
+        for leg_payload, leg in zip(payload["legs"], snapshot.legs):
+            leg_payload["key"] = leg.key
+        payload["stale_reason"] = snapshot_staleness(snapshot, idea, now)
+        return payload
+
+
+class IdeaTestSnapshotModel(IdeaSnapshotModelBase):
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    leg_contributions: dict[str, float | None] = Field(default_factory=dict)
+    equity_curve: list[tuple[date, float]] = Field(default_factory=list)
+    benchmark_curve: list[tuple[date, float]] = Field(default_factory=list)
+    costs_included: bool = False
+    sample: str = "in_sample"
+
+    @classmethod
+    def from_domain(cls, snapshot: IdeaTestSnapshot, idea: Idea, now: datetime) -> "IdeaTestSnapshotModel":
+        return cls(**cls._payload(snapshot, idea, now))
+
+
+class IdeaRiskEpisodeModel(BaseModel):
+    episode_id: str
+    label: str
+    start: date
+    end: date
+    status: str
+    book_return: float | None = None
+    benchmark_return: float | None = None
+    max_drawdown: float | None = None
+    coverage: float | None = None
+
+
+class IdeaRiskSnapshotModel(IdeaSnapshotModelBase):
+    alpha: float
+    horizon_days: int = 1
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    episodes: list[IdeaRiskEpisodeModel] = Field(default_factory=list)
+    worst_episode_id: str | None = None
+
+    @classmethod
+    def from_domain(cls, snapshot: IdeaRiskSnapshot, idea: Idea, now: datetime) -> "IdeaRiskSnapshotModel":
+        return cls(**cls._payload(snapshot, idea, now))
+
+
+IdeaModel.model_rebuild()
+IdeaSummaryModel.model_rebuild()

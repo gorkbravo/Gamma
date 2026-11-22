@@ -1,4 +1,4 @@
-"""Domain model for Workstream 12 - Ideas (checkpoints I1 and I2).
+"""Domain model for Workstream 12 - Ideas (checkpoints I1, I2, I3a, I3b and I3c).
 
 An Idea joins Gamma's tabs into one research workflow: a written thesis,
 evidence pinned from any tab with its provenance frozen at capture, criteria
@@ -28,7 +28,10 @@ from src.utils.time import now_utc
 
 # Version 2 (I2) added ``criteria``; version 1 files migrate on load
 # (``migrate_idea_v1_to_v2``), so an older build skips them instead of dropping criteria.
-IDEA_SCHEMA_VERSION = 2
+# Version 3 (I3a) added ``tracking`` (``migrate_idea_v2_to_v3``).
+# Version 4 (I3b) added ``reviews`` (``migrate_idea_v3_to_v4``).
+# Version 5 (I3c) added ``tests`` and ``risks`` (``migrate_idea_v4_to_v5``).
+IDEA_SCHEMA_VERSION = 5
 
 IDEA_STANCES = ("long", "short", "relative", "event", "neutral")
 # ``closed`` belongs to I3 (close requires a review); it is a valid stored state
@@ -64,6 +67,12 @@ JOURNAL_SYSTEM_KINDS = (
     "criterion_removed",
     "criterion_triggered",
     "criterion_acknowledged",
+    # I3a: apertura y cierre de segmentos de seguimiento, y cambios de supuestos (costes, benchmark).
+    "tracking_segment",
+    "tracking_settings",
+    # I3c: snapshots de test y riesgo recalculados a petición del usuario.
+    "test_refreshed",
+    "risk_refreshed",
 )
 JOURNAL_KINDS = JOURNAL_USER_KINDS + JOURNAL_SYSTEM_KINDS
 JOURNAL_AUTHORS = ("user", "system")
@@ -122,6 +131,85 @@ OBSERVABLE_PARAM_VALUE_MAX = 200
 OBSERVABLE_LABEL_MAX = 160
 CRITERION_WARNINGS_MAX = 10
 
+# Forward tracking (I3a). The record is a hypothetical book: nothing here is an order.
+TRACKING_LABEL = "Hypothetical, not executed"
+# Leg types this slice can price from provider closes (research market data and CoinGecko).
+TRACKED_ENTITY_TYPES = ("equity", "etf", "crypto")
+TRACKING_ASSET_CLASSES = (
+    "us_equity_liquid",
+    "equity_other",
+    "futures",
+    "options",
+    "crypto_spot",
+    "prediction_contract",
+    "non_tradable",
+)
+# Classes whose cost is a stated number of basis points per side (editable). Options and
+# prediction contracts take half the quoted spread from a live quote; non-tradable has none.
+TRACKING_BP_CLASSES = ("us_equity_liquid", "equity_other", "futures", "crypto_spot")
+# Per-side defaults (decision 5). Assumptions checked against official fee schedules on
+# 2026-11-21; see docs/idea_workspace_spec.md (Default cost model). The spec's starting
+# values were 10 bp for other equities and 25 bp for crypto: the official schedules put
+# IBKR's European commission alone at 5 bp (minimum EUR 3) and entry-tier crypto taker
+# fees at 50-90 bp (Coinbase Advanced, Kraken Pro), so both were raised.
+DEFAULT_TRACKING_COST_BP: dict[str, float] = {
+    "us_equity_liquid": 5.0,
+    "equity_other": 15.0,
+    "futures": 3.0,
+    "crypto_spot": 50.0,
+}
+TRACKING_COST_BP_MAX = 500.0
+TRACKING_START_REASONS = ("activated", "legs_edited", "legs_added", "restored", "reopened", "migrated")
+TRACKING_END_REASONS = ("legs_edited", "legs_removed", "archived", "closed")
+TRACKING_STATUSES = ("not_started", "waiting", "tracking", "stopped", "unavailable")
+TRACKING_WEIGHT_SOURCES = ("stated", "stance")
+TRACKING_SEGMENTS_MAX = 200
+TRACKING_NOTE_MAX = 500
+TRACKING_BENCHMARK_MAX = 24
+DEFAULT_TRACKING_BENCHMARK = "SPY"
+
+# Close and review (I3b). Closing requires a review; reviews only grow.
+REVIEW_OUTCOMES = ("confirmed", "invalidated", "abandoned", "expired")
+EVIDENCE_VERDICTS = ("held", "failed", "unclear")
+REVIEW_TEXT_MAX = 4_000
+REVIEW_LESSON_MIN = 3
+IDEA_REVIEWS_MAX = 50
+
+# Test and risk snapshots (I3c): recomputed only when the user asks; kept with their date.
+IDEA_SNAPSHOTS_MAX = 20
+SNAPSHOT_STALE_DAYS = 7
+SNAPSHOT_SERIES_MAX_POINTS = 260
+SNAPSHOT_WARNINGS_MAX = 12
+SNAPSHOT_EPISODES_MAX = 16
+
+# Exchange suffixes (Yahoo style) with the local closing time Gamma uses for each market.
+# Times are at or before the official close: a session whose close might precede the
+# activation is skipped rather than used, so a price known before activation never enters.
+# A suffix not listed here falls back to the conservative ``unknown`` market (see
+# ``application/idea_tracking.py``); one letter after a dot is a US share class (BRK.B).
+TRACKING_EXCHANGES: dict[str, tuple[str, str, int, int]] = {
+    # suffijo: (mercado, zona horaria, hora, minuto) del cierre local
+    "L": ("lse", "Europe/London", 16, 30),
+    "IL": ("lse", "Europe/London", 16, 30),
+    "DE": ("xetra", "Europe/Berlin", 17, 30),
+    "PA": ("euronext_paris", "Europe/Paris", 17, 30),
+    "AS": ("euronext_amsterdam", "Europe/Amsterdam", 17, 30),
+    "BR": ("euronext_brussels", "Europe/Brussels", 17, 30),
+    "LS": ("euronext_lisbon", "Europe/Lisbon", 16, 30),
+    "MI": ("borsa_italiana", "Europe/Rome", 17, 30),
+    "MC": ("bme", "Europe/Madrid", 17, 30),
+    "SW": ("six", "Europe/Zurich", 17, 20),
+    "ST": ("nasdaq_stockholm", "Europe/Stockholm", 17, 25),
+    "CO": ("nasdaq_copenhagen", "Europe/Copenhagen", 16, 55),
+    "HE": ("nasdaq_helsinki", "Europe/Helsinki", 18, 25),
+    "OL": ("oslo", "Europe/Oslo", 16, 20),
+    "TO": ("tsx", "America/Toronto", 16, 0),
+    "V": ("tsxv", "America/Toronto", 16, 0),
+    "T": ("tse", "Asia/Tokyo", 15, 25),
+    "HK": ("hkex", "Asia/Hong_Kong", 16, 0),
+    "AX": ("asx", "Australia/Sydney", 16, 0),
+}
+
 
 class IdeaValidationError(ValueError):
     """Raised when an idea record breaks a domain rule; routes answer 422."""
@@ -129,6 +217,10 @@ class IdeaValidationError(ValueError):
 
 class IdeaLifecycleError(IdeaValidationError):
     """Raised for a lifecycle transition the current status does not allow."""
+
+
+class IdeaSourceUnavailableError(IdeaValidationError):
+    """A read-only source (Strategy Lab, Risk, a price provider) failed; routes answer 502."""
 
 
 # ---------------------------------------------------------------------------
@@ -810,6 +902,1060 @@ class IdeaCriterion:
         )
 
 
+# ---------------------------------------------------------------------------
+# Forward tracking (I3a)
+# ---------------------------------------------------------------------------
+
+
+def tracking_leg_key(entity: HandoffEntity) -> str:
+    """Stable identity of a leg for the cost model: type and id, case-insensitive."""
+    return f"{str(entity.entity_type).strip().lower()}:{str(entity.normalized_id).strip().upper()}"
+
+
+def tracking_market(entity: HandoffEntity) -> str:
+    """The market whose calendar and closing time price this leg.
+
+    ``crypto`` trades every day; ``us`` is the default for a listing without an
+    exchange suffix (or with a one-letter share class such as BRK.B); a known
+    suffix maps to its exchange; any other suffix is ``unknown``.
+    """
+    entity_type = str(entity.entity_type).strip().lower()
+    if entity_type == "crypto":
+        return "crypto"
+    symbol = str(entity.normalized_id).strip().upper()
+    if "." not in symbol:
+        return "us"
+    suffix = symbol.rsplit(".", 1)[1]
+    if suffix in TRACKING_EXCHANGES:
+        return TRACKING_EXCHANGES[suffix][0]
+    if len(suffix) == 1 and suffix.isalpha():
+        return "us"
+    return "unknown"
+
+
+def default_tracking_asset_class(entity: HandoffEntity) -> str:
+    """Asset class for the default cost: a guess the user can override per leg."""
+    entity_type = str(entity.entity_type).strip().lower()
+    if entity_type in {"equity", "etf"}:
+        return "us_equity_liquid" if tracking_market(entity) == "us" else "equity_other"
+    if entity_type == "crypto":
+        return "crypto_spot"
+    if entity_type == "commodity":
+        return "futures"
+    if entity_type == "prediction_market":
+        return "prediction_contract"
+    return "non_tradable"
+
+
+@dataclass(frozen=True)
+class IdeaTrackedLeg:
+    """A leg as frozen when its tracking segment opened.
+
+    ``weight`` is the signed share of gross exposure (the absolute weights of a
+    segment add up to 1); ``None`` when the segment cannot be tracked.
+    ``stated_weight`` is what the user wrote; ``weight_source`` says whether the
+    weight came from it or from the stance (an equal-weight long or short book).
+    """
+
+    entity: HandoffEntity
+    stated_weight: float | None = None
+    weight: float | None = None
+    weight_source: str = "stated"
+    asset_class: str = "non_tradable"
+    market: str = "us"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.entity, HandoffEntity):
+            raise IdeaValidationError("A tracked leg needs an entity.")
+        for name in ("stated_weight", "weight"):
+            value = getattr(self, name)
+            if value is not None:
+                number = _finite_or_none(value)
+                if number is None:
+                    raise IdeaValidationError(f"tracked leg {name} must be a finite number.")
+                object.__setattr__(self, name, number)
+        if self.weight is not None and abs(self.weight) > 1.0 + 1e-9:
+            raise IdeaValidationError("A tracked leg weight is a share of gross exposure, between -1 and 1.")
+        if self.weight_source not in TRACKING_WEIGHT_SOURCES:
+            raise IdeaValidationError(f"weight_source must be one of {TRACKING_WEIGHT_SOURCES}.")
+        if self.asset_class not in TRACKING_ASSET_CLASSES:
+            raise IdeaValidationError(f"asset_class must be one of {TRACKING_ASSET_CLASSES}.")
+        market = str(self.market or "").strip().lower()
+        _require_text(market, "tracked leg market")
+        object.__setattr__(self, "market", market)
+
+    @property
+    def key(self) -> str:
+        return tracking_leg_key(self.entity)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entity": self.entity.to_dict(),
+            "stated_weight": self.stated_weight,
+            "weight": self.weight,
+            "weight_source": self.weight_source,
+            "asset_class": self.asset_class,
+            "market": self.market,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTrackedLeg":
+        entity = payload.get("entity")
+        if not isinstance(entity, Mapping):
+            raise IdeaValidationError("A tracked leg needs an entity.")
+        return cls(
+            entity=_entity_from_dict(entity),
+            stated_weight=_finite_or_none(payload.get("stated_weight")),
+            weight=_finite_or_none(payload.get("weight")),
+            weight_source=str(payload.get("weight_source") or "stated").strip().lower(),
+            asset_class=str(payload.get("asset_class") or "non_tradable").strip().lower(),
+            market=str(payload.get("market") or "us"),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaTrackingSegment:
+    """One stretch of the hypothetical book with fixed legs and weights.
+
+    A segment opens when the legs are frozen (activation, a leg edit, a restore)
+    and closes when they change again or the idea stops being active. Its book
+    enters at the first close after ``started_at`` and, once ended, exits at the
+    first close after ``ended_at``; nothing before ``started_at`` is ever used.
+    ``untracked_reason`` says why the segment has no book (a leg type this slice
+    cannot price, or weights that do not define one); the period stays visible.
+    """
+
+    segment_id: str
+    number: int
+    started_at: datetime
+    start_reason: str
+    legs: tuple[IdeaTrackedLeg, ...] = ()
+    stance: str = "neutral"
+    start_note: str = ""
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    end_note: str = ""
+    untracked_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.segment_id, "segment_id")
+        if int(self.number) < 1:
+            raise IdeaValidationError("Tracking segments are numbered from 1.")
+        object.__setattr__(self, "number", int(self.number))
+        if self.start_reason not in TRACKING_START_REASONS:
+            raise IdeaValidationError(f"start_reason must be one of {TRACKING_START_REASONS}, got {self.start_reason!r}.")
+        if self.stance not in IDEA_STANCES:
+            raise IdeaValidationError(f"segment stance must be one of {IDEA_STANCES}.")
+        legs = tuple(self.legs)
+        if not legs:
+            raise IdeaValidationError("A tracking segment needs at least one leg.")
+        if len(legs) > IDEA_LEGS_MAX:
+            raise IdeaValidationError(f"A tracking segment holds at most {IDEA_LEGS_MAX} legs.")
+        if any(not isinstance(leg, IdeaTrackedLeg) for leg in legs):
+            raise IdeaValidationError("Segment legs must be IdeaTrackedLeg records.")
+        object.__setattr__(self, "legs", legs)
+        if (self.ended_at is None) != (self.end_reason is None):
+            raise IdeaValidationError("An ended segment needs both ended_at and end_reason.")
+        if self.end_reason is not None and self.end_reason not in TRACKING_END_REASONS:
+            raise IdeaValidationError(f"end_reason must be one of {TRACKING_END_REASONS}, got {self.end_reason!r}.")
+        if self.ended_at is not None and self.ended_at < self.started_at:
+            raise IdeaValidationError("A segment cannot end before it starts.")
+        for name in ("start_note", "end_note"):
+            text = " ".join(str(getattr(self, name) or "").split())
+            object.__setattr__(self, name, text[:TRACKING_NOTE_MAX])
+        reason = _optional_text(self.untracked_reason)
+        object.__setattr__(self, "untracked_reason", reason[:TRACKING_NOTE_MAX] if reason else None)
+        if reason is None and any(leg.weight is None for leg in legs):
+            raise IdeaValidationError("A tracked segment needs a weight on every leg.")
+
+    @property
+    def is_open(self) -> bool:
+        return self.ended_at is None
+
+    def closed(self, at: datetime, reason: str, note: str = "") -> "IdeaTrackingSegment":
+        return replace(self, ended_at=at, end_reason=reason, end_note=note)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "segment_id": self.segment_id,
+            "number": self.number,
+            "started_at": self.started_at.isoformat(),
+            "start_reason": self.start_reason,
+            "start_note": self.start_note,
+            "stance": self.stance,
+            "legs": [leg.to_dict() for leg in self.legs],
+            "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+            "end_reason": self.end_reason,
+            "end_note": self.end_note,
+            "untracked_reason": self.untracked_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTrackingSegment":
+        started_at = _parse_instant(payload.get("started_at"))
+        if started_at is None:
+            raise IdeaValidationError("A tracking segment needs started_at.")
+        return cls(
+            segment_id=str(payload.get("segment_id") or ""),
+            number=int(payload.get("number") or 0),
+            started_at=started_at,
+            start_reason=str(payload.get("start_reason") or "").strip().lower(),
+            start_note=str(payload.get("start_note") or ""),
+            stance=str(payload.get("stance") or "neutral").strip().lower(),
+            legs=tuple(IdeaTrackedLeg.from_dict(item) for item in _list(payload.get("legs"), "segment.legs")),
+            ended_at=_parse_instant(payload.get("ended_at")),
+            end_reason=_optional_text(payload.get("end_reason")),
+            end_note=str(payload.get("end_note") or ""),
+            untracked_reason=_optional_text(payload.get("untracked_reason")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaCostModel:
+    """Per-side cost assumptions by asset class, plus per-leg class overrides.
+
+    The gross record never depends on it; the net record is the gross record
+    minus these costs, so changing an assumption is visible and journaled but
+    cannot rewrite what the prices did.
+    """
+
+    per_side_bp: Mapping[str, float] = field(default_factory=lambda: MappingProxyType(dict(DEFAULT_TRACKING_COST_BP)))
+    leg_classes: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        raw = dict(self.per_side_bp or {})
+        unknown = sorted(set(raw) - set(TRACKING_BP_CLASSES))
+        if unknown:
+            raise IdeaValidationError(f"Costs take basis points for {TRACKING_BP_CLASSES}; not {', '.join(unknown)}.")
+        values: dict[str, float] = {}
+        for asset_class in TRACKING_BP_CLASSES:
+            number = _finite_or_none(raw.get(asset_class, DEFAULT_TRACKING_COST_BP[asset_class]))
+            if number is None or number < 0 or number > TRACKING_COST_BP_MAX:
+                raise IdeaValidationError(
+                    f"The {asset_class} cost must be between 0 and {TRACKING_COST_BP_MAX:g} bp per side."
+                )
+            values[asset_class] = number
+        object.__setattr__(self, "per_side_bp", MappingProxyType(values))
+        overrides: dict[str, str] = {}
+        raw_overrides = dict(self.leg_classes or {})
+        if len(raw_overrides) > IDEA_LEGS_MAX * 4:
+            raise IdeaValidationError("Too many per-leg cost classes.")
+        for key, value in raw_overrides.items():
+            key_text = str(key or "").strip()
+            _require_text(key_text, "leg class key")
+            _require_max(key_text, OBSERVABLE_PARAM_VALUE_MAX, "leg class key")
+            asset_class = str(value or "").strip().lower()
+            if asset_class not in TRACKING_ASSET_CLASSES:
+                raise IdeaValidationError(f"A leg class must be one of {TRACKING_ASSET_CLASSES}, got {value!r}.")
+            overrides[key_text] = asset_class
+        object.__setattr__(self, "leg_classes", MappingProxyType(dict(sorted(overrides.items()))))
+
+    def class_for(self, leg: IdeaTrackedLeg) -> str:
+        return self.leg_classes.get(leg.key, leg.asset_class)
+
+    def bp_for(self, asset_class: str) -> float | None:
+        """Per-side basis points; ``None`` where the cost comes from a live quote."""
+        if asset_class in self.per_side_bp:
+            return float(self.per_side_bp[asset_class])
+        if asset_class == "non_tradable":
+            return 0.0
+        return None
+
+    @property
+    def edited(self) -> bool:
+        return dict(self.per_side_bp) != DEFAULT_TRACKING_COST_BP or bool(self.leg_classes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "per_side_bp": dict(self.per_side_bp),
+            "leg_classes": dict(self.leg_classes),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | None) -> "IdeaCostModel":
+        payload = payload or {}
+        per_side = payload.get("per_side_bp")
+        leg_classes = payload.get("leg_classes")
+        return cls(
+            per_side_bp=dict(per_side) if isinstance(per_side, Mapping) else dict(DEFAULT_TRACKING_COST_BP),
+            leg_classes=dict(leg_classes) if isinstance(leg_classes, Mapping) else {},
+            updated_at=_parse_instant(payload.get("updated_at")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaTrackingSnapshot:
+    """The last computed headline of the canonical series, kept for the Board.
+
+    It is derived data, refreshed whenever the series is rebuilt; the Board
+    shows it with its ``as_of`` session so a stale figure is never mistaken for
+    today's.
+    """
+
+    status: str
+    computed_at: datetime
+    as_of: date | None = None
+    net_return: float | None = None
+    gross_return: float | None = None
+    benchmark_return: float | None = None
+    benchmark: str | None = None
+    sessions: int = 0
+    gaps: int = 0
+    partial: bool = False
+    # I3b: no hay segmento abierto ni salida pendiente; la cifra ya no cambiará.
+    final: bool = False
+    # Revisión del stack: último cierre del proveedor cuando dejó de llegar (registro detenido, no rellenado).
+    stale_since: date | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in TRACKING_STATUSES:
+            raise IdeaValidationError(f"tracking status must be one of {TRACKING_STATUSES}, got {self.status!r}.")
+        for name in ("net_return", "gross_return", "benchmark_return"):
+            value = getattr(self, name)
+            if value is not None:
+                number = _finite_or_none(value)
+                if number is None:
+                    raise IdeaValidationError(f"snapshot {name} must be a finite number.")
+                object.__setattr__(self, name, number)
+        object.__setattr__(self, "sessions", max(0, int(self.sessions)))
+        object.__setattr__(self, "gaps", max(0, int(self.gaps)))
+
+    def same_figures(self, other: "IdeaTrackingSnapshot | None") -> bool:
+        """Equal apart from ``computed_at``: no need to rewrite the idea file."""
+        if other is None:
+            return False
+        mine = self.to_dict()
+        theirs = other.to_dict()
+        mine.pop("computed_at")
+        theirs.pop("computed_at")
+        return mine == theirs
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "computed_at": self.computed_at.isoformat(),
+            "as_of": self.as_of.isoformat() if self.as_of else None,
+            "net_return": self.net_return,
+            "gross_return": self.gross_return,
+            "benchmark_return": self.benchmark_return,
+            "benchmark": self.benchmark,
+            "sessions": self.sessions,
+            "gaps": self.gaps,
+            "partial": self.partial,
+            "final": self.final,
+            "stale_since": self.stale_since.isoformat() if self.stale_since else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTrackingSnapshot":
+        return cls(
+            status=str(payload.get("status") or "not_started").strip().lower(),
+            computed_at=_parse_instant(payload.get("computed_at")) or now_utc(),
+            as_of=_parse_date(payload.get("as_of")),
+            net_return=_finite_or_none(payload.get("net_return")),
+            gross_return=_finite_or_none(payload.get("gross_return")),
+            benchmark_return=_finite_or_none(payload.get("benchmark_return")),
+            benchmark=_optional_text(payload.get("benchmark")),
+            sessions=int(payload.get("sessions") or 0),
+            gaps=int(payload.get("gaps") or 0),
+            partial=payload.get("partial") is True,
+            final=payload.get("final") is True,
+            stale_since=_parse_date(payload.get("stale_since")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaTracking:
+    """The hypothetical forward record of an idea with legs (I3a).
+
+    ``segments`` only grow: a closed segment is never edited or removed, and at
+    most the last one is open. The canonical daily series is not stored; it is
+    rebuilt from provider closes (``application/idea_tracking.py``), so it has
+    no holes when Gamma was closed. ``snapshot`` keeps the last headline for the
+    Board.
+    """
+
+    benchmark: str = DEFAULT_TRACKING_BENCHMARK
+    cost_model: IdeaCostModel = field(default_factory=IdeaCostModel)
+    segments: tuple[IdeaTrackingSegment, ...] = ()
+    snapshot: IdeaTrackingSnapshot | None = None
+
+    def __post_init__(self) -> None:
+        benchmark = str(self.benchmark or "").strip().upper()
+        _require_text(benchmark, "benchmark")
+        _require_max(benchmark, TRACKING_BENCHMARK_MAX, "benchmark")
+        if any(char.isspace() for char in benchmark):
+            raise IdeaValidationError("Use a ticker such as SPY for the benchmark.")
+        object.__setattr__(self, "benchmark", benchmark)
+        if not isinstance(self.cost_model, IdeaCostModel):
+            raise IdeaValidationError("tracking cost_model must be an IdeaCostModel.")
+        segments = tuple(self.segments)
+        if len(segments) > TRACKING_SEGMENTS_MAX:
+            raise IdeaValidationError(f"A tracking record holds at most {TRACKING_SEGMENTS_MAX} segments.")
+        for index, segment in enumerate(segments):
+            if not isinstance(segment, IdeaTrackingSegment):
+                raise IdeaValidationError("Tracking segments must be IdeaTrackingSegment records.")
+            if segment.number != index + 1:
+                raise IdeaValidationError("Tracking segments are numbered 1, 2, 3… in order.")
+            if segment.is_open and index != len(segments) - 1:
+                raise IdeaValidationError("Only the last tracking segment can be open.")
+            if index and segment.started_at < (segments[index - 1].ended_at or segments[index - 1].started_at):
+                raise IdeaValidationError("A tracking segment cannot start before the previous one ended.")
+        if len({segment.segment_id for segment in segments}) != len(segments):
+            raise IdeaValidationError("Tracking segment ids must be unique.")
+        object.__setattr__(self, "segments", segments)
+        if self.snapshot is not None and not isinstance(self.snapshot, IdeaTrackingSnapshot):
+            raise IdeaValidationError("tracking snapshot must be an IdeaTrackingSnapshot.")
+
+    @property
+    def open_segment(self) -> IdeaTrackingSegment | None:
+        if self.segments and self.segments[-1].is_open:
+            return self.segments[-1]
+        return None
+
+    def with_open_segment(
+        self, *, legs: Sequence[IdeaLeg], stance: str, at: datetime, reason: str, note: str = ""
+    ) -> "IdeaTracking":
+        """Append a new open segment with ``legs`` frozen at ``at``. The last one must be closed."""
+        if self.open_segment is not None:
+            raise IdeaValidationError("Close the open tracking segment before opening another.")
+        frozen, untracked = freeze_tracking_legs(legs, stance)
+        number = len(self.segments) + 1
+        segment = IdeaTrackingSegment(
+            segment_id=f"seg-{number}",
+            number=number,
+            started_at=at,
+            start_reason=reason,
+            start_note=note,
+            stance=stance,
+            legs=frozen,
+            untracked_reason=untracked,
+        )
+        return replace(self, segments=(*self.segments, segment))
+
+    def with_open_segment_closed(self, *, at: datetime, reason: str, note: str = "") -> "IdeaTracking":
+        current = self.open_segment
+        if current is None:
+            return self
+        return replace(self, segments=(*self.segments[:-1], current.closed(at, reason, note)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": TRACKING_LABEL,
+            "benchmark": self.benchmark,
+            "cost_model": self.cost_model.to_dict(),
+            "segments": [segment.to_dict() for segment in self.segments],
+            "snapshot": self.snapshot.to_dict() if self.snapshot else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTracking":
+        snapshot = payload.get("snapshot")
+        cost_model = payload.get("cost_model")
+        return cls(
+            benchmark=str(payload.get("benchmark") or DEFAULT_TRACKING_BENCHMARK),
+            cost_model=IdeaCostModel.from_dict(cost_model if isinstance(cost_model, Mapping) else None),
+            segments=tuple(IdeaTrackingSegment.from_dict(item) for item in _list(payload.get("segments"), "tracking.segments")),
+            snapshot=IdeaTrackingSnapshot.from_dict(snapshot) if isinstance(snapshot, Mapping) else None,
+        )
+
+
+def tracking_signature(tracking: IdeaTracking | None) -> tuple[Any, ...]:
+    """What a computed series depends on: segments, their ends, the benchmark and the costs.
+
+    A headline computed from one signature must not be stored on a record whose
+    signature changed meanwhile (a leg edit, an archive, a cost change).
+    """
+    if tracking is None:
+        return ()
+    return (
+        tracking.benchmark,
+        json.dumps(tracking.cost_model.to_dict(), sort_keys=True),
+        tuple((segment.segment_id, segment.ended_at.isoformat() if segment.ended_at else None) for segment in tracking.segments),
+    )
+
+
+def freeze_tracking_legs(legs: Sequence[IdeaLeg], stance: str) -> tuple[tuple[IdeaTrackedLeg, ...], str | None]:
+    """Freeze ``legs`` for a segment and say why the book cannot be tracked, if it cannot.
+
+    Weights become signed shares of gross exposure. Without any stated weight, a
+    ``long`` or ``short`` idea is an equal-weight book with that sign; a
+    relative, event or neutral idea needs a signed weight on every leg, because
+    only the user knows which leg is short. Mixing stated and missing weights is
+    refused rather than guessed.
+    """
+    items = tuple(legs)
+    if not items:
+        raise IdeaValidationError("A tracking segment needs at least one leg.")
+    reasons: list[str] = []
+    untracked_types = sorted(
+        {
+            str(leg.entity.entity_type).strip().lower()
+            for leg in items
+            if str(leg.entity.entity_type).strip().lower() not in TRACKED_ENTITY_TYPES
+        }
+    )
+    if untracked_types:
+        names = ", ".join(item.replace("_", " ") for item in untracked_types)
+        reasons.append(
+            f"Tracking prices equity, ETF and crypto legs from provider closes; {names} legs have no price source in this build."
+        )
+    stated = [leg.weight for leg in items]
+    weights: list[float] | None
+    source = "stated"
+    if all(value is None for value in stated):
+        if stance in {"long", "short"}:
+            sign = 1.0 if stance == "long" else -1.0
+            weights = [sign for _ in items]
+            source = "stance"
+        else:
+            weights = None
+            reasons.append("Give each leg a signed weight: a relative, event or neutral idea must say which legs are short.")
+    elif any(value is None for value in stated):
+        weights = None
+        reasons.append("Give every leg a signed weight, or none for an equal-weight long or short book.")
+    else:
+        weights = [float(value) for value in stated if value is not None]
+    gross = sum(abs(value) for value in weights) if weights is not None else 0.0
+    if weights is not None and gross <= 0:
+        weights = None
+        reasons.append("The weights add up to no exposure; give at least one leg a non-zero weight.")
+    untracked = " ".join(reasons) or None
+    frozen = tuple(
+        IdeaTrackedLeg(
+            entity=leg.entity,
+            stated_weight=leg.weight,
+            weight=None if untracked or weights is None else weights[index] / gross,
+            weight_source=source,
+            asset_class=default_tracking_asset_class(leg.entity),
+            market=tracking_market(leg.entity),
+        )
+        for index, leg in enumerate(items)
+    )
+    return frozen, untracked
+
+
+def tracking_positions(legs: Sequence[IdeaLeg], stance: str) -> tuple[Any, ...]:
+    """What a segment holds, for deciding whether an edit opens a new one.
+
+    Labels and metadata are not positions: renaming a leg keeps the segment;
+    a new instrument, a different weight share or a stance change that alters
+    a default weight opens a new one.
+    """
+    if not legs:
+        return ()
+    frozen, untracked = freeze_tracking_legs(legs, stance)
+    # Pesos (1, -1) y (2, -2) son el mismo libro: se compara la proporción, no el número escrito.
+    positions = sorted((leg.key, leg.weight is None, round(leg.weight or 0.0, 10)) for leg in frozen)
+    return (tuple(positions), untracked)
+
+
+# ---------------------------------------------------------------------------
+# Close and review (I3b)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IdeaEvidenceVerdict:
+    """Whether a pin held up, as the user judged it at close; title and stance frozen then."""
+
+    evidence_id: str
+    verdict: str
+    title: str
+    stance: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.evidence_id, "evidence_id")
+        if self.verdict not in EVIDENCE_VERDICTS:
+            raise IdeaValidationError(f"An evidence verdict must be one of {EVIDENCE_VERDICTS}, got {self.verdict!r}.")
+        if self.stance not in EVIDENCE_STANCES:
+            raise IdeaValidationError(f"An evidence stance must be one of {EVIDENCE_STANCES}.")
+        title = str(self.title or "").strip()
+        _require_text(title, "evidence title")
+        object.__setattr__(self, "title", title[:EVIDENCE_TITLE_MAX])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"evidence_id": self.evidence_id, "verdict": self.verdict, "title": self.title, "stance": self.stance}
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaEvidenceVerdict":
+        return cls(
+            evidence_id=str(payload.get("evidence_id") or ""),
+            verdict=str(payload.get("verdict") or "").strip().lower(),
+            title=str(payload.get("title") or ""),
+            stance=str(payload.get("stance") or "").strip().lower(),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaCriterionAtClose:
+    """A criterion's state when the idea was closed, kept for the review statistics."""
+
+    criterion_id: str
+    kind: str
+    label: str
+    state: str
+    triggered_at: datetime | None = None
+    first_met_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.criterion_id, "criterion_id")
+        if self.kind not in CRITERION_KINDS:
+            raise IdeaValidationError(f"Criterion kind must be one of {CRITERION_KINDS}.")
+        if self.state not in CRITERION_STATES:
+            raise IdeaValidationError(f"Criterion state must be one of {CRITERION_STATES}.")
+        label = " ".join(str(self.label or "").split())
+        _require_text(label, "criterion label")
+        object.__setattr__(self, "label", label[:CRITERION_LABEL_MAX])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "criterion_id": self.criterion_id,
+            "kind": self.kind,
+            "label": self.label,
+            "state": self.state,
+            "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
+            "first_met_at": self.first_met_at.isoformat() if self.first_met_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaCriterionAtClose":
+        return cls(
+            criterion_id=str(payload.get("criterion_id") or ""),
+            kind=str(payload.get("kind") or "").strip().lower(),
+            label=str(payload.get("label") or ""),
+            state=str(payload.get("state") or "").strip().lower(),
+            triggered_at=_parse_instant(payload.get("triggered_at")),
+            first_met_at=_parse_instant(payload.get("first_met_at")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaReview:
+    """Written at close (I3b): what was expected against what happened, and the lesson.
+
+    ``realized`` is the hypothetical tracking headline as it stood when the
+    idea was closed (its exit close may still be pending); the live record
+    stays on ``Idea.tracking``. ``opened_at`` is when this episode began (the
+    activation, or the reopen after an earlier close). Reviews only grow: a
+    reopened idea keeps the review of its earlier close.
+    """
+
+    review_id: str
+    idea_id: str
+    outcome: str
+    lesson: str
+    opened_at: datetime
+    closed_at: datetime
+    expected: str = ""
+    realized_note: str = ""
+    evidence_verdicts: tuple[IdeaEvidenceVerdict, ...] = ()
+    criteria_at_close: tuple[IdeaCriterionAtClose, ...] = ()
+    realized: IdeaTrackingSnapshot | None = None
+    schema_version: int = IDEA_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_text(self.review_id, "review_id")
+        _require_text(self.idea_id, "idea_id")
+        if self.outcome not in REVIEW_OUTCOMES:
+            raise IdeaValidationError(f"A review outcome must be one of {REVIEW_OUTCOMES}, got {self.outcome!r}.")
+        lesson = str(self.lesson or "").strip()
+        if len(lesson) < REVIEW_LESSON_MIN:
+            raise IdeaValidationError("Closing an idea needs a review: write the lesson.")
+        for name, value in (("lesson", lesson), ("expected", self.expected), ("realized_note", self.realized_note)):
+            _require_max(str(value or "").strip(), REVIEW_TEXT_MAX, f"review {name}")
+        object.__setattr__(self, "lesson", lesson)
+        object.__setattr__(self, "expected", str(self.expected or "").strip())
+        object.__setattr__(self, "realized_note", str(self.realized_note or "").strip())
+        if self.closed_at < self.opened_at:
+            raise IdeaValidationError("A review cannot close before its episode opened.")
+        verdicts = tuple(self.evidence_verdicts)
+        if any(not isinstance(item, IdeaEvidenceVerdict) for item in verdicts):
+            raise IdeaValidationError("evidence_verdicts must be IdeaEvidenceVerdict records.")
+        if len({item.evidence_id for item in verdicts}) != len(verdicts):
+            raise IdeaValidationError("Each pin takes at most one verdict.")
+        object.__setattr__(self, "evidence_verdicts", verdicts[:IDEA_EVIDENCE_MAX])
+        criteria = tuple(self.criteria_at_close)
+        if any(not isinstance(item, IdeaCriterionAtClose) for item in criteria):
+            raise IdeaValidationError("criteria_at_close must be IdeaCriterionAtClose records.")
+        object.__setattr__(self, "criteria_at_close", criteria[:IDEA_CRITERIA_MAX])
+        if self.realized is not None and not isinstance(self.realized, IdeaTrackingSnapshot):
+            raise IdeaValidationError("review realized must be a tracking snapshot.")
+        _check_schema_version(self.schema_version)
+
+    @property
+    def holding_days(self) -> float:
+        return (self.closed_at - self.opened_at).total_seconds() / 86_400
+
+    @property
+    def invalidation_criteria(self) -> int:
+        return sum(1 for item in self.criteria_at_close if item.kind == "invalidate")
+
+    @property
+    def first_invalidation_at(self) -> datetime | None:
+        """The earliest invalidation trigger before the close, if any fired."""
+        moments = [
+            item.first_met_at or item.triggered_at
+            for item in self.criteria_at_close
+            if item.kind == "invalidate" and item.triggered_at is not None and item.triggered_at <= self.closed_at
+        ]
+        return min((moment for moment in moments if moment is not None), default=None)
+
+    def verdict_counts(self) -> dict[str, int]:
+        counts = {verdict: 0 for verdict in EVIDENCE_VERDICTS}
+        for item in self.evidence_verdicts:
+            counts[item.verdict] += 1
+        return counts
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "review_id": self.review_id,
+            "idea_id": self.idea_id,
+            "outcome": self.outcome,
+            "lesson": self.lesson,
+            "expected": self.expected,
+            "realized_note": self.realized_note,
+            "opened_at": self.opened_at.isoformat(),
+            "closed_at": self.closed_at.isoformat(),
+            "evidence_verdicts": [item.to_dict() for item in self.evidence_verdicts],
+            "criteria_at_close": [item.to_dict() for item in self.criteria_at_close],
+            "realized": self.realized.to_dict() if self.realized else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaReview":
+        opened_at = _parse_instant(payload.get("opened_at"))
+        closed_at = _parse_instant(payload.get("closed_at"))
+        if opened_at is None or closed_at is None:
+            raise IdeaValidationError("A review needs opened_at and closed_at.")
+        realized = payload.get("realized")
+        return cls(
+            schema_version=_schema_version(payload.get("schema_version")),
+            review_id=str(payload.get("review_id") or ""),
+            idea_id=str(payload.get("idea_id") or ""),
+            outcome=str(payload.get("outcome") or "").strip().lower(),
+            lesson=str(payload.get("lesson") or ""),
+            expected=str(payload.get("expected") or ""),
+            realized_note=str(payload.get("realized_note") or ""),
+            opened_at=opened_at,
+            closed_at=closed_at,
+            evidence_verdicts=tuple(
+                IdeaEvidenceVerdict.from_dict(item) for item in _list(payload.get("evidence_verdicts"), "evidence_verdicts")
+            ),
+            criteria_at_close=tuple(
+                IdeaCriterionAtClose.from_dict(item) for item in _list(payload.get("criteria_at_close"), "criteria_at_close")
+            ),
+            realized=IdeaTrackingSnapshot.from_dict(realized) if isinstance(realized, Mapping) else None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test and risk snapshots (I3c)
+# ---------------------------------------------------------------------------
+
+
+def _frozen_numbers(raw: Mapping[str, Any] | None, name: str) -> Mapping[str, float | None]:
+    values: dict[str, float | None] = {}
+    for key, value in dict(raw or {}).items():
+        key_text = str(key or "").strip()
+        _require_text(key_text, f"{name} key")
+        _require_max(key_text, OBSERVABLE_PARAM_VALUE_MAX, f"{name} key")
+        values[key_text] = _finite_or_none(value)
+    if len(values) > IDEA_LEGS_MAX * 4:
+        raise IdeaValidationError(f"{name} holds too many values.")
+    return MappingProxyType(dict(sorted(values.items())))
+
+
+def _frozen_series(raw: Sequence[Any] | None, name: str) -> tuple[tuple[str, float], ...]:
+    points: list[tuple[str, float]] = []
+    for item in raw or ():
+        if isinstance(item, Mapping):
+            stamp, value = item.get("date"), item.get("value")
+        else:
+            stamp, value = item[0], item[1]
+        day = _parse_date(stamp)
+        number = _finite_or_none(value)
+        if day is None or number is None:
+            continue
+        points.append((day.isoformat(), number))
+    kept, _ = downsample_series_points(points, SNAPSHOT_SERIES_MAX_POINTS) if len(points) > SNAPSHOT_SERIES_MAX_POINTS else (points, None)
+    return tuple(kept)
+
+
+def _frozen_text_list(raw: Sequence[Any] | None, limit: int) -> tuple[str, ...]:
+    items = [" ".join(str(item or "").split())[:CRITERION_REASON_MAX] for item in raw or ()]
+    return tuple(item for item in items if item)[:limit]
+
+
+@dataclass(frozen=True)
+class IdeaSnapshotBase:
+    """What a test and a risk snapshot share: who ran what, on which legs, over which window."""
+
+    snapshot_id: str
+    idea_id: str
+    created_at: datetime
+    legs: tuple[IdeaTrackedLeg, ...]
+    benchmark: str
+    lookback_days: int
+    window_start: date | None = None
+    window_end: date | None = None
+    observations: int = 0
+    source: str = "idea_legs"
+    source_ids: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    provenance: ProvenanceRecord | None = None
+    warnings: tuple[str, ...] = ()
+    schema_version: int = IDEA_SCHEMA_VERSION
+
+    def _validate_base(self) -> None:
+        _require_text(self.snapshot_id, "snapshot_id")
+        _require_text(self.idea_id, "idea_id")
+        legs = tuple(self.legs)
+        if not legs or any(not isinstance(leg, IdeaTrackedLeg) or leg.weight is None for leg in legs):
+            raise IdeaValidationError("A snapshot needs the legs and weights it was run on.")
+        object.__setattr__(self, "legs", legs[:IDEA_LEGS_MAX])
+        benchmark = str(self.benchmark or "").strip().upper()
+        _require_text(benchmark, "snapshot benchmark")
+        object.__setattr__(self, "benchmark", benchmark[:TRACKING_BENCHMARK_MAX])
+        object.__setattr__(self, "lookback_days", max(1, int(self.lookback_days)))
+        object.__setattr__(self, "observations", max(0, int(self.observations)))
+        if self.source not in {"idea_legs"}:
+            raise IdeaValidationError("A snapshot source must be idea_legs.")
+        ids = {str(key): str(value)[:OBSERVABLE_PARAM_VALUE_MAX] for key, value in dict(self.source_ids or {}).items() if str(value or "").strip()}
+        object.__setattr__(self, "source_ids", MappingProxyType(dict(sorted(ids.items()))))
+        if self.provenance is not None and not isinstance(self.provenance, ProvenanceRecord):
+            raise IdeaValidationError("snapshot provenance must be a ProvenanceRecord.")
+        object.__setattr__(self, "warnings", _frozen_text_list(self.warnings, SNAPSHOT_WARNINGS_MAX))
+        _check_schema_version(self.schema_version)
+
+    def positions(self) -> tuple[Any, ...]:
+        return tuple(sorted((leg.key, round(float(leg.weight or 0.0), 10)) for leg in self.legs))
+
+    def _base_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "snapshot_id": self.snapshot_id,
+            "idea_id": self.idea_id,
+            "created_at": self.created_at.isoformat(),
+            "legs": [leg.to_dict() for leg in self.legs],
+            "benchmark": self.benchmark,
+            "lookback_days": self.lookback_days,
+            "window_start": self.window_start.isoformat() if self.window_start else None,
+            "window_end": self.window_end.isoformat() if self.window_end else None,
+            "observations": self.observations,
+            "source": self.source,
+            "source_ids": dict(self.source_ids),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+            "warnings": list(self.warnings),
+        }
+
+    @staticmethod
+    def _base_kwargs(payload: Mapping[str, Any]) -> dict[str, Any]:
+        created_at = _parse_instant(payload.get("created_at"))
+        if created_at is None:
+            raise IdeaValidationError("A snapshot needs created_at.")
+        provenance = payload.get("provenance")
+        source_ids = payload.get("source_ids")
+        return {
+            "schema_version": _schema_version(payload.get("schema_version")),
+            "snapshot_id": str(payload.get("snapshot_id") or ""),
+            "idea_id": str(payload.get("idea_id") or ""),
+            "created_at": created_at,
+            "legs": tuple(IdeaTrackedLeg.from_dict(item) for item in _list(payload.get("legs"), "snapshot.legs")),
+            "benchmark": str(payload.get("benchmark") or ""),
+            "lookback_days": int(payload.get("lookback_days") or 1),
+            "window_start": _parse_date(payload.get("window_start")),
+            "window_end": _parse_date(payload.get("window_end")),
+            "observations": int(payload.get("observations") or 0),
+            "source": str(payload.get("source") or "idea_legs"),
+            "source_ids": dict(source_ids) if isinstance(source_ids, Mapping) else {},
+            "provenance": provenance_from_dict(provenance) if isinstance(provenance, Mapping) else None,
+            "warnings": tuple(str(item) for item in _list(payload.get("warnings"), "snapshot.warnings")),
+        }
+
+
+@dataclass(frozen=True)
+class IdeaTestSnapshot(IdeaSnapshotBase):
+    """A Strategy Lab composition of the idea's legs, frozen when the user ran it (I3c).
+
+    The backtest is in-sample and carries no costs; both are stated on the
+    snapshot (``costs_included`` is always False here) so no figure reads as
+    more than it is.
+    """
+
+    metrics: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    leg_contributions: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    equity_curve: tuple[tuple[str, float], ...] = ()
+    benchmark_curve: tuple[tuple[str, float], ...] = ()
+    costs_included: bool = False
+    sample: str = "in_sample"
+
+    def __post_init__(self) -> None:
+        self._validate_base()
+        object.__setattr__(self, "metrics", _frozen_numbers(self.metrics, "test metrics"))
+        object.__setattr__(self, "leg_contributions", _frozen_numbers(self.leg_contributions, "leg contributions"))
+        object.__setattr__(self, "equity_curve", _frozen_series(self.equity_curve, "equity curve"))
+        object.__setattr__(self, "benchmark_curve", _frozen_series(self.benchmark_curve, "benchmark curve"))
+        if self.sample not in {"in_sample"}:
+            raise IdeaValidationError("A test sample must be in_sample until out-of-sample splits exist (I4).")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._base_dict(),
+            "metrics": dict(self.metrics),
+            "leg_contributions": dict(self.leg_contributions),
+            "equity_curve": [list(point) for point in self.equity_curve],
+            "benchmark_curve": [list(point) for point in self.benchmark_curve],
+            "costs_included": self.costs_included,
+            "sample": self.sample,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTestSnapshot":
+        metrics = payload.get("metrics")
+        contributions = payload.get("leg_contributions")
+        return cls(
+            **cls._base_kwargs(payload),
+            metrics=dict(metrics) if isinstance(metrics, Mapping) else {},
+            leg_contributions=dict(contributions) if isinstance(contributions, Mapping) else {},
+            equity_curve=tuple(_list(payload.get("equity_curve"), "equity_curve")),
+            benchmark_curve=tuple(_list(payload.get("benchmark_curve"), "benchmark_curve")),
+            costs_included=payload.get("costs_included") is True,
+            sample=str(payload.get("sample") or "in_sample"),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaRiskEpisode:
+    episode_id: str
+    label: str
+    start: date
+    end: date
+    status: str
+    book_return: float | None = None
+    benchmark_return: float | None = None
+    max_drawdown: float | None = None
+    # Share of the book's gross exposure with price history in the episode; a partial
+    # replay treats the missing legs as flat, so its result must say how much it covers.
+    coverage: float | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.episode_id, "episode_id")
+        object.__setattr__(self, "label", " ".join(str(self.label or "").split())[:OBSERVABLE_LABEL_MAX] or self.episode_id)
+        if self.status not in {"full", "partial", "unavailable"}:
+            raise IdeaValidationError("An episode status must be full, partial or unavailable.")
+        for name in ("book_return", "benchmark_return", "max_drawdown"):
+            object.__setattr__(self, name, _finite_or_none(getattr(self, name)))
+        coverage = _finite_or_none(self.coverage)
+        object.__setattr__(self, "coverage", None if coverage is None else min(1.0, max(0.0, coverage)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "episode_id": self.episode_id,
+            "label": self.label,
+            "start": self.start.isoformat(),
+            "end": self.end.isoformat(),
+            "status": self.status,
+            "book_return": self.book_return,
+            "benchmark_return": self.benchmark_return,
+            "max_drawdown": self.max_drawdown,
+            "coverage": self.coverage,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaRiskEpisode":
+        start = _parse_date(payload.get("start"))
+        end = _parse_date(payload.get("end"))
+        if start is None or end is None:
+            raise IdeaValidationError("An episode needs start and end dates.")
+        return cls(
+            episode_id=str(payload.get("episode_id") or ""),
+            label=str(payload.get("label") or ""),
+            start=start,
+            end=end,
+            status=str(payload.get("status") or "unavailable"),
+            book_return=_finite_or_none(payload.get("book_return")),
+            benchmark_return=_finite_or_none(payload.get("benchmark_return")),
+            max_drawdown=_finite_or_none(payload.get("max_drawdown")),
+            coverage=_finite_or_none(payload.get("coverage")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaRiskSnapshot(IdeaSnapshotBase):
+    """A Risk result on the idea's research book, frozen when the user ran it (I3c).
+
+    ``metrics`` are shares of the book (a 1-day VaR of 0.021 is 2.1%), so the
+    figures do not depend on a notional. ``episodes`` replay the book's
+    weights through documented stress episodes.
+    """
+
+    alpha: float = 0.95
+    horizon_days: int = 1
+    metrics: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    episodes: tuple[IdeaRiskEpisode, ...] = ()
+
+    def __post_init__(self) -> None:
+        self._validate_base()
+        alpha = _finite_or_none(self.alpha)
+        if alpha is None or not 0.5 <= alpha < 1:
+            raise IdeaValidationError("A risk confidence level must be between 0.5 and 1.")
+        object.__setattr__(self, "alpha", alpha)
+        object.__setattr__(self, "horizon_days", max(1, int(self.horizon_days)))
+        object.__setattr__(self, "metrics", _frozen_numbers(self.metrics, "risk metrics"))
+        episodes = tuple(self.episodes)
+        if any(not isinstance(item, IdeaRiskEpisode) for item in episodes):
+            raise IdeaValidationError("episodes must be IdeaRiskEpisode records.")
+        object.__setattr__(self, "episodes", episodes[:SNAPSHOT_EPISODES_MAX])
+
+    @property
+    def worst_episode(self) -> IdeaRiskEpisode | None:
+        """The worst fully covered episode; a partial one only when no episode is fully covered.
+
+        A partial replay treats the legs without history as flat, so naming it
+        the worst while a full replay exists would compare different books.
+        """
+        priced = [item for item in self.episodes if item.status != "unavailable" and item.book_return is not None]
+        full = [item for item in priced if item.status == "full"]
+        return min(full or priced, key=lambda item: float(item.book_return or 0.0), default=None)
+
+    def to_dict(self) -> dict[str, Any]:
+        worst = self.worst_episode
+        return {
+            **self._base_dict(),
+            "alpha": self.alpha,
+            "horizon_days": self.horizon_days,
+            "metrics": dict(self.metrics),
+            "episodes": [item.to_dict() for item in self.episodes],
+            "worst_episode_id": worst.episode_id if worst else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaRiskSnapshot":
+        metrics = payload.get("metrics")
+        return cls(
+            **cls._base_kwargs(payload),
+            alpha=float(payload.get("alpha") or 0.95),
+            horizon_days=int(payload.get("horizon_days") or 1),
+            metrics=dict(metrics) if isinstance(metrics, Mapping) else {},
+            episodes=tuple(IdeaRiskEpisode.from_dict(item) for item in _list(payload.get("episodes"), "episodes")),
+        )
+
+
+def snapshot_staleness(snapshot: IdeaSnapshotBase, idea: "Idea", now: datetime) -> str | None:
+    """Why a snapshot no longer describes the idea, or ``None`` while it still does."""
+    frozen, untracked = freeze_tracking_legs(idea.legs, idea.stance) if idea.legs else ((), "no legs")
+    current = tuple(sorted((leg.key, round(float(leg.weight or 0.0), 10)) for leg in frozen)) if not untracked else ()
+    if current != snapshot.positions():
+        return "The legs or weights changed after this run."
+    age = now - snapshot.created_at
+    if age.days >= SNAPSHOT_STALE_DAYS:
+        return f"Run {age.days} days ago."
+    return None
+
+
 @dataclass(frozen=True)
 class Idea:
     """A thesis with its pinned evidence, criteria and journal."""
@@ -830,6 +1976,13 @@ class Idea:
     evidence: tuple[IdeaEvidence, ...] = ()
     criteria: tuple[IdeaCriterion, ...] = ()
     journal: tuple[IdeaJournalEntry, ...] = ()
+    # I3a: registro hipotético de seguimiento; None mientras la idea nunca estuvo activa con patas.
+    tracking: IdeaTracking | None = None
+    # I3b: revisiones escritas al cerrar; solo crecen (reabrir conserva la anterior).
+    reviews: tuple[IdeaReview, ...] = ()
+    # I3c: snapshots de test (Strategy Lab) y de riesgo (Risk), del más antiguo al más reciente.
+    tests: tuple[IdeaTestSnapshot, ...] = ()
+    risks: tuple[IdeaRiskSnapshot, ...] = ()
     schema_version: int = IDEA_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -884,6 +2037,27 @@ class Idea:
         object.__setattr__(self, "journal", journal)
         if self.status == "closed" and self.closed_at is None:
             raise IdeaValidationError("A closed idea needs closed_at.")
+        if self.tracking is not None and not isinstance(self.tracking, IdeaTracking):
+            raise IdeaValidationError("tracking must be an IdeaTracking record.")
+        reviews = tuple(self.reviews)
+        if len(reviews) > IDEA_REVIEWS_MAX:
+            raise IdeaValidationError(f"An idea holds at most {IDEA_REVIEWS_MAX} reviews.")
+        for review in reviews:
+            if not isinstance(review, IdeaReview) or review.idea_id != self.idea_id:
+                raise IdeaValidationError("Every review must belong to this idea.")
+        if len({review.review_id for review in reviews}) != len(reviews):
+            raise IdeaValidationError("Review ids must be unique within an idea.")
+        object.__setattr__(self, "reviews", reviews)
+        for name, kind in (("tests", IdeaTestSnapshot), ("risks", IdeaRiskSnapshot)):
+            items = tuple(getattr(self, name))
+            if any(not isinstance(item, kind) or item.idea_id != self.idea_id for item in items):
+                raise IdeaValidationError(f"Every {name[:-1]} snapshot must belong to this idea.")
+            if len({item.snapshot_id for item in items}) != len(items):
+                raise IdeaValidationError(f"{name.capitalize()} snapshot ids must be unique.")
+            object.__setattr__(self, name, items[-IDEA_SNAPSHOTS_MAX:])
+        # Cerrar exige una revisión: la última corresponde a este cierre.
+        if self.status == "closed" and (not reviews or reviews[-1].closed_at != self.closed_at):
+            raise IdeaValidationError("A closed idea needs the review written at its close.")
         _check_schema_version(self.schema_version)
 
     # -- derived views -----------------------------------------------------
@@ -907,6 +2081,18 @@ class Idea:
     @property
     def unacknowledged_triggers(self) -> int:
         return sum(1 for item in self.criteria if item.needs_acknowledgement)
+
+    @property
+    def latest_review(self) -> IdeaReview | None:
+        return self.reviews[-1] if self.reviews else None
+
+    @property
+    def current_review(self) -> IdeaReview | None:
+        """The review of the idea's current close (closed, or archived after closing)."""
+        review = self.latest_review
+        if review is None or self.closed_at is None or review.closed_at != self.closed_at:
+            return None
+        return review
 
     @property
     def activated_at(self) -> datetime | None:
@@ -946,6 +2132,10 @@ class Idea:
             "evidence": [item.to_dict() for item in self.evidence],
             "criteria": [item.to_dict() for item in self.criteria],
             "journal": [entry.to_dict() for entry in self.journal],
+            "tracking": self.tracking.to_dict() if self.tracking else None,
+            "reviews": [review.to_dict() for review in self.reviews],
+            "tests": [item.to_dict() for item in self.tests],
+            "risks": [item.to_dict() for item in self.risks],
         }
 
     @classmethod
@@ -968,6 +2158,10 @@ class Idea:
             evidence=tuple(IdeaEvidence.from_dict(item) for item in _list(payload.get("evidence"), "evidence")),
             criteria=tuple(IdeaCriterion.from_dict(item) for item in _list(payload.get("criteria"), "criteria")),
             journal=tuple(IdeaJournalEntry.from_dict(item) for item in _list(payload.get("journal"), "journal")),
+            tracking=IdeaTracking.from_dict(payload["tracking"]) if isinstance(payload.get("tracking"), Mapping) else None,
+            reviews=tuple(IdeaReview.from_dict(item) for item in _list(payload.get("reviews"), "reviews")),
+            tests=tuple(IdeaTestSnapshot.from_dict(item) for item in _list(payload.get("tests"), "tests")),
+            risks=tuple(IdeaRiskSnapshot.from_dict(item) for item in _list(payload.get("risks"), "risks")),
         )
 
 
@@ -985,6 +2179,84 @@ def migrate_idea_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(items, list):
             migrated[key] = [dict(item, schema_version=2) if isinstance(item, Mapping) else item for item in items]
     return migrated
+
+
+def migrate_idea_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 3 adds ``tracking``. Nested records carry the idea's version too.
+
+    An idea that is active with legs gets one open segment, frozen at the last
+    moment its legs and status were set: the later of its last activation (or
+    restore) and its last leg edit, both read from the journal. Its legs have
+    not changed since that instant, so the record starts at the next close
+    after it and nothing earlier is added. Earlier active periods are not
+    reconstructed, because version 2 journals describe old legs only as text.
+    """
+    migrated = dict(payload)
+    for key in ("evidence", "journal", "criteria"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=3) if isinstance(item, Mapping) else item for item in items]
+    migrated["tracking"] = None
+    if str(migrated.get("status") or "").strip().lower() != "active" or not migrated.get("legs"):
+        return migrated
+    activated_at: datetime | None = None
+    legs_edited_at: datetime | None = None
+    for entry in migrated.get("journal") or []:
+        if not isinstance(entry, Mapping):
+            continue
+        created_at = _parse_instant(entry.get("created_at"))
+        details = entry.get("details") if isinstance(entry.get("details"), Mapping) else {}
+        if created_at is None:
+            continue
+        if entry.get("kind") == "status_changed" and details.get("to") == "active":
+            activated_at = created_at
+        changes = details.get("changes") if entry.get("kind") == "edited" else None
+        if isinstance(changes, list) and any(isinstance(item, Mapping) and item.get("field") == "legs" for item in changes):
+            legs_edited_at = created_at
+    if activated_at is None:
+        return migrated
+    frozen_at = max(activated_at, legs_edited_at) if legs_edited_at else activated_at
+    legs = tuple(IdeaLeg.from_dict(item) for item in _list(migrated.get("legs"), "legs"))
+    stance = str(migrated.get("stance") or "neutral").strip().lower()
+    note = (
+        f"Tracking began in a later build. The legs have not changed since {frozen_at.strftime('%Y-%m-%d %H:%M')} UTC, "
+        "so the record starts at the next close after that; nothing earlier is added."
+    )
+    tracking = IdeaTracking().with_open_segment(legs=legs, stance=stance, at=frozen_at, reason="migrated", note=note)
+    migrated["tracking"] = tracking.to_dict()
+    return migrated
+
+
+def migrate_idea_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 4 adds ``reviews``. No version 3 idea can be closed, so none needs one."""
+    migrated = dict(payload)
+    migrated["reviews"] = list(migrated.get("reviews") or [])
+    for key in ("evidence", "journal", "criteria", "reviews"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=4) if isinstance(item, Mapping) else item for item in items]
+    return migrated
+
+
+def migrate_idea_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 5 adds ``tests`` and ``risks`` (empty: no snapshot existed before I3c)."""
+    migrated = dict(payload)
+    migrated["tests"] = list(migrated.get("tests") or [])
+    migrated["risks"] = list(migrated.get("risks") or [])
+    for key in ("evidence", "journal", "criteria", "reviews", "tests", "risks"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=5) if isinstance(item, Mapping) else item for item in items]
+    return migrated
+
+
+def assert_reviews_append_only(previous: Sequence[IdeaReview], current: Sequence[IdeaReview]) -> None:
+    """Refuse any change that edits or drops a review written at an earlier close."""
+    if len(current) < len(previous):
+        raise IdeaValidationError("Idea reviews are kept; a review cannot be removed.")
+    for index, review in enumerate(previous):
+        if current[index].to_dict() != review.to_dict():
+            raise IdeaValidationError("Idea reviews are kept as written; an earlier review cannot be edited.")
 
 
 def assert_journal_append_only(previous: Sequence[IdeaJournalEntry], current: Sequence[IdeaJournalEntry]) -> None:

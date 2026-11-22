@@ -29,6 +29,24 @@ const LIST: IdeaListResponse = {
       criteria_counts: { pending: 0, holding: 2, triggered: 1, unavailable: 0, stale: 0 },
       criteria_total: 3,
       unacknowledged_triggers: 1,
+      tracking: {
+        label: "Hypothetical, not executed",
+        segments: 1,
+        open: true,
+        started_at: "2026-11-09T14:00:00",
+        snapshot: {
+          status: "tracking",
+          computed_at: "2026-11-14T12:00:00",
+          as_of: "2026-11-13",
+          net_return: -0.0215,
+          gross_return: -0.02,
+          benchmark_return: 0.01,
+          benchmark: "SPY",
+          sessions: 5,
+          gaps: 0,
+          partial: false,
+        },
+      },
     },
     {
       idea_id: "i2",
@@ -130,12 +148,53 @@ describe("IdeasView", () => {
     expect(body).toMatch(/<th class="num">Challenges<\/th>/);
     // I2: criterion states (triggered first) and days to review.
     expect(body).toContain("<th>Criteria</th>");
+    // I3a: rentabilidad hipotética desde la activación, con su sesión y el rótulo en la cabecera.
+    expect(body).toContain("Since activation");
+    expect(body).toContain('title="Hypothetical, not executed: net return since activation, after costs"');
+    expect(body).toMatch(/<span class="negative[^"]*">-2\.15%<\/span>/);
+    expect(body).toContain("as of 2026-11-13");
     expect(body.indexOf("1 triggered")).toBeLessThan(body.indexOf("2 holding"));
     expect(body).toContain("overdue");
     // The default "Open" filter hides archived ideas.
     expect(body).not.toContain("Old rates idea");
     expect(body).toContain("1 shown");
     expect(body).toContain("Idea file bad.json is not valid JSON.");
+  });
+
+  it("offers Close on an active idea, Reopen on a closed one, and a Review mode", () => {
+    const active = render(IdeasView, { props: { mode: "idea", list: LIST, idea: IDEA } }).body;
+    expect(active).toMatch(/aria-expanded="false"[^>]*>Close<\/button>/);
+    expect(active).not.toContain("Reopen as active; the review stays in the record");
+    const closedIdea = {
+      ...IDEA,
+      status: "closed" as const,
+      closed_at: "2026-11-20T15:00:00",
+      reviews: [
+        {
+          review_id: "r1",
+          outcome: "confirmed" as const,
+          lesson: "Keep the rule.",
+          expected: "",
+          realized_note: "",
+          opened_at: "2026-11-09T14:00:00",
+          closed_at: "2026-11-20T15:00:00",
+          holding_days: 11,
+          evidence_verdicts: [],
+          criteria_at_close: [],
+          realized: null,
+          first_invalidation_at: null,
+        },
+      ],
+    };
+    const closed = render(IdeasView, { props: { mode: "idea", list: LIST, idea: closedIdea } }).body;
+    expect(closed).toContain("Reopen as active; the review stays in the record");
+    expect(closed).toContain("Keep the rule.");
+    const board = render(IdeasView, { props: { mode: "board", list: LIST } }).body;
+    expect(board).toContain(">Closed</button>");
+    const review = render(IdeasView, { props: { mode: "review", list: LIST, reviewStats: null } }).body;
+    expect(review).toContain(">Review</button>");
+    expect(review).toContain("Closed ideas · your own record");
+    expect(review).toContain("No closed ideas yet.");
   });
 
   it("explains an empty board and the loading state in place", () => {

@@ -230,6 +230,9 @@ class IdeaEvaluationService:
             if reading is None:
                 reading = self._read(criterion.observable, now=now, intraday=bool(intraday))
                 readings[key] = reading
+            if intraday and not reading.is_unavailable and reading.intraday_from is None and reading.intraday_note:
+                # I3d: el registro buscó una marca IBKR reciente y no la había; se evalúa sobre los cierres y lo dice.
+                effective, note = "daily_close", reading.intraday_note
             armed_from = max(criterion.armed_at, activated_at) if activated_at else criterion.armed_at
             # The baseline is taken once per arming moment; a re-activation takes a new one.
             if criterion.baseline_for == armed_from:
@@ -459,8 +462,14 @@ class IdeaEvaluationScheduler:
         clock: Callable[[], datetime] = now_utc,
         tick_seconds: float = SCHEDULER_TICK_SECONDS,
         startup_delay: float = STARTUP_DELAY_SECONDS,
+        tracking: Any = None,
+        intraday: Any = None,
     ) -> None:
         self.service = service
+        # I3a: tras la pasada de arranque y la de cierre se refresca el titular de seguimiento del tablero.
+        self.tracking = tracking
+        # I3d: con TWS conectado se graban marcas IBKR de las patas a la cadencia de seguimiento.
+        self.intraday = intraday
         self._clock = clock
         self._tick = tick_seconds
         self._startup_delay = startup_delay
@@ -498,10 +507,31 @@ class IdeaEvaluationScheduler:
         # The start pass covers every cadence, including the latest close.
         self.last_daily_session = last_daily_close_session(now)
         try:
-            return self.service.evaluate_all(trigger="startup")
+            result = self.service.evaluate_all(trigger="startup")
         except Exception:  # noqa: BLE001
             logger.exception("Idea evaluation at start failed")
-            return None
+            result = None
+        self._refresh_tracking()
+        self._record_intraday(now)
+        return result
+
+    def _record_intraday(self, now: datetime) -> None:
+        """Record IBKR marks when due; never lets the intraday layer stop the scheduler."""
+        if self.intraday is None:
+            return
+        try:
+            if self.intraday.due(now):
+                self.intraday.record_pass()
+        except Exception:  # noqa: BLE001
+            logger.exception("Idea intraday marks failed")
+
+    def _refresh_tracking(self) -> None:
+        if self.tracking is None:
+            return
+        try:
+            self.tracking.refresh_all()
+        except Exception:  # noqa: BLE001 - el seguimiento nunca detiene el planificador
+            logger.exception("Idea tracking refresh failed")
 
     def tick(self) -> list[EvaluationPassResult]:
         now = self._clock()
@@ -510,6 +540,9 @@ class IdeaEvaluationScheduler:
         if self.last_daily_session is None or session > self.last_daily_session:
             self.last_daily_session = session
             results.append(self.service.evaluate_all(trigger="daily_close"))
+            self._refresh_tracking()
+        # Las marcas se graban antes de la pasada intradía de criterios, que lee la más reciente.
+        self._record_intraday(now)
         due_intraday = self.last_intraday_at is None or (now - self.last_intraday_at).total_seconds() >= INTRADAY_PASS_SECONDS
         if due_intraday and self.service.registry.tws_connected() and self.service.has_intraday_criteria():
             self.last_intraday_at = now

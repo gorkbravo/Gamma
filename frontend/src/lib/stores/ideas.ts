@@ -1,4 +1,4 @@
-// Ideas store (Workstream 12, checkpoints I1 and I2).
+// Ideas store (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
 //
 // One place that talks to /ideas, so the Ideas tab, the shared Pin to idea
 // action, Sitrep ("Promote to idea", "Your ideas") and the notification center
@@ -9,6 +9,7 @@ import { derived, get, writable } from "svelte/store";
 import { deleteJson, getJson, getText, patchJson, postJson } from "../api/client";
 import type {
   Idea,
+  IdeaClosePayload,
   IdeaCreatePayload,
   IdeaCriterionPayload,
   IdeaCriterionResponse,
@@ -22,7 +23,11 @@ import type {
   IdeaObservableRegistryResponse,
   IdeaPatchPayload,
   IdeaPinResponse,
+  IdeaReviewStatsResponse,
   IdeaSummary,
+  IdeaIntradayView,
+  IdeaTrackingResponse,
+  IdeaTrackingSettingsPayload,
 } from "../api/types";
 
 export const ideaList = writable<IdeaListResponse | null>(null);
@@ -38,6 +43,15 @@ export const ideaObservables = writable<IdeaObservableRegistryResponse | null>(n
 /** "What is this?" texts by key, loaded once. */
 export const ideaExplanations = writable<Record<string, IdeaExplanation>>({});
 export const criteriaBusy = writable(false);
+/** I3a: the selected idea's hypothetical forward record, rebuilt by the backend on each read. */
+export const ideaTracking = writable<IdeaTrackingResponse | null>(null);
+export const ideaTrackingLoading = writable(false);
+export const ideaTrackingError = writable("");
+/** I3b: the Review mode's closed record and statistics. */
+export const ideaReviewStats = writable<IdeaReviewStatsResponse | null>(null);
+/** I3c: which snapshot is running for the selected idea, and the last run error. */
+export const ideaAnalysisBusy = writable<"" | "test" | "risk">("");
+export const ideaAnalysisError = writable("");
 
 /** Every idea the board knows about, newest change first. */
 export const ideaSummaries = derived(ideaList, ($list): IdeaSummary[] => $list?.items ?? []);
@@ -152,13 +166,61 @@ export async function addIdeaJournalEntry(ideaId: string, kind: "note" | "decisi
   return idea;
 }
 
-export async function transitionIdea(ideaId: string, action: "activate" | "archive" | "restore") {
+export async function transitionIdea(ideaId: string, action: "activate" | "archive" | "restore" | "reopen") {
   const idea = await guarded(() => postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/${action}`, {}));
   if (idea) {
     applyIdea(idea);
-    await Promise.all([loadIdeas(), loadIdeaNotifications()]);
+    await Promise.all([loadIdeas(), loadIdeaNotifications(), loadIdeaReview()]);
   }
   return idea;
+}
+
+// ── Close and review (I3b) ──────────────────────────────────────────────────
+
+/** Close an active idea with its review (required); the tracking record stops at the next close. */
+export async function closeIdea(ideaId: string, payload: IdeaClosePayload): Promise<Idea | null> {
+  const idea = await guarded(() => postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/close`, payload));
+  if (idea) {
+    applyIdea(idea);
+    await Promise.all([loadIdeas(), loadIdeaNotifications(), loadIdeaReview()]);
+  }
+  return idea;
+}
+
+// ── Test and risk snapshots (I3c) ──────────────────────────────────────────
+
+async function runSnapshot(ideaId: string, kind: "test" | "risk"): Promise<Idea | null> {
+  if (get(ideaAnalysisBusy)) return null;
+  ideaAnalysisBusy.set(kind);
+  ideaAnalysisError.set("");
+  try {
+    const idea = await postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/${kind}`, {});
+    applyIdea(idea);
+    await loadIdeas();
+    return idea;
+  } catch (error) {
+    // Un fallo de Strategy Lab o Risk queda en la sección, no en la línea de error de Ideas.
+    ideaAnalysisError.set(messageOf(error));
+    return null;
+  } finally {
+    ideaAnalysisBusy.set("");
+  }
+}
+
+/** Backtest the idea's legs in Strategy Lab and keep the snapshot (in-sample, no costs). */
+export function runIdeaTest(ideaId: string): Promise<Idea | null> {
+  return runSnapshot(ideaId, "test");
+}
+
+/** Run Risk on the idea's research book and keep the snapshot. */
+export function runIdeaRisk(ideaId: string): Promise<Idea | null> {
+  return runSnapshot(ideaId, "risk");
+}
+
+export async function loadIdeaReview(): Promise<IdeaReviewStatsResponse | null> {
+  const response = await guarded(() => getJson<IdeaReviewStatsResponse>("/ideas/review"));
+  if (response) ideaReviewStats.set(response);
+  return response;
 }
 
 // ── Criteria, evaluation and notifications (I2) ─────────────────────────────
@@ -263,6 +325,66 @@ export async function previewObservable(observable: IdeaObservableRef): Promise<
     return await postJson<IdeaObservablePreview>("/ideas/observables/preview", { observable });
   } catch (error) {
     ideasError.set(messageOf(error));
+    return null;
+  }
+}
+
+// ── Hypothetical forward tracking (I3a) ─────────────────────────────────────
+
+let trackingRequest = 0;
+
+/** Rebuild the selected idea's series. Errors stay in the tracking panel, not the Ideas error line. */
+export async function loadIdeaTracking(ideaId: string): Promise<IdeaTrackingResponse | null> {
+  const request = ++trackingRequest;
+  ideaTrackingLoading.set(true);
+  if (get(ideaTracking)?.idea_id !== ideaId) ideaTracking.set(null);
+  try {
+    const response = await getJson<IdeaTrackingResponse>(`/ideas/${encodeURIComponent(ideaId)}/tracking`);
+    if (request !== trackingRequest) return response;
+    ideaTracking.set(response);
+    ideaTrackingError.set("");
+    // El servidor guarda el titular del tablero al reconstruir la serie; el tablero lo recoge ya.
+    void loadIdeas();
+    return response;
+  } catch (error) {
+    if (request === trackingRequest) ideaTrackingError.set(messageOf(error));
+    return null;
+  } finally {
+    if (request === trackingRequest) ideaTrackingLoading.set(false);
+  }
+}
+
+/**
+ * I3d: reread the intraday layer (one UTC session day, or the latest) and put it
+ * beside the daily series already loaded; the daily series is not rebuilt.
+ */
+export async function loadIdeaIntraday(ideaId: string, session?: string | null): Promise<IdeaIntradayView | null> {
+  try {
+    const query = session ? `?session=${encodeURIComponent(session)}` : "";
+    const view = await getJson<IdeaIntradayView>(`/ideas/${encodeURIComponent(ideaId)}/tracking/intraday${query}`);
+    const current = get(ideaTracking);
+    if (current && current.idea_id === ideaId) ideaTracking.set({ ...current, intraday: view });
+    return view;
+  } catch (error) {
+    ideaTrackingError.set(messageOf(error));
+    return null;
+  }
+}
+
+/** Change the cost assumptions or the benchmark (journaled); returns the recomputed record. */
+export async function updateIdeaTracking(
+  ideaId: string,
+  payload: IdeaTrackingSettingsPayload
+): Promise<IdeaTrackingResponse | null> {
+  try {
+    const response = await patchJson<IdeaTrackingResponse>(`/ideas/${encodeURIComponent(ideaId)}/tracking`, payload);
+    ideaTracking.set(response);
+    ideaTrackingError.set("");
+    // El cambio queda en el diario de la idea.
+    await Promise.all([loadIdea(ideaId), loadIdeas()]);
+    return response;
+  } catch (error) {
+    ideaTrackingError.set(messageOf(error));
     return null;
   }
 }

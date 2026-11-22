@@ -159,7 +159,7 @@ def test_criterion_model_enforces_rule_shape_and_round_trips():
     assert IdeaCriterion(**base, condition="below", threshold=100).state == "pending"
 
 
-def test_v1_idea_files_migrate_to_v2_with_empty_criteria(tmp_path):
+def test_v1_idea_files_migrate_to_the_current_version_with_empty_criteria(tmp_path):
     base = tmp_path / "ideas"
     _, store, _, service, _ = _setup(tmp_path)
     idea = service.create_idea(IdeaCreateRequest(title="Legacy idea"))
@@ -174,11 +174,13 @@ def test_v1_idea_files_migrate_to_v2_with_empty_criteria(tmp_path):
 
     reopened = IdeaStore(base)
     migrated = reopened.require(idea.idea_id)
-    assert migrated.schema_version == IDEA_SCHEMA_VERSION == 2
+    # v1 -> v2 (criterios) -> v3 (seguimiento, I3a) -> v4 (revisiones, I3b) en una sola carga.
+    assert migrated.schema_version == IDEA_SCHEMA_VERSION
     assert migrated.criteria == ()
+    assert migrated.tracking is None, "a draft has no tracking"
     on_disk = json.loads(path.read_text(encoding="utf-8"))
-    assert on_disk["schema_version"] == 2 and on_disk["criteria"] == []
-    assert all(entry["schema_version"] == 2 for entry in on_disk["journal"])
+    assert on_disk["schema_version"] == IDEA_SCHEMA_VERSION and on_disk["criteria"] == []
+    assert all(entry["schema_version"] == IDEA_SCHEMA_VERSION for entry in on_disk["journal"])
     assert any(item.action == "migrated" for item in reopened.storage_warnings())
 
 
@@ -736,7 +738,7 @@ def test_routes_manage_criteria_evaluate_and_notify(tmp_path):
     body = draft_add.json()
     assert body["criterion"]["state"] == "pending", "a draft does not evaluate"
     assert body["criterion"]["label"] == "2026-11-01 reached"
-    assert body["idea"]["schema_version"] == 2
+    assert body["idea"]["schema_version"] == IDEA_SCHEMA_VERSION
 
     bad = client.post(
         f"/ideas/{idea_id}/criteria",

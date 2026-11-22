@@ -4709,7 +4709,11 @@ export type IdeaJournalKind =
   | "criterion_edited"
   | "criterion_removed"
   | "criterion_triggered"
-  | "criterion_acknowledged";
+  | "criterion_acknowledged"
+  | "tracking_segment"
+  | "tracking_settings"
+  | "test_refreshed"
+  | "risk_refreshed";
 
 export type IdeaCriterionKind = "invalidate" | "confirm" | "review";
 export type IdeaCriterionCondition =
@@ -4986,6 +4990,13 @@ export interface Idea {
   journal: IdeaJournalEntry[];
   evidence_counts: Record<IdeaEvidenceStance, number>;
   criteria_counts: Record<IdeaCriterionState, number>;
+  /** I3a: segments, cost assumptions and the last headline; the series comes from /tracking. */
+  tracking?: IdeaTrackingRecord | null;
+  /** I3b: reviews written at close; the last one is the current close's when the idea is closed. */
+  reviews?: IdeaReview[];
+  /** I3c: test and risk snapshots, oldest first; recomputed only when the user asks. */
+  tests?: IdeaTestSnapshot[];
+  risks?: IdeaRiskSnapshot[];
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
 }
 
@@ -5016,6 +5027,10 @@ export interface IdeaSummary {
   criteria_counts: Record<IdeaCriterionState, number>;
   criteria_total: number;
   unacknowledged_triggers: number;
+  /** I3a: Board headline ("forward return since activation"), hypothetical. */
+  tracking?: IdeaTrackingHeadline | null;
+  /** I3b: the review of the current close (closed, or archived after closing). */
+  review?: IdeaReviewHeadline | null;
 }
 
 export interface IdeaStorageWarning {
@@ -5068,4 +5083,428 @@ export interface IdeaEvidenceCreatePayload extends IdeaPinDraft {
 export interface IdeaPinResponse {
   idea: Idea;
   evidence: IdeaEvidence;
+}
+
+// ── Ideas: hypothetical forward tracking (Workstream 12, I3a) ────────────────
+
+export type IdeaTrackingStatus = "not_started" | "waiting" | "tracking" | "stopped" | "unavailable";
+export type IdeaTrackingSegmentStatus =
+  | "untracked"
+  | "unavailable"
+  | "waiting"
+  | "never_entered"
+  | "tracking"
+  | "exiting"
+  | "closed";
+export type IdeaTrackingCostClass =
+  | "us_equity_liquid"
+  | "equity_other"
+  | "futures"
+  | "options"
+  | "crypto_spot"
+  | "prediction_contract"
+  | "non_tradable";
+
+export interface IdeaTrackingSnapshot {
+  status: IdeaTrackingStatus;
+  computed_at: string;
+  as_of: string | null;
+  net_return: number | null;
+  gross_return: number | null;
+  benchmark_return: number | null;
+  benchmark: string | null;
+  sessions: number;
+  gaps: number;
+  partial: boolean;
+  final?: boolean;
+  /** The provider's last close when it stopped answering; the record stops there. */
+  stale_since?: string | null;
+}
+
+export interface IdeaTrackingHeadline {
+  label: string;
+  segments: number;
+  open: boolean;
+  started_at: string;
+  snapshot: IdeaTrackingSnapshot | null;
+}
+
+export interface IdeaTrackedLeg {
+  entity: CrossTabHandoffEntity;
+  stated_weight: number | null;
+  weight: number | null;
+  weight_source: "stated" | "stance";
+  asset_class: IdeaTrackingCostClass;
+  market: string;
+  key: string;
+}
+
+export interface IdeaTrackingSegmentRecord {
+  segment_id: string;
+  number: number;
+  started_at: string;
+  start_reason: string;
+  start_note: string;
+  stance: IdeaStance;
+  legs: IdeaTrackedLeg[];
+  ended_at: string | null;
+  end_reason: string | null;
+  end_note: string;
+  untracked_reason: string | null;
+}
+
+export interface IdeaTrackingRecord {
+  label: string;
+  benchmark: string;
+  cost_model: { per_side_bp: Record<string, number>; leg_classes: Record<string, string>; updated_at: string | null };
+  segments: IdeaTrackingSegmentRecord[];
+  snapshot: IdeaTrackingSnapshot | null;
+}
+
+export interface IdeaTrackingCostClassView {
+  asset_class: IdeaTrackingCostClass;
+  label: string;
+  basis: string;
+  per_side_bp: number | null;
+  default_bp: number | null;
+  editable: boolean;
+  source: "stated" | "quote" | "none";
+  edited: boolean;
+}
+
+export interface IdeaTrackingSegmentLeg {
+  key: string;
+  label: string;
+  entity_type: string;
+  normalized_id: string;
+  stated_weight: number | null;
+  weight: number | null;
+  weight_source: "stated" | "stance";
+  asset_class: IdeaTrackingCostClass;
+  detected_class: IdeaTrackingCostClass;
+  cost_bp: number | null;
+  market: string;
+  entry_price: number | null;
+  last_price: number | null;
+}
+
+export interface IdeaTrackingSegment {
+  segment_id: string;
+  number: number;
+  status: IdeaTrackingSegmentStatus;
+  reason: string | null;
+  started_at: string;
+  start_reason: string;
+  start_note: string;
+  ended_at: string | null;
+  end_reason: string | null;
+  stance: IdeaStance;
+  entry_session: string | null;
+  exit_session: string | null;
+  last_session: string | null;
+  sessions: number;
+  gaps: number;
+  gross_return: number | null;
+  net_return: number | null;
+  entry_cost: number | null;
+  exit_cost: number | null;
+  cost: number | null;
+  benchmark_return: number | null;
+  excess_return: number | null;
+  max_drawdown: number | null;
+  legs: IdeaTrackingSegmentLeg[];
+}
+
+export interface IdeaTrackingPoint {
+  session: string;
+  segment: number;
+  net_return: number | null;
+  gross_return: number | null;
+  benchmark_return: number | null;
+  drawdown: number | null;
+  gap: boolean;
+  missing: string[];
+}
+
+export interface IdeaTrackingProvenance {
+  key: string;
+  label: string;
+  role: "leg" | "benchmark";
+  source_provider: string | null;
+  retrieved_at: string | null;
+  origin: string | null;
+  transformation_note: string | null;
+  available: boolean;
+}
+
+export interface IdeaTrackingResponse {
+  idea_id: string;
+  label: string;
+  status: IdeaTrackingStatus;
+  status_reason: string | null;
+  methodology: string;
+  summary: {
+    net_return: number | null;
+    gross_return: number | null;
+    cost_drag: number | null;
+    benchmark_return: number | null;
+    excess_return: number | null;
+    max_drawdown: number | null;
+    sessions: number;
+    gaps: number;
+    partial: boolean;
+    final?: boolean;
+    stale_since?: string | null;
+    first_session: string | null;
+    as_of: string | null;
+  };
+  benchmark: { symbol: string; available: boolean; reason: string | null };
+  cost_model: {
+    classes: IdeaTrackingCostClassView[];
+    leg_classes: Record<string, string>;
+    updated_at: string | null;
+    edited: boolean;
+  };
+  segments: IdeaTrackingSegment[];
+  points: IdeaTrackingPoint[];
+  warnings: string[];
+  provenance: IdeaTrackingProvenance[];
+  computed_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  /** I3d: the intraday layer (IBKR marks while TWS is connected); never part of the daily series. */
+  intraday?: IdeaIntradayView | null;
+}
+
+/** How TWS served a mark: live, delayed, frozen (last price at or before the close) or both. */
+export type IdeaIntradayQuality = "live" | "delayed" | "frozen" | "delayed_frozen";
+
+export interface IdeaIntradayPoint {
+  at: string;
+  segment: number;
+  net_return: number | null;
+  gross_return: number | null;
+  today_return: number | null;
+  drawdown: number | null;
+  quality: IdeaIntradayQuality | null;
+  gap: boolean;
+  state: "priced" | "gap" | "before_entry";
+  missing: string[];
+  carried: string[];
+}
+
+export interface IdeaIntradayGap {
+  start: string;
+  end: string | null;
+  kind: "disconnected" | "skipped" | "not_running" | "not_recorded";
+  reason: string;
+}
+
+export interface IdeaIntradayLeg {
+  key: string;
+  label: string;
+  price: number | null;
+  field: string | null;
+  md_type: number | null;
+  quality: IdeaIntradayQuality | null;
+  carried: boolean;
+  reference_close: number | null;
+  move: number | null;
+  missing_reason: string | null;
+}
+
+export interface IdeaIntradayView {
+  label: string;
+  available: boolean;
+  status: "recording" | "idle" | "no_marks" | "demo" | "not_tracked";
+  status_reason: string | null;
+  tws_connected: boolean;
+  session: string | null;
+  sessions: string[];
+  reference: { session: string; net_return: number | null } | null;
+  summary: {
+    as_of: string | null;
+    today_return: number | null;
+    net_return: number | null;
+    intraday_drawdown: number | null;
+    quality: IdeaIntradayQuality | null;
+    qualities: IdeaIntradayQuality[];
+    marks: number;
+    gaps: number;
+    segment: number | null;
+  };
+  points: IdeaIntradayPoint[];
+  gaps: IdeaIntradayGap[];
+  legs: IdeaIntradayLeg[];
+  warnings: string[];
+  methodology: string;
+  cadence_seconds: number;
+  closed_cadence_seconds: number;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface IdeaTrackingSettingsPayload {
+  per_side_bp?: Record<string, number>;
+  leg_classes?: Record<string, string | null>;
+  benchmark?: string;
+}
+
+// ── Ideas: close and review (Workstream 12, I3b) ─────────────────────────────
+
+export type IdeaReviewOutcome = "confirmed" | "invalidated" | "abandoned" | "expired";
+export type IdeaEvidenceVerdict = "held" | "failed" | "unclear";
+
+export interface IdeaReview {
+  review_id: string;
+  outcome: IdeaReviewOutcome;
+  lesson: string;
+  expected: string;
+  realized_note: string;
+  opened_at: string;
+  closed_at: string;
+  holding_days: number;
+  evidence_verdicts: Array<{ evidence_id: string; verdict: IdeaEvidenceVerdict; title: string; stance: IdeaEvidenceStance }>;
+  criteria_at_close: Array<{
+    criterion_id: string;
+    kind: IdeaCriterionKind;
+    label: string;
+    state: IdeaCriterionState;
+    triggered_at: string | null;
+    first_met_at: string | null;
+  }>;
+  realized: IdeaTrackingSnapshot | null;
+  first_invalidation_at: string | null;
+}
+
+export interface IdeaReviewHeadline {
+  review_id: string;
+  outcome: IdeaReviewOutcome;
+  opened_at: string;
+  closed_at: string;
+  holding_days: number;
+  expected: string;
+  lesson: string;
+  invalidation_criteria: number;
+  first_invalidation_at: string | null;
+  evidence_verdicts: Record<IdeaEvidenceVerdict, number>;
+  realized_at_close: IdeaTrackingSnapshot | null;
+}
+
+export interface IdeaClosePayload {
+  outcome: IdeaReviewOutcome;
+  lesson: string;
+  expected?: string | null;
+  realized_note?: string;
+  evidence_verdicts?: Record<string, IdeaEvidenceVerdict>;
+}
+
+export interface IdeaReviewRow {
+  idea_id: string;
+  title: string;
+  stance: IdeaStance;
+  status: IdeaStatus;
+  tags: string[];
+  outcome: IdeaReviewOutcome;
+  opened_at: string;
+  closed_at: string;
+  holding_days: number;
+  expected: string;
+  lesson: string;
+  net_return: number | null;
+  benchmark: string | null;
+  benchmark_return: number | null;
+  excess_return: number | null;
+  realized_final: boolean;
+  realized_as_of: string | null;
+  tracked: boolean;
+  invalidation_criteria: number;
+  first_invalidation_at: string | null;
+  evidence_verdicts: Record<string, number>;
+}
+
+export interface IdeaReviewStatsResponse {
+  rows: IdeaReviewRow[];
+  outcomes: Record<IdeaReviewOutcome, number>;
+  holding_days: {
+    count: number;
+    median: number | null;
+    mean: number | null;
+    min: number | null;
+    max: number | null;
+    median_by_outcome: Record<IdeaReviewOutcome, number | null>;
+  };
+  realized: {
+    count: number;
+    untracked: number;
+    median_net: number | null;
+    median_excess: number | null;
+    excess_count: number;
+    positive: number;
+    negative: number;
+    median_net_by_outcome: Record<IdeaReviewOutcome, number | null>;
+  };
+  invalidation: {
+    losses: number;
+    losses_with_invalidation_criteria: number;
+    losses_with_trigger_before_close: number;
+    share_of_losses: number | null;
+    share_of_losses_with_criteria: number | null;
+  };
+  label: string;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+// ── Ideas: test and risk snapshots (Workstream 12, I3c) ──────────────────────
+
+interface IdeaSnapshotBase {
+  snapshot_id: string;
+  created_at: string;
+  legs: IdeaTrackedLeg[];
+  benchmark: string;
+  lookback_days: number;
+  window_start: string | null;
+  window_end: string | null;
+  observations: number;
+  source: "idea_legs";
+  source_ids: Record<string, string>;
+  provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null } | null;
+  warnings: string[];
+  /** Why the snapshot no longer describes the idea (legs changed, or run days ago), or null. */
+  stale_reason: string | null;
+}
+
+export interface IdeaTestSnapshot extends IdeaSnapshotBase {
+  metrics: Record<string, number | null>;
+  leg_contributions: Record<string, number | null>;
+  equity_curve: Array<[string, number]>;
+  benchmark_curve: Array<[string, number]>;
+  costs_included: boolean;
+  sample: "in_sample";
+}
+
+export interface IdeaRiskEpisode {
+  episode_id: string;
+  label: string;
+  start: string;
+  end: string;
+  status: "full" | "partial" | "unavailable";
+  book_return: number | null;
+  benchmark_return: number | null;
+  max_drawdown: number | null;
+  /** Share of gross exposure with history in the episode (a partial replay treats the rest as flat). */
+  coverage?: number | null;
+}
+
+export interface IdeaRiskSnapshot extends IdeaSnapshotBase {
+  alpha: number;
+  horizon_days: number;
+  metrics: Record<string, number | null>;
+  episodes: IdeaRiskEpisode[];
+  worst_episode_id: string | null;
 }

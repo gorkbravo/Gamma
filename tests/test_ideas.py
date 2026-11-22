@@ -265,7 +265,17 @@ def test_service_journals_every_change_and_runs_the_i1_lifecycle(tmp_path):
     restored = service.restore(idea.idea_id)
     assert restored.status == "active", "restore returns to the status the idea had when archived"
     kinds = [entry.kind for entry in restored.journal]
-    assert kinds == ["created", "edited", "status_changed", "status_changed", "status_changed"]
+    # I3a: activar, archivar y restaurar una idea con patas abre o cierra un segmento de seguimiento.
+    assert kinds == [
+        "created",
+        "edited",
+        "status_changed",
+        "tracking_segment",
+        "status_changed",
+        "tracking_segment",
+        "status_changed",
+        "tracking_segment",
+    ]
 
 
 def test_pin_and_unpin_keep_the_record_in_the_journal(tmp_path):
@@ -449,7 +459,7 @@ def test_markdown_export_keeps_provenance_and_reopen_target(tmp_path):
     assert "## Export provenance" in markdown and "not advice" in markdown
 
     exported = service.export_json(idea.idea_id)
-    assert exported["format"] == "gamma.idea" and exported["format_version"] == 2
+    assert exported["format"] == "gamma.idea" and exported["format_version"] == 3
     assert Idea.from_dict(exported["idea"]).to_dict() == service.get_idea(idea.idea_id).to_dict()
 
 

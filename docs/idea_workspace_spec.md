@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)). I3-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking), I3b (close and review), I3c (test and risk snapshots) and I3d (the TWS intraday layer) are done on stacked branches `claude/laughing-gauss-4b5d02`, `claude/ideas-i3b-close-review`, `claude/ideas-i3c-test-risk` and `claude/ideas-i3d-intraday-579806`. None is merged; all await review (see the [I3a](#i3a-implementation-notes), [I3b](#i3b-implementation-notes), [I3c](#i3c-implementation-notes) and [I3d](#i3d-implementation-notes) notes, and the [live check](#live-check-2026-11-21)). I4-I6 are not started.
 
 ## Goal
 
@@ -118,17 +118,40 @@ The registry orders observables for the reference retail user: the ones that nee
 | `trial_count` | Number of Script runs and sweep points attached to this idea before the current signal. It is shown next to every performance statistic |
 | `cost_model` | Explicit cost and slippage assumptions per leg, from the per-asset-class defaults below; always shown, editable, never zero by default |
 
-**Default cost model (decision 5):** costs are per side, set by asset class, and shown wherever a return appears. The values below are **starting assumptions**, not measured figures. They should be checked against current broker and venue fee schedules before I3 ships.
+**Default cost model (decision 5):** costs are per side, set by asset class, and shown wherever a return appears. The defaults were checked on **2026-11-21** against the official broker, venue and tax pages listed below. They remain **assumptions**: a fee schedule gives the commission and the fees, but the half spread is an estimate, and every user's broker differs. Two starting values were raised after the check: other equities from 10 to 15 bp, and spot crypto from 25 to 50 bp.
 
-| Asset class | Default per side | Basis |
+| Asset class | Default per side | Basis (checked 2026-11-21) |
 | --- | --- | --- |
-| Liquid US equities and ETFs (index members) | 5 bp | Commission plus half a typical spread |
-| Other equities and ETFs (small caps, non-US, UCITS) | 10 bp | Wider spreads, FX and venue fees |
-| Futures | 3 bp of notional | Half a tick plus commission on liquid contracts |
-| Options | Half the quoted bid-ask at the mark | Taken from the chain; marked unavailable without a quote |
-| Spot crypto | 25 bp | Taker fee plus spread |
-| Prediction market contracts | Half the quoted spread, plus the venue fee where the venue charges one | Taken from the book |
+| Liquid US equities and ETFs (index members) | 5 bp | Commission $0 online at Schwab [2] and Fidelity [3] and at IBKR Lite; IBKR Pro Fixed $0.005 per share, $1 minimum, 1% maximum (about 1-2 bp on a typical order) [1]. SEC Section 31 fee $20.60 per million of sales since 2026-04-04 (0.21 bp, sales only) [4]. FINRA TAF $0 from 2026-10-01 to 2026-12-31 [5], otherwise $0.000195 per share sold, at most $9.79 per trade [6]. **Assumption:** half spread of 1-3 bp for index members; 5 bp is a conservative sum |
+| Other equities and ETFs (small caps, non-US, UCITS) | 15 bp | IBKR Europe 0.05% per order (5 bp) with a EUR 3 minimum (Fixed) [1]. **Assumption:** half spread of about 10 bp for small caps, non-US listings and UCITS ETFs. **Not included:** buy-side taxes, which a user can add by raising the class cost: UK stamp duty or SDRT 0.5% [7], French TTF 0.4% since 2025-04-01 [8], Spanish ITF 0.2% on companies above EUR 1,000 M [9], Italian FTT 0.4% (0.2% on regulated markets and MTFs) [10] |
+| Futures | 3 bp of notional | IBKR $0.85 per E-mini contract; its ES example totals $2.24 with exchange and regulatory fees, Micro E-mini $0.25 plus fees [11]. ES is $50 × the index with a 0.25-point tick worth $12.50 [12]. **Assumption:** at an index level near 6,000 that is about 0.3 bp per side for ES; 3 bp is kept to cover less liquid contracts. Not priced in I3a |
+| Options | Half the quoted bid-ask at the mark | Taken from the chain; marked unavailable without a quote. Commission at IBKR Pro $0.65 per contract (premium of $0.10 or more), $1 minimum per order [13]; $0.65 at Schwab and Fidelity [2][3]. Not priced in I3a |
+| Spot crypto | 50 bp | Entry-tier taker fees: Coinbase Advanced 0.50% in the EU and UK and 0.90% in the US [14]; Kraken Pro 0.80% [15]; Binance 0.10%, not available to US residents [16]. **Assumption:** market orders at an EU/UK entry tier; a US or Kraken user pays more and a Binance user less |
+| Prediction market contracts | Half the quoted spread, plus the venue fee where the venue charges one | Taken from the book. Polymarket charges takers C × rate × p × (1 − p) with a rate of 0.05 or 0.01 by category, makers nothing, geopolitics exempt [17]. **Kalshi not verified:** its fee schedule page refused connections; its help page confirms maker fees on some markets but not the formula [18]. Not priced in I3a |
 | Macro series and other non-tradable observables | None | They are criteria, not legs |
+
+Sources, all read on 2026-11-21:
+
+1. IBKR stock commissions: <https://www.interactivebrokers.com/en/pricing/commissions-stocks.php>
+2. Charles Schwab pricing: <https://www.schwab.com/pricing>
+3. Fidelity commissions: <https://www.fidelity.com/trading/commissions-margin-rates>
+4. SEC Fee Rate Advisory 2026-2 (issued 2026-02-27): <https://www.sec.gov/rules-regulations/fee-rate-advisories/2026-2>
+5. FINRA billing FAQ (TAF suspension): <https://www.finra.org/rules-guidance/guidance/faqs/finra-billingcollections>
+6. FINRA fee adjustment schedule (SR-FINRA-2024-019): <https://www.finra.org/rules-guidance/rule-filings/sr-finra-2024-019/fee-adjustment-schedule>. FINRA's rulebook page still shows the older $0.000166 and $8.30.
+7. GOV.UK, tax when you buy shares: <https://www.gov.uk/tax-buy-shares>
+8. BOFiP, French TTF at 0.4% (ACTU-2025-00034): <https://bofip.impots.gouv.fr/bofip/14605-PGP.html/ACTU-2025-00034>
+9. BOE, Ley 5/2020 (Impuesto sobre las Transacciones Financieras), art. 7: <https://www.boe.es/buscar/act.php?id=BOE-A-2020-12356>
+10. Agenzia delle Entrate, imposta sulle transazioni finanziarie: <https://www.agenziaentrate.gov.it/portale/schede/pagamenti/imposta-sulle-transazioni-finanziarie/infogen-imposta-transazioni-finanziarie>
+11. IBKR futures commissions: <https://www.interactivebrokers.com/en/pricing/commissions-futures.php>
+12. CME Group, E-mini S&P 500 contract specs: <https://www.cmegroup.com/markets/equities/sp/e-mini-sandp500.contractSpecs.html>
+13. IBKR options commissions: <https://www.interactivebrokers.com/en/pricing/commissions-options.php>
+14. Coinbase Advanced fee tiers: <https://www.coinbase.com/advanced-vip> and the 2026-09-16 announcement <https://www.coinbase.com/blog/were-lowering-fees-for-many-active-traders-on-coinbase-advanced> (the signed-in fee page was not read)
+15. Kraken Pro fees: <https://www.kraken.com/pro/fees>
+16. Binance fee schedule: <https://www.binance.com/en/fee/schedule>
+17. Polymarket trading fees: <https://docs.polymarket.com/trading/fees>
+18. Kalshi help, fees: <https://help.kalshi.com/trading/fees> (the fee schedule at kalshi.com could not be read)
+
+Fee schedules change; check these pages again before relying on a default. The figures are for research costs on a hypothetical book, not advice.
 
 ### `IdeaTest` and `IdeaRisk`
 
@@ -286,7 +309,11 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 | --- | --- | --- |
 | I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done, merged 2026-11-21** (see [I1 implementation notes](#i1-implementation-notes)) |
 | I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done, merged 2026-11-21** (see [I2 implementation notes](#i2-implementation-notes)) |
-| I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review |
+| I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review. Split on 2026-11-21 into the four slices below |
+| I3a: forward tracking | `IdeaTracking` with segments, the canonical daily series, the per-asset-class cost model, `GET`/`PATCH /ideas/{id}/tracking`, the tracking chart in the Idea view, the Board column | A legs idea tracks for five trading days with no backfill and no TWS; an edit opens a new segment; gaps stay gaps; costs are applied and shown. **Status: done on branch `claude/laughing-gauss-4b5d02`, not merged** (see [I3a implementation notes](#i3a-implementation-notes)) |
+| I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date. **Status: done on branch `claude/ideas-i3b-close-review` (stacked on I3a), not merged** (see [I3b implementation notes](#i3b-implementation-notes)) |
+| I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale. **Status: done on branch `claude/ideas-i3c-test-risk` (stacked on I3b), not merged** (see [I3c implementation notes](#i3c-implementation-notes)) |
+| I3d: TWS intraday layer | IBKR marks for the legs while TWS is connected | With TWS, the intraday layer records and shows its gaps without changing the daily series. **Status: done on branch `claude/ideas-i3d-intraday-579806` (stacked on I3c), not merged; checked live against TWS over a weekend, weekday re-check pending** (see [I3d implementation notes](#i3d-implementation-notes) and [Live check](#live-check-2026-11-21)) |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
 | I5: Copilot | Ideas context builder, draft, review and explain tools | Copilot plan updated with a dated OpenAI guidance review; draft-from-card needs user acceptance; no execution authority |
@@ -365,6 +392,265 @@ A backend and a frontend code review of I1+I2 found these defects. They were fix
 - **Equity Research pins** store the lookback and benchmark of the run that produced the figures (`researchResultBasis`), in the title, the captured metrics and the reopen ids, and reopening runs exactly that analysis. Older pins reopen as before. The scope form now follows external draft changes, so after any handoff it shows the ticker, benchmark and lookback of the analysis on screen.
 - Still open, small: a "What is this?" button sits inside a `<label>` in the criteria form, and the legs editor table is not inside a `.table-scroll` wrapper at 390 px.
 
+### I3a implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/laughing-gauss-4b5d02`, cut from local `main` at b5b7ccd; not merged and not pushed.
+
+- **Model (schema v3):** `IdeaTracking` in `src/models/ideas.py` holds the benchmark (SPY by default), the `IdeaCostModel`, the segments and the last computed `IdeaTrackingSnapshot`. A segment freezes its legs as `IdeaTrackedLeg` records: the stated weight, the signed share of gross exposure (absolute shares add up to 1), where the weight came from, the detected asset class and the market. Segments only grow, and only the last one can be open.
+- **Weights:** with no stated weights, a `long` or `short` idea is an equal-weight book with that sign. A relative, event or neutral idea needs a signed weight on every leg, and a mix of stated and missing weights is refused rather than guessed. Such a segment, or one with a leg type this slice cannot price (commodity, prediction contract, FX, rates, macro), still opens with its `untracked_reason`. The period stays visible as a state.
+- **Segments:**
+  - Activation opens segment 1; restoring an archived idea opens a new one (reason `restored`).
+  - A leg edit that changes the book closes the open segment and opens the next one. That covers a new instrument, a different share of gross, or a stance change that alters a default weight. Renaming a leg or scaling all weights (1/−1 to 2/−2) keeps the segment.
+  - Archiving or removing every leg closes the segment.
+  - Every change writes a `tracking_segment` journal entry that starts with "Hypothetical, not executed".
+- **Entry and exit:**
+  - A segment's book enters at the first session where every leg has a close *after* the freeze instant, and exits at the first such close after its end. Consecutive segments chain at the same close.
+  - Each listing's close is placed at its exchange's closing time (`TRACKING_EXCHANGES`, at or before the official close). An unknown exchange suffix is taken to close at the start of its UTC day, so a close known before the freeze is never used.
+  - A segment edited again before its first close is `never_entered` and holds nothing.
+  - Nothing before a freeze is ever added.
+- **Canonical daily series** (`src/application/idea_tracking.py`):
+  - It is rebuilt on every read from provider closes. Equities and ETFs come from research market data, the read path of Strategy Lab and the `equity_close` observable (Yahoo Finance, then IBKR when configured; demo sample history in mock mode). Crypto comes from CoinGecko daily closes stamped at 00:00 UTC; the current-price point is not a close and is dropped.
+  - A session counts only once its close is final (20 minutes after the close; crypto at the next UTC midnight).
+  - The book buys fixed quantities at the entry close. Gross return is Σ share × (price / entry price − 1), in each instrument's own currency (no FX conversion in this slice).
+  - Net return subtracts the per-side cost of entering and of closing at the latest close (mark to liquidation).
+  - Benchmark, excess return and maximum drawdown (on the net path) are computed on the same sessions. Segments chain into one record "since activation".
+- **Gaps stay gaps:**
+  - Each market's calendar is the set of sessions on which any leg of that market, or a benchmark on the same market, has a close. Crypto trades every day.
+  - A session in a leg's calendar without that leg's close is a gap: no value, a warning naming the leg and the date, and a break in the chart line. Later sessions are valued from the entry prices, so nothing is interpolated.
+  - A market that was closed while another leg's market traded (an equity on a weekend in a crypto book) keeps its last close; that is not a gap.
+  - **Limitation:** without an exchange holiday calendar, a day that every source misses cannot be told from a holiday and is not shown as a gap.
+- **Costs:**
+  - Per side, by asset class (table above), never zero by default. The four stated-cost classes are editable from 0 to 500 bp, and a tracked leg can be moved to another stated-cost class. Options and prediction contracts take their cost from a live quote, which daily tracking does not read.
+  - The gross record never depends on the costs. A change is journaled (`tracking_settings`), recomputes the net figures and drops the stored Board headline, so a figure computed with other assumptions is never shown.
+- **Board headline:** rebuilding the series stores the snapshot on the idea without touching `updated_at`. The scheduler does it at start-up and after each daily close, together with the criteria passes; `GAMMA_IDEAS_EVALUATION=off` turns off both. The index (schema v3) serves it, and the Board's "Since activation (hyp.)" column shows the net return with its as-of session, gaps and "stopped" or "partial". It reads "Not tracked" or "Not computed" when there is no figure.
+- **Migration v2 → v3:** an active idea with legs gets one open segment, frozen at the later of its last activation or restore and its last leg edit (both read from the journal), with start reason `migrated`. Its legs have not changed since that instant, so nothing earlier is added. Earlier active periods are not reconstructed, because version 2 journals describe old legs only as text. Drafts and archived ideas get none.
+- **API and exports:**
+  - `GET /ideas/{id}/tracking` returns the rebuilt series: status, summary, segments with their legs and costs, points with gaps, cost classes with their basis, warnings and per-source provenance. `PATCH /ideas/{id}/tracking` changes the costs, leg classes or benchmark and returns the recomputed record.
+  - The idea and the Board rows carry the tracking record and headline.
+  - JSON export (format v3) adds `tracking_label` and the rebuilt `tracking_series`. Markdown adds "Tracking — Hypothetical, not executed" with the summary, the segments, the cost assumptions and the method.
+- **UI:**
+  - `IdeaTrackingPanel.svelte` sits after the criteria in the Idea view. Its title row has the label tag "Hypothetical, not executed", the session count and as-of date, and the shared provenance badge, whose tooltip holds the method.
+  - The panel shows net, gross, costs (with the per-side range), the benchmark, excess and maximum drawdown. Below them: a 220 px chart of the net record against the benchmark with S1, S2 … markers at segment entries, the segments table with the reason each one opened, an inline cost editor and the warnings.
+  - `TimeSeriesChart` gained opt-in `breakOnGaps`, `valueFormat: "percent"` and `markers`. lightweight-charts draws across whitespace points, so with `breakOnGaps` each continuous run is its own series and the gap keeps its slot on the axis.
+  - Two "What is this?" entries were added: `stat.forward_return` and `stat.tracking_costs`.
+- **Tests:**
+  - `tests/test_idea_tracking.py` (19, injected clock and prices, no network, no TWS) covers five trading days with no backfill, activation after the close, waiting for the first close, a leg edit opening segment 2 and chaining, renames and scaled weights, never-entered segments, archive and restore, gaps that stay gaps, closed markets that are not gaps, crypto with equities over a weekend, costs and their edits, asset classes, untrackable legs and weights, provider failures, close instants and DST, CoinGecko closes, the v2 → v3 migration, and the routes against the demo runtime.
+  - Frontend: `idea-tracking.test.ts`, `IdeaTrackingPanel.test.ts`, the Board column in `IdeasView.test.ts`, and the gap helpers in `chart-data.test.ts`.
+  - Full suites on 2026-11-21: backend 1275 passed, 5 skipped (`GAMMA_IDEAS_EVALUATION=off`); frontend 712 passed; `tsc` clean; production build OK.
+- **Browser check, 2026-11-21:**
+  - Mock backend with its `data/`, `cache/` and a copy of the sample data in the worktree. One MSFT close (2026-01-21) was removed to show a real gap. Ideas were seeded with an injected clock in January 2026, the range the demo sample covers.
+  - Headless Playwright in the light and dark themes at 1440, 1000 and 390 px: no console errors and no horizontal page overflow. The table scrolls inside its box at 390 px.
+  - What was seen: the pair idea's two segments with their markers, the gap as a break in both lines, the SPY idea entering the session after an after-close activation, the migrated v2 idea, and the commodity idea as "Not tracked" with its reason.
+  - A cost edit from the UI moved the net from −1.58% to −1.78%, left the gross at −1.38%, and wrote the journal entry.
+- **Left for later slices:** close, review and Review mode (I3b); test and risk snapshots (I3c); the TWS intraday layer (I3d). Also deferred: pricing commodity, futures, option and prediction legs; FX conversion of non-USD legs; exchange holiday calendars, so a day every source misses becomes a gap; borrow costs for shorts.
+
+### I3b implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3b-close-review`, cut from the I3a branch at 1e1118e; not merged and not pushed.
+
+- **Model (schema v4):** `Idea.reviews` holds `IdeaReview` records. Each review keeps:
+  - the `outcome` (`confirmed`, `invalidated`, `abandoned`, `expired`), the `lesson` (required), `expected` (the thesis when left blank) and an optional `realized_note`;
+  - when its episode opened (the activation, or the reopen after an earlier close) and when it closed;
+  - a verdict per pin (`held`, `failed`, `unclear`) with the pin's title and stance frozen;
+  - every criterion's state at close, with its trigger time;
+  - `realized`, the hypothetical tracking headline as it stood when the idea was closed.
+
+  The model refuses a closed idea without the review of its close. The store refuses any write that edits or drops an earlier review, as it does for the journal. Version 3 files migrate on load with no reviews; no version 3 idea can be closed.
+- **Lifecycle:**
+  - `POST /ideas/{id}/close` closes an active idea and requires the review. It journals the outcome and the lesson, and closes the tracking segment with end reason `closed`. Tracking stops at the close date: the book exits at the first close after the close instant, and nothing later is added.
+  - `POST /ideas/{id}/reopen` returns a closed idea to active. It keeps the review and opens a new tracking segment (start reason `reopened`).
+  - A closed idea can be archived, and restoring it returns it closed.
+- **Realized:** the route rebuilds the series just before closing and freezes that headline into the review; its exit close may still be pending. The tracking snapshot gained `final`, set once no segment is open or waiting for its exit close. The scheduler keeps rebuilding closed and archived ideas until their record is final, so the Review mode shows the final figure once the exit close is priced, and "exit pending" with its as-of date before that.
+- **Review mode** (`GET /ideas/review`, the Ideas tab's third mode):
+  - It lists the review of each idea's current close: closed ideas, and archived ones that were closed. An idea that was reopened drops out until it is closed again; its earlier review stays on the idea.
+  - It shows the outcome mix, holding time (median, range, by outcome), the median net hypothetical return and the median excess return over the benchmark (each with its sample size), and the closed ideas with their expectation, realized return, invalidation and lesson.
+  - "Invalidation before a loss" counts the losing ideas whose invalidation criterion fired before the close, against all losses and against the losses that had an invalidation rule.
+  - It describes the user's own record only, with no score.
+- **UI:**
+  - The Idea view has Close (active) and Reopen (closed); a closed idea can also be archived.
+  - `IdeaCloseForm.svelte` asks for the outcome, the expectation (prefilled with the thesis), the hypothetical record so far, what happened, a verdict per pin and the lesson. The submit button stays disabled until there is an outcome and a lesson.
+  - `IdeaReviewSection.svelte` shows the current review, the record at close beside the record now (final or exit pending), the pin verdicts, the triggered criteria and the earlier closes.
+  - `IdeaReviewMode.svelte` is the Review mode. The Board gained a "Closed" filter.
+  - Three "What is this?" entries: `review.outcome`, `stat.holding_time`, `stat.invalidation_before_loss`. Exports carry the reviews: in the JSON idea, and a "Reviews" section in Markdown.
+- **Tests:**
+  - `tests/test_idea_review.py` (10, injected clock and prices) covers: close requires a review and an active idea; the frozen review and realized record; tracking stops at the exit close; reopen keeps the review and opens a segment; reviews cannot be rewritten; archive and restore of a closed idea; the statistics; refreshing until final; the v3 → v4 migration; the routes against the demo runtime.
+  - Frontend: `idea-review.test.ts`, `IdeaReviewSection.test.ts` (section, close form, Review mode), the Idea and Review modes in `IdeasView.test.ts`, and the mode registry in `navigation.test.ts`.
+  - Full suites on 2026-11-21: backend 1285 passed, 5 skipped; frontend 722 passed; `tsc` clean.
+- **Browser check, 2026-11-21:**
+  - Same worktree-only mock fixture as I3a, plus closed ideas: a confirmed one with pin verdicts, an invalidated one whose invalidation fired before the loss, one archived after an abandoned close, and one reopened after an expired close.
+  - Light and dark at 1440, 1000 and 390 px: no console errors and no horizontal page overflow.
+  - From the UI: the Close button stayed disabled until the outcome and lesson were filled in. The idea closed and its tracking showed "Stopped". Review listed it. Reopen returned it to active with the earlier review shown.
+- **Left for later:** Copilot's `review_idea` (I5); counting every close of a reopened idea, not just the current one, in the statistics; per-episode returns for a reopened idea (the record since activation chains every segment).
+
+### I3c implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3c-test-risk`, cut from the I3b branch at 6da1839; not merged and not pushed.
+
+- **Model (schema v5):** `Idea.tests` holds `IdeaTestSnapshot` records and `Idea.risks` holds `IdeaRiskSnapshot` records; they are the spec's `IdeaTest` and `IdeaRisk`.
+  - Each snapshot keeps the legs and signed shares of gross exposure it ran on (the same frozen legs as tracking), the benchmark, the lookback, the window and observation count, the source ids (the composition and its origin), the provenance and the data warnings. Strategy Lab's generic disclaimers are left out of the warnings.
+  - Version 4 files migrate on load with none. An idea keeps the last 20 of each, and the journal keeps every run (`test_refreshed`, `risk_refreshed`).
+- **Recomputed only when asked:**
+  - `POST /ideas/{id}/test` composes the idea's legs in Strategy Lab (`ResearchService.compose_strategy_lab_portfolio`, 756-session lookback, the idea's benchmark). It keeps total and annual return, volatility, Sharpe, Sortino, maximum drawdown, the benchmark's return and the excess, beta and correlation, per-leg contributions, and the equity and benchmark curves, each at most 260 points.
+  - A backtest is labelled in-sample with no costs (`sample = in_sample`, `costs_included = false`) wherever its figures appear. Out-of-sample splits and trial counts arrive with I4.
+  - `POST /ideas/{id}/risk` runs the Risk service on that research book (`source_scope = research_book`, 252 sessions, 95%, one day, no Monte Carlo). It keeps historical and parametric VaR and expected shortfall as shares of the book (shown as losses), volatility, beta, correlation and drawdown. It also replays the same signed weights through the documented stress episodes, keeping each episode's status, and names the worst priced one.
+  - Equity and ETF legs resolve through research market data. Crypto legs reach Strategy Lab as inline CoinGecko daily closes. Legs this slice cannot price, missing weights, an unknown symbol, or an idea that is not a draft or active answer 422 with the reason.
+- **Stale snapshots:** a snapshot is stale when the idea's legs or shares of gross changed after the run (scaling every weight keeps it fresh) or when it is 7 days old or more. The API serves `stale_reason`, and the UI tags it "Stale" beside the run date.
+- **UI:** `IdeaAnalysisPanel.svelte` ("Test and risk") sits between the criteria and the tracking panel, as the spec orders the Idea view.
+  - It has "Run test" and "Run risk" buttons for draft and active ideas with legs, and the latest backtest with its "No costs" and "In-sample only" tags, run date, window, legs, metrics and a 160 px curve against the benchmark.
+  - Below that: the latest risk run, with VaR, ES, volatility, beta, the worst replayed episode and the priced episodes table.
+  - Each part carries the shared provenance badge.
+  - Exports carry the snapshots: in the JSON idea, and a "Test and risk snapshots" section in Markdown.
+- **Tests:**
+  - `tests/test_idea_analysis.py` (8) covers: the backtest and risk snapshots on the demo runtime (window, metrics, curves, provenance, no boilerplate, journal, VaR written as a loss, episodes and the worst one, exports); staleness after a leg edit; refusals for legless, unpriceable and unknown legs; crypto legs as inline closes (with a fake Strategy Lab); the 20-snapshot cap with the journal kept; staleness by age and by rescaled weights; archived ideas refused; record validation and round trip; the v4 → v5 migration.
+  - Frontend: `IdeaAnalysisPanel.test.ts` (helpers, labels, losses, worst episode, stale and empty states).
+  - Full suites on 2026-11-21: backend 1293 passed, 5 skipped; frontend 726 passed; `tsc` clean.
+- **Browser check, 2026-11-21:** same worktree-only mock fixture (its v4 idea files migrated to v5 on start).
+  - From the UI at 1440 px in the light theme, the panel started empty. "Run test" and "Run risk" filled it, and the journal recorded both runs.
+  - Light and dark at 1440, 1000 and 390 px: labels shown, no horizontal page overflow, and no console errors once the backend was up.
+  - On the demo sample, the backtest covers 2024-12-24 to 2026-01-27. Only the 2025 tariff episode falls inside the sample; the older ones are unavailable and stay out of the table.
+- **Left for later:** "Attach to idea" from Strategy Lab and Risk results (the snapshots here run from the idea itself); out-of-sample validation and trial counts (I4); costs inside the backtest; Monte Carlo for signed books.
+
+### Stack review, 2026-11-21
+
+A code review of the I3a-I3c stack found nine defects. They were fixed in one commit on top of `claude/ideas-i3c-test-risk`, so merging the whole stack includes them; merging I3a or I3b alone does not. Each fix has a regression test in `tests/test_idea_tracking.py` or `tests/test_idea_analysis.py`, or a frontend unit test, and the frontend ones were checked in the mock browser.
+
+- **(I3a)** A version 2 file whose migration fails, for example an active idea with an out-of-range leg weight, now goes to quarantine. Before, it stopped the store, and so the backend, from starting.
+- **(I3a)** A headline computed while the record changed is dropped. The tracking signature (segments and their ends, benchmark, costs) is checked before the snapshot is written, so a slow rebuild no longer overwrites the Board figure of a book edited meanwhile.
+- **(I3a)** Consecutive segments never hold two books at once. A segment enters no earlier than the close where the previous one exits, and waits, with that reason, while the previous one cannot exit yet. Before, a removed leg with a missing close could make both segments count the same sessions.
+- **(I3a)** A provider that stops answering is named. When a leg of an open, waiting or exiting segment has no close for more than three of its market's sessions, the record gains `stale_since` with a warning and the reason. The Board shows "provider stopped", and the panel shows "no close since …". The record still stops there and is never filled in.
+- **(I3a, pre-existing pattern)** A store update whose mutation changes nothing no longer rewrites the item file and the index, so reading a tracking record no longer writes to disk when nothing changed.
+- **(I3a)** Editing anything other than the legs of an active idea never opens a tracking segment. Before, a migrated idea without a segment got one labelled "Legs added" on a title edit.
+- **(I3b)** Review mode requests its statistics once when it opens; it requested them twice.
+- **(I3b)** The close form says "Loading…", "Tracking unavailable" or "Not computed yet" according to the tracking state, and falls back to the last stored headline with its date. Before, it could show "Loading…" forever.
+- **(I3c)** A failing source during "Run test" or "Run risk" (Strategy Lab, Risk, CoinGecko) answers 502 with the reason instead of a bare 500.
+
+### I3d implementation notes
+
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3d-intraday-579806`, cut from the I3c branch at f5f2c44 (with the stack review fixes); not merged and not pushed.
+
+- **What the layer is for:** today's hypothetical P&L, the intraday drawdown and intraday criterion triggers, while Trader Workstation is connected and Gamma runs. It never replaces or rewrites the canonical daily series. `compute_tracking` reads provider closes only. The daily series (points, segments, figures and Board headline) is identical with and without marks, and a test checks it.
+- **Recording** (`src/application/idea_intraday.py`, `IdeaIntradayService`):
+  - The evaluation scheduler records marks before its intraday criteria pass, and once at start-up. `GAMMA_IDEAS_EVALUATION=off` turns it off with the rest.
+  - The legs marked are those of every active idea's open, trackable segment. The cadence is every 5 minutes while any leg's market is in its regular session (crypto always; US 09:30-16:00 New York time on weekdays).
+  - A leg whose market is closed is asked once an hour, and its frozen mark is reused in between. An idea whose markets are all closed gains one row an hour.
+  - Connecting or disconnecting TWS, or a change of tracked books, makes a pass due at once.
+  - Demo mode records nothing. Before TWS has connected once in a run, nothing is written either: there is no layer to interrupt yet.
+- **IBKR reads** (`src/services/ibkr_marks.py`, `IbkrMarkReader`): market-data snapshots only, through the runtime's IBKR client: no orders and no account or position requests from the layer. The TWS connection itself is Gamma's existing one, opened read-only.
+  - Each distinct instrument is asked once per pass, even when several ideas share it, and at most 24 instruments per pass.
+  - Batches hold 8 contracts, or 4 while the Options surface streams, which stays inside the 10 lines its engine keeps in reserve. The stream is never started, stopped or reconfigured.
+  - Each batch is one task on the shared IB thread. It sets the market-data type, requests, waits, falls back and restores the session default (live for `auto` or `live`, delayed for `delayed`), so a type cannot leak into another service's request. An open market asks live, then delayed; a closed one asks frozen, then delayed-frozen.
+  - US listings map to SMART stock contracts. CoinGecko `bitcoin`, `ethereum`, `litecoin` and `bitcoin-cash` map to IBKR crypto on PAXOS, which has no snapshots: it is streamed for up to 2.5 times the snapshot wait (5 s) and cancelled. Other listings and leg types are named as unmarked.
+  - When TWS refuses a contract for lack of data (errors 200, 354, 10089, 10168, 10186 on every type tried), the leg carries TWS's message, and the contract is not asked again for an hour.
+  - Each pass is recorded in the provider usage ledger (`ideas.intraday_marks`).
+- **Labels:** each mark keeps the data type TWS served and the field it came from (last trade, or the bid-ask mid). It is `live` only when TWS served live data and the market was in session.
+  - Delayed data or a delayed field is `delayed`.
+  - Frozen data or a closed market is `frozen`.
+  - Both together are `delayed_frozen`.
+  - The quality of a point is the oldest of its legs.
+  - TWS's `close` tick is never a mark. Over a weekend it is the close of the session before the latest one, which was checked live: on Sunday the delayed `close` was Thursday's. A ticker with nothing else gives no mark, with that reason. A leg whose market is closed then carries its canonical last close.
+- **Storage** (`src/services/idea_intraday_store.py`): `data/ideas/intraday/<idea_id>/<UTC day>.json`. Each file holds `mark` rows (price, field, data type and quality per leg, the legs without a mark and why, the segment, the run id and the promised cadence) and `status` rows.
+  - A status row is a stretch where Gamma ran but could not mark, because TWS was disconnected or IBKR did not answer. Each stretch is one row, extended while it lasts.
+  - Bounds: at most 400 rows per file (a 5-minute cadence writes about 290 a day) and the 10 newest days per idea. Writes are atomic; an unreadable file is moved aside.
+- **Valuation** (`compute_intraday`, pure):
+  - A mark values its segment's book against the entry prices of the canonical series, with the same per-side costs and mark to liquidation, chained to the earlier segments as the daily record is.
+  - Today's return is measured from the latest daily close before the mark's UTC day.
+  - The intraday drawdown is the deepest fall from the session's running peak, which starts at that close.
+  - The canonical closes are dividend-adjusted and the marks are not. Valuing against the entry price keeps a total return, consistent with the daily series.
+- **Absence:**
+  - A leg with no mark while its market is open makes the point a gap, with no value. A leg whose market is closed carries its last close, labelled.
+  - A mark before the segment's first close has no P&L: the book enters at that close.
+  - The gaps list is explicit. A stretch between two marks longer than 2.5 times the promised cadence is a gap. So are the stretch from the regular open (or the segment's start) to the first mark, and from the last mark to now or to the close.
+  - A gap is split at the status stretches inside it: "TWS disconnected" or "IBKR did not answer" for the time Gamma saw, and "Gamma not running" (the run id changed) or "not recorded" for the rest.
+  - Nothing is interpolated: the chart line breaks at every gap.
+- **Criteria:**
+  - `equity_close` and `crypto_price` are now intraday-capable. With `intraday` cadence and TWS connected, the reading appends the latest recorded mark of a tracked leg (live or delayed only, at most 12.5 minutes old) as one more observation at its instant, with IBKR provenance.
+  - That observation counts only if it was taken after the rule was armed (the instant rule; `ObservableReading.intraday_from`).
+  - Frozen marks never trigger. Without a fresh mark the rule is evaluated at the daily close and says why.
+  - Criteria never ask IBKR for a quote of their own.
+- **API:**
+  - `GET /ideas/{id}/tracking` (and `PATCH`) keeps the daily series and adds `intraday`: the latest session's view.
+  - `GET /ideas/{id}/tracking/intraday?session=YYYY-MM-DD` serves one stored session without persisting anything.
+  - The view holds the status (`recording`, `idle`, `no_marks`, `demo`, `not_tracked`), the reference close, the summary (today, since activation live, intraday drawdown, quality, marks, gaps), the points, the gaps, the latest marks per leg, the warnings and the provenance, all labelled "Hypothetical, not executed".
+- **UI** (`IdeaIntradayStrip.svelte` in `IdeaTrackingPanel.svelte`, below the daily chart):
+  - The head holds "Intraday", the "Hypothetical, not executed" tag, the quality tag (Live in the accent; Delayed or Frozen as a warning), "Recording" or "TWS disconnected", "as of HH:MM UTC · marks · gaps", a session picker when several days are stored, and the shared provenance badge.
+  - Below: the Today, Since activation live and Intraday drawdown stats; a 120 px chart of today's return with the line broken at gaps; the gaps table (UTC period, length, why); and the latest IBKR mark per leg (mark, source, prior close, move).
+  - The strip rereads its session every minute while it records today and the window is visible; otherwise its figures do not move.
+  - Empty states keep the same place and say what is missing.
+- **Tests:**
+  - `tests/test_idea_intraday.py` (24, fake IBKR client and injected clock, no network or TWS) covers: marks recorded while connected and valued against the daily series; the daily series unchanged; the intraday drawdown; delayed and frozen labels; the prior-session close never used as a mark; a disconnection and a restart as explicit gaps, and a gap split at the stretches Gamma saw; nothing written before the first connection; connection changes making a pass due; a missing mark as a gap and a closed market carried; hourly closed-market requests while crypto keeps five minutes; deduplication and the instrument budget; demo mode; a segment waiting for its first close; storage bounds and a corrupt file; the reader's live-to-delayed fallback, frozen requests and type restore, batches while Options streams, and TWS's no-subscription error with its one-hour wait; intraday criteria from fresh marks only and the service's fallback note; the scheduler order; and the routes.
+  - Frontend: `idea-intraday.test.ts`, `IdeaIntradayStrip.test.ts`, the intraday case in `IdeaTrackingPanel.test.ts`, and `percentAxisFormat` in `chart-data.test.ts`.
+  - Full suites on 2026-11-22: backend 1325 passed, 5 skipped (`GAMMA_IDEAS_EVALUATION=off`); frontend 740 passed; `tsc` clean; production build OK.
+- **Left for later:**
+  - IBKR contracts for non-US listings.
+  - An exchange holiday calendar: on a US holiday the marks may read live.
+  - Marking legs that are not in a tracked segment (criteria on other symbols fall back to the daily close).
+  - Keeping the old book's P&L for the rest of the day after a mid-session leg edit (the new segment's marks have no P&L until its entry close).
+  - Live P&L on the Board.
+
+### Live check, 2026-11-21
+
+Run on Saturday 2026-11-21 and Sunday 2026-11-22 against real providers and TWS, on branch `claude/ideas-i3d-intraday-579806`. US equity markets were closed on both days. A live-mode backend ran from the worktree on port 8010 with its own `data/` and `cache/` (never the main checkout's), the provider keys of the root `.env`, and IBKR client id 17 (the desktop backend was not running and was not touched). Ideas were seeded through `IdeaService` with an injected clock, so real closes from the previous two weeks were used. The worktree data was deleted afterwards.
+
+**I3a-I3c on real data (no TWS needed):**
+
+- **Equity pair** (AAPL +1 / MSFT −1, relative). Activated Friday 2026-11-06 at 22:30 UTC, after the New York close. On Thursday 2026-11-12 at 15:00 UTC, NVDA +0.5 was added.
+  - S1 entered at the Monday 11-09 close, the first close after activation; nothing earlier was used. It exited at the Thursday 11-12 close, with AAPL +50% and MSFT −50%: 4 sessions, gross +2.67%, net +2.57%, costs 0.10%, SPY +0.59%.
+  - S2 entered at that same Thursday close, with AAPL +40%, MSFT −40% and NVDA +20%. Through 11-20 it had 7 sessions: gross −3.41%, net −3.51%, SPY −8.89%.
+  - Since activation: 10 sessions (11-09 to 11-20), no gaps, net −1.03%, gross −0.83%, cost drag 0.19% (5 bp per side on four sides), SPY −8.35%, excess +7.33%, maximum drawdown −3.73%.
+- **Crypto and equity** (CoinGecko `bitcoin` and COIN, equal-weight long). Activated Wednesday 11-11 at 15:00 UTC, it entered at the 11-11 close.
+  - It has 10 sessions, including Saturday 11-14 and Sunday 11-15, with crypto closes while COIN and SPY kept their Friday closes. There were no gaps.
+  - Net −23.32%, gross −22.83%, costs 0.49% (50 bp per side on Bitcoin, 5 bp on COIN), SPY −9.21%. Bitcoin went from 73,974 to 58,818 and COIN from 136.27 to 101.97.
+  - The record is as of 11-20, because Saturday's crypto close is final only at 00:00 UTC on Sunday.
+- **Closed idea** (XOM long). Activated Monday 11-09 at 15:00 UTC; closed Wednesday 11-18 at 16:00 UTC as `invalidated`, with a lesson.
+  - The review froze the record as it stood at the close, as of 11-17: 7 sessions, net +2.05%, SPY −2.69%.
+  - The final record exited at the 11-18 close: 8 sessions, net −2.00%, SPY −2.99%, excess +0.98%, `final`.
+  - Review mode showed one invalidated idea, holding time 9.04 days, median net −2.00% and median excess +0.98% (n = 1), and one loss with no invalidation rule.
+- **Closes cross-checked against IBKR daily bars** (TRADES, unadjusted, read through TWS). The Yahoo closes matched to the cent wherever no dividend fell inside the window: COIN, NVDA, SPY, and AAPL from 11-12. Earlier AAPL, MSFT and XOM closes were lower by exactly one quarterly dividend: AAPL 350.42 against 350.69 on 11-09, XOM 163.70 against 164.73.
+  - Research market data reads Yahoo with `auto_adjust=True`. The canonical series is therefore a total return, and an entry price shown in the segments table is restated after an ex-dividend date.
+  - This was not documented; the methodology text now says it. A provider switch to IBKR's unadjusted bars in the middle of a record would show a jump the size of a dividend. That stays a known limitation.
+- **Run test on the pair** (three years). Window 2023-11-16 to 2026-11-20, 756 observations: total +42.57%, annual +12.55%, volatility 14.72%, Sharpe 0.88, maximum drawdown −17.09%, SPY +58.87%, excess −16.30%. Labelled in-sample with no costs.
+- **Run risk on the pair.** Over 252 observations: historical VaR 1.54%, expected shortfall 2.40% and parametric VaR 1.69%, as one-day losses at 95%.
+  - All eight stress episodes were priced with full coverage, including the ones the demo sample could not price: the 2007-2009 financial crisis −16.41% (SPY −55.19%), Q4 2018 −16.96%, COVID 2020 −7.79% (SPY −33.72%), the 2020 oil collapse −4.00%, the 2022 rate shock −8.98% (SPY −24.50%), the 2022 energy shock −0.80%, August 2024 −3.62% and the 2025 tariffs −12.26%.
+  - The worst was Q4 2018.
+- **Run test and risk on the crypto idea.** CoinGecko serves 365 days, so 250 observations were analysed, with the warning shown. The four episodes before 2021 were unavailable; the 2022-2025 ones were partial, with Bitcoin missing.
+  - **Defect found and fixed:** the "Worst replayed episode" figure named the 2022 rate shock at −36.07%. That is a partial replay in which Bitcoin, half the gross exposure, has no history and is treated as flat, but the figure did not say so.
+  - Now each episode stores its coverage, the share of gross with history. The worst episode is the worst fully covered one, and a partial one only when no episode is fully covered.
+  - The figure and the coverage column say "Partial · 50% of gross". Regression tests: `test_the_worst_episode_is_a_full_replay_and_a_partial_one_says_its_coverage` (backend) and the coverage case in `IdeaAnalysisPanel.test.ts`.
+- **Five trading days in wall-clock time** cannot be checked from back-dated ideas. An idea has to be activated now and read later.
+  - The worktree data is deleted after this check, so it cannot hold that idea.
+  - To run it, activate a legs idea in the desktop app with no TWS, for example SPY long or a pair, and note the instant. Then open its tracking panel after the fifth US close that follows. The first session must be the first close after the activation instant, there must be five sessions, nothing earlier, and the Board column must show the same figure.
+
+**I3d against TWS** (port 8010, IBKR client id 17, read-only connection; Saturday 21 and Sunday 22 November, US markets closed):
+
+- **Connection and first marks.** Connecting from the API made a pass due at once, and the first marks were written within a minute. On Saturday at 21:38 UTC (market-data mode `auto`), TWS served frozen data (type 2) for AAPL 344.87, MSFT 489.54 (bid-ask mid) and NVDA 130.01 (last). These are Friday's after-hours last trades, above the closes of 342.56, 484.52 and 125.53, and every mark was labelled frozen.
+  - The pair's strip read: Today +0.43% against the 11-20 close, Since activation live −0.60% (the daily record is −1.03%), intraday drawdown 0.00%.
+  - On the weekend the pair was marked once an hour. The crypto idea kept the five-minute cadence, and COIN's frozen mark was reused between hourly requests (`marked_at`).
+- **Delayed labelling.** With `IB_MARKET_DATA_MODE=delayed` on Sunday, TWS answered the closed US listings with delayed-frozen data (type 4), but only the `close` tick. That tick was Thursday's close, not Friday's: AAPL 349.21, MSFT 498.30, NVDA 145.98, COIN 108.87.
+  - **Defect found and fixed:** the first build used that tick as a frozen mark, which would have shown a false move (AAPL +1.9% against Friday). Now the `close` tick is never a mark. The leg says "IBKR served only the prior session's close", and a leg whose market is closed carries its canonical close. Regression tests: `test_best_price_never_uses_the_prior_session_close` and `test_a_ticker_with_only_the_prior_close_has_no_mark_and_says_why`.
+  - The rows that build wrote, two marks at 18:22 UTC in the test data, were discarded.
+  - A delayed BTC mark arrived once (60,648.5, labelled delayed) and not on later passes, even with a 5 s wait.
+- **IBKR crypto.** On Saturday TWS refused BTC on PAXOS with error 354 ("Requested market data is not subscribed"). The leg showed that message, the contract was not asked again for an hour, and the crypto idea's points were gaps, because Bitcoin's market was open and it had no mark.
+  - After TWS's nightly restart, on Sunday, BTC came back live (type 1): 60,616.5, then 60,664.75. The crypto strip read Today +0.63% against the 11-21 close and Since activation live −21.96% (the daily record is −22.45%).
+- **Gaps:**
+  - Stopping the backend for 13 minutes on Saturday (last mark 21:38:47, next 21:52:39 from a new run) showed "Gamma not running".
+  - Disconnecting TWS from the API on Sunday from 18:32:57 to 18:47 wrote one `disconnected` status row, extended every five minutes. Its stretch, 18:32:42-18:48:00, showed "TWS disconnected" on the crypto idea. The pair's hourly cadence on a closed market correctly showed no gap for it.
+  - Sunday's leading stretch was split into "not recorded" (00:00-18:23:51) and "IBKR did not answer" (18:23:51-18:32:42, the delayed-mode passes). **Defect found and fixed:** before the split, the whole 18-hour stretch read "IBKR did not answer". Regression test: `test_a_gap_is_split_at_the_stretches_gamma_saw`.
+  - The laptop went into standby on Saturday at about 21:57 UTC, so the Saturday file ends there with a trailing "not recorded" stretch. TWS dropped its API at its nightly restart (04:59 local, error 1100), and the backend stopped with it.
+- **The daily series did not change.** After two days of marks, disconnections and restarts, every daily point and segment of both ideas was identical to its copy saved before the first connection. The crypto idea only gained the 11-21 session from CoinGecko's final close.
+- **Browser** (headless Playwright against this backend and Vite on 5174): light and dark at 1440, 1000 and 390 px for both ideas, with no console errors and no horizontal page overflow. The tables scroll inside their box at 390 px.
+  - **Defect found and fixed (pre-existing since I3a):** `TimeSeriesChart`'s `valueFormat: "percent"` used lightweight-charts' `percent` price format. That format belongs to its percentage scale mode and does not print the value: it showed 2.468 as "2.1%" and 0.6 as "0.1%". Only whole ticks came out right, which is why the daily chart looked correct.
+  - This affected the tracking chart, the backtest curve and the intraday strip. Percent series now use a custom formatter (`percentAxisFormat`, two decimals), tested in `chart-data.test.ts`.
+  - Also from this check: isolated marks are drawn as points, and the gaps table no longer repeats the label in its reason line.
+- **Not verifiable on a weekend; re-check on a weekday session with TWS connected:**
+  - live (type 1) and delayed (type 3) marks during regular hours, and the five-minute cadence while the US market is open;
+  - the leading gap from the 09:30 New York open to the first mark;
+  - today's P&L and the intraday drawdown moving through a session, and the strip refreshing every minute;
+  - an intraday criterion on `equity_close` triggering from a live or delayed mark (frozen marks never trigger);
+  - the hand-over at the US close, from five-minute to hourly frozen marks;
+  - no conflict with a streaming Options surface, where batches are limited to 4 contracts.
+
+  To re-check, run the app with TWS connected and an active legs idea, for example the AAPL/MSFT pair, from before the open into the session. Open the idea's tracking panel and confirm the quality tag reads Live (or Delayed without a live subscription) and the marks arrive every five minutes. Then disconnect TWS for 15 minutes and reconnect: a "TWS disconnected" row should appear. The daily figures above the strip must not move.
+
 ## Non-goals
 
 - Orders, execution, broker-side alerts, paper trading through the broker, automatic deployment.
@@ -383,8 +669,8 @@ Settled by the product owner on 2026-11-14:
 | 2 | Place | A **Research tab** after Sitrep (Board, Idea, Review); "Pin to idea" works from every panel | Surfaces |
 | 3 | Notifications | **In-app only**: notification center and Sitrep "Your ideas"; Tauri desktop notifications later; no off-machine channels | Surfaces |
 | 4 | Tracking resolution | **IBKR marks while TWS is connected, daily closes otherwise**: a canonical daily series for all statistics, plus an intraday layer recorded only while TWS is connected | `IdeaTracking`, I3 |
-| 5 | Default costs | **Per asset class**, shown and editable; values are starting assumptions to check against fee schedules before I3 | `IdeaSignal`, I3 |
+| 5 | Default costs | **Per asset class**, shown and editable; values are starting assumptions to check against fee schedules before I3 (checked 2026-11-21: other equities 15 bp, spot crypto 50 bp) | `IdeaSignal`, I3 |
 | 6 | Python client | **In this repo (`clients/python/`), after I4** | Quant bridge, I4b |
 | 7 | Reference retail user | **Any broker, no TWS**: the default path needs no IBKR; IBKR observables are enhancements | Personas, observable registry, I6 |
 
-Still to settle during implementation: the exact cost values (decision 5) and the client's API shape (I4b).
+Still to settle during implementation: the client's API shape (I4b). The per-side cost values (decision 5) were checked against official fee schedules on 2026-11-21 (see the default cost model); they stay assumptions the user can edit.

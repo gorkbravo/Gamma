@@ -47,13 +47,23 @@
     ideaList,
     ideaNotifications,
     ideaObservables,
+    closeIdea,
+    ideaAnalysisBusy,
+    ideaAnalysisError,
     ideaOpenRequest,
+    ideaReviewStats,
     ideaSummaries,
+    ideaTracking,
+    ideaTrackingError,
+    ideaTrackingLoading,
     ideasError,
     ideasLoading,
     loadIdea,
     loadIdeaNotifications,
     loadIdeaObservables,
+    loadIdeaReview,
+    loadIdeaIntraday,
+    loadIdeaTracking,
     loadIdeas,
     loadMacroEventOptions,
     patchIdea,
@@ -63,6 +73,9 @@
     transitionIdea,
     unpinEvidence,
     updateCriterion,
+    updateIdeaTracking,
+    runIdeaRisk,
+    runIdeaTest,
   } from "./lib/stores/ideas";
   import type { Idea, IdeaCriterionPayload } from "./lib/api/types";
   import IdeaNotificationCenter from "./components/IdeaNotificationCenter.svelte";
@@ -399,7 +412,7 @@
   );
   let optionsMode: OptionsMode = persistedMode(restoredWorkspaceState, "iv", "overview");
   let riskMode: RiskMode = persistedMode(restoredWorkspaceState, "risk", "overview");
-  let ideasMode: "board" | "idea" = persistedMode(restoredWorkspaceState, "ideas", "board");
+  let ideasMode: "board" | "idea" | "review" = persistedMode(restoredWorkspaceState, "ideas", "board");
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -3326,6 +3339,19 @@
             onEvaluateIdea={(ideaId: string) => evaluateIdea(ideaId, "manual")}
             onPreviewObservable={previewObservable}
             onLoadEvents={() => loadMacroEventOptions("US")}
+            tracking={$ideaTracking}
+            trackingLoading={$ideaTrackingLoading}
+            trackingError={$ideaTrackingError}
+            onLoadTracking={loadIdeaTracking}
+            onLoadIntraday={loadIdeaIntraday}
+            onUpdateTracking={updateIdeaTracking}
+            reviewStats={$ideaReviewStats}
+            onLoadReview={loadIdeaReview}
+            onCloseIdea={closeIdea}
+            analysisBusy={$ideaAnalysisBusy}
+            analysisError={$ideaAnalysisError}
+            onRunTest={runIdeaTest}
+            onRunRisk={runIdeaRisk}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component
