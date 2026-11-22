@@ -1,6 +1,6 @@
 # Idea Workspace Spec
 
-> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking), I3b (close and review), I3c (test and risk snapshots) and I3d (the TWS intraday layer) are done on stacked branches `claude/laughing-gauss-4b5d02`, `claude/ideas-i3b-close-review`, `claude/ideas-i3c-test-risk` and `claude/ideas-i3d-intraday-579806`. None is merged; all await review (see the [I3a](#i3a-implementation-notes), [I3b](#i3b-implementation-notes), [I3c](#i3c-implementation-notes) and [I3d](#i3d-implementation-notes) notes, and the [live check](#live-check-2026-11-21)). I4-I6 are not started.
+> **Status: approved (2026-11-14); I1 and I2 merged into main on 2026-11-21 after a code review (see [Review before merge](#review-before-merge-2026-11-21)); I3a-I3d merged into main on 2026-11-22 (merge commit 8aafa1f).** Roadmap [Workstream 12 - Ideas](../roadmap.md#workstream-12---ideas); listed in [`docs/README.md`](./README.md). The product owner settled the seven open decisions on 2026-11-14 (see [Decisions](#decisions)) and split I3 into I3a-I3d on 2026-11-21. I3a (forward tracking), I3b (close and review), I3c (test and risk snapshots) and I3d (the TWS intraday layer) were built on stacked branches `claude/laughing-gauss-4b5d02`, `claude/ideas-i3b-close-review`, `claude/ideas-i3c-test-risk` and `claude/ideas-i3d-intraday-579806` and merged into main together on 2026-11-22 (see the [I3a](#i3a-implementation-notes), [I3b](#i3b-implementation-notes), [I3c](#i3c-implementation-notes) and [I3d](#i3d-implementation-notes) notes, and the [live check](#live-check-2026-11-21)). I4-I6 are not started.
 
 ## Goal
 
@@ -309,11 +309,11 @@ Each checkpoint lands on its own branch with tests, a browser review in both the
 | --- | --- | --- |
 | I1: core object | `Idea`, `IdeaEvidence`, `IdeaJournalEntry`, store, routes, Ideas tab (Board and Idea), Pin to idea on the panels that have a provenance badge, Sitrep promote, Markdown and JSON export | Create, pin from five different tabs, reopen each pin in its source tab on the same entity; store survives a restart and a corrupt file. **Status: I1 done, merged 2026-11-21** (see [I1 implementation notes](#i1-implementation-notes)) |
 | I2: criteria and notifications | `IdeaCriterion`, observable registry v1, evaluation on start, open and daily close, notification center, Sitrep "Your ideas", "What is this?" registry | Every observable evaluates live, or is `unavailable` with its reason when TWS or a key is missing; a trigger reaches the notification center and Sitrep. **Status: I2 done, merged 2026-11-21** (see [I2 implementation notes](#i2-implementation-notes)) |
-| I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review. Split on 2026-11-21 into the four slices below |
-| I3a: forward tracking | `IdeaTracking` with segments, the canonical daily series, the per-asset-class cost model, `GET`/`PATCH /ideas/{id}/tracking`, the tracking chart in the Idea view, the Board column | A legs idea tracks for five trading days with no backfill and no TWS; an edit opens a new segment; gaps stay gaps; costs are applied and shown. **Status: done on branch `claude/laughing-gauss-4b5d02`, not merged** (see [I3a implementation notes](#i3a-implementation-notes)) |
-| I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date. **Status: done on branch `claude/ideas-i3b-close-review` (stacked on I3a), not merged** (see [I3b implementation notes](#i3b-implementation-notes)) |
-| I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale. **Status: done on branch `claude/ideas-i3c-test-risk` (stacked on I3b), not merged** (see [I3c implementation notes](#i3c-implementation-notes)) |
-| I3d: TWS intraday layer | IBKR marks for the legs while TWS is connected | With TWS, the intraday layer records and shows its gaps without changing the daily series. **Status: done on branch `claude/ideas-i3d-intraday-579806` (stacked on I3c), not merged; checked live against TWS over a weekend, weekday re-check pending** (see [I3d implementation notes](#i3d-implementation-notes) and [Live check](#live-check-2026-11-21)) |
+| I3: test, risk, tracking | `IdeaTest`, `IdeaRisk`, `IdeaTracking` with segments, the canonical daily series and the TWS intraday layer, the per-asset-class cost model, close and review, Review mode | A legs idea tracks for five trading days with no backfill and no TWS; with TWS, the intraday layer records and shows its gaps without changing the daily series; an edit opens a new segment; close requires a review. Split on 2026-11-21 into the four slices below. **Status: done, merged 2026-11-22** |
+| I3a: forward tracking | `IdeaTracking` with segments, the canonical daily series, the per-asset-class cost model, `GET`/`PATCH /ideas/{id}/tracking`, the tracking chart in the Idea view, the Board column | A legs idea tracks for five trading days with no backfill and no TWS; an edit opens a new segment; gaps stay gaps; costs are applied and shown. **Status: done, merged 2026-11-22** (see [I3a implementation notes](#i3a-implementation-notes)) |
+| I3b: close and review | Close with `IdeaReview`, reopen as a new segment, Review mode | Close requires a review; tracking stops at the close date. **Status: done, merged 2026-11-22** (see [I3b implementation notes](#i3b-implementation-notes)) |
+| I3c: test and risk snapshots | `IdeaTest`, `IdeaRisk` | Snapshots keep their source ids, window and provenance and show their date when stale. **Status: done, merged 2026-11-22** (see [I3c implementation notes](#i3c-implementation-notes)) |
+| I3d: TWS intraday layer | IBKR marks for the legs while TWS is connected | With TWS, the intraday layer records and shows its gaps without changing the daily series. **Status: done, merged 2026-11-22; checked live against TWS over a weekend, weekday re-check pending** (see [I3d implementation notes](#i3d-implementation-notes) and [Live check](#live-check-2026-11-21)) |
 | I4: quant layer | `IdeaSignal` from Script runs and CSV import, validation snapshots, trial count, signal-driven tracking | A Script signal attaches with its out-of-sample result and trial count; tracking follows the signal's positions; costs are visible |
 | I4b: Python client | Read-only client in `clients/python/`: histories with provenance, ideas, observables, and signal import into an idea | From a notebook: read a history, attach a signal to an idea, and see it validated in Gamma exactly as a CSV import; no route the client uses can place, stage or route anything |
 | I5: Copilot | Ideas context builder, draft, review and explain tools | Copilot plan updated with a dated OpenAI guidance review; draft-from-card needs user acceptance; no execution authority |
@@ -394,7 +394,7 @@ A backend and a frontend code review of I1+I2 found these defects. They were fix
 
 ### I3a implementation notes
 
-Recorded 2026-11-21 for review. Branch `claude/laughing-gauss-4b5d02`, cut from local `main` at b5b7ccd; not merged and not pushed.
+Recorded 2026-11-21 for review. Branch `claude/laughing-gauss-4b5d02`, cut from local `main` at b5b7ccd; merged into main with the rest of I3 on 2026-11-22.
 
 - **Model (schema v3):** `IdeaTracking` in `src/models/ideas.py` holds the benchmark (SPY by default), the `IdeaCostModel`, the segments and the last computed `IdeaTrackingSnapshot`. A segment freezes its legs as `IdeaTrackedLeg` records: the stated weight, the signed share of gross exposure (absolute shares add up to 1), where the weight came from, the detected asset class and the market. Segments only grow, and only the last one can be open.
 - **Weights:** with no stated weights, a `long` or `short` idea is an equal-weight book with that sign. A relative, event or neutral idea needs a signed weight on every leg, and a mix of stated and missing weights is refused rather than guessed. Such a segment, or one with a leg type this slice cannot price (commodity, prediction contract, FX, rates, macro), still opens with its `untracked_reason`. The period stays visible as a state.
@@ -446,7 +446,7 @@ Recorded 2026-11-21 for review. Branch `claude/laughing-gauss-4b5d02`, cut from 
 
 ### I3b implementation notes
 
-Recorded 2026-11-21 for review. Branch `claude/ideas-i3b-close-review`, cut from the I3a branch at 1e1118e; not merged and not pushed.
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3b-close-review`, cut from the I3a branch at 1e1118e; merged into main with the rest of I3 on 2026-11-22.
 
 - **Model (schema v4):** `Idea.reviews` holds `IdeaReview` records. Each review keeps:
   - the `outcome` (`confirmed`, `invalidated`, `abandoned`, `expired`), the `lesson` (required), `expected` (the thesis when left blank) and an optional `realized_note`;
@@ -484,7 +484,7 @@ Recorded 2026-11-21 for review. Branch `claude/ideas-i3b-close-review`, cut from
 
 ### I3c implementation notes
 
-Recorded 2026-11-21 for review. Branch `claude/ideas-i3c-test-risk`, cut from the I3b branch at 6da1839; not merged and not pushed.
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3c-test-risk`, cut from the I3b branch at 6da1839; merged into main with the rest of I3 on 2026-11-22.
 
 - **Model (schema v5):** `Idea.tests` holds `IdeaTestSnapshot` records and `Idea.risks` holds `IdeaRiskSnapshot` records; they are the spec's `IdeaTest` and `IdeaRisk`.
   - Each snapshot keeps the legs and signed shares of gross exposure it ran on (the same frozen legs as tracking), the benchmark, the lookback, the window and observation count, the source ids (the composition and its origin), the provenance and the data warnings. Strategy Lab's generic disclaimers are left out of the warnings.
@@ -526,7 +526,7 @@ A code review of the I3a-I3c stack found nine defects. They were fixed in one co
 
 ### I3d implementation notes
 
-Recorded 2026-11-21 for review. Branch `claude/ideas-i3d-intraday-579806`, cut from the I3c branch at f5f2c44 (with the stack review fixes); not merged and not pushed.
+Recorded 2026-11-21 for review. Branch `claude/ideas-i3d-intraday-579806`, cut from the I3c branch at f5f2c44 (with the stack review fixes); merged into main with the rest of I3 on 2026-11-22.
 
 - **What the layer is for:** today's hypothetical P&L, the intraday drawdown and intraday criterion triggers, while Trader Workstation is connected and Gamma runs. It never replaces or rewrites the canonical daily series. `compute_tracking` reads provider closes only. The daily series (points, segments, figures and Board headline) is identical with and without marks, and a test checks it.
 - **Recording** (`src/application/idea_intraday.py`, `IdeaIntradayService`):
