@@ -35,8 +35,12 @@ from src.models.ideas import (
     IDEA_SCHEMA_VERSION,
     IDEA_STATUSES,
     TRACKING_BP_CLASSES,
+    TRACKING_COST_BP_MAX,
     TRACKING_LABEL,
+    TRIAL_LEDGER_MAX,
     Idea,
+    IdeaSignal,
+    IdeaTrial,
     IdeaCostModel,
     IdeaCriterionAtClose,
     IdeaEvidenceVerdict,
@@ -59,6 +63,7 @@ from src.models.ideas import (
     tracking_signature,
     prepare_captured_values,
     thaw_captured_values,
+    trial_key_for_positions,
 )
 from src.models.provenance import FreshnessRecord, ProvenanceRecord
 from src.services.idea_store import IdeaNotFoundError, IdeaStorageWarning, IdeaStore, IdeaSummary
@@ -168,6 +173,8 @@ class IdeaTrackingSettingsRequest:
     per_side_bp: Mapping[str, float] | None = None
     leg_classes: Mapping[str, str | None] | None = None
     benchmark: str | None = None
+    # I4: coste por lado propio de una pierna; None quita el ajuste y vuelve al de su clase.
+    leg_bp: Mapping[str, float | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -293,7 +300,13 @@ class IdeaService:
             if patch.stance is not None:
                 changes["stance"] = patch.stance
             if patch.legs is not None:
-                changes["legs"] = tuple(patch.legs)
+                legs = tuple(patch.legs)
+                # I4: con una señal de libro adjuntada, las patas son las de la señal.
+                if current.book_signal is not None and [leg.to_dict() for leg in legs] != [leg.to_dict() for leg in current.legs]:
+                    raise IdeaValidationError(
+                        f"The legs follow the attached signal ({current.book_signal.label}); detach the signal to edit them."
+                    )
+                changes["legs"] = legs
             if patch.horizon is not None:
                 changes["horizon"] = patch.horizon
             if patch.tags is not None:
@@ -621,15 +634,25 @@ class IdeaService:
         def mutate(current: Idea) -> Idea:
             _require_snapshot_status(current)
             now = self._clock()
-            total = snapshot.metrics.get("total_return")
+            # I4: un backtest con un conjunto de pesos nuevo es una prueba más del libro de pruebas.
+            key = trial_key_for_positions(snapshot.positions())
+            trials = current.trials
+            if all(trial.key != key for trial in trials):
+                trials = (
+                    *trials,
+                    IdeaTrial(key=key, kind="legs", recorded_at=now, label=f"Backtest of the legs: {_snapshot_legs_text(snapshot)}"),
+                )
+            counted = replace(snapshot, trial_count=len(trials), trial_count_lower_bound=current.trials_lower_bound)
+            total = counted.metrics.get("total_return")
             body = (
-                f"Ran a backtest of the legs ({snapshot.window_start or 'N/A'} to {snapshot.window_end or 'N/A'}, "
-                f"{snapshot.observations} observations): total {_pct(total)}, max drawdown {_pct(snapshot.metrics.get('max_drawdown'))}, "
-                f"{snapshot.benchmark} {_pct(snapshot.metrics.get('benchmark_total_return'))}. In-sample, no costs."
+                f"Ran a backtest of the legs ({counted.window_start or 'N/A'} to {counted.window_end or 'N/A'}, "
+                f"{counted.observations} observations): total {_pct(total)}, max drawdown {_pct(counted.metrics.get('max_drawdown'))}, "
+                f"{counted.benchmark} {_pct(counted.metrics.get('benchmark_total_return'))}. In-sample, no costs. "
+                f"Trials recorded for this idea: {_trials_text(len(trials), current.trials_lower_bound)}."
             )
-            updated = replace(current, tests=(*current.tests, snapshot), updated_at=now)
+            updated = replace(current, tests=(*current.tests, counted), trials=trials, updated_at=now)
             return updated.with_journal_entry(
-                self._system_entry(idea_id, "test_refreshed", body, now, {"snapshot_id": snapshot.snapshot_id}),
+                self._system_entry(idea_id, "test_refreshed", body, now, {"snapshot_id": snapshot.snapshot_id, "trial_count": len(trials)}),
                 touched_at=now,
             )
 
@@ -686,6 +709,153 @@ class IdeaService:
 
         return self.store.update(idea_id, mutate)
 
+    # -- signals (I4) -----------------------------------------------------------
+
+    def attach_signal(self, idea_id: str, signal: IdeaSignal, trials: Sequence[IdeaTrial] = ()) -> Idea:
+        """Attach a signal built from a Script run or an import; journaled, never executed.
+
+        The trial ledger only grows; the signal's ``trial_count`` is its size
+        after this attach. A book signal (positions or weights) sets the legs
+        and, on an active idea, closes the open tracking segment and opens the
+        next one, which rebalances from the previous book at its exit close.
+        A returns signal is validation only and leaves tracking as it was,
+        unless it replaces a book signal, whose book then returns to the legs.
+        """
+
+        def mutate(current: Idea) -> Idea:
+            if current.status not in {"draft", "active"}:
+                raise IdeaLifecycleError(f"A signal attaches to a draft or active idea; this one is {current.status}.")
+            if signal.idea_id != idea_id:
+                raise IdeaValidationError("The signal belongs to another idea.")
+            now = self._clock()
+            ledger = list(current.trials)
+            known = {trial.key for trial in ledger}
+            for trial in trials:
+                if trial.key not in known:
+                    ledger.append(replace(trial, signal_id=trial.signal_id or signal.signal_id))
+                    known.add(trial.key)
+            if len(ledger) > TRIAL_LEDGER_MAX:
+                raise IdeaValidationError(f"The trial ledger holds at most {TRIAL_LEDGER_MAX} entries.")
+            attached = replace(
+                signal,
+                attached_at=now,
+                trial_count=max(1, len(ledger)),
+                trial_count_lower_bound=current.trials_lower_bound,
+            )
+            previous = current.current_signal
+            signals = list(current.signals)
+            if previous is not None:
+                signals[-1] = replace(previous, detached_at=now)
+            signals.append(attached)
+            updated = replace(current, signals=tuple(signals), trials=tuple(ledger), updated_at=now)
+            if attached.is_book:
+                updated = replace(updated, legs=attached.idea_legs())
+            replaced = f" It replaces {previous.label}." if previous is not None else ""
+            body = (
+                f"Attached the signal {attached.label} ({attached.source}, {attached.output_kind}"
+                + (f", as of {attached.as_of.isoformat()}" if attached.as_of else "")
+                + f"); {_trials_text(attached.trial_count, attached.trial_count_lower_bound)}."
+                + (" A returns signal is validation only; it does not drive tracking." if not attached.is_book else " The legs now follow its book.")
+                + replaced
+            )
+            updated = updated.with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "signal_attached",
+                    body,
+                    now,
+                    {
+                        "signal_id": attached.signal_id,
+                        "source": attached.source,
+                        "output_kind": attached.output_kind,
+                        "trial_count": attached.trial_count,
+                        "replaced_signal_id": previous.signal_id if previous else None,
+                    },
+                ),
+                touched_at=now,
+            )
+            return self._reconcile_signal_tracking(current, updated, now)
+
+        return self.store.update(idea_id, mutate)
+
+    def detach_signal(self, idea_id: str) -> Idea:
+        """Detach the current signal. It stays in the record; a book returns to the legs as they are."""
+
+        def mutate(current: Idea) -> Idea:
+            signal = current.current_signal
+            if signal is None:
+                raise IdeaValidationError("No signal is attached to this idea.")
+            if current.status not in {"draft", "active"}:
+                raise IdeaLifecycleError(f"A signal detaches from a draft or active idea; this one is {current.status}.")
+            now = self._clock()
+            signals = (*current.signals[:-1], replace(signal, detached_at=now))
+            updated = replace(current, signals=signals, updated_at=now).with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "signal_detached",
+                    f"Detached the signal {signal.label}. It stays in the record"
+                    + ("; the legs keep its last book and can be edited again." if signal.is_book else "."),
+                    now,
+                    {"signal_id": signal.signal_id},
+                ),
+                touched_at=now,
+            )
+            return self._reconcile_signal_tracking(current, updated, now)
+
+        return self.store.update(idea_id, mutate)
+
+    def _reconcile_signal_tracking(self, before: Idea, after: Idea, now: datetime) -> Idea:
+        """Open the next segment when the book signal changes on an active idea."""
+        if after.status != "active":
+            return after
+        old_book = before.book_signal
+        new_book = after.book_signal
+        if old_book is None and new_book is None:
+            return after
+        if old_book is not None and new_book is not None and old_book.signal_id == new_book.signal_id:
+            return after
+        tracking = after.tracking or IdeaTracking()
+        open_segment = tracking.open_segment
+        closed_number: int | None = None
+        if open_segment is not None:
+            tracking = tracking.with_open_segment_closed(at=now, reason="signal_changed")
+            closed_number = open_segment.number
+        opened = None
+        if after.legs:
+            if new_book is not None:
+                start_reason = "signal_changed" if old_book is not None else "signal_attached"
+                note = f"{_START_REASON_TEXT[start_reason]}: {new_book.label}"
+            else:
+                start_reason = "signal_detached"
+                note = f"{_START_REASON_TEXT[start_reason]}: {old_book.label if old_book else 'signal'}; the legs keep its book"
+            tracking = tracking.with_open_segment(
+                legs=after.legs, stance=after.stance, at=now, reason=start_reason, note=note, signal=new_book
+            )
+            opened = tracking.open_segment
+        if closed_number is None and opened is None:
+            return after
+        tracking = replace(tracking, snapshot=None)
+        parts: list[str] = []
+        if closed_number is not None:
+            parts.append(f"Closed tracking segment {closed_number} (signal changed); its book is rebalanced at the next close.")
+        if opened is not None:
+            parts.append(
+                f"Opened tracking segment {opened.number} ({_tracked_legs_text(opened)}); it enters at the next close, "
+                "paying the per-side cost on each instrument's turnover."
+            )
+            if opened.untracked_reason:
+                parts.append(f"It cannot be priced: {opened.untracked_reason}")
+        details = {
+            "closed_segment": closed_number,
+            "end_reason": "signal_changed" if closed_number is not None else None,
+            "opened_segment": opened.number if opened else None,
+            "start_reason": opened.start_reason if opened else None,
+        }
+        return replace(after, tracking=tracking).with_journal_entry(
+            self._system_entry(after.idea_id, "tracking_segment", f"{TRACKING_LABEL}. " + " ".join(parts), now, details),
+            touched_at=after.updated_at,
+        )
+
     # -- tracking (I3a) --------------------------------------------------------
 
     def update_tracking_settings(self, idea_id: str, request: IdeaTrackingSettingsRequest) -> Idea:
@@ -725,6 +895,24 @@ class IdeaService:
                         leg_classes[key_text] = target
                     if before != after:
                         changes.append({"field": f"class.{key_text}", "before": before, "after": after})
+            leg_bp = dict(cost_model.leg_bp)
+            if request.leg_bp is not None:
+                known = {leg.key: leg for segment in tracking.segments for leg in segment.legs}
+                for key, value in request.leg_bp.items():
+                    key_text = str(key or "").strip()
+                    if key_text not in known:
+                        raise IdeaValidationError(f"{key_text} is not a tracked leg of this idea.")
+                    before_bp = leg_bp.get(key_text)
+                    if value is None:
+                        leg_bp.pop(key_text, None)
+                    else:
+                        number = float(value)
+                        if not 0 <= number <= TRACKING_COST_BP_MAX:
+                            raise IdeaValidationError(f"A leg cost must be between 0 and {TRACKING_COST_BP_MAX:g} bp per side.")
+                        leg_bp[key_text] = number
+                    after_bp = leg_bp.get(key_text)
+                    if before_bp != after_bp:
+                        changes.append({"field": f"leg_cost.{key_text}", "before": before_bp, "after": after_bp})
             benchmark = tracking.benchmark
             if request.benchmark is not None:
                 candidate = str(request.benchmark).strip().upper()
@@ -733,7 +921,7 @@ class IdeaService:
                     benchmark = candidate
             if not changes:
                 return current
-            updated_model = IdeaCostModel(per_side_bp=per_side, leg_classes=leg_classes, updated_at=now)
+            updated_model = IdeaCostModel(per_side_bp=per_side, leg_classes=leg_classes, updated_at=now, leg_bp=leg_bp)
             # El snapshot queda obsoleto: el tablero no debe mostrar una cifra calculada con otros supuestos.
             tracking = replace(tracking, cost_model=updated_model, benchmark=benchmark, snapshot=None)
             body = "Changed the tracking assumptions: " + "; ".join(
@@ -797,7 +985,9 @@ class IdeaService:
             else:
                 start_reason = "legs_edited" if closed_number is not None else "legs_added"
             note = _segment_note(start_reason, before, after)
-            tracking = tracking.with_open_segment(legs=after.legs, stance=after.stance, at=now, reason=start_reason, note=note)
+            tracking = tracking.with_open_segment(
+                legs=after.legs, stance=after.stance, at=now, reason=start_reason, note=note, signal=after.book_signal
+            )
             opened = tracking.open_segment
         if closed_number is None and opened is None:
             return after
@@ -886,6 +1076,7 @@ _END_REASON_TEXT = {
     "legs_removed": "legs removed",
     "archived": "idea archived",
     "closed": "idea closed",
+    "signal_changed": "signal changed",
 }
 _START_REASON_TEXT = {
     "activated": "Activated",
@@ -894,7 +1085,20 @@ _START_REASON_TEXT = {
     "legs_added": "Legs added",
     "restored": "Restored from the archive",
     "migrated": "Tracking began in a later build",
+    "signal_attached": "Signal attached",
+    "signal_changed": "Signal changed",
+    "signal_detached": "Signal detached",
 }
+
+
+def _trials_text(count: int, lower_bound: bool) -> str:
+    """"1 trial", "at least 4 trials": the size of the idea's trial ledger."""
+    prefix = "at least " if lower_bound else ""
+    return f"{prefix}{count} trial{'s' if count != 1 else ''}"
+
+
+def _snapshot_legs_text(snapshot: Any) -> str:
+    return _clip("; ".join(f"{leg.entity.label} {float(leg.weight or 0.0) * 100:+.0f}%" for leg in snapshot.legs), 160)
 _SETTING_LABELS = {
     "cost.us_equity_liquid": "liquid US equities and ETFs",
     "cost.equity_other": "other equities and ETFs",
@@ -907,10 +1111,14 @@ _SETTING_LABELS = {
 def _setting_label(field_name: str) -> str:
     if field_name.startswith("class."):
         return f"class of {field_name.split(':', 1)[-1]}"
+    if field_name.startswith("leg_cost."):
+        return f"cost of {field_name.split(':', 1)[-1]}"
     return _SETTING_LABELS.get(field_name, field_name)
 
 
 def _setting_value(value: Any) -> str:
+    if value is None:
+        return "class default"
     if isinstance(value, float):
         return f"{value:g} bp"
     return str(value).replace("_", " ")
@@ -1200,6 +1408,7 @@ def render_idea_markdown(
         lines.append("_No criteria._")
     lines += _tracking_markdown(idea, tracking_result)
     lines += _snapshots_markdown(idea, exported_at)
+    lines += _signal_markdown(idea)
     lines += _reviews_markdown(idea)
     lines += ["", "## Journal", ""]
     if idea.journal:
@@ -1315,7 +1524,8 @@ def _snapshots_markdown(idea: Idea, exported_at: datetime) -> list[str]:
         lines += [
             f"### Backtest · run {_ts(test.created_at)}" + (f" · stale: {stale}" if stale else ""),
             "",
-            "- In-sample only, no costs (Strategy Lab composition of the idea's legs).",
+            "- In-sample only, no costs (Strategy Lab composition of the idea's legs) · "
+            + (f"trials: {_trials_text(test.trial_count, test.trial_count_lower_bound)}." if test.trial_count else "trials not recorded (run before I4)."),
             f"- Window {test.window_start or 'N/A'} to {test.window_end or 'N/A'} · {test.observations} observations · legs "
             + "; ".join(f"{leg.entity.label} {leg.weight * 100:+.0f}%" for leg in test.legs if leg.weight is not None),
             f"- Total {_pct(metrics.get('total_return'))} · annual {_pct(metrics.get('annual_return'))} · volatility "
@@ -1338,6 +1548,50 @@ def _snapshots_markdown(idea: Idea, exported_at: datetime) -> list[str]:
             "",
         ]
     return lines
+
+
+def _signal_markdown(idea: Idea) -> list[str]:
+    """The attached signal (I4): source ids, book, validation and trial count."""
+    signal = idea.current_signal
+    if signal is None and not idea.trials:
+        return []
+    lines = ["", "## Signal and validation", ""]
+    lines.append(f"- Trials recorded for this idea: {_trials_text(max(1, idea.trial_count), idea.trials_lower_bound)}." if idea.trials else "- No trials recorded.")
+    if signal is None:
+        lines.append("- No signal attached.")
+        return lines + [""]
+    ref = thaw_captured_values(signal.source_ref)
+    lines.append(f"- {_md(signal.label)} · {signal.source} · {signal.output_kind} · attached {_ts(signal.attached_at)}"
+                 + (f" · as of {signal.as_of.isoformat()}" if signal.as_of else "")
+                 + f" · {_trials_text(signal.trial_count, signal.trial_count_lower_bound)} when attached")
+    if signal.source == "script":
+        lines.append(
+            f"- Script {ref.get('script_id')} · revision {ref.get('revision_id')} ({ref.get('revision_status')}) · run {ref.get('run_id')} · "
+            f"parameters {ref.get('parameters_sha256') or 'none'} · source {str(ref.get('source_sha256') or '')[:16]}"
+        )
+    else:
+        lines.append(f"- Import {str(ref.get('content_sha256') or '')[:16]} · {ref.get('rows')} rows · columns {', '.join(ref.get('columns') or [])}")
+    if signal.is_book:
+        lines.append(f"- {TRACKING_LABEL}. Book frozen at attach: " + "; ".join(
+            f"{leg.entity.label} {leg.weight * 100:+.1f}%" for leg in signal.legs) + (" of NAV" if signal.output_kind == "weights" else " of gross"))
+    elif signal.supplied is not None:
+        supplied = signal.supplied
+        lines.append(
+            f"- {supplied.label}: {supplied.window_start or 'N/A'} to {supplied.window_end or 'N/A'} · total {_pct(supplied.metrics.get('total_return'))} · "
+            f"Sharpe {_ratio(supplied.metrics.get('sharpe_ratio'))} · does not drive tracking"
+        )
+    validation = signal.validation
+    if validation is None:
+        lines.append("- No out-of-sample validation attached.")
+    else:
+        oos = validation.out_of_sample
+        costs = {True: f"{validation.cost_bps:g} bp per unit of turnover", False: "no costs", None: "costs as written by the script"}[validation.costs_included]
+        lines.append(
+            f"- Out-of-sample (walk-forward, {len(validation.folds)} folds, {validation.window}, train {validation.train_observations} / test "
+            f"{validation.test_observations}, {validation.oos_start or 'N/A'} to {validation.oos_end or 'N/A'}): total {_pct(oos.get('total_return'))} · "
+            f"Sharpe {_ratio(oos.get('sharpe_ratio'))} · max drawdown {_pct(oos.get('max_drawdown'))} · {validation.trials} sweep trials · {costs}"
+        )
+    return lines + [""]
 
 
 def _loss(value: Any) -> float | None:

@@ -50,6 +50,10 @@
     closeIdea,
     ideaAnalysisBusy,
     ideaAnalysisError,
+    ideaSignalBusy,
+    ideaSignalError,
+    attachIdeaSignal,
+    detachIdeaSignal,
     ideaOpenRequest,
     ideaReviewStats,
     ideaSummaries,
@@ -3352,6 +3356,10 @@
             analysisError={$ideaAnalysisError}
             onRunTest={runIdeaTest}
             onRunRisk={runIdeaRisk}
+            signalBusy={$ideaSignalBusy}
+            signalError={$ideaSignalError}
+            onAttachSignal={attachIdeaSignal}
+            onDetachSignal={detachIdeaSignal}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component

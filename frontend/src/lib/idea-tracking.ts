@@ -39,8 +39,21 @@ export const SEGMENT_START_LABELS: Record<string, string> = {
   legs_edited: "Legs edited",
   legs_added: "Legs added",
   restored: "Restored",
+  reopened: "Reopened",
   migrated: "Tracking began",
+  signal_attached: "Signal attached",
+  signal_changed: "Signal changed",
+  signal_detached: "Signal detached",
 };
+
+/** "Signal changed 2026-01-20 15:00 · ended … · rebalanced, turnover 79%": the segment's history line. */
+export function segmentNoteText(segment: IdeaTrackingSegment, formatInstant: (value: string) => string): string {
+  const parts = [`${SEGMENT_START_LABELS[segment.start_reason] ?? segment.start_reason.replace(/_/g, " ")} ${formatInstant(segment.started_at)}`];
+  if (segment.ended_at) parts.push(`ended ${formatInstant(segment.ended_at)}`);
+  if (segment.rebalanced && segment.turnover != null) parts.push(`rebalanced, turnover ${Math.round(segment.turnover * 100)}%`);
+  if (segment.gaps) parts.push(`${segment.gaps} ${segment.gaps === 1 ? "gap" : "gaps"}`);
+  return parts.join(" · ");
+}
 
 export const COST_CLASS_SHORT_LABELS: Record<IdeaTrackingCostClass, string> = {
   us_equity_liquid: "Liquid US equity",
@@ -233,6 +246,32 @@ export function costDraftError(draft: Record<string, string>): string {
     if (!Number.isFinite(value) || value < 0 || value > 500) return "Costs are 0 to 500 bp per side.";
   }
   return "";
+}
+
+/** I4: a leg's own per-side cost as typed in the editor; blank when it takes its class's cost. */
+export function legBpText(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? "" : String(value);
+}
+
+/** Blank is the class cost; anything else must be 0 to 500 bp per side. */
+export function legBpDraftError(draft: Record<string, string>): string {
+  for (const raw of Object.values(draft)) {
+    if (raw.trim() === "") continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0 || value > 500) return "Leg costs are 0 to 500 bp per side, or blank for the class cost.";
+  }
+  return "";
+}
+
+/** The per-leg costs that changed (null drops an override), or null when nothing did. */
+export function changedLegBp(current: Record<string, number>, draft: Record<string, string>): Record<string, number | null> | null {
+  const changes: Record<string, number | null> = {};
+  for (const [key, raw] of Object.entries(draft)) {
+    const next = raw.trim() === "" ? null : Number(raw);
+    const before = current[key] ?? null;
+    if (next !== before) changes[key] = next;
+  }
+  return Object.keys(changes).length ? changes : null;
 }
 
 /** The headline line under the panel title: sessions, gaps and the last close. */

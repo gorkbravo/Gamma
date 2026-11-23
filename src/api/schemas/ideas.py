@@ -58,6 +58,7 @@ from src.models.ideas import (
     snapshot_staleness,
     thaw_captured_values,
 )
+from src.application.idea_signals import InstrumentMapping, SignalRequest, ValidationRequest
 from src.services.idea_store import IdeaStorageWarning, IdeaSummary
 
 IdeaStanceLiteral = Literal["long", "short", "relative", "event", "neutral"]
@@ -450,6 +451,12 @@ class IdeaModel(BaseModel):
     # I3c: snapshots de test y riesgo (del más antiguo al más reciente), con su motivo de obsolescencia.
     tests: list["IdeaTestSnapshotModel"] = Field(default_factory=list)
     risks: list["IdeaRiskSnapshotModel"] = Field(default_factory=list)
+    # I4: señales adjuntadas (la vigente es la última sin retirar) y libro de pruebas, que solo crece.
+    signals: list[dict[str, Any]] = Field(default_factory=list)
+    current_signal_id: str | None = None
+    trials: list[dict[str, Any]] = Field(default_factory=list)
+    trial_count: int = 0
+    trials_lower_bound: bool = False
     # ``origin`` above is the idea's domain origin, so the record's own
     # provenance travels as one nested object instead of top-level fields.
     provenance: dict[str, Any]
@@ -480,6 +487,11 @@ class IdeaModel(BaseModel):
             reviews=[IdeaReviewModel.from_domain(item) for item in idea.reviews],
             tests=[IdeaTestSnapshotModel.from_domain(item, idea, retrieved_at) for item in idea.tests],
             risks=[IdeaRiskSnapshotModel.from_domain(item, idea, retrieved_at) for item in idea.risks],
+            signals=[_signal_payload(item) for item in idea.signals],
+            current_signal_id=idea.current_signal.signal_id if idea.current_signal else None,
+            trials=[item.to_dict() for item in idea.trials],
+            trial_count=idea.trial_count,
+            trials_lower_bound=idea.trials_lower_bound,
             provenance={
                 "source_provider": "gamma_ideas",
                 "retrieved_at": retrieved_at.isoformat(),
@@ -718,6 +730,8 @@ class IdeaTrackingSegmentRecordModel(BaseModel):
     end_reason: str | None = None
     end_note: str = ""
     untracked_reason: str | None = None
+    signal_id: str | None = None
+    rebalance: bool = False
 
 
 class IdeaTrackingSnapshotModel(BaseModel):
@@ -738,6 +752,7 @@ class IdeaTrackingSnapshotModel(BaseModel):
 class IdeaCostModelRecordModel(BaseModel):
     per_side_bp: dict[str, float]
     leg_classes: dict[str, str] = Field(default_factory=dict)
+    leg_bp: dict[str, float] = Field(default_factory=dict)
     updated_at: datetime | None = None
 
 
@@ -769,6 +784,7 @@ class IdeaTrackingSettingsRequestModel(BaseModel):
     per_side_bp: dict[str, float] | None = None
     leg_classes: dict[str, str | None] | None = None
     benchmark: str | None = Field(default=None, min_length=1, max_length=TRACKING_BENCHMARK_MAX)
+    leg_bp: dict[str, float | None] | None = None
 
     def to_domain(self) -> IdeaTrackingSettingsRequest:
         if self.per_side_bp is not None:
@@ -779,6 +795,7 @@ class IdeaTrackingSettingsRequestModel(BaseModel):
             per_side_bp=None if self.per_side_bp is None else dict(self.per_side_bp),
             leg_classes=None if self.leg_classes is None else dict(self.leg_classes),
             benchmark=self.benchmark,
+            leg_bp=None if self.leg_bp is None else dict(self.leg_bp),
         )
 
 
@@ -818,6 +835,7 @@ class TrackingCostClassModel(BaseModel):
 class TrackingCostModelViewModel(BaseModel):
     classes: list[TrackingCostClassModel]
     leg_classes: dict[str, str] = Field(default_factory=dict)
+    leg_bp: dict[str, float] = Field(default_factory=dict)
     updated_at: datetime | None = None
     edited: bool = False
 
@@ -836,6 +854,7 @@ class TrackingSegmentLegModel(BaseModel):
     market: str
     entry_price: float | None = None
     last_price: float | None = None
+    cost_source: str = "class"
 
 
 class TrackingSegmentModel(BaseModel):
@@ -862,6 +881,10 @@ class TrackingSegmentModel(BaseModel):
     benchmark_return: float | None = None
     excess_return: float | None = None
     max_drawdown: float | None = None
+    signal_id: str | None = None
+    rebalanced: bool = False
+    turnover: float | None = None
+    exit_rebalanced: bool = False
     legs: list[TrackingSegmentLegModel] = Field(default_factory=list)
 
 
@@ -1151,6 +1174,8 @@ class IdeaTestSnapshotModel(IdeaSnapshotModelBase):
     benchmark_curve: list[tuple[date, float]] = Field(default_factory=list)
     costs_included: bool = False
     sample: str = "in_sample"
+    trial_count: int | None = None
+    trial_count_lower_bound: bool = False
 
     @classmethod
     def from_domain(cls, snapshot: IdeaTestSnapshot, idea: Idea, now: datetime) -> "IdeaTestSnapshotModel":
@@ -1179,6 +1204,89 @@ class IdeaRiskSnapshotModel(IdeaSnapshotModelBase):
     @classmethod
     def from_domain(cls, snapshot: IdeaRiskSnapshot, idea: Idea, now: datetime) -> "IdeaRiskSnapshotModel":
         return cls(**cls._payload(snapshot, idea, now))
+
+
+# ---------------------------------------------------------------------------
+# Signals (I4)
+# ---------------------------------------------------------------------------
+
+
+def _signal_payload(signal: Any) -> dict[str, Any]:
+    payload = signal.to_dict()
+    payload.pop("schema_version", None)
+    payload["current"] = signal.is_current
+    payload["drives_tracking"] = signal.is_book
+    for leg_payload, leg in zip(payload["legs"], signal.legs):
+        leg_payload["key"] = leg.key
+    return payload
+
+
+class SignalInstrumentModel(BaseModel):
+    symbol: str = Field(min_length=1, max_length=24)
+    entity_type: Literal["equity", "etf", "crypto"] = "equity"
+    label: str | None = Field(default=None, max_length=160)
+
+
+class SignalValidationRequestModel(BaseModel):
+    sweep_id: str = Field(min_length=1, max_length=80)
+    train_observations: int = Field(ge=1, le=100_000)
+    test_observations: int = Field(ge=1, le=100_000)
+    window: Literal["anchored", "rolling"] = "anchored"
+    selection_metric: Literal["sharpe", "total_return"] = "sharpe"
+    target: Literal["weight_book", "returns_result"] | None = None
+    result_id: str | None = Field(default=None, max_length=64)
+    execution_lag: int = Field(default=1, ge=1, le=5)
+    cost_bps: float | None = Field(default=None, ge=0, le=1000)
+
+
+class IdeaSignalRequestModel(BaseModel):
+    """Attach a Script run or imported CSV rows. Data only: nothing is executed or routed."""
+
+    source: Literal["script", "import"]
+    output_kind: Literal["positions", "weights", "returns"]
+    label: str | None = Field(default=None, max_length=200)
+    run_id: str | None = Field(default=None, max_length=80)
+    result_id: str | None = Field(default=None, max_length=64)
+    validation: SignalValidationRequestModel | None = None
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=20_000)
+    date_column: str | None = Field(default=None, max_length=120)
+    columns: list[str] = Field(default_factory=list, max_length=24)
+    value_column: str | None = Field(default=None, max_length=120)
+    value_kind: Literal["return", "level"] = "return"
+    instruments: dict[str, SignalInstrumentModel] = Field(default_factory=dict, max_length=64)
+
+    def to_domain(self) -> SignalRequest:
+        validation = None
+        if self.validation is not None:
+            item = self.validation
+            validation = ValidationRequest(
+                sweep_id=item.sweep_id,
+                train_observations=item.train_observations,
+                test_observations=item.test_observations,
+                window=item.window,
+                selection_metric=item.selection_metric,
+                target=item.target,
+                result_id=item.result_id,
+                execution_lag=item.execution_lag,
+                cost_bps=item.cost_bps,
+            )
+        return SignalRequest(
+            source=self.source,
+            output_kind=self.output_kind,
+            label=self.label,
+            run_id=self.run_id,
+            result_id=self.result_id,
+            validation=validation,
+            rows=list(self.rows),
+            date_column=self.date_column,
+            columns=list(self.columns),
+            value_column=self.value_column,
+            value_kind=self.value_kind,
+            instruments={
+                key: InstrumentMapping(symbol=value.symbol, entity_type=value.entity_type, label=value.label)
+                for key, value in self.instruments.items()
+            },
+        )
 
 
 IdeaModel.model_rebuild()

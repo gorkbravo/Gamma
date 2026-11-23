@@ -11,6 +11,7 @@
   import { formatIdeaInstant } from "../lib/ideas";
   import { asLoss, episodeCoverageText, formatRatio, snapshotLegsText, snapshotWindowText, worstEpisode } from "../lib/idea-analysis";
   import { toProvenanceBadge } from "../lib/provenance";
+  import { trialsTag, trialsText } from "../lib/idea-signals";
 
   export let idea: Idea;
   export let busy: "" | "test" | "risk" = "";
@@ -83,6 +84,11 @@
       {#if test}
         <span class="tag warning">No costs</span>
         <span class="tag">In-sample only</span>
+        <span
+          class="tag accent"
+          title={test.trial_count != null ? `${trialsText(test.trial_count, test.trial_count_lower_bound)} recorded for this idea when this backtest ran` : "Run before trial counting (I4)"}
+          >{trialsTag(test.trial_count, test.trial_count_lower_bound)}</span
+        >
         {#if test.stale_reason}<span class="tag warning" title={test.stale_reason}>Stale</span>{/if}
         <span class="header-meta">{formatIdeaInstant(test.created_at)} · {snapshotWindowText(test)} · {snapshotLegsText(test)}</span>
         <ProvenanceBadge data={test.provenance ? toProvenanceBadge({ ...test.provenance, warnings: test.warnings }) : null} variant="dot" />

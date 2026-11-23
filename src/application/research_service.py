@@ -2585,16 +2585,21 @@ class ResearchService:
         return clean_return_series(values)
 
     @staticmethod
-    def _returns_from_imported_rows(
+    def imported_column_values(
         rows: list[dict[str, Any]],
         *,
         date_column: str,
         value_column: str,
-        value_kind: str,
         label: str,
-        min_observations: int,
         warnings: list[str],
     ) -> pd.Series:
+        """One CSV column as dated numbers, with the Strategy Lab import rules.
+
+        Shared by Strategy Lab return imports and Ideas signal imports (I4), so
+        both read dates, numbers (``%`` suffix, thousands separators), missing
+        cells and duplicate dates the same way: invalid rows are dropped with a
+        warning and a duplicate date keeps its last row.
+        """
         if not rows:
             raise ResearchValidationError(["CSV import contains no rows."])
         if not str(date_column or "").strip():
@@ -2625,12 +2630,27 @@ class ResearchService:
         if not records:
             raise ResearchValidationError([f"{label} has no valid dated observations."])
 
-        frame = pd.DataFrame(records, columns=["date", "value"]).sort_values("date")
+        frame = pd.DataFrame(records, columns=["date", "value"]).sort_values("date", kind="stable")
         duplicate_count = int(frame.duplicated("date", keep=False).sum())
         if duplicate_count:
             warnings.append(f"{label}: duplicate dates detected; keeping the last row per date.")
             frame = frame.drop_duplicates("date", keep="last")
-        values = pd.Series(frame["value"].to_numpy(dtype=float), index=pd.to_datetime(frame["date"]))
+        return pd.Series(frame["value"].to_numpy(dtype=float), index=pd.to_datetime(frame["date"]))
+
+    @staticmethod
+    def _returns_from_imported_rows(
+        rows: list[dict[str, Any]],
+        *,
+        date_column: str,
+        value_column: str,
+        value_kind: str,
+        label: str,
+        min_observations: int,
+        warnings: list[str],
+    ) -> pd.Series:
+        values = ResearchService.imported_column_values(
+            rows, date_column=date_column, value_column=value_column, label=label, warnings=warnings
+        )
         kind = str(value_kind or "return").strip().lower()
         if kind == "level":
             non_positive = int((values <= 0).sum())

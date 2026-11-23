@@ -75,7 +75,10 @@ METHODOLOGY = (
     "instrument's own currency (no FX conversion). Yahoo Finance closes are adjusted for dividends and splits, "
     "so the record is a total return and an entry price can be restated after an ex-dividend date. A session "
     "where a market traded but the provider has no close is a gap, never interpolated; a market closed while "
-    "another leg's market traded keeps its last close. Segments chain: one exits at the same close the next one enters."
+    "another leg's market traded keeps its last close. Segments chain: one exits at the same close the next one enters. "
+    "An attached signal's weights are held exactly, as shares of NAV with the residual in cash at 0%; a segment opened "
+    "by a signal change rebalances at the close where the previous book exits, paying the per-side cost on each "
+    "instrument's turnover instead of a full exit and entry."
 )
 
 # Etiqueta, coste por lado y fundamento de cada clase, para la tabla de supuestos de la UI.
@@ -373,6 +376,8 @@ class SegmentLegView:
     market: str
     entry_price: float | None = None
     last_price: float | None = None
+    # I4: coste por lado propio de la pierna (frente al de su clase).
+    cost_source: str = "class"
 
 
 @dataclass(frozen=True)
@@ -393,6 +398,11 @@ class SegmentResult:
     sessions: int = 0
     gaps: int = 0
     last_session: date | None = None
+    # I4: entró rebalanceando desde el libro anterior en su mismo cierre (coste por rotación).
+    rebalanced: bool = False
+    turnover: float | None = None
+    # El libro anterior no se liquidó: se rebalanceó al siguiente, así que su coste de salida no se cobra.
+    exit_rebalanced: bool = False
 
     @property
     def priced(self) -> bool:
@@ -427,6 +437,10 @@ class SegmentResult:
             "benchmark_return": self.benchmark_return,
             "excess_return": excess,
             "max_drawdown": self.max_drawdown,
+            "signal_id": segment.signal_id,
+            "rebalanced": self.rebalanced,
+            "turnover": self.turnover,
+            "exit_rebalanced": self.exit_rebalanced,
             "legs": [
                 {
                     "key": leg.key,
@@ -442,6 +456,7 @@ class SegmentResult:
                     "market": leg.market,
                     "entry_price": leg.entry_price,
                     "last_price": leg.last_price,
+                    "cost_source": leg.cost_source,
                 }
                 for leg in self.legs
             ],
@@ -587,6 +602,7 @@ def cost_model_view(cost_model: IdeaCostModel) -> dict[str, Any]:
     return {
         "classes": classes,
         "leg_classes": dict(cost_model.leg_classes),
+        "leg_bp": dict(cost_model.leg_bp),
         "updated_at": cost_model.updated_at.isoformat() if cost_model.updated_at else None,
         "edited": cost_model.edited,
     }
@@ -625,10 +641,13 @@ def compute_tracking(
     bench_market = tracking_market(HandoffEntity(entity_type="etf", label=tracking.benchmark, normalized_id=tracking.benchmark))
     results: list[SegmentResult] = []
     held: SegmentResult | None = None
+    held_index: int | None = None
     for segment in tracking.segments:
         # Un libro se compra al cierre en que se vende el anterior: nunca hay dos libros a la vez.
         not_before = held.exit_session if held is not None and held.status == "closed" else None
         blocked_by = held.segment.number if held is not None and held.status == "exiting" else None
+        # I4: un segmento abierto por un cambio de señal rebalancea desde el libro anterior en su cierre de salida.
+        rebalance_from = held if segment.rebalance and held is not None and held.status == "closed" else None
         result = _compute_segment(
             segment,
             tracking.cost_model,
@@ -639,10 +658,14 @@ def compute_tracking(
             warnings=warnings,
             not_before=not_before,
             blocked_by=blocked_by,
+            rebalance_from=rebalance_from,
         )
+        if result.rebalanced and held_index is not None and rebalance_from is not None:
+            results[held_index] = _without_exit_cost(rebalance_from)
         results.append(result)
         if result.priced:
             held = result
+            held_index = len(results) - 1
     stale_since = _stale_since(results, prices, now=now, warnings=warnings)
     points, chained = _chain(results)
     priced_points = [point for point in points if not point.gap]
@@ -706,11 +729,70 @@ def _leg_views(segment: IdeaTrackingSegment, cost_model: IdeaCostModel) -> tuple
                 weight_source=leg.weight_source,
                 asset_class=asset_class,
                 detected_class=leg.asset_class,
-                cost_bp=cost_model.bp_for(asset_class),
+                cost_bp=cost_model.bp_for_leg(leg),
                 market=leg.market,
+                cost_source="leg" if leg.key in cost_model.leg_bp else "class",
             )
         )
     return tuple(views)
+
+
+def _turnover_cost(previous: SegmentResult, views: Sequence[SegmentLegView]) -> tuple[float, float]:
+    """Cost and one-way turnover of moving from ``previous``'s drifted book to ``views``' weights.
+
+    The previous book's exposure to each instrument has drifted with its price
+    since its entry: as a share of the book's value it is w × (P / P0) / (1 + gross).
+    Each instrument pays its per-side cost on |new − drifted|; an instrument that
+    leaves the book pays its old cost, one that joins pays its new one.
+    """
+    nav = 1.0 + float(previous.gross_return or 0.0)
+    drifted: dict[str, float] = {}
+    bps: dict[str, float] = {}
+    for leg in previous.legs:
+        relative = (leg.last_price / leg.entry_price) if leg.entry_price and leg.last_price else 1.0
+        drifted[leg.key] = float(leg.weight or 0.0) * relative / nav if nav > 0 else 0.0
+        bps[leg.key] = float(leg.cost_bp or 0.0) / 10_000.0
+    target: dict[str, float] = {}
+    for view in views:
+        target[view.key] = float(view.weight or 0.0)
+        bps[view.key] = float(view.cost_bp or 0.0) / 10_000.0
+    turnover = 0.0
+    cost = 0.0
+    for key in set(drifted) | set(target):
+        moved = abs(target.get(key, 0.0) - drifted.get(key, 0.0))
+        turnover += moved
+        cost += moved * bps[key]
+    return cost, turnover
+
+
+def _without_exit_cost(result: SegmentResult) -> SegmentResult:
+    """The previous book rebalanced into the next one at its exit close: it was not liquidated."""
+    priced = [index for index, point in enumerate(result.points) if not point.gap]
+    if not priced or result.exit_cost is None:
+        return result
+    last = priced[-1]
+    points = list(result.points)
+    point = points[last]
+    net = float(point.gross_return or 0.0) - float(result.entry_cost or 0.0)
+    points[last] = SegmentPoint(**{**point.__dict__, "net_return": net})
+    peak = 1.0
+    max_dd = 0.0
+    for item in points:
+        if item.gap or item.net_return is None:
+            continue
+        value = 1.0 + item.net_return
+        peak = max(peak, value)
+        max_dd = min(max_dd, value / peak - 1.0 if peak > 0 else 0.0)
+    return SegmentResult(
+        **{
+            **result.__dict__,
+            "points": tuple(points),
+            "net_return": net,
+            "exit_cost": 0.0,
+            "max_drawdown": max_dd,
+            "exit_rebalanced": True,
+        }
+    )
 
 
 def _compute_segment(
@@ -724,6 +806,7 @@ def _compute_segment(
     warnings: list[str],
     not_before: date | None = None,
     blocked_by: int | None = None,
+    rebalance_from: SegmentResult | None = None,
 ) -> SegmentResult:
     views = _leg_views(segment, cost_model)
     if segment.untracked_reason:
@@ -736,7 +819,7 @@ def _compute_segment(
             problems.append(f"{leg.entity.label}: {(data.unavailable_reason if data else None) or 'no closes'}")
     if problems:
         return SegmentResult(segment=segment, status="unavailable", reason="; ".join(problems), legs=views)
-    costs = [cost_model.bp_for(view.asset_class) for view in views]
+    costs = [view.cost_bp for view in views]
     if any(value is None for value in costs):
         return SegmentResult(
             segment=segment,
@@ -837,6 +920,12 @@ def _compute_segment(
     bps = [float(value or 0.0) / 10_000.0 for value in costs]
     entry_prices = [rows[entry].price for rows in by_leg]
     entry_cost = sum(abs(weight) * bp for weight, bp in zip(weights, bps))
+    rebalanced = False
+    turnover: float | None = None
+    if rebalance_from is not None and rebalance_from.exit_session == entry:
+        # Mismo cierre: el libro anterior pasa al nuevo pagando solo la rotación.
+        entry_cost, turnover = _turnover_cost(rebalance_from, views)
+        rebalanced = True
     bench_entry = _bench_mark(bench_rows, entry, calendars.get(bench_market)) if benchmark else None
     points: list[SegmentPoint] = []
     last_prices: list[float] = list(entry_prices)
@@ -904,6 +993,8 @@ def _compute_segment(
         sessions=len(priced),
         gaps=len(points) - len(priced),
         last_session=final.session if final else None,
+        rebalanced=rebalanced,
+        turnover=turnover,
     )
 
 

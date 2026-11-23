@@ -4997,7 +4997,144 @@ export interface Idea {
   /** I3c: test and risk snapshots, oldest first; recomputed only when the user asks. */
   tests?: IdeaTestSnapshot[];
   risks?: IdeaRiskSnapshot[];
+  /** I4: attached signals (only grow; the current one is the last not detached) and the trial ledger. */
+  signals?: IdeaSignal[];
+  current_signal_id?: string | null;
+  trials?: IdeaTrial[];
+  trial_count?: number;
+  trials_lower_bound?: boolean;
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null };
+}
+
+// ── Ideas: quant layer (Workstream 12, I4a) ─────────────────────────────────
+
+export type IdeaSignalSource = "script" | "import";
+export type IdeaSignalOutputKind = "positions" | "weights" | "returns";
+
+export interface IdeaSignalLeg {
+  entity: CrossTabHandoffEntity;
+  /** Share of NAV for a weights signal; share of a fully invested gross book for positions. */
+  weight: number;
+  instrument_id: string;
+  units: number | null;
+  price: number | null;
+  price_date: string | null;
+  key: string;
+}
+
+export interface IdeaSuppliedSeries {
+  label: string;
+  window_start: string | null;
+  window_end: string | null;
+  observations: number;
+  metrics: Record<string, number | null>;
+  curve: Array<[string, number]>;
+  warnings: string[];
+  drives_tracking: false;
+}
+
+export interface IdeaValidationFold {
+  fold: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  test_observations: number;
+  selected_point: number;
+  test_return: number | null;
+  partial: boolean;
+}
+
+export interface IdeaValidationSnapshot {
+  kind: "walk_forward";
+  snapshot_id: string;
+  created_at: string;
+  sweep_id: string;
+  definition_sha256: string;
+  report_sha256: string;
+  target: "weight_book" | "returns_result";
+  result_id: string | null;
+  execution_lag: number | null;
+  cost_bps: number | null;
+  /** true: Gamma charged turnover costs; false: none; null: the script's own costs, unknown to Gamma. */
+  costs_included: boolean | null;
+  trials: number;
+  train_observations: number;
+  test_observations: number;
+  window: "anchored" | "rolling";
+  selection_metric: "sharpe" | "total_return";
+  window_start: string | null;
+  window_end: string | null;
+  observations: number;
+  folds: IdeaValidationFold[];
+  out_of_sample: Record<string, number | null>;
+  oos_start: string | null;
+  oos_end: string | null;
+  oos_curve: Array<[string, number]>;
+  in_sample_value: number | null;
+  in_sample_point: number | null;
+  in_sample_label: string;
+  distinct_selections: number;
+  causality_verified: boolean;
+  warnings: string[];
+  provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null } | null;
+}
+
+export interface IdeaSignal {
+  signal_id: string;
+  idea_id: string;
+  attached_at: string;
+  source: IdeaSignalSource;
+  output_kind: IdeaSignalOutputKind;
+  label: string;
+  source_ref: Record<string, unknown>;
+  as_of: string | null;
+  legs: IdeaSignalLeg[];
+  supplied: IdeaSuppliedSeries | null;
+  validation: IdeaValidationSnapshot | null;
+  trial_count: number;
+  trial_count_lower_bound: boolean;
+  detached_at: string | null;
+  warnings: string[];
+  provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null } | null;
+  current: boolean;
+  drives_tracking: boolean;
+}
+
+export interface IdeaTrial {
+  key: string;
+  kind: "script_run" | "sweep_point" | "import" | "legs";
+  recorded_at: string;
+  label: string;
+  signal_id: string | null;
+}
+
+export interface IdeaSignalInstrument {
+  symbol: string;
+  entity_type: "equity" | "etf" | "crypto";
+  label?: string | null;
+}
+
+export interface IdeaSignalPayload {
+  source: IdeaSignalSource;
+  output_kind: IdeaSignalOutputKind;
+  label?: string | null;
+  run_id?: string | null;
+  result_id?: string | null;
+  validation?: {
+    sweep_id: string;
+    train_observations: number;
+    test_observations: number;
+    window?: "anchored" | "rolling";
+    selection_metric?: "sharpe" | "total_return";
+    cost_bps?: number | null;
+  } | null;
+  rows?: Array<Record<string, string>>;
+  date_column?: string | null;
+  columns?: string[];
+  value_column?: string | null;
+  value_kind?: "return" | "level";
+  instruments?: Record<string, IdeaSignalInstrument>;
 }
 
 export interface IdeaLegSummary {
@@ -5133,7 +5270,7 @@ export interface IdeaTrackedLeg {
   entity: CrossTabHandoffEntity;
   stated_weight: number | null;
   weight: number | null;
-  weight_source: "stated" | "stance";
+  weight_source: "stated" | "stance" | "signal";
   asset_class: IdeaTrackingCostClass;
   market: string;
   key: string;
@@ -5151,12 +5288,20 @@ export interface IdeaTrackingSegmentRecord {
   end_reason: string | null;
   end_note: string;
   untracked_reason: string | null;
+  /** I4: the signal whose book this segment froze, and whether it entered by rebalancing. */
+  signal_id?: string | null;
+  rebalance?: boolean;
 }
 
 export interface IdeaTrackingRecord {
   label: string;
   benchmark: string;
-  cost_model: { per_side_bp: Record<string, number>; leg_classes: Record<string, string>; updated_at: string | null };
+  cost_model: {
+    per_side_bp: Record<string, number>;
+    leg_classes: Record<string, string>;
+    leg_bp?: Record<string, number>;
+    updated_at: string | null;
+  };
   segments: IdeaTrackingSegmentRecord[];
   snapshot: IdeaTrackingSnapshot | null;
 }
@@ -5179,13 +5324,15 @@ export interface IdeaTrackingSegmentLeg {
   normalized_id: string;
   stated_weight: number | null;
   weight: number | null;
-  weight_source: "stated" | "stance";
+  weight_source: "stated" | "stance" | "signal";
   asset_class: IdeaTrackingCostClass;
   detected_class: IdeaTrackingCostClass;
   cost_bp: number | null;
   market: string;
   entry_price: number | null;
   last_price: number | null;
+  /** I4: "leg" when the leg has its own per-side cost, "class" when it takes its class's. */
+  cost_source?: "leg" | "class";
 }
 
 export interface IdeaTrackingSegment {
@@ -5212,6 +5359,11 @@ export interface IdeaTrackingSegment {
   benchmark_return: number | null;
   excess_return: number | null;
   max_drawdown: number | null;
+  /** I4: a segment opened by a signal change enters by rebalancing (turnover cost). */
+  signal_id?: string | null;
+  rebalanced?: boolean;
+  turnover?: number | null;
+  exit_rebalanced?: boolean;
   legs: IdeaTrackingSegmentLeg[];
 }
 
@@ -5262,6 +5414,7 @@ export interface IdeaTrackingResponse {
   cost_model: {
     classes: IdeaTrackingCostClassView[];
     leg_classes: Record<string, string>;
+    leg_bp?: Record<string, number>;
     updated_at: string | null;
     edited: boolean;
   };
@@ -5350,6 +5503,8 @@ export interface IdeaTrackingSettingsPayload {
   per_side_bp?: Record<string, number>;
   leg_classes?: Record<string, string | null>;
   benchmark?: string;
+  /** I4: a leg's own per-side cost; null returns it to its class's cost. */
+  leg_bp?: Record<string, number | null>;
 }
 
 // ── Ideas: close and review (Workstream 12, I3b) ─────────────────────────────
@@ -5486,6 +5641,9 @@ export interface IdeaTestSnapshot extends IdeaSnapshotBase {
   benchmark_curve: Array<[string, number]>;
   costs_included: boolean;
   sample: "in_sample";
+  /** I4: size of the idea's trial ledger when the backtest ran; null before I4. */
+  trial_count?: number | null;
+  trial_count_lower_bound?: boolean;
 }
 
 export interface IdeaRiskEpisode {

@@ -39,10 +39,13 @@ from src.models.ideas import (
     TRACKING_LABEL,
     assert_journal_append_only,
     assert_reviews_append_only,
+    assert_signals_append_only,
+    assert_trials_append_only,
     migrate_idea_v1_to_v2,
     migrate_idea_v2_to_v3,
     migrate_idea_v3_to_v4,
     migrate_idea_v4_to_v5,
+    migrate_idea_v5_to_v6,
 )
 from src.utils.time import now_utc
 
@@ -57,6 +60,7 @@ DEFAULT_IDEA_MIGRATIONS: dict[int, IdeaMigration] = {
     2: migrate_idea_v2_to_v3,
     3: migrate_idea_v3_to_v4,
     4: migrate_idea_v4_to_v5,
+    5: migrate_idea_v5_to_v6,
 }
 
 
@@ -313,6 +317,8 @@ class IdeaStore:
                 raise IdeaValidationError("An update cannot change the idea id.")
             assert_journal_append_only(current.journal, updated.journal)
             assert_reviews_append_only(current.reviews, updated.reviews)
+            assert_signals_append_only(current.signals, updated.signals)
+            assert_trials_append_only(current.trials, updated.trials)
             self._write_item_unlocked(updated)
             return updated
 

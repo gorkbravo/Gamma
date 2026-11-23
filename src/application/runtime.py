@@ -26,6 +26,7 @@ from src.application.idea_observables import ObservableRegistry
 from src.application.idea_analysis import IdeaAnalysisService
 from src.application.idea_intraday import IdeaIntradayService
 from src.application.idea_service import IdeaService
+from src.application.idea_signals import IdeaSignalService
 from src.application.idea_tracking import IdeaTrackingService, ProviderTrackingPrices
 from src.application.iv_service import IVService
 from src.services.iv_snapshot_store import IVSnapshotStore
@@ -209,6 +210,8 @@ class ApplicationRuntime:
     idea_intraday: IdeaIntradayService | None = None
     # I3c: snapshots de test (Strategy Lab) y riesgo (Risk) de las patas de una idea, a petición.
     idea_analysis: IdeaAnalysisService | None = None
+    # I4: señales (ejecuciones de Script o importaciones) adjuntadas a una idea; nunca ejecuta un Script.
+    idea_signals: IdeaSignalService | None = None
     desktop: DesktopRuntimeState | None = None
     # Preferencias del asistente de primer arranque y origen de cada ajuste de inicio.
     setup_store: SetupStore | None = None
@@ -650,6 +653,12 @@ def build_runtime(
             risk_service=risk_service,
             research_provider=research_provider,
             crypto_prices=idea_tracking_prices,
+        ),
+        idea_signals=IdeaSignalService(
+            idea_service,
+            script_service=research_script_service,
+            research_service=research_service,
+            prices=idea_tracking_prices,
         ),
         setup_store=setup_store,
         startup_settings=startup_settings,
