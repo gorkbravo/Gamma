@@ -84,6 +84,7 @@
       {#if test}
         <span class="tag warning">No costs</span>
         <span class="tag">In-sample only</span>
+        {#if test.source !== "idea_legs"}<span class="tag accent" title={test.source_ids.attached_label ?? ""}>From {test.source === "risk_tab" ? "Risk" : "Strategy Lab"}</span>{/if}
         <span
           class="tag accent"
           title={test.trial_count != null ? `${trialsText(test.trial_count, test.trial_count_lower_bound)} recorded for this idea when this backtest ran` : "Run before trial counting (I4)"}
@@ -117,6 +118,7 @@
     <div class="snapshot-head">
       <strong>Risk</strong>
       {#if risk}
+        {#if risk.source !== "idea_legs"}<span class="tag accent" title={risk.source_ids.attached_label ?? ""}>From {risk.source === "risk_tab" ? "Risk" : "Strategy Lab"}</span>{/if}
         {#if risk.stale_reason}<span class="tag warning" title={risk.stale_reason}>Stale</span>{/if}
         <span class="header-meta">{formatIdeaInstant(risk.created_at)} · {snapshotWindowText(risk)} · {Math.round(risk.alpha * 100)}%, 1 day</span>
         <ProvenanceBadge data={risk.provenance ? toProvenanceBadge({ ...risk.provenance, warnings: risk.warnings }) : null} variant="dot" />

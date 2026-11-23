@@ -167,4 +167,13 @@ describe("IdeaAnalysisPanel", () => {
     expect(legless).toContain("Add legs to backtest the idea.");
     expect(legless).toMatch(/<button type="button" class="btn is-small is-ghost"[^>]*disabled/);
   });
+
+  it("names the tab an attached snapshot came from (I4c)", () => {
+    const attached = { ...TEST, source: "strategy_lab" as const, source_ids: { attached_label: "Megacap pair" } };
+    const riskAttached = { ...RISK, source: "risk_tab" as const, source_ids: { attached_label: "Book" } };
+    const { body } = render(IdeaAnalysisPanel, { props: { idea: { ...IDEA, tests: [attached], risks: [riskAttached] } } });
+    expect(body).toContain("From Strategy Lab");
+    expect(body).toContain("From Risk");
+    expect(render(IdeaAnalysisPanel, { props: { idea: IDEA } }).body).not.toContain("From Strategy Lab");
+  });
 });

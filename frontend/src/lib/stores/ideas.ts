@@ -25,6 +25,7 @@ import type {
   IdeaPinResponse,
   IdeaReviewStatsResponse,
   IdeaSignalPayload,
+  IdeaAttachedBook,
   IdeaSummary,
   IdeaIntradayView,
   IdeaTrackingResponse,
@@ -246,6 +247,25 @@ export function attachIdeaSignal(ideaId: string, payload: IdeaSignalPayload): Pr
 /** Detach the current signal; it stays in the record and the trial count keeps its value. */
 export function detachIdeaSignal(ideaId: string): Promise<Idea | null> {
   return runSignal(ideaId, () => deleteJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/signal`));
+}
+
+/**
+ * I4c: attach a result from another tab. Returns null on success or the reason it failed, so the
+ * shared "Attach to idea" picker can show it where the user clicked (never the Ideas error line).
+ */
+export async function attachToIdea(
+  ideaId: string,
+  request: { kind: "test" | "risk"; book: IdeaAttachedBook } | { kind: "signal"; payload: IdeaSignalPayload }
+): Promise<string | null> {
+  try {
+    const path = `/ideas/${encodeURIComponent(ideaId)}/${request.kind === "signal" ? "signal" : request.kind}`;
+    const idea = await postJson<Idea>(path, request.kind === "signal" ? request.payload : request.book);
+    applyIdea(idea);
+    await loadIdeas();
+    return null;
+  } catch (error) {
+    return messageOf(error);
+  }
 }
 
 export async function loadIdeaReview(): Promise<IdeaReviewStatsResponse | null> {

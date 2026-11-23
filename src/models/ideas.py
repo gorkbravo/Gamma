@@ -196,6 +196,7 @@ SNAPSHOT_STALE_DAYS = 7
 SNAPSHOT_SERIES_MAX_POINTS = 260
 SNAPSHOT_WARNINGS_MAX = 12
 SNAPSHOT_EPISODES_MAX = 16
+SNAPSHOT_SOURCES = ("idea_legs", "strategy_lab", "risk_tab")
 
 # Quant layer (I4). A signal is data the user brought (a Script run or an import),
 # never something Gamma runs on its own; see docs/idea_workspace_spec.md, I4 design decisions.
@@ -1805,8 +1806,9 @@ class IdeaSnapshotBase:
         object.__setattr__(self, "benchmark", benchmark[:TRACKING_BENCHMARK_MAX])
         object.__setattr__(self, "lookback_days", max(1, int(self.lookback_days)))
         object.__setattr__(self, "observations", max(0, int(self.observations)))
-        if self.source not in {"idea_legs"}:
-            raise IdeaValidationError("A snapshot source must be idea_legs.")
+        # I4c: un snapshot también puede venir de un libro adjuntado desde Strategy Lab o Risk.
+        if self.source not in SNAPSHOT_SOURCES:
+            raise IdeaValidationError(f"A snapshot source must be one of {SNAPSHOT_SOURCES}.")
         ids = {str(key): str(value)[:OBSERVABLE_PARAM_VALUE_MAX] for key, value in dict(self.source_ids or {}).items() if str(value or "").strip()}
         object.__setattr__(self, "source_ids", MappingProxyType(dict(sorted(ids.items()))))
         if self.provenance is not None and not isinstance(self.provenance, ProvenanceRecord):
@@ -2045,6 +2047,10 @@ def snapshot_staleness(snapshot: IdeaSnapshotBase, idea: "Idea", now: datetime) 
     frozen, untracked = freeze_tracking_legs(idea.legs, idea.stance) if idea.legs else ((), "no legs")
     current = tuple(sorted((leg.key, round(float(leg.weight or 0.0), 10)) for leg in frozen)) if not untracked else ()
     if current != snapshot.positions():
+        if snapshot.source == "strategy_lab":
+            return "Attached from Strategy Lab: a different book from the idea's legs."
+        if snapshot.source == "risk_tab":
+            return "Attached from Risk: a different book from the idea's legs."
         return "The legs or weights changed after this run."
     age = now - snapshot.created_at
     if age.days >= SNAPSHOT_STALE_DAYS:

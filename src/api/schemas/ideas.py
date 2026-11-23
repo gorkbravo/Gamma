@@ -58,6 +58,7 @@ from src.models.ideas import (
     snapshot_staleness,
     thaw_captured_values,
 )
+from src.application.idea_analysis import AttachedBook, AttachedBookLeg
 from src.application.idea_signals import InstrumentMapping, SignalRequest, ValidationRequest
 from src.services.idea_store import IdeaStorageWarning, IdeaSummary
 
@@ -1237,6 +1238,32 @@ class SignalValidationRequestModel(BaseModel):
     result_id: str | None = Field(default=None, max_length=64)
     execution_lag: int = Field(default=1, ge=1, le=5)
     cost_bps: float | None = Field(default=None, ge=0, le=1000)
+
+
+class AttachedBookLegModel(BaseModel):
+    entity_type: Literal["equity", "etf", "crypto"] = "equity"
+    symbol: str = Field(min_length=1, max_length=24)
+    weight: float = Field(ge=-100, le=100)
+    label: str | None = Field(default=None, max_length=160)
+
+
+class AttachedBookRequestModel(BaseModel):
+    """A book attached from Strategy Lab's composer or Risk's research book (I4c); Gamma recomputes it."""
+
+    source: Literal["strategy_lab", "risk_tab"]
+    label: str = Field(min_length=1, max_length=160)
+    legs: list[AttachedBookLegModel] = Field(min_length=1, max_length=24)
+    benchmark: str | None = Field(default=None, max_length=24)
+    lookback_days: int | None = Field(default=None, ge=20, le=5000)
+
+    def to_domain(self) -> AttachedBook:
+        return AttachedBook(
+            source=self.source,
+            label=self.label,
+            legs=tuple(AttachedBookLeg(entity_type=leg.entity_type, symbol=leg.symbol, weight=leg.weight, label=leg.label) for leg in self.legs),
+            benchmark=self.benchmark,
+            lookback_days=self.lookback_days,
+        )
 
 
 class IdeaSignalRequestModel(BaseModel):

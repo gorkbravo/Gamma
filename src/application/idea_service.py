@@ -645,7 +645,7 @@ class IdeaService:
             counted = replace(snapshot, trial_count=len(trials), trial_count_lower_bound=current.trials_lower_bound)
             total = counted.metrics.get("total_return")
             body = (
-                f"Ran a backtest of the legs ({counted.window_start or 'N/A'} to {counted.window_end or 'N/A'}, "
+                f"{_snapshot_subject(counted, 'backtest')} ({counted.window_start or 'N/A'} to {counted.window_end or 'N/A'}, "
                 f"{counted.observations} observations): total {_pct(total)}, max drawdown {_pct(counted.metrics.get('max_drawdown'))}, "
                 f"{counted.benchmark} {_pct(counted.metrics.get('benchmark_total_return'))}. In-sample, no costs. "
                 f"Trials recorded for this idea: {_trials_text(len(trials), current.trials_lower_bound)}."
@@ -666,7 +666,7 @@ class IdeaService:
             now = self._clock()
             worst = snapshot.worst_episode
             body = (
-                f"Ran risk on the legs ({snapshot.observations} observations): {int(snapshot.alpha * 100)}% one-day historical VaR "
+                f"{_snapshot_subject(snapshot, 'risk')} ({snapshot.observations} observations): {int(snapshot.alpha * 100)}% one-day historical VaR "
                 f"{_pct(_loss(snapshot.metrics.get('historical_var')))}, expected shortfall {_pct(_loss(snapshot.metrics.get('historical_es')))}"
                 + (f"; worst replayed episode {worst.label} {_pct(worst.book_return)}." if worst else "; no stress episode in the available history.")
             )
@@ -1089,6 +1089,15 @@ _START_REASON_TEXT = {
     "signal_changed": "Signal changed",
     "signal_detached": "Signal detached",
 }
+
+
+def _snapshot_subject(snapshot: Any, kind: str) -> str:
+    """"Ran a backtest of the legs", or "Attached a Strategy Lab backtest of <book>" (I4c)."""
+    attached = snapshot.source_ids.get("attached_from") if snapshot.source != "idea_legs" else None
+    if attached:
+        what = "backtest" if kind == "backtest" else "risk run"
+        return f"Attached a {attached} {what} of {snapshot.source_ids.get('attached_label') or 'a book'}"
+    return "Ran a backtest of the legs" if kind == "backtest" else "Ran risk on the legs"
 
 
 def _trials_text(count: int, lower_bound: bool) -> str:
