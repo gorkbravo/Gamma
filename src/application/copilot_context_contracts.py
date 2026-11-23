@@ -38,6 +38,7 @@ COPILOT_SCOPE_CONTEXT_BUDGET_BYTES: dict[str, int] = {
     "risk": 36_000,
     "iv": 36_000,
     "external_context": 36_000,
+    "ideas": 28_000,
     "synthesis": COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
 }
 
@@ -63,6 +64,7 @@ _PRESERVED_SELECTOR_KEYS = (
     "token_id",
     "account_scope",
     "research_book_id",
+    "idea_id",
     "active_tab",
     "included_domains",
 )

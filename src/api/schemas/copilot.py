@@ -128,6 +128,7 @@ class CopilotRequestContextModel(BaseModel):
     risk_state: CopilotRiskStateModel | None = None
     iv_state: CopilotIvStateModel | None = None
     maritime_state: dict[str, object] | None = None
+    idea_id: str | None = Field(default=None, max_length=80)
 
     def to_domain(self) -> CopilotRequestContext:
         return CopilotRequestContext(
@@ -145,6 +146,7 @@ class CopilotRequestContextModel(BaseModel):
             risk_state=self.risk_state.model_dump(mode="python") if self.risk_state is not None else None,
             iv_state=self.iv_state.model_dump(mode="python") if self.iv_state is not None else None,
             maritime_state=self.maritime_state,
+            idea_id=self.idea_id,
         )
 
 
@@ -343,6 +345,8 @@ class CopilotResearchCardResponseModel(BaseModel):
         default_factory=lambda: CopilotRunObservabilityModel()
     )
     safe_provider_error: CopilotSafeProviderErrorModel | None = None
+    proposal_ids: list[str] = Field(default_factory=list)
+    proposals: list["CopilotDraftMutationModel"] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, row: CopilotResearchCardResult) -> "CopilotResearchCardResponseModel":
@@ -378,6 +382,8 @@ class CopilotResearchCardResponseModel(BaseModel):
                 if row.safe_provider_error
                 else None
             ),
+            proposal_ids=list(row.proposal_ids),
+            proposals=[CopilotDraftMutationModel.from_domain(item) for item in row.proposals],
         )
 
 

@@ -15,6 +15,7 @@ export { queryStates } from "../query-cache";
 export function clearFrontendQueryCache() { queryCache.clear(); }
 import { beginLoading, endLoading, lastError, loading, setError, setLoading } from "./runtime";
 import { researchScriptWorkspace } from "./research-script";
+import { activeIdea, selectedIdeaId } from "./ideas";
 export { lastError, loading } from "./runtime";
 import {
   diagnostics, diagnosticsLog, loadDiagnostics, loadProviderUsage, providerUsage,
@@ -438,6 +439,7 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
     fundamentals: createEmptyCopilotThread("fundamentals"),
     risk: createEmptyCopilotThread("risk"),
     iv: createEmptyCopilotThread("iv"),
+    ideas: createEmptyCopilotThread("ideas"),
     synthesis: createEmptyCopilotThread("synthesis")
   };
 }
@@ -550,6 +552,7 @@ export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardRe
   fundamentals: null,
   risk: null,
   iv: null,
+  ideas: null,
   synthesis: null
 });
 export const copilotThreads = writable<Record<CopilotDomain, CopilotThreadState>>(createEmptyCopilotThreads());
@@ -1015,6 +1018,7 @@ function resetAllCopilotThreads() {
     fundamentals: null,
     risk: null,
     iv: null,
+    ideas: null,
     synthesis: null
   });
   copilotThreads.set(createEmptyCopilotThreads());
@@ -1273,7 +1277,8 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   crypto: "Crypto",
   fundamentals: "Fundamentals",
   risk: "Risk",
-  iv: "Options"
+  iv: "Options",
+  ideas: "Ideas"
 };
 
 function buildCopilotContextFingerprint(
@@ -1450,6 +1455,12 @@ function buildCopilotContextFingerprint(
       spreads: workspace?.spreads.length ?? 0,
       inventories: workspace?.inventories.length ?? 0
     });
+  }
+
+  if (domain === "ideas") {
+    // I5: la huella cambia con la idea abierta y con su última modificación.
+    const idea = get(activeIdea);
+    return JSON.stringify({ domain, workspaceMode, ideaId: idea?.idea_id ?? null, updatedAt: idea?.updated_at ?? null });
   }
 
   if (domain === "maritime") {
@@ -3939,6 +3950,12 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         workspace_mode: workspaceMode,
         crypto_token_id: get(selectedCryptoTokenId)
       };
+    case "ideas":
+      return {
+        current_tab: "ideas",
+        workspace_mode: workspaceMode,
+        idea_id: get(activeIdea)?.idea_id ?? get(selectedIdeaId)
+      };
     case "fundamentals": {
       const fundamentalsTicker = get(selectedFundamentalsTicker);
       const fundamentalsOverviewState = get(fundamentalsOverview);
@@ -4053,6 +4070,9 @@ function validateSynthesisScopeDomain(
   }
   if (domain === "maritime" && !get(maritimeWorkspace)) {
     return "Load the Sealanes workspace before including it in a synthesis card.";
+  }
+  if (domain === "ideas" && !get(activeIdea)) {
+    return "Open an idea in the Ideas tab before including it in a synthesis card.";
   }
   if (domain === "prediction_markets" && !get(predictionMarketDetail)) {
     return "Select and load a Prediction Markets contract before including it in a synthesis card.";

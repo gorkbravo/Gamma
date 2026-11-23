@@ -493,5 +493,17 @@ def test_attached_blocks_are_bounded_and_carry_no_outputs():
     empty = CopilotResearchCardRequest(domain="research", prompt="p")
     for tool_id in ("run_strategy_lab_portfolio_backtest", "run_research_basket_analysis", "run_crypto_token_analysis",
                     "run_prediction_market_comparison", "draft_options_strategy", "run_macro_series_analysis",
-                    "get_synthesis_domain_context"):
+                    "get_synthesis_domain_context", "review_idea", "explain_criterion_state", "draft_idea_from_context"):
         assert operator_attached_context(empty, plan(tool_id)) is None, tool_id
+
+
+def test_ideas_tools_see_the_open_idea():
+    """I5: the Ideas tools receive the idea open in the Ideas tab, by id only."""
+    from src.application.copilot_operator_context import operator_attached_context
+    from src.models.copilot import CopilotOperatorPlan, CopilotOperatorPlanStep, CopilotRequestContext, CopilotResearchCardRequest
+    request = CopilotResearchCardRequest(domain="ideas", prompt="Review", context=CopilotRequestContext(current_tab="ideas", idea_id="idea-1"))
+    plan = CopilotOperatorPlan(intent="test", steps=[CopilotOperatorPlanStep(
+        step_id="step_01", order=1, title="t", domain="ideas", action_type="read_context", tool_id="review_idea")])
+    attached = operator_attached_context(request, plan)
+    assert attached["ideas_selection"]["selected_idea_id"] == "idea-1"
+

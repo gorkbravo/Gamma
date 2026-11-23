@@ -3749,7 +3749,8 @@ export type CopilotBaseDomain =
   | "crypto"
   | "fundamentals"
   | "risk"
-  | "iv";
+  | "iv"
+  | "ideas";
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
 export type CopilotReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 export type CopilotProfile = "auto" | "quick" | "standard" | "deep";
@@ -3899,6 +3900,9 @@ export interface CopilotResearchCardResult {
   usage?: CopilotUsageRecord;
   observability?: CopilotRunObservability;
   safe_provider_error?: CopilotSafeProviderError | null;
+  /** I5: pending idea drafts the user accepts or rejects; ids survive a session reload. */
+  proposal_ids?: string[];
+  proposals?: CopilotDraftMutation[];
 }
 
 export interface CopilotResearchPlanEntity {

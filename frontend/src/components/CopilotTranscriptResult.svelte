@@ -8,6 +8,7 @@
     CopilotSourceRef
   } from "../lib/api/types";
   import CopilotRichText from "./CopilotRichText.svelte";
+  import CopilotIdeaProposals from "./CopilotIdeaProposals.svelte";
   import { canNavigateCopilotSource } from "../lib/copilot-source-navigation";
   import { isCopilotOutputBudgetCutoff, isRetryableCopilotStatus } from "../lib/copilot-result";
   import { hasCopilotText } from "../lib/copilot-text";
@@ -656,6 +657,10 @@
       <div class="provenance">{block.providerLabel}</div>
     {/if}
   {/each}
+  {#if result && ((result.proposals?.length ?? 0) > 0 || (result.proposal_ids?.length ?? 0) > 0)}
+    <!-- I5: borradores de idea que el usuario acepta o rechaza. -->
+    <CopilotIdeaProposals {result} />
+  {/if}
 </div>
 
 <style>

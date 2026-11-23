@@ -88,7 +88,7 @@ class MockCopilotProvider(CopilotProvider):
         sources: dict[str, CopilotSourceRef] = {source.source_id: source for source in context.sources}
         extra_warnings: list[str] = []
 
-        for tool_name, arguments in self._planned_tool_calls(context):
+        for tool_name, arguments in self._planned_tool_calls(context, request):
             if tool_name not in allowed_tool_names:
                 continue
             execution = execute_tool(tool_name, arguments, context)
@@ -127,8 +127,12 @@ class MockCopilotProvider(CopilotProvider):
             warnings=warnings,
         )
 
-    def _planned_tool_calls(self, context: CopilotContextBundle) -> list[tuple[str, dict[str, Any]]]:
+    def _planned_tool_calls(
+        self, context: CopilotContextBundle, request: CopilotResearchCardRequest | None = None
+    ) -> list[tuple[str, dict[str, Any]]]:
         domain = context.domain
+        if domain == "ideas":
+            return self._planned_idea_calls(context, request)
         if domain == "portfolio":
             return [
                 ("get_portfolio_positions_summary", {}),
@@ -224,7 +228,95 @@ class MockCopilotProvider(CopilotProvider):
             return self._build_strategy_lab_card(request, context, tool_outputs, tool_traces)
         if domain == "synthesis":
             return self._build_synthesis_card(request, context, tool_outputs, tool_traces)
+        if domain == "ideas":
+            return self._build_ideas_card(request, context, tool_outputs, tool_traces)
         return self._fallback_card(request, context, tool_traces)
+
+    # -- Ideas (I5): llamadas deterministas a las herramientas de Ideas, sin inferencia externa --
+
+    _DRAFT_WORDS = ("draft", "propose", "new idea", "create an idea", "save as an idea")
+
+    def _planned_idea_calls(
+        self, context: CopilotContextBundle, request: CopilotResearchCardRequest | None
+    ) -> list[tuple[str, dict[str, Any]]]:
+        summary = context.summary_data
+        calls: list[tuple[str, dict[str, Any]]] = [("review_idea", {"idea_id": None})]
+        criteria = self._as_list(summary.get("criteria"))
+        if criteria:
+            calls.append(("explain_criterion_state", {"idea_id": None, "criterion_id": str(self._as_dict(criteria[0]).get("criterion_id") or "")}))
+        prompt = str(getattr(request, "prompt", "") or "").lower()
+        if any(word in prompt for word in self._DRAFT_WORDS):
+            legs = [
+                self._as_dict(leg)
+                for leg in self._as_list(summary.get("legs"))
+                if str(self._as_dict(leg).get("entity_type")) in {"equity", "etf", "crypto"}
+            ][:4]
+            first = str(legs[0].get("id") or "SPY") if legs else "SPY"
+            first_type = str(legs[0].get("entity_type") or "equity") if legs else "etf"
+            observable = "crypto_price" if first_type == "crypto" else "equity_close"
+            param = "token_id" if first_type == "crypto" else "symbol"
+            calls.append((
+                "draft_idea_from_context",
+                {
+                    "title": f"Follow-up: {summary.get('title') or 'idea'}"[:200],
+                    "thesis": f"The case behind “{summary.get('title') or 'this idea'}” holds over the next quarter.",
+                    "stance": str(summary.get("stance") or "long"),
+                    "legs": [
+                        {"entity_type": str(leg.get("entity_type")), "symbol": str(leg.get("id")), "label": str(leg.get("label") or leg.get("id")), "weight": leg.get("weight")}
+                        for leg in legs
+                    ],
+                    "criteria": [
+                        {"kind": "invalidate", "observable_id": observable, "params": [{"name": param, "value": first.lower() if first_type == "crypto" else first}],
+                         "condition": "change_over_window", "threshold": -10.0, "window": "1m",
+                         "rationale": f"A 10% monthly fall in {first} would contradict the thesis."},
+                        {"kind": "review", "observable_id": "calendar_date", "params": [{"name": "date", "value": "2027-03-31"}],
+                         "condition": "date_reached", "threshold": None, "window": None, "rationale": "Review at the end of the quarter."},
+                    ],
+                    "rationale": "Drafted by Gamma's deterministic mock Copilot from the selected idea.",
+                },
+            ))
+        return calls
+
+    def _build_ideas_card(
+        self,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        tool_outputs: dict[str, Any],
+        tool_traces: list[CopilotToolTrace],
+    ) -> ResearchCard:
+        summary = context.summary_data
+        review = self._as_dict(tool_outputs.get("review_idea"))
+        explained = self._as_dict(tool_outputs.get("explain_criterion_state"))
+        draft = self._as_dict(tool_outputs.get("draft_idea_from_context"))
+        counts = self._as_dict(summary.get("evidence_counts"))
+        claims = [
+            self._claim(
+                f"The idea is {summary.get('status')} with {counts.get('supports', 0)} supporting, {counts.get('challenges', 0)} challenging "
+                f"and {counts.get('context', 0)} context pins and {len(self._as_list(summary.get('criteria')))} criteria.",
+                context,
+                tool_traces,
+            )
+        ]
+        if explained:
+            claims.append(self._claim(f"Criterion “{explained.get('label')}” is {explained.get('state')}: {explained.get('state_reading')}", context, tool_traces))
+        steps = ["Open the idea to review the criteria and the hypothetical tracking."]
+        if draft.get("mutation_id"):
+            steps.insert(0, "Accept or reject the drafted idea below; nothing is created until you accept it.")
+        return ResearchCard(
+            title=self._title("Idea", request.prompt),
+            hypothesis=str(review.get("expected") or summary.get("thesis") or "No thesis written yet."),
+            rationale=(
+                f"Outcome: {review.get('outcome') or 'open'}. Evidence that held: {', '.join(review.get('held') or []) or 'none judged'}; "
+                f"failed: {', '.join(review.get('failed') or []) or 'none judged'}."
+            ),
+            required_data=["The idea's criteria and their latest evaluations", "The hypothetical tracking record"],
+            proposed_test="Compare the realized hypothetical path with the thesis at the next review date.",
+            confounders=["Tracking is hypothetical and not executed; costs are assumptions."],
+            next_steps=steps,
+            caveats=["This card was generated by Gamma's deterministic mock Copilot."],
+            source_backed_claims=claims,
+            inferred_claims=[],
+        )
 
     def _build_portfolio_card(
         self,

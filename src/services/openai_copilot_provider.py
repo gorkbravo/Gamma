@@ -1643,6 +1643,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "commodities": "Generate a concise research card for the active Gamma commodities workspace.",
             "maritime": "Generate a concise research card for the active Gamma Sealanes workspace.",
             "external_context": "Generate a concise research card from the approved item-level news context.",
+            "ideas": "Review the selected Gamma idea: thesis, evidence, criteria states and the hypothetical tracking record.",
             "synthesis": "Generate a concise cross-context research synthesis for the selected Gamma domains.",
         }.get(request.domain, "Generate a concise research card for the current Gamma workspace.")
         requested_prompt = (request.prompt or "").strip() or default_prompt

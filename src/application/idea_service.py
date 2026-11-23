@@ -287,6 +287,58 @@ class IdeaService:
         )
         return self.store.create(idea)
 
+    def create_idea_from_draft(self, proposal: Any, *, origin: IdeaOrigin) -> Idea:
+        """Create a draft idea from a Copilot proposal the user accepted (I5), in one write.
+
+        The idea and its criteria are created together, so a rule the registry
+        refuses leaves nothing behind. The idea stays a draft: nothing is
+        activated, tracked or evaluated until the user activates it.
+        """
+        now = self._clock()
+        idea_id = self._new_id()
+        criteria = []
+        for item in proposal.criteria:
+            request = IdeaCriterionRequest(
+                kind=item.kind,
+                observable=item.observable,
+                condition=item.condition,
+                threshold=item.threshold,
+                window=item.window,
+                cadence=item.cadence,
+                label=item.label,
+            )
+            criteria.append(self._build_criterion(idea_id, self._new_id(), request, now=now, created_at=now))
+        idea = Idea(
+            idea_id=idea_id,
+            title=proposal.title,
+            thesis=proposal.thesis,
+            stance=proposal.stance,
+            legs=tuple(proposal.legs),
+            status="draft",
+            origin=origin,
+            notes=(f"Copilot's rationale: {proposal.rationale}" if proposal.rationale else ""),
+            created_at=now,
+            updated_at=now,
+            criteria=tuple(criteria),
+        )
+        body = "Created from a Copilot draft you accepted" + (f" (“{origin.label}”)" if origin.label else "") + "."
+        if proposal.warnings:
+            body += " Warnings at drafting: " + " ".join(proposal.warnings)
+        idea = idea.with_journal_entry(
+            self._system_entry(idea_id, "created", _clip(body, 1_500), now, {"origin_kind": origin.kind, "criteria": len(criteria)})
+        )
+        for criterion in criteria:
+            idea = idea.with_journal_entry(
+                self._system_entry(
+                    idea_id,
+                    "criterion_added",
+                    f"Added a {criterion.kind} criterion from the Copilot draft: “{criterion.label}” ({_cadence_text(criterion.cadence)}).",
+                    now,
+                    {"criterion_id": criterion.criterion_id, "rule": _rule_details(criterion)},
+                )
+            )
+        return self.store.create(idea)
+
     def update_idea(self, idea_id: str, patch: IdeaPatchRequest) -> Idea:
         def mutate(current: Idea) -> Idea:
             now = self._clock()

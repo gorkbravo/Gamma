@@ -55,6 +55,7 @@
     attachIdeaSignal,
     detachIdeaSignal,
     ideaOpenRequest,
+    requestOpenIdea,
     ideaReviewStats,
     ideaSummaries,
     ideaTracking,
@@ -490,6 +491,7 @@
     riskWorkspace: $riskWorkspaceBasis,
     ivSurface: $ivSurface,
     ivSession: $ivSession,
+    idea: $activeIdea,
   });
   $: {
     const availableDomains = synthesisScopeOptions
@@ -541,6 +543,7 @@
     crypto: $cryptoTokenDetail,
     fundamentals: $fundamentalsOverview,
     fundamentalsTicker: $selectedFundamentalsTicker,
+    idea: $activeIdea,
   });
   $: setRiskWorkspaceMode(riskMode);
   $: persistWorkspaceState(
@@ -798,6 +801,8 @@
     { tabId: "maritime", domain: "maritime", label: "Sealanes", unavailableLabel: "Load the Sealanes workspace" },
     { tabId: "risk", domain: "risk", label: "Risk", unavailableLabel: "Run a Risk computation" },
     { tabId: "iv", domain: "iv", label: "Options", unavailableLabel: "Load an options surface" },
+    // I5: la idea abierta en Ideas (tesis, evidencias, criterios, seguimiento hipotético).
+    { tabId: "ideas", domain: "ideas", label: "Ideas", unavailableLabel: "Open an idea in the Ideas tab" },
   ];
 
   function contextDefinitionForDomain(domain: CopilotBaseDomain) {
@@ -818,6 +823,11 @@
     return degraded
       ? `SITREP | ${sectionLabel} | ${degraded} degraded`
       : `SITREP | ${sectionLabel} loaded`;
+  }
+
+  function describeIdeaCopilotContext(idea: Idea): string {
+    const criteria = idea.criteria.length;
+    return `${idea.title} · ${idea.status} · ${criteria} ${criteria === 1 ? "criterion" : "criteria"}`;
   }
 
   function buildSynthesisScopeOptions({
@@ -844,6 +854,7 @@
     riskWorkspace,
     ivSurface,
     ivSession,
+    idea,
   }: {
     activeTab: TabId;
     workspaceMode: WorkspaceMode | null;
@@ -868,6 +879,7 @@
     riskWorkspace: "portfolio" | "research" | "research_book" | null;
     ivSurface: IvSurface | null;
     ivSession: IvSessionStatus | null;
+    idea: Idea | null;
   }): CopilotGroundingScopeOption[] {
     const options: CopilotGroundingScopeOption[] = [];
     const pushedDomains = new Set<CopilotBaseDomain>();
@@ -1026,6 +1038,10 @@
       );
     }
 
+    if (idea) {
+      pushOption("ideas", describeIdeaCopilotContext(idea), null, null);
+    }
+
     if (crypto) {
       pushOption(
         "crypto",
@@ -1130,6 +1146,7 @@
     crypto,
     fundamentals,
     fundamentalsTicker,
+    idea,
   }: {
     tab: TabId;
     workspaceMode: WorkspaceMode | null;
@@ -1154,6 +1171,7 @@
     crypto: CryptoToken | null;
     fundamentals: FundamentalsOverview | null;
     fundamentalsTicker: string | null;
+    idea: Idea | null;
   }): CopilotSurfaceState {
     if (tab === "portfolio") {
       return {
@@ -1308,6 +1326,23 @@
         placeholder:
           "Test the repricing thesis, compare probability against flow, or frame the cleanest consistency check.",
         thread: threads.prediction_markets,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
+      };
+    }
+
+    if (tab === "ideas") {
+      return {
+        supported: idea != null,
+        domain: "ideas",
+        triggerLabel: idea ? "Idea context" : "Open an idea",
+        contextLabel: idea ? describeIdeaCopilotContext(idea) : "Open an idea in the Ideas tab first.",
+        domainLabel: "Ideas",
+        guidance:
+          "Grounded in the open idea: thesis, frozen evidence, criteria and their states, test and risk snapshots and the hypothetical tracking record. Copilot can explain and draft a new idea for you to accept; it never activates, closes or edits one.",
+        placeholder: "Review this idea against what happened, explain a criterion, or draft a follow-up idea for you to accept.",
+        thread: threads.ideas,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -2576,6 +2611,12 @@
   }
 
   async function handleOpenCopilotSource(source: CopilotSourceRef) {
+    // I5: una fuente de Ideas abre la idea concreta.
+    const ideaSourceId = source.navigation_tab === "ideas" ? source.navigation_context?.idea_id : null;
+    if (ideaSourceId) {
+      requestOpenIdea(ideaSourceId);
+      return;
+    }
     const externalUrl = validatedExternalSourceUrl(source.url);
     if (externalUrl) {
       await openExternalUrl(externalUrl);
