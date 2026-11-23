@@ -21,6 +21,9 @@
     TimeSeriesPoint
   } from "../lib/api/types";
   import { strategyComposerDraft } from "../lib/stores/app";
+  import AttachToIdea from "../components/AttachToIdea.svelte";
+  import { strategyLabAttachTarget } from "../lib/idea-attach";
+  import { attachToIdea } from "../lib/stores/ideas";
   import type {
     SavedResearchCreateOptions,
     StrategyLabAnalyzeOptions,
@@ -592,6 +595,11 @@
     (warning) => !warning.startsWith("Stale window:") && warning !== bookValidationWindow.lookbackNote
   );
   $: strategyBadge = activeStrategyResult ? toProvenanceBadge(activeStrategyResult) : null;
+  // I4c: el resultado activo se adjunta a una idea (snapshot de backtest o señal), recalculado por el backend.
+  $: ideaAttach = strategyLabAttachTarget(
+    { composition: strategyComposition, result: activeStrategyResult, csvText: strategyCsvText, dateColumn: strategyDateColumn, valueColumn: strategyValueColumn },
+    attachToIdea
+  );
   $: strategyChartSeries = activeStrategyResult
     ? [
         ...(activeStrategyResult.equity_curve_points.length
@@ -1186,6 +1194,7 @@
             <div class="builder-actions compact">
               {#if activeStrategyResult?.analytical_provenance}<button type="button" class="btn is-large" on:click={exportScriptAnalysis}>Export analysis JSON</button>{/if}
               <button type="button" class="btn is-large" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
+              <AttachToIdea target={ideaAttach.target} disabledReason={ideaAttach.reason} />
             </div>
           </div>
 

@@ -36,6 +36,9 @@
   import type { CopilotWorkingAnalysis, IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, RiskStressReplay, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
   import { colorWithAlpha, mixToken } from "../lib/chart-colors";
+  import AttachToIdea from "../components/AttachToIdea.svelte";
+  import { riskAttachTarget } from "../lib/idea-attach";
+  import { attachToIdea } from "../lib/stores/ideas";
 
   export let mode: WorkspaceMode | null = "portfolio";
   export let activeMode: RiskMode = "overview";
@@ -252,6 +255,8 @@
     seededBookKey = controls.key;
   }
   $: sourceView = resolveRiskSourceView({ selected: selectedSource, result });
+  // I4c: un libro de investigación de Strategy Lab se adjunta a una idea como snapshot de riesgo.
+  $: riskAttach = riskAttachTarget(strategyLabResearchBook?.composition ?? null, attachToIdea);
   $: computeSnapshot = riskSnapshotFor(selectedSource, snapshot, researchSnapshot, strategyLabResearchBook);
   $: renderSnapshot = riskSnapshotFor(sourceView.rendered, snapshot, researchSnapshot, strategyLabResearchBook);
   $: selectedSourceLabel = riskSourceLabelFor(selectedSource, strategyLabResearchBook);
@@ -765,6 +770,9 @@
     <div class="header-top">
       <span class="title">Risk Workspace</span>
       <span class="subtitle">{workspace.context.sourceLabel} · {workspace.context.baseCurrency}</span>
+      {#if selectedSource === "strategy_lab_book"}
+        <span class="header-attach"><AttachToIdea target={riskAttach.target} disabledReason={riskAttach.reason} /></span>
+      {/if}
     </div>
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Risk modes">
@@ -1523,6 +1531,12 @@
 {/snippet}
 
 <style>
+  /* I4c: la acción de adjuntar se alinea al final de la fila del título. */
+  .header-attach {
+    margin-left: auto;
+    align-self: center;
+  }
+
   .analysis-window {
     margin: var(--space-2) 0 0;
     color: var(--text-2);

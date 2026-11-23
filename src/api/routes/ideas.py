@@ -15,7 +15,7 @@ from dataclasses import replace
 from datetime import date
 from typing import NoReturn
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 from src.api.schemas.ideas import (
     EvaluationPassModel,
@@ -23,6 +23,7 @@ from src.api.schemas.ideas import (
     IdeaIntradayModel,
     IdeaReviewStatsResponseModel,
     IdeaSignalRequestModel,
+    AttachedBookRequestModel,
     IdeaCreateRequestModel,
     IdeaCriterionModel,
     IdeaCriterionRequestModel,
@@ -47,6 +48,7 @@ from src.api.schemas.ideas import (
     ObservableRefModel,
     ObservableRegistryResponseModel,
 )
+from src.models.handoff import HandoffEntity
 from src.models.ideas import Idea, IdeaSourceUnavailableError, IdeaValidationError
 from src.services.idea_explanations import list_explanations
 from src.services.idea_store import IdeaConflictError, IdeaNotFoundError
@@ -77,6 +79,13 @@ def _tracking(request: Request):
 
 def _analysis(request: Request):
     return request.app.state.runtime.idea_analysis
+
+
+def _attached_book(payload: dict | None):
+    """An empty body runs the idea's own legs (I3c); a body attaches a book from Strategy Lab or Risk (I4c)."""
+    if not payload:
+        return None
+    return AttachedBookRequestModel.model_validate(payload).to_domain()
 
 
 def _signals(request: Request):
@@ -136,6 +145,65 @@ def list_observables(request: Request) -> ObservableRegistryResponseModel:
         tws_connected=registry.tws_connected(),
         retrieved_at=now_utc(),
     )
+
+
+@router.get("/ideas/history")
+def get_idea_history(
+    request: Request,
+    symbol: str = Query(min_length=1, max_length=24, description="Ticker, or a CoinGecko id with kind=crypto"),
+    kind: str = Query(default="equity", pattern="^(equity|etf|crypto)$"),
+    days: int = Query(default=365, ge=5, le=3650),
+) -> dict:
+    """Daily closes as Ideas reads them (I4b): the provider path of the canonical tracking series, with provenance.
+
+    Read-only. A close is listed only once it is final (the same rule as
+    tracking); an unavailable source is a state with its reason, not an error.
+    """
+    from datetime import timedelta
+
+    from src.application.idea_tracking import market_horizon
+    from src.models.ideas import IdeaTrackedLeg, default_tracking_asset_class, tracking_market
+
+    tracking = _tracking(request)
+    token = symbol.strip()
+    if kind == "crypto":
+        entity = HandoffEntity(entity_type="crypto", label=token.lower(), normalized_id=token.upper(), native_id=token.lower(),
+                               metadata={"coingecko_id": token.lower()})
+    else:
+        entity = HandoffEntity(entity_type=kind, label=token.upper(), normalized_id=token.upper())
+    leg = IdeaTrackedLeg(entity=entity, asset_class=default_tracking_asset_class(entity), market=tracking_market(entity))
+    now = now_utc()
+    try:
+        closes = tracking.prices.leg_closes(leg, since=now.date() - timedelta(days=days), now=now)
+    except Exception as exc:  # noqa: BLE001 - un fallo del proveedor es un estado
+        closes = None
+        reason = f"The price source failed: {exc}"
+    else:
+        reason = closes.unavailable_reason
+    horizon = market_horizon(leg.market, now)
+    since = now.date() - timedelta(days=days)
+    points = [
+        {"session": item.session.isoformat(), "close_at": item.close_at.isoformat(), "close": item.price}
+        for item in (closes.closes if closes else ())
+        if since <= item.session <= horizon
+    ]
+    record = closes.provenance if closes else None
+    return {
+        "symbol": entity.normalized_id if kind != "crypto" else token.lower(),
+        "kind": kind,
+        "market": leg.market,
+        "available": reason is None and bool(points),
+        "unavailable_reason": reason if reason or points else "No closes in the requested window.",
+        "points": points,
+        "warnings": list(closes.warnings) if closes else [],
+        "provenance": {
+            "source_provider": record.source_provider if record else None,
+            "retrieved_at": record.retrieved_at.isoformat() if record else None,
+            "origin": record.origin if record else "idea_tracking.prices",
+            "transformation_note": (record.transformation_note if record else None)
+            or "Daily provider closes, final only; the same read path as the canonical tracking series.",
+        },
+    }
 
 
 @router.post("/ideas/observables/preview", response_model=ObservablePreviewResponseModel)
@@ -299,20 +367,20 @@ def close_idea(idea_id: str, payload: IdeaCloseRequestModel, request: Request) -
 
 
 @router.post("/ideas/{idea_id}/test", response_model=IdeaModel)
-def run_idea_test(idea_id: str, request: Request) -> IdeaModel:
-    """Backtest the idea's legs in Strategy Lab and keep the snapshot (in-sample, no costs)."""
+def run_idea_test(idea_id: str, request: Request, payload: dict | None = Body(default=None)) -> IdeaModel:
+    """Backtest the idea's legs, or a book attached from Strategy Lab (I4c), and keep the snapshot (in-sample, no costs)."""
     try:
-        idea = _analysis(request).run_test(idea_id)
+        idea = _analysis(request).run_test(idea_id, _attached_book(payload))
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
     return _idea_response(idea)
 
 
 @router.post("/ideas/{idea_id}/risk", response_model=IdeaModel)
-def run_idea_risk(idea_id: str, request: Request) -> IdeaModel:
-    """Run Risk on the idea's research book (VaR, expected shortfall, stress replay) and keep the snapshot."""
+def run_idea_risk(idea_id: str, request: Request, payload: dict | None = Body(default=None)) -> IdeaModel:
+    """Run Risk on the idea's legs, or a book attached from Risk (I4c): VaR, expected shortfall, stress replay."""
     try:
-        idea = _analysis(request).run_risk(idea_id)
+        idea = _analysis(request).run_risk(idea_id, _attached_book(payload))
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
     return _idea_response(idea)

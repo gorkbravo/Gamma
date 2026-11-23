@@ -15,7 +15,7 @@ This directory is split into active documentation, audits, and archived project 
 - [`strategy_lab_cross_tab_handoffs.md`](./strategy_lab_cross_tab_handoffs.md): active spec and progress board for sending selected research objects from source tabs into the Strategy Lab composer
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 - [`fundamentals_phase6_spec.md`](./fundamentals_phase6_spec.md): product and architecture spec for the first-pass `Fundamentals` workspace
-- [`idea_workspace_spec.md`](./idea_workspace_spec.md): approved spec (2026-11-14) for roadmap Workstream 12, the Idea object and Ideas tab: thesis, pinned evidence with frozen provenance, criteria stated in advance, tests and risk, hypothetical forward tracking, journal and review; checkpoints I1-I6 and the owner's seven decisions
+- [`idea_workspace_spec.md`](./idea_workspace_spec.md): approved spec (2026-11-14) for roadmap Workstream 12, the Idea object and Ideas tab: thesis, pinned evidence with frozen provenance, criteria stated in advance, tests and risk, hypothetical forward tracking, journal and review; checkpoints I1-I6 and the owner's seven decisions; the read-only Python client from checkpoint I4b lives in [`../clients/python/`](../clients/python/README.md)
 
 Current Commodities tab setup, EIA and IBKR provider switches, sample fallback behavior, futures-curve caveats, and read-only constraints are documented in [`../README.md`](../README.md).
 

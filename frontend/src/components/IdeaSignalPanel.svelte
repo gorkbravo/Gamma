@@ -31,6 +31,17 @@
     type SignalScriptDraft,
   } from "../lib/idea-signals";
   import { toProvenanceBadge } from "../lib/provenance";
+  import {
+    loadPickerRuns,
+    loadPickerScripts,
+    loadPickerSweeps,
+    runOptionLabel,
+    runSelectable,
+    sweepOptionLabel,
+    type PickerRun,
+    type PickerScript,
+    type PickerSweep,
+  } from "../lib/idea-script-picker";
 
   export let idea: Idea;
   export let tracking: IdeaTrackingResponse | null = null;
@@ -40,6 +51,49 @@
   export let onDetach: (ideaId: string) => Promise<unknown> | void = () => {};
 
   export let expanded = false;
+  // I4c: selector de Script, ejecución y barrido (listados de solo lectura de Strategy Lab).
+  export let loadScripts: () => Promise<PickerScript[]> = loadPickerScripts;
+  export let loadRuns: (scriptId: string) => Promise<PickerRun[]> = loadPickerRuns;
+  export let loadSweeps: (scriptId: string) => Promise<PickerSweep[]> = loadPickerSweeps;
+  let pickerScripts: PickerScript[] = [];
+  let pickerRuns: PickerRun[] = [];
+  let pickerSweeps: PickerSweep[] = [];
+  let pickerScriptId = "";
+  let pickerState: "idle" | "loading" | "ready" | "error" = "idle";
+  let pickerError = "";
+
+  async function openScriptForm() {
+    formSource = "script";
+    if (pickerState === "loading" || pickerState === "ready") return;
+    pickerState = "loading";
+    pickerError = "";
+    try {
+      pickerScripts = await loadScripts();
+      pickerState = "ready";
+      if (pickerScripts.length && !pickerScriptId) await chooseScript(pickerScripts[0].script_id);
+    } catch (failure) {
+      pickerState = "error";
+      pickerError = failure instanceof Error ? failure.message : String(failure);
+    }
+  }
+
+  async function chooseScript(scriptId: string) {
+    pickerScriptId = scriptId;
+    pickerRuns = [];
+    pickerSweeps = [];
+    scriptDraft = { ...scriptDraft, runId: "", sweepId: "" };
+    if (!scriptId) return;
+    try {
+      const [runs, sweeps] = await Promise.all([loadRuns(scriptId), loadSweeps(scriptId)]);
+      if (pickerScriptId !== scriptId) return;
+      pickerRuns = runs;
+      pickerSweeps = sweeps;
+      const first = runs.find(runSelectable);
+      if (first) scriptDraft = { ...scriptDraft, runId: first.run_id };
+    } catch (failure) {
+      pickerError = failure instanceof Error ? failure.message : String(failure);
+    }
+  }
   let formOpen = false;
   let formSource: "import" | "script" = "import";
   let confirmDetach = false;
@@ -173,7 +227,7 @@
         <div class="form-row">
           <div class="segmented" role="radiogroup" aria-label="Signal source">
             <button type="button" role="radio" aria-checked={formSource === "import"} class:selected={formSource === "import"} on:click={() => (formSource = "import")}>Import CSV</button>
-            <button type="button" role="radio" aria-checked={formSource === "script"} class:selected={formSource === "script"} on:click={() => (formSource = "script")}>Script run</button>
+            <button type="button" role="radio" aria-checked={formSource === "script"} class:selected={formSource === "script"} on:click={openScriptForm}>Script run</button>
           </div>
           {#if formSource === "import"}
             <label class="field">
@@ -270,10 +324,28 @@
           {#each parsed.warnings.slice(0, 3) as warning (warning)}<p class="form-note warning">{warning}</p>{/each}
         {:else}
           <div class="form-row">
-            <label class="field grow">
-              <span>Run id</span>
-              <input class="form-control is-small" bind:value={scriptDraft.runId} placeholder="From Strategy Lab · Script runs" spellcheck="false" />
-            </label>
+            {#if pickerScripts.length}
+              <label class="field grow">
+                <span>Script</span>
+                <select class="form-control is-small" value={pickerScriptId} on:change={(event) => chooseScript(event.currentTarget.value)}>
+                  {#each pickerScripts as script (script.script_id)}<option value={script.script_id}>{script.title}</option>{/each}
+                </select>
+              </label>
+              <label class="field grow">
+                <span>Run</span>
+                <select class="form-control is-small" bind:value={scriptDraft.runId}>
+                  {#if !pickerRuns.length}<option value="">No runs yet</option>{/if}
+                  {#each pickerRuns as run (run.run_id)}
+                    <option value={run.run_id} disabled={!runSelectable(run)}>{runOptionLabel(run)}</option>
+                  {/each}
+                </select>
+              </label>
+            {:else}
+              <label class="field grow">
+                <span>Run id</span>
+                <input class="form-control is-small" bind:value={scriptDraft.runId} placeholder={pickerState === "loading" ? "Loading…" : "No scripts listed · paste a run id"} spellcheck="false" />
+              </label>
+            {/if}
             {#if scriptDraft.outputKind === "returns"}
               <label class="field">
                 <span>Returns result id</span>
@@ -289,8 +361,15 @@
           {/if}
           <div class="form-row">
             <label class="field grow">
-              <span>Validation sweep id</span>
-              <input class="form-control is-small" bind:value={scriptDraft.sweepId} placeholder="Optional · E5 sweep of the same script" spellcheck="false" />
+              <span>Validation sweep</span>
+              {#if pickerSweeps.length}
+                <select class="form-control is-small" bind:value={scriptDraft.sweepId}>
+                  <option value="">None</option>
+                  {#each pickerSweeps as sweep (sweep.sweep_id)}<option value={sweep.sweep_id}>{sweepOptionLabel(sweep)}</option>{/each}
+                </select>
+              {:else}
+                <input class="form-control is-small" bind:value={scriptDraft.sweepId} placeholder="Optional · E5 sweep id of the same script" spellcheck="false" />
+              {/if}
             </label>
             <label class="field">
               <span>Train</span>
@@ -308,6 +387,7 @@
               </select>
             </label>
           </div>
+          {#if pickerError}<p class="form-note warning">{pickerError}</p>{/if}
           <p class="form-note">Gamma reads the run's retained results; it never starts a Script run. Every completed run of the script counts as a trial.</p>
         {/if}
         <div class="form-actions">
@@ -508,6 +588,7 @@
 
   .signal-form {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);
     padding: var(--space-2) var(--space-5) var(--space-4);
   }
@@ -534,6 +615,19 @@
 
   .field.grow {
     flex: 1 1 12rem;
+  }
+
+  /* Un select toma el ancho de su opción más larga; aquí se ajusta a su campo (390 px). */
+  .field > select,
+  .field > input:not(.obs-input) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .form-row > .field {
+    max-width: 100%;
   }
 
   .csv-input {

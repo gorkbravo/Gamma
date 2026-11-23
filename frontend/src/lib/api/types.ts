@@ -5109,6 +5109,15 @@ export interface IdeaTrial {
   signal_id: string | null;
 }
 
+/** I4c: a book attached from Strategy Lab's composer or Risk's research book; the backend recomputes it. */
+export interface IdeaAttachedBook {
+  source: "strategy_lab" | "risk_tab";
+  label: string;
+  legs: Array<{ entity_type: "equity" | "etf" | "crypto"; symbol: string; weight: number; label?: string | null }>;
+  benchmark?: string | null;
+  lookback_days?: number | null;
+}
+
 export interface IdeaSignalInstrument {
   symbol: string;
   entity_type: "equity" | "etf" | "crypto";
@@ -5626,7 +5635,7 @@ interface IdeaSnapshotBase {
   window_start: string | null;
   window_end: string | null;
   observations: number;
-  source: "idea_legs";
+  source: "idea_legs" | "strategy_lab" | "risk_tab";
   source_ids: Record<string, string>;
   provenance: { source_provider: string; retrieved_at: string; origin: string; transformation_note: string | null } | null;
   warnings: string[];

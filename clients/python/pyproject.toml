@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gamma-research-client"
+version = "0.1.0"
+description = "Read-only client for Gamma's local research API: histories, ideas and observables with provenance, plus signal import into an idea."
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.24"]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0"]
+
+[tool.setuptools.packages.find]
+include = ["gamma_client*"]

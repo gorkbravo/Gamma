@@ -21,14 +21,17 @@ or after a few days. Nothing here can place, stage or route an order.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from src.models.handoff import HandoffEntity
 from src.models.ideas import (
     DEFAULT_TRACKING_BENCHMARK,
     Idea,
+    IdeaLeg,
     IdeaRiskEpisode,
     IdeaRiskSnapshot,
     IdeaSourceUnavailableError,
@@ -100,6 +103,33 @@ def _total(series: Any) -> float | None:
     return clean[-1] / clean[0] - 1.0
 
 
+@dataclass(frozen=True)
+class AttachedBookLeg:
+    entity_type: str
+    symbol: str
+    weight: float
+    label: str | None = None
+
+
+@dataclass(frozen=True)
+class AttachedBook:
+    """A book the user attaches from another tab (I4c): Strategy Lab's composer or Risk's research book.
+
+    The snapshot is recomputed from these legs with the same services as the
+    idea's own test and risk, so it is reproducible and carries provenance; it
+    is never a copy of figures sent by the browser.
+    """
+
+    source: str  # strategy_lab | risk_tab
+    label: str
+    legs: tuple[AttachedBookLeg, ...]
+    benchmark: str | None = None
+    lookback_days: int | None = None
+
+
+ATTACHED_SOURCES = {"strategy_lab": "Strategy Lab", "risk_tab": "Risk"}
+
+
 class IdeaAnalysisService:
     """Runs test and risk snapshots of an idea's legs on request."""
 
@@ -124,11 +154,15 @@ class IdeaAnalysisService:
 
     # -- public ---------------------------------------------------------------
 
-    def run_test(self, idea_id: str) -> Idea:
+    def run_test(self, idea_id: str, attached: AttachedBook | None = None) -> Idea:
         idea = self.idea_service.get_idea(idea_id)
-        legs = self._legs(idea, "tested")
+        legs = self._attached_legs(attached) if attached else self._legs(idea, "tested")
         now = self._clock()
-        composition = self._compose(idea, legs, lookback_days=TEST_LOOKBACK_DAYS, now=now)
+        lookback = TEST_LOOKBACK_DAYS
+        if attached and attached.lookback_days:
+            lookback = max(TEST_MIN_OBSERVATIONS, min(int(attached.lookback_days), TEST_LOOKBACK_DAYS * 2))
+        benchmark = self._benchmark(idea, attached)
+        composition = self._compose(idea, legs, lookback_days=lookback, now=now, benchmark=benchmark, name=self._name(idea, attached))
         metrics = composition.metrics
         benchmark_total = _total(composition.benchmark_equity_curve)
         total = _finite(metrics.total_return)
@@ -137,12 +171,13 @@ class IdeaAnalysisService:
             idea_id=idea.idea_id,
             created_at=now,
             legs=legs,
-            benchmark=self._benchmark(idea),
-            lookback_days=TEST_LOOKBACK_DAYS,
+            benchmark=benchmark,
+            lookback_days=lookback,
             window_start=_day(metrics.start_date),
             window_end=_day(metrics.end_date),
             observations=int(metrics.observation_count or 0),
-            source_ids={"composition": composition.name, "origin": str(composition.origin or "")},
+            source=attached.source if attached else "idea_legs",
+            source_ids={"composition": composition.name, "origin": str(composition.origin or ""), **self._attached_ids(attached)},
             provenance=self._provenance(composition, now),
             warnings=tuple(_data_warnings(composition.warnings)),
             metrics={
@@ -163,15 +198,15 @@ class IdeaAnalysisService:
         )
         return self.idea_service.add_test_snapshot(idea.idea_id, snapshot)
 
-    def run_risk(self, idea_id: str) -> Idea:
+    def run_risk(self, idea_id: str, attached: AttachedBook | None = None) -> Idea:
         from src.application.risk_service import RiskComputeRequest, RiskStressReplayRequest
         from src.models.portfolio import PortfolioSnapshot
 
         idea = self.idea_service.get_idea(idea_id)
-        legs = self._legs(idea, "risk-checked")
+        legs = self._attached_legs(attached) if attached else self._legs(idea, "risk-checked")
         now = self._clock()
-        benchmark = self._benchmark(idea)
-        composition = self._compose(idea, legs, lookback_days=TEST_LOOKBACK_DAYS, now=now)
+        benchmark = self._benchmark(idea, attached)
+        composition = self._compose(idea, legs, lookback_days=TEST_LOOKBACK_DAYS, now=now, benchmark=benchmark, name=self._name(idea, attached))
         book = PortfolioSnapshot(
             timestamp=now,
             base_currency="USD",
@@ -263,7 +298,8 @@ class IdeaAnalysisService:
             window_start=min(window) if window else None,
             window_end=max(window) if window else None,
             observations=len(window),
-            source_ids={"composition": composition.name, "risk_scope": "research_book"},
+            source=attached.source if attached else "idea_legs",
+            source_ids={"composition": composition.name, "risk_scope": "research_book", **self._attached_ids(attached)},
             provenance=ProvenanceRecord(
                 source_provider=str(composition.source_provider or "research"),
                 retrieved_at=now,
@@ -301,10 +337,58 @@ class IdeaAnalysisService:
         return legs
 
     @staticmethod
-    def _benchmark(idea: Idea) -> str:
+    def _attached_legs(attached: AttachedBook) -> tuple[IdeaTrackedLeg, ...]:
+        """The attached book as signed shares of gross, priced like the idea's own legs (equities, ETFs, crypto)."""
+        if attached.source not in ATTACHED_SOURCES:
+            raise IdeaValidationError(f"A book attaches from {', '.join(ATTACHED_SOURCES.values())}.")
+        if not attached.legs:
+            raise IdeaValidationError("The attached book has no legs.")
+        legs = []
+        for item in attached.legs:
+            entity_type = str(item.entity_type or "").strip().lower()
+            symbol = str(item.symbol or "").strip()
+            if not symbol:
+                raise IdeaValidationError("Every attached leg needs a ticker or CoinGecko id.")
+            label = str(item.label or "").strip() or symbol.upper()
+            if entity_type == "crypto":
+                token = symbol.lower()
+                entity = HandoffEntity(entity_type="crypto", label=label, normalized_id=token.upper(), native_id=token, metadata={"coingecko_id": token})
+            else:
+                entity = HandoffEntity(entity_type=entity_type or "equity", label=label, normalized_id=symbol.upper())
+            legs.append(IdeaLeg(entity=entity, weight=float(item.weight)))
+        frozen, untracked = freeze_tracking_legs(legs, "relative")
+        if untracked:
+            raise IdeaValidationError(f"The attached book cannot be analysed: {untracked}")
+        return frozen
+
+    @staticmethod
+    def _attached_ids(attached: AttachedBook | None) -> dict[str, str]:
+        if attached is None:
+            return {}
+        return {"attached_from": ATTACHED_SOURCES[attached.source], "attached_label": attached.label[:160]}
+
+    @staticmethod
+    def _name(idea: Idea, attached: AttachedBook | None) -> str:
+        if attached is not None:
+            return f"{ATTACHED_SOURCES[attached.source]}: {attached.label}"[:120]
+        return f"Idea: {idea.title}"[:120]
+
+    @staticmethod
+    def _benchmark(idea: Idea, attached: AttachedBook | None = None) -> str:
+        if attached is not None and attached.benchmark and str(attached.benchmark).strip():
+            return str(attached.benchmark).strip().upper()[:24]
         return idea.tracking.benchmark if idea.tracking is not None else DEFAULT_TRACKING_BENCHMARK
 
-    def _compose(self, idea: Idea, legs: tuple[IdeaTrackedLeg, ...], *, lookback_days: int, now: datetime) -> Any:
+    def _compose(
+        self,
+        idea: Idea,
+        legs: tuple[IdeaTrackedLeg, ...],
+        *,
+        lookback_days: int,
+        now: datetime,
+        benchmark: str | None = None,
+        name: str | None = None,
+    ) -> Any:
         from src.application.research_validation import ResearchValidationError
         from src.models.research_lab import (
             ResearchObjectReturnPoint,
@@ -328,9 +412,9 @@ class IdeaAnalysisService:
         try:
             return self._research_service().compose_strategy_lab_portfolio(
                 StrategyLabPortfolioCompositionRequest(
-                    name=f"Idea: {idea.title}"[:120],
+                    name=name or f"Idea: {idea.title}"[:120],
                     legs=portfolio_legs,
-                    benchmark_symbol=self._benchmark(idea),
+                    benchmark_symbol=benchmark or self._benchmark(idea),
                     lookback_days=lookback_days,
                     min_observations=TEST_MIN_OBSERVATIONS,
                 )
@@ -377,4 +461,4 @@ class IdeaAnalysisService:
         )
 
 
-__all__ = ["IdeaAnalysisService", "RISK_ALPHA", "TEST_LOOKBACK_DAYS"]
+__all__ = ["AttachedBook", "AttachedBookLeg", "IdeaAnalysisService", "RISK_ALPHA", "TEST_LOOKBACK_DAYS"]
