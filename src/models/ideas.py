@@ -14,6 +14,7 @@ See ``docs/idea_workspace_spec.md``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -31,7 +32,7 @@ from src.utils.time import now_utc
 # Version 3 (I3a) added ``tracking`` (``migrate_idea_v2_to_v3``).
 # Version 4 (I3b) added ``reviews`` (``migrate_idea_v3_to_v4``).
 # Version 5 (I3c) added ``tests`` and ``risks`` (``migrate_idea_v4_to_v5``).
-IDEA_SCHEMA_VERSION = 5
+IDEA_SCHEMA_VERSION = 6
 
 IDEA_STANCES = ("long", "short", "relative", "event", "neutral")
 # ``closed`` belongs to I3 (close requires a review); it is a valid stored state
@@ -73,6 +74,9 @@ JOURNAL_SYSTEM_KINDS = (
     # I3c: snapshots de test y riesgo recalculados a petición del usuario.
     "test_refreshed",
     "risk_refreshed",
+    # I4: señales adjuntadas o retiradas (Script o importación).
+    "signal_attached",
+    "signal_detached",
 )
 JOURNAL_KINDS = JOURNAL_USER_KINDS + JOURNAL_SYSTEM_KINDS
 JOURNAL_AUTHORS = ("user", "system")
@@ -159,10 +163,21 @@ DEFAULT_TRACKING_COST_BP: dict[str, float] = {
     "crypto_spot": 50.0,
 }
 TRACKING_COST_BP_MAX = 500.0
-TRACKING_START_REASONS = ("activated", "legs_edited", "legs_added", "restored", "reopened", "migrated")
-TRACKING_END_REASONS = ("legs_edited", "legs_removed", "archived", "closed")
+TRACKING_START_REASONS = (
+    "activated",
+    "legs_edited",
+    "legs_added",
+    "restored",
+    "reopened",
+    "migrated",
+    # I4: la señal adjuntada define el libro; cada cambio abre un segmento nuevo.
+    "signal_attached",
+    "signal_changed",
+    "signal_detached",
+)
+TRACKING_END_REASONS = ("legs_edited", "legs_removed", "archived", "closed", "signal_changed")
 TRACKING_STATUSES = ("not_started", "waiting", "tracking", "stopped", "unavailable")
-TRACKING_WEIGHT_SOURCES = ("stated", "stance")
+TRACKING_WEIGHT_SOURCES = ("stated", "stance", "signal")
 TRACKING_SEGMENTS_MAX = 200
 TRACKING_NOTE_MAX = 500
 TRACKING_BENCHMARK_MAX = 24
@@ -181,6 +196,22 @@ SNAPSHOT_STALE_DAYS = 7
 SNAPSHOT_SERIES_MAX_POINTS = 260
 SNAPSHOT_WARNINGS_MAX = 12
 SNAPSHOT_EPISODES_MAX = 16
+
+# Quant layer (I4). A signal is data the user brought (a Script run or an import),
+# never something Gamma runs on its own; see docs/idea_workspace_spec.md, I4 design decisions.
+SIGNAL_SOURCES = ("script", "import")
+SIGNAL_OUTPUT_KINDS = ("positions", "weights", "returns")
+SIGNAL_BOOK_KINDS = ("positions", "weights")
+# Exposición firmada sobre NAV aceptada para una señal de pesos (apalancamiento bruto máximo).
+SIGNAL_GROSS_MAX = 5.0
+IDEA_SIGNALS_MAX = 50
+SIGNAL_LABEL_MAX = 200
+SIGNAL_REF_MAX_BYTES = 8 * 1024
+TRIAL_KINDS = ("script_run", "sweep_point", "import", "legs")
+TRIAL_LEDGER_MAX = 2_000
+TRIAL_KEY_MAX = 200
+VALIDATION_FOLDS_MAX = 40
+SUPPLIED_SERIES_LABEL = "Supplied series, not rebuilt by Gamma"
 
 # Exchange suffixes (Yahoo style) with the local closing time Gamma uses for each market.
 # Times are at or before the official close: a session whose close might precede the
@@ -974,10 +1005,14 @@ class IdeaTrackedLeg:
                 if number is None:
                     raise IdeaValidationError(f"tracked leg {name} must be a finite number.")
                 object.__setattr__(self, name, number)
-        if self.weight is not None and abs(self.weight) > 1.0 + 1e-9:
-            raise IdeaValidationError("A tracked leg weight is a share of gross exposure, between -1 and 1.")
         if self.weight_source not in TRACKING_WEIGHT_SOURCES:
             raise IdeaValidationError(f"weight_source must be one of {TRACKING_WEIGHT_SOURCES}.")
+        # I4: una señal de pesos es exposición sobre NAV (con caja residual y apalancamiento acotado).
+        bound = SIGNAL_GROSS_MAX if self.weight_source == "signal" else 1.0
+        if self.weight is not None and abs(self.weight) > bound + 1e-9:
+            if self.weight_source == "signal":
+                raise IdeaValidationError(f"A signal leg's exposure must be between -{SIGNAL_GROSS_MAX:g} and {SIGNAL_GROSS_MAX:g} of NAV.")
+            raise IdeaValidationError("A tracked leg weight is a share of gross exposure, between -1 and 1.")
         if self.asset_class not in TRACKING_ASSET_CLASSES:
             raise IdeaValidationError(f"asset_class must be one of {TRACKING_ASSET_CLASSES}.")
         market = str(self.market or "").strip().lower()
@@ -1036,9 +1071,14 @@ class IdeaTrackingSegment:
     end_reason: str | None = None
     end_note: str = ""
     untracked_reason: str | None = None
+    # I4: señal que define el libro del segmento y si entra rebalanceando desde el libro anterior.
+    signal_id: str | None = None
+    rebalance: bool = False
 
     def __post_init__(self) -> None:
         _require_text(self.segment_id, "segment_id")
+        object.__setattr__(self, "signal_id", _optional_text(self.signal_id))
+        object.__setattr__(self, "rebalance", self.rebalance is True)
         if int(self.number) < 1:
             raise IdeaValidationError("Tracking segments are numbered from 1.")
         object.__setattr__(self, "number", int(self.number))
@@ -1088,6 +1128,8 @@ class IdeaTrackingSegment:
             "end_reason": self.end_reason,
             "end_note": self.end_note,
             "untracked_reason": self.untracked_reason,
+            "signal_id": self.signal_id,
+            "rebalance": self.rebalance,
         }
 
     @classmethod
@@ -1107,6 +1149,8 @@ class IdeaTrackingSegment:
             end_reason=_optional_text(payload.get("end_reason")),
             end_note=str(payload.get("end_note") or ""),
             untracked_reason=_optional_text(payload.get("untracked_reason")),
+            signal_id=_optional_text(payload.get("signal_id")),
+            rebalance=payload.get("rebalance") is True,
         )
 
 
@@ -1122,6 +1166,8 @@ class IdeaCostModel:
     per_side_bp: Mapping[str, float] = field(default_factory=lambda: MappingProxyType(dict(DEFAULT_TRACKING_COST_BP)))
     leg_classes: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     updated_at: datetime | None = None
+    # I4: coste por lado explícito de una pierna (clave ``type:ID``), por encima del de su clase.
+    leg_bp: Mapping[str, float] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
         raw = dict(self.per_side_bp or {})
@@ -1150,9 +1196,28 @@ class IdeaCostModel:
                 raise IdeaValidationError(f"A leg class must be one of {TRACKING_ASSET_CLASSES}, got {value!r}.")
             overrides[key_text] = asset_class
         object.__setattr__(self, "leg_classes", MappingProxyType(dict(sorted(overrides.items()))))
+        leg_bp: dict[str, float] = {}
+        raw_leg_bp = dict(self.leg_bp or {})
+        if len(raw_leg_bp) > IDEA_LEGS_MAX * 4:
+            raise IdeaValidationError("Too many per-leg costs.")
+        for key, value in raw_leg_bp.items():
+            key_text = str(key or "").strip()
+            _require_text(key_text, "leg cost key")
+            _require_max(key_text, OBSERVABLE_PARAM_VALUE_MAX, "leg cost key")
+            number = _finite_or_none(value)
+            if number is None or number < 0 or number > TRACKING_COST_BP_MAX:
+                raise IdeaValidationError(f"A leg cost must be between 0 and {TRACKING_COST_BP_MAX:g} bp per side.")
+            leg_bp[key_text] = number
+        object.__setattr__(self, "leg_bp", MappingProxyType(dict(sorted(leg_bp.items()))))
 
     def class_for(self, leg: IdeaTrackedLeg) -> str:
         return self.leg_classes.get(leg.key, leg.asset_class)
+
+    def bp_for_leg(self, leg: IdeaTrackedLeg) -> float | None:
+        """Per-side basis points of one leg: its own override, else its class's cost."""
+        if leg.key in self.leg_bp:
+            return float(self.leg_bp[leg.key])
+        return self.bp_for(self.class_for(leg))
 
     def bp_for(self, asset_class: str) -> float | None:
         """Per-side basis points; ``None`` where the cost comes from a live quote."""
@@ -1164,12 +1229,13 @@ class IdeaCostModel:
 
     @property
     def edited(self) -> bool:
-        return dict(self.per_side_bp) != DEFAULT_TRACKING_COST_BP or bool(self.leg_classes)
+        return dict(self.per_side_bp) != DEFAULT_TRACKING_COST_BP or bool(self.leg_classes) or bool(self.leg_bp)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "per_side_bp": dict(self.per_side_bp),
             "leg_classes": dict(self.leg_classes),
+            "leg_bp": dict(self.leg_bp),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
@@ -1178,10 +1244,12 @@ class IdeaCostModel:
         payload = payload or {}
         per_side = payload.get("per_side_bp")
         leg_classes = payload.get("leg_classes")
+        leg_bp = payload.get("leg_bp")
         return cls(
             per_side_bp=dict(per_side) if isinstance(per_side, Mapping) else dict(DEFAULT_TRACKING_COST_BP),
             leg_classes=dict(leg_classes) if isinstance(leg_classes, Mapping) else {},
             updated_at=_parse_instant(payload.get("updated_at")),
+            leg_bp=dict(leg_bp) if isinstance(leg_bp, Mapping) else {},
         )
 
 
@@ -1316,12 +1384,26 @@ class IdeaTracking:
         return None
 
     def with_open_segment(
-        self, *, legs: Sequence[IdeaLeg], stance: str, at: datetime, reason: str, note: str = ""
+        self,
+        *,
+        legs: Sequence[IdeaLeg],
+        stance: str,
+        at: datetime,
+        reason: str,
+        note: str = "",
+        signal: "IdeaSignal | None" = None,
     ) -> "IdeaTracking":
-        """Append a new open segment with ``legs`` frozen at ``at``. The last one must be closed."""
+        """Append a new open segment with ``legs`` frozen at ``at``. The last one must be closed.
+
+        With a book ``signal`` (I4) the segment freezes the signal's book instead of
+        the legs, and rebalances from the previous book when it chains to it.
+        """
         if self.open_segment is not None:
             raise IdeaValidationError("Close the open tracking segment before opening another.")
-        frozen, untracked = freeze_tracking_legs(legs, stance)
+        if signal is not None and signal.is_book:
+            frozen, untracked = signal.frozen_legs(), None
+        else:
+            frozen, untracked = freeze_tracking_legs(legs, stance)
         number = len(self.segments) + 1
         segment = IdeaTrackingSegment(
             segment_id=f"seg-{number}",
@@ -1332,6 +1414,8 @@ class IdeaTracking:
             stance=stance,
             legs=frozen,
             untracked_reason=untracked,
+            signal_id=signal.signal_id if signal is not None and signal.is_book else None,
+            rebalance=reason in {"signal_attached", "signal_changed", "signal_detached"},
         )
         return replace(self, segments=(*self.segments, segment))
 
@@ -1791,15 +1875,23 @@ class IdeaTestSnapshot(IdeaSnapshotBase):
     benchmark_curve: tuple[tuple[str, float], ...] = ()
     costs_included: bool = False
     sample: str = "in_sample"
+    # I4: tamaño del libro de pruebas de la idea cuando se ejecutó (None en snapshots anteriores a I4).
+    trial_count: int | None = None
+    trial_count_lower_bound: bool = False
 
     def __post_init__(self) -> None:
         self._validate_base()
+        if self.trial_count is not None:
+            object.__setattr__(self, "trial_count", max(1, int(self.trial_count)))
+        object.__setattr__(self, "trial_count_lower_bound", self.trial_count_lower_bound is True)
         object.__setattr__(self, "metrics", _frozen_numbers(self.metrics, "test metrics"))
         object.__setattr__(self, "leg_contributions", _frozen_numbers(self.leg_contributions, "leg contributions"))
         object.__setattr__(self, "equity_curve", _frozen_series(self.equity_curve, "equity curve"))
         object.__setattr__(self, "benchmark_curve", _frozen_series(self.benchmark_curve, "benchmark curve"))
+        # Un backtest de las patas usa toda la ventana: es dentro de muestra. La validación fuera de
+        # muestra llega con la señal (IdeaValidationSnapshot), no con este snapshot.
         if self.sample not in {"in_sample"}:
-            raise IdeaValidationError("A test sample must be in_sample until out-of-sample splits exist (I4).")
+            raise IdeaValidationError("A backtest of the legs is in-sample; out-of-sample validation belongs to the signal.")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1810,6 +1902,8 @@ class IdeaTestSnapshot(IdeaSnapshotBase):
             "benchmark_curve": [list(point) for point in self.benchmark_curve],
             "costs_included": self.costs_included,
             "sample": self.sample,
+            "trial_count": self.trial_count,
+            "trial_count_lower_bound": self.trial_count_lower_bound,
         }
 
     @classmethod
@@ -1824,6 +1918,8 @@ class IdeaTestSnapshot(IdeaSnapshotBase):
             benchmark_curve=tuple(_list(payload.get("benchmark_curve"), "benchmark_curve")),
             costs_included=payload.get("costs_included") is True,
             sample=str(payload.get("sample") or "in_sample"),
+            trial_count=int(payload["trial_count"]) if isinstance(payload.get("trial_count"), int) and not isinstance(payload.get("trial_count"), bool) else None,
+            trial_count_lower_bound=payload.get("trial_count_lower_bound") is True,
         )
 
 
@@ -1956,6 +2052,565 @@ def snapshot_staleness(snapshot: IdeaSnapshotBase, idea: "Idea", now: datetime) 
     return None
 
 
+# ---------------------------------------------------------------------------
+# Quant layer (I4): signals, validation snapshots and the trial ledger
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IdeaSignalLeg:
+    """One instrument of a signal's book, as frozen at attach.
+
+    ``weight`` is signed exposure as a share of NAV for a ``weights`` signal (not
+    normalized; the residual is cash) and the signed share of a fully invested
+    gross book for a ``positions`` signal, whose ``units`` were valued at
+    ``price`` (the latest provider close on or before ``price_date``).
+    ``instrument_id`` is the identity in the source: a CSV column or a Script
+    instrument id.
+    """
+
+    entity: HandoffEntity
+    weight: float
+    instrument_id: str = ""
+    units: float | None = None
+    price: float | None = None
+    price_date: date | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.entity, HandoffEntity):
+            raise IdeaValidationError("A signal leg needs an entity.")
+        if str(self.entity.entity_type).strip().lower() not in TRACKED_ENTITY_TYPES:
+            raise IdeaValidationError(
+                f"A signal leg must be an equity, ETF or crypto instrument; {self.entity.entity_type} has no price source."
+            )
+        weight = _finite_or_none(self.weight)
+        if weight is None or abs(weight) > SIGNAL_GROSS_MAX + 1e-9:
+            raise IdeaValidationError(f"A signal weight must be a finite number between -{SIGNAL_GROSS_MAX:g} and {SIGNAL_GROSS_MAX:g}.")
+        object.__setattr__(self, "weight", weight)
+        object.__setattr__(self, "instrument_id", str(self.instrument_id or "").strip()[:TRIAL_KEY_MAX])
+        for name in ("units", "price"):
+            object.__setattr__(self, name, _finite_or_none(getattr(self, name)))
+
+    @property
+    def key(self) -> str:
+        return tracking_leg_key(self.entity)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entity": self.entity.to_dict(),
+            "weight": self.weight,
+            "instrument_id": self.instrument_id,
+            "units": self.units,
+            "price": self.price,
+            "price_date": self.price_date.isoformat() if self.price_date else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaSignalLeg":
+        entity = payload.get("entity")
+        if not isinstance(entity, Mapping):
+            raise IdeaValidationError("A signal leg needs an entity.")
+        return cls(
+            entity=_entity_from_dict(entity),
+            weight=payload.get("weight"),  # type: ignore[arg-type]
+            instrument_id=str(payload.get("instrument_id") or ""),
+            units=_finite_or_none(payload.get("units")),
+            price=_finite_or_none(payload.get("price")),
+            price_date=_parse_date(payload.get("price_date")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaSuppliedSeries:
+    """A return stream Gamma cannot rebuild from provider closes (decision 2 of I4).
+
+    It is validation only: never part of the canonical series, the tracking
+    chart, the Board headline or a review's realized figure.
+    """
+
+    label: str = SUPPLIED_SERIES_LABEL
+    window_start: date | None = None
+    window_end: date | None = None
+    observations: int = 0
+    metrics: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    curve: tuple[tuple[str, float], ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "label", " ".join(str(self.label or SUPPLIED_SERIES_LABEL).split())[:SIGNAL_LABEL_MAX])
+        object.__setattr__(self, "observations", max(0, int(self.observations)))
+        object.__setattr__(self, "metrics", _frozen_numbers(self.metrics, "supplied metrics"))
+        object.__setattr__(self, "curve", _frozen_series(self.curve, "supplied curve"))
+        object.__setattr__(self, "warnings", _frozen_text_list(self.warnings, SNAPSHOT_WARNINGS_MAX))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "window_start": self.window_start.isoformat() if self.window_start else None,
+            "window_end": self.window_end.isoformat() if self.window_end else None,
+            "observations": self.observations,
+            "metrics": dict(self.metrics),
+            "curve": [list(point) for point in self.curve],
+            "warnings": list(self.warnings),
+            # El seguimiento nunca lo usa: queda dicho en el propio registro.
+            "drives_tracking": False,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaSuppliedSeries":
+        metrics = payload.get("metrics")
+        return cls(
+            label=str(payload.get("label") or SUPPLIED_SERIES_LABEL),
+            window_start=_parse_date(payload.get("window_start")),
+            window_end=_parse_date(payload.get("window_end")),
+            observations=int(payload.get("observations") or 0),
+            metrics=dict(metrics) if isinstance(metrics, Mapping) else {},
+            curve=tuple(_list(payload.get("curve"), "supplied.curve")),
+            warnings=tuple(str(item) for item in _list(payload.get("warnings"), "supplied.warnings")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaValidationFold:
+    fold: int
+    train_start: date
+    train_end: date
+    test_start: date
+    test_end: date
+    test_observations: int
+    selected_point: int
+    test_return: float | None = None
+    partial: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "fold": self.fold,
+            "train_start": self.train_start.isoformat(),
+            "train_end": self.train_end.isoformat(),
+            "test_start": self.test_start.isoformat(),
+            "test_end": self.test_end.isoformat(),
+            "test_observations": self.test_observations,
+            "selected_point": self.selected_point,
+            "test_return": self.test_return,
+            "partial": self.partial,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaValidationFold":
+        days = [_parse_date(payload.get(name)) for name in ("train_start", "train_end", "test_start", "test_end")]
+        if any(day is None for day in days):
+            raise IdeaValidationError("A validation fold needs its train and test windows.")
+        train_start, train_end, test_start, test_end = days  # type: ignore[misc]
+        if not train_end < test_start:  # type: ignore[operator]
+            raise IdeaValidationError("A validation fold's test window must start after its training window.")
+        return cls(
+            fold=int(payload.get("fold") or 0),
+            train_start=train_start,  # type: ignore[arg-type]
+            train_end=train_end,  # type: ignore[arg-type]
+            test_start=test_start,  # type: ignore[arg-type]
+            test_end=test_end,  # type: ignore[arg-type]
+            test_observations=int(payload.get("test_observations") or 0),
+            selected_point=int(payload.get("selected_point") or 0),
+            test_return=_finite_or_none(payload.get("test_return")),
+            partial=payload.get("partial") is True,
+        )
+
+
+@dataclass(frozen=True)
+class IdeaValidationSnapshot:
+    """An E5 walk-forward report over a parameter sweep, frozen when it was attached.
+
+    Each fold selects a point on its training window only and is scored on the
+    strictly later test window; the out-of-sample figures chain the test
+    windows. ``trials`` is the sweep's size (every point counts, run or not).
+    ``cost_bps`` is the weight book's cost per unit of turnover; a returns
+    target carries the costs the script wrote, which Gamma cannot see.
+    """
+
+    snapshot_id: str
+    created_at: datetime
+    sweep_id: str
+    definition_sha256: str
+    report_sha256: str
+    target: str
+    trials: int
+    train_observations: int
+    test_observations: int
+    window: str
+    selection_metric: str
+    window_start: date | None = None
+    window_end: date | None = None
+    observations: int = 0
+    result_id: str | None = None
+    execution_lag: int | None = None
+    cost_bps: float | None = None
+    folds: tuple[IdeaValidationFold, ...] = ()
+    out_of_sample: Mapping[str, float | None] = field(default_factory=lambda: MappingProxyType({}))
+    oos_start: date | None = None
+    oos_end: date | None = None
+    oos_curve: tuple[tuple[str, float], ...] = ()
+    in_sample_value: float | None = None
+    in_sample_point: int | None = None
+    in_sample_label: str = ""
+    distinct_selections: int = 0
+    causality_verified: bool = False
+    warnings: tuple[str, ...] = ()
+    provenance: ProvenanceRecord | None = None
+    kind: str = "walk_forward"
+
+    def __post_init__(self) -> None:
+        for name in ("snapshot_id", "sweep_id", "definition_sha256", "report_sha256"):
+            _require_text(getattr(self, name), name)
+        if self.kind != "walk_forward":
+            raise IdeaValidationError("A validation snapshot is a walk-forward report.")
+        if self.target not in {"returns_result", "weight_book"}:
+            raise IdeaValidationError("A validation target must be returns_result or weight_book.")
+        if self.window not in {"anchored", "rolling"}:
+            raise IdeaValidationError("A walk-forward window must be anchored or rolling.")
+        if self.selection_metric not in {"sharpe", "total_return"}:
+            raise IdeaValidationError("A walk-forward selection metric must be sharpe or total_return.")
+        for name in ("trials", "train_observations", "test_observations", "observations", "distinct_selections"):
+            object.__setattr__(self, name, max(0, int(getattr(self, name) or 0)))
+        if self.trials < 1:
+            raise IdeaValidationError("A validation snapshot needs the sweep's trial count.")
+        folds = tuple(self.folds)
+        if any(not isinstance(item, IdeaValidationFold) for item in folds):
+            raise IdeaValidationError("folds must be IdeaValidationFold records.")
+        object.__setattr__(self, "folds", folds[:VALIDATION_FOLDS_MAX])
+        object.__setattr__(self, "out_of_sample", _frozen_numbers(self.out_of_sample, "out-of-sample metrics"))
+        object.__setattr__(self, "oos_curve", _frozen_series(self.oos_curve, "out-of-sample curve"))
+        for name in ("cost_bps", "in_sample_value"):
+            object.__setattr__(self, name, _finite_or_none(getattr(self, name)))
+        object.__setattr__(self, "in_sample_label", " ".join(str(self.in_sample_label or "").split())[:CRITERION_REASON_MAX])
+        object.__setattr__(self, "warnings", _frozen_text_list(self.warnings, SNAPSHOT_WARNINGS_MAX))
+        object.__setattr__(self, "causality_verified", self.causality_verified is True)
+        if self.provenance is not None and not isinstance(self.provenance, ProvenanceRecord):
+            raise IdeaValidationError("validation provenance must be a ProvenanceRecord.")
+
+    @property
+    def costs_included(self) -> bool | None:
+        """True when Gamma charged turnover costs in the book; None when the script's own costs are unknown."""
+        if self.target == "weight_book":
+            return bool(self.cost_bps and self.cost_bps > 0)
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "snapshot_id": self.snapshot_id,
+            "created_at": self.created_at.isoformat(),
+            "sweep_id": self.sweep_id,
+            "definition_sha256": self.definition_sha256,
+            "report_sha256": self.report_sha256,
+            "target": self.target,
+            "result_id": self.result_id,
+            "execution_lag": self.execution_lag,
+            "cost_bps": self.cost_bps,
+            "costs_included": self.costs_included,
+            "trials": self.trials,
+            "train_observations": self.train_observations,
+            "test_observations": self.test_observations,
+            "window": self.window,
+            "selection_metric": self.selection_metric,
+            "window_start": self.window_start.isoformat() if self.window_start else None,
+            "window_end": self.window_end.isoformat() if self.window_end else None,
+            "observations": self.observations,
+            "folds": [item.to_dict() for item in self.folds],
+            "out_of_sample": dict(self.out_of_sample),
+            "oos_start": self.oos_start.isoformat() if self.oos_start else None,
+            "oos_end": self.oos_end.isoformat() if self.oos_end else None,
+            "oos_curve": [list(point) for point in self.oos_curve],
+            "in_sample_value": self.in_sample_value,
+            "in_sample_point": self.in_sample_point,
+            "in_sample_label": self.in_sample_label,
+            "distinct_selections": self.distinct_selections,
+            "causality_verified": self.causality_verified,
+            "warnings": list(self.warnings),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaValidationSnapshot":
+        created_at = _parse_instant(payload.get("created_at"))
+        if created_at is None:
+            raise IdeaValidationError("A validation snapshot needs created_at.")
+        provenance = payload.get("provenance")
+        metrics = payload.get("out_of_sample")
+        point = payload.get("in_sample_point")
+        lag = payload.get("execution_lag")
+        return cls(
+            kind=str(payload.get("kind") or "walk_forward"),
+            snapshot_id=str(payload.get("snapshot_id") or ""),
+            created_at=created_at,
+            sweep_id=str(payload.get("sweep_id") or ""),
+            definition_sha256=str(payload.get("definition_sha256") or ""),
+            report_sha256=str(payload.get("report_sha256") or ""),
+            target=str(payload.get("target") or ""),
+            result_id=_optional_text(payload.get("result_id")),
+            execution_lag=int(lag) if isinstance(lag, (int, float)) and not isinstance(lag, bool) else None,
+            cost_bps=_finite_or_none(payload.get("cost_bps")),
+            trials=int(payload.get("trials") or 0),
+            train_observations=int(payload.get("train_observations") or 0),
+            test_observations=int(payload.get("test_observations") or 0),
+            window=str(payload.get("window") or ""),
+            selection_metric=str(payload.get("selection_metric") or ""),
+            window_start=_parse_date(payload.get("window_start")),
+            window_end=_parse_date(payload.get("window_end")),
+            observations=int(payload.get("observations") or 0),
+            folds=tuple(IdeaValidationFold.from_dict(item) for item in _list(payload.get("folds"), "validation.folds")),
+            out_of_sample=dict(metrics) if isinstance(metrics, Mapping) else {},
+            oos_start=_parse_date(payload.get("oos_start")),
+            oos_end=_parse_date(payload.get("oos_end")),
+            oos_curve=tuple(_list(payload.get("oos_curve"), "validation.oos_curve")),
+            in_sample_value=_finite_or_none(payload.get("in_sample_value")),
+            in_sample_point=int(point) if isinstance(point, (int, float)) and not isinstance(point, bool) else None,
+            in_sample_label=str(payload.get("in_sample_label") or ""),
+            distinct_selections=int(payload.get("distinct_selections") or 0),
+            causality_verified=payload.get("causality_verified") is True,
+            warnings=tuple(str(item) for item in _list(payload.get("warnings"), "validation.warnings")),
+            provenance=provenance_from_dict(provenance) if isinstance(provenance, Mapping) else None,
+        )
+
+
+@dataclass(frozen=True)
+class IdeaTrial:
+    """One distinct thing tried for this idea (decision 3 of I4). The ledger only grows."""
+
+    key: str
+    kind: str
+    recorded_at: datetime
+    label: str = ""
+    signal_id: str | None = None
+
+    def __post_init__(self) -> None:
+        key = str(self.key or "").strip()
+        _require_text(key, "trial key")
+        _require_max(key, TRIAL_KEY_MAX, "trial key")
+        object.__setattr__(self, "key", key)
+        if self.kind not in TRIAL_KINDS:
+            raise IdeaValidationError(f"A trial kind must be one of {TRIAL_KINDS}, got {self.kind!r}.")
+        object.__setattr__(self, "label", " ".join(str(self.label or "").split())[:SIGNAL_LABEL_MAX])
+        object.__setattr__(self, "signal_id", _optional_text(self.signal_id))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "kind": self.kind,
+            "recorded_at": self.recorded_at.isoformat(),
+            "label": self.label,
+            "signal_id": self.signal_id,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaTrial":
+        recorded_at = _parse_instant(payload.get("recorded_at"))
+        if recorded_at is None:
+            raise IdeaValidationError("A trial needs recorded_at.")
+        return cls(
+            key=str(payload.get("key") or ""),
+            kind=str(payload.get("kind") or "").strip().lower(),
+            recorded_at=recorded_at,
+            label=str(payload.get("label") or ""),
+            signal_id=_optional_text(payload.get("signal_id")),
+        )
+
+
+@dataclass(frozen=True)
+class IdeaSignal:
+    """A Script run or an imported series attached to an idea (I4).
+
+    ``source_ref`` keeps what identifies the source exactly: for a Script, the
+    script id, accepted revision, source hash, parameter hash and run id; for an
+    import, the content hash and the columns read. A book signal (positions or
+    weights) carries the frozen book in ``legs`` and drives tracking; a returns
+    signal carries a ``supplied`` series and never does. ``trial_count`` is the
+    size of the idea's trial ledger when it was attached, itself included.
+    """
+
+    signal_id: str
+    idea_id: str
+    attached_at: datetime
+    source: str
+    output_kind: str
+    label: str
+    source_ref: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    as_of: date | None = None
+    legs: tuple[IdeaSignalLeg, ...] = ()
+    supplied: IdeaSuppliedSeries | None = None
+    validation: IdeaValidationSnapshot | None = None
+    trial_count: int = 1
+    trial_count_lower_bound: bool = False
+    detached_at: datetime | None = None
+    warnings: tuple[str, ...] = ()
+    provenance: ProvenanceRecord | None = None
+    schema_version: int = IDEA_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_text(self.signal_id, "signal_id")
+        _require_text(self.idea_id, "idea_id")
+        if self.source not in SIGNAL_SOURCES:
+            raise IdeaValidationError(f"A signal source must be one of {SIGNAL_SOURCES}, got {self.source!r}.")
+        if self.output_kind not in SIGNAL_OUTPUT_KINDS:
+            raise IdeaValidationError(f"A signal output must be one of {SIGNAL_OUTPUT_KINDS}, got {self.output_kind!r}.")
+        if self.source == "script" and self.output_kind == "positions":
+            raise IdeaValidationError("A Script run supplies weights or returns; positions come from an import.")
+        label = " ".join(str(self.label or "").split())
+        _require_text(label, "signal label")
+        object.__setattr__(self, "label", label[:SIGNAL_LABEL_MAX])
+        ref = freeze_captured_values(dict(self.source_ref or {}))
+        size = len(json.dumps(thaw_captured_values(ref), allow_nan=False, separators=(",", ":")).encode("utf-8"))
+        if size > SIGNAL_REF_MAX_BYTES:
+            raise IdeaValidationError(f"A signal's source reference is {size} bytes; the limit is {SIGNAL_REF_MAX_BYTES}.")
+        object.__setattr__(self, "source_ref", ref)
+        if self.source == "script":
+            missing = [name for name in ("script_id", "revision_id", "run_id") if not ref.get(name)]
+            if missing:
+                raise IdeaValidationError(f"A Script signal needs its {', '.join(missing)}.")
+        legs = tuple(self.legs)
+        if any(not isinstance(leg, IdeaSignalLeg) for leg in legs):
+            raise IdeaValidationError("Signal legs must be IdeaSignalLeg records.")
+        if self.output_kind in SIGNAL_BOOK_KINDS:
+            if not legs:
+                raise IdeaValidationError("A positions or weights signal needs at least one instrument.")
+            if len(legs) > IDEA_LEGS_MAX:
+                raise IdeaValidationError(f"A signal book holds at most {IDEA_LEGS_MAX} instruments.")
+            if len({leg.key for leg in legs}) != len(legs):
+                raise IdeaValidationError("A signal book names each instrument once.")
+            gross = sum(abs(leg.weight) for leg in legs)
+            if gross <= 0:
+                raise IdeaValidationError("The signal's latest row holds no exposure.")
+            if gross > SIGNAL_GROSS_MAX + 1e-9:
+                raise IdeaValidationError(
+                    f"The signal's gross exposure is {gross:.2f}× NAV; the limit is {SIGNAL_GROSS_MAX:g}×."
+                )
+            if self.output_kind == "positions" and abs(gross - 1.0) > 1e-6:
+                raise IdeaValidationError("A positions book is held as shares of a fully invested gross book.")
+            if self.supplied is not None:
+                raise IdeaValidationError("A book signal has no supplied return series.")
+        else:
+            if legs:
+                raise IdeaValidationError("A returns signal holds no book: Gamma cannot rebuild it from provider closes.")
+            if not isinstance(self.supplied, IdeaSuppliedSeries):
+                raise IdeaValidationError("A returns signal needs its supplied series.")
+        object.__setattr__(self, "legs", legs)
+        if self.validation is not None and not isinstance(self.validation, IdeaValidationSnapshot):
+            raise IdeaValidationError("validation must be an IdeaValidationSnapshot.")
+        object.__setattr__(self, "trial_count", max(1, int(self.trial_count)))
+        object.__setattr__(self, "trial_count_lower_bound", self.trial_count_lower_bound is True)
+        if self.detached_at is not None and self.detached_at < self.attached_at:
+            raise IdeaValidationError("A signal cannot be detached before it was attached.")
+        object.__setattr__(self, "warnings", _frozen_text_list(self.warnings, SNAPSHOT_WARNINGS_MAX))
+        if self.provenance is not None and not isinstance(self.provenance, ProvenanceRecord):
+            raise IdeaValidationError("signal provenance must be a ProvenanceRecord.")
+        _check_schema_version(self.schema_version)
+
+    @property
+    def is_book(self) -> bool:
+        return self.output_kind in SIGNAL_BOOK_KINDS
+
+    @property
+    def is_current(self) -> bool:
+        return self.detached_at is None
+
+    def frozen_legs(self) -> tuple[IdeaTrackedLeg, ...]:
+        """The book as tracked legs: the signal weight is held exactly (weight source ``signal``)."""
+        return tuple(
+            IdeaTrackedLeg(
+                entity=leg.entity,
+                stated_weight=leg.weight,
+                weight=leg.weight,
+                weight_source="signal",
+                asset_class=default_tracking_asset_class(leg.entity),
+                market=tracking_market(leg.entity),
+            )
+            for leg in self.legs
+        )
+
+    def idea_legs(self) -> tuple[IdeaLeg, ...]:
+        return tuple(IdeaLeg(entity=leg.entity, weight=leg.weight) for leg in self.legs)
+
+    def positions(self) -> tuple[Any, ...]:
+        return tuple(sorted((leg.key, round(leg.weight, 10)) for leg in self.legs))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "signal_id": self.signal_id,
+            "idea_id": self.idea_id,
+            "attached_at": self.attached_at.isoformat(),
+            "source": self.source,
+            "output_kind": self.output_kind,
+            "label": self.label,
+            "source_ref": thaw_captured_values(self.source_ref),
+            "as_of": self.as_of.isoformat() if self.as_of else None,
+            "legs": [leg.to_dict() for leg in self.legs],
+            "supplied": self.supplied.to_dict() if self.supplied else None,
+            "validation": self.validation.to_dict() if self.validation else None,
+            "trial_count": self.trial_count,
+            "trial_count_lower_bound": self.trial_count_lower_bound,
+            "detached_at": self.detached_at.isoformat() if self.detached_at else None,
+            "warnings": list(self.warnings),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IdeaSignal":
+        attached_at = _parse_instant(payload.get("attached_at"))
+        if attached_at is None:
+            raise IdeaValidationError("A signal needs attached_at.")
+        ref = payload.get("source_ref")
+        supplied = payload.get("supplied")
+        validation = payload.get("validation")
+        provenance = payload.get("provenance")
+        return cls(
+            schema_version=_schema_version(payload.get("schema_version")),
+            signal_id=str(payload.get("signal_id") or ""),
+            idea_id=str(payload.get("idea_id") or ""),
+            attached_at=attached_at,
+            source=str(payload.get("source") or "").strip().lower(),
+            output_kind=str(payload.get("output_kind") or "").strip().lower(),
+            label=str(payload.get("label") or ""),
+            source_ref=dict(ref) if isinstance(ref, Mapping) else {},
+            as_of=_parse_date(payload.get("as_of")),
+            legs=tuple(IdeaSignalLeg.from_dict(item) for item in _list(payload.get("legs"), "signal.legs")),
+            supplied=IdeaSuppliedSeries.from_dict(supplied) if isinstance(supplied, Mapping) else None,
+            validation=IdeaValidationSnapshot.from_dict(validation) if isinstance(validation, Mapping) else None,
+            trial_count=int(payload.get("trial_count") or 1),
+            trial_count_lower_bound=payload.get("trial_count_lower_bound") is True,
+            detached_at=_parse_instant(payload.get("detached_at")),
+            warnings=tuple(str(item) for item in _list(payload.get("warnings"), "signal.warnings")),
+            provenance=provenance_from_dict(provenance) if isinstance(provenance, Mapping) else None,
+        )
+
+
+def trial_key_for_positions(positions: Sequence[tuple[str, float]]) -> str:
+    """Stable ledger key of a set of weights (a backtest of the legs, ``legs:<hash>``)."""
+    digest = hashlib.sha256(json.dumps([list(item) for item in positions], separators=(",", ":")).encode("utf-8")).hexdigest()
+    return f"legs:{digest[:16]}"
+
+
+def assert_signals_append_only(previous: Sequence[IdeaSignal], current: Sequence[IdeaSignal]) -> None:
+    """Signals only grow; the one change allowed to an earlier record is setting its ``detached_at`` once."""
+    if len(current) < len(previous):
+        raise IdeaValidationError("Attached signals are kept; a signal cannot be removed.")
+    for index, signal in enumerate(previous):
+        before = signal.to_dict()
+        after = current[index].to_dict()
+        if before["detached_at"] is None and after["detached_at"] is not None:
+            after = {**after, "detached_at": None}
+        if before != after:
+            raise IdeaValidationError("Attached signals are kept as attached; an earlier signal cannot be edited.")
+
+
+def assert_trials_append_only(previous: Sequence[IdeaTrial], current: Sequence[IdeaTrial]) -> None:
+    """The trial ledger only grows, so a trial count can never go back down."""
+    if len(current) < len(previous):
+        raise IdeaValidationError("The trial ledger only grows; a trial cannot be removed.")
+    for index, trial in enumerate(previous):
+        if current[index].to_dict() != trial.to_dict():
+            raise IdeaValidationError("The trial ledger only grows; a recorded trial cannot be edited.")
+
+
 @dataclass(frozen=True)
 class Idea:
     """A thesis with its pinned evidence, criteria and journal."""
@@ -1983,6 +2638,10 @@ class Idea:
     # I3c: snapshots de test (Strategy Lab) y de riesgo (Risk), del más antiguo al más reciente.
     tests: tuple[IdeaTestSnapshot, ...] = ()
     risks: tuple[IdeaRiskSnapshot, ...] = ()
+    # I4: señales adjuntadas (solo crecen; la vigente es la última sin retirar) y libro de pruebas.
+    signals: tuple[IdeaSignal, ...] = ()
+    trials: tuple[IdeaTrial, ...] = ()
+    trials_lower_bound: bool = False
     schema_version: int = IDEA_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -2055,6 +2714,25 @@ class Idea:
             if len({item.snapshot_id for item in items}) != len(items):
                 raise IdeaValidationError(f"{name.capitalize()} snapshot ids must be unique.")
             object.__setattr__(self, name, items[-IDEA_SNAPSHOTS_MAX:])
+        signals = tuple(self.signals)
+        if len(signals) > IDEA_SIGNALS_MAX:
+            raise IdeaValidationError(f"An idea keeps at most {IDEA_SIGNALS_MAX} signals.")
+        if any(not isinstance(item, IdeaSignal) or item.idea_id != self.idea_id for item in signals):
+            raise IdeaValidationError("Every signal must belong to this idea.")
+        if len({item.signal_id for item in signals}) != len(signals):
+            raise IdeaValidationError("Signal ids must be unique within an idea.")
+        if any(item.is_current for item in signals[:-1]):
+            raise IdeaValidationError("Only the latest signal can be attached; earlier ones are detached.")
+        object.__setattr__(self, "signals", signals)
+        trials = tuple(self.trials)
+        if len(trials) > TRIAL_LEDGER_MAX:
+            raise IdeaValidationError(f"The trial ledger holds at most {TRIAL_LEDGER_MAX} entries.")
+        if any(not isinstance(item, IdeaTrial) for item in trials):
+            raise IdeaValidationError("trials must be IdeaTrial records.")
+        if len({item.key for item in trials}) != len(trials):
+            raise IdeaValidationError("Each trial is recorded once.")
+        object.__setattr__(self, "trials", trials)
+        object.__setattr__(self, "trials_lower_bound", self.trials_lower_bound is True)
         # Cerrar exige una revisión: la última corresponde a este cierre.
         if self.status == "closed" and (not reviews or reviews[-1].closed_at != self.closed_at):
             raise IdeaValidationError("A closed idea needs the review written at its close.")
@@ -2105,6 +2783,23 @@ class Idea:
     def criterion(self, criterion_id: str) -> IdeaCriterion | None:
         return next((item for item in self.criteria if item.criterion_id == criterion_id), None)
 
+    @property
+    def current_signal(self) -> IdeaSignal | None:
+        """The attached signal, if any (the latest one, while it is not detached)."""
+        if self.signals and self.signals[-1].is_current:
+            return self.signals[-1]
+        return None
+
+    @property
+    def book_signal(self) -> IdeaSignal | None:
+        """The attached signal when it defines the book (positions or weights)."""
+        signal = self.current_signal
+        return signal if signal is not None and signal.is_book else None
+
+    @property
+    def trial_count(self) -> int:
+        return len(self.trials)
+
     # -- immutable updates --------------------------------------------------
 
     def with_journal_entry(self, entry: IdeaJournalEntry, *, touched_at: datetime | None = None) -> "Idea":
@@ -2136,6 +2831,9 @@ class Idea:
             "reviews": [review.to_dict() for review in self.reviews],
             "tests": [item.to_dict() for item in self.tests],
             "risks": [item.to_dict() for item in self.risks],
+            "signals": [item.to_dict() for item in self.signals],
+            "trials": [item.to_dict() for item in self.trials],
+            "trials_lower_bound": self.trials_lower_bound,
         }
 
     @classmethod
@@ -2162,6 +2860,9 @@ class Idea:
             reviews=tuple(IdeaReview.from_dict(item) for item in _list(payload.get("reviews"), "reviews")),
             tests=tuple(IdeaTestSnapshot.from_dict(item) for item in _list(payload.get("tests"), "tests")),
             risks=tuple(IdeaRiskSnapshot.from_dict(item) for item in _list(payload.get("risks"), "risks")),
+            signals=tuple(IdeaSignal.from_dict(item) for item in _list(payload.get("signals"), "signals")),
+            trials=tuple(IdeaTrial.from_dict(item) for item in _list(payload.get("trials"), "trials")),
+            trials_lower_bound=payload.get("trials_lower_bound") is True,
         )
 
 
@@ -2247,6 +2948,54 @@ def migrate_idea_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
         items = migrated.get(key)
         if isinstance(items, list):
             migrated[key] = [dict(item, schema_version=5) if isinstance(item, Mapping) else item for item in items]
+    return migrated
+
+
+def migrate_idea_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
+    """Version 6 adds ``signals`` and the trial ledger (I4).
+
+    No signal existed before I4. The ledger is seeded from the retained test
+    snapshots, one trial per distinct set of weights; an idea keeps only its
+    last 20 snapshots, so when the journal records more test runs than survive
+    the ledger is flagged as a lower bound.
+    """
+    migrated = dict(payload)
+    migrated["signals"] = list(migrated.get("signals") or [])
+    for key in ("evidence", "journal", "criteria", "reviews", "tests", "risks", "signals"):
+        items = migrated.get(key)
+        if isinstance(items, list):
+            migrated[key] = [dict(item, schema_version=6) if isinstance(item, Mapping) else item for item in items]
+    trials: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in migrated.get("tests") or []:
+        if not isinstance(item, Mapping):
+            continue
+        positions = []
+        for leg in _list(item.get("legs"), "snapshot.legs"):
+            if isinstance(leg, Mapping) and isinstance(leg.get("entity"), Mapping):
+                entity = _entity_from_dict(leg["entity"])
+                positions.append((tracking_leg_key(entity), round(float(_finite_or_none(leg.get("weight")) or 0.0), 10)))
+        if not positions:
+            continue
+        key = trial_key_for_positions(sorted(positions))
+        if key in seen:
+            continue
+        seen.add(key)
+        trials.append(
+            {
+                "key": key,
+                "kind": "legs",
+                "recorded_at": item.get("created_at"),
+                "label": "Backtest of the legs (recorded before trial counting)",
+                "signal_id": None,
+            }
+        )
+    migrated["trials"] = trials
+    journal_runs = sum(
+        1 for entry in migrated.get("journal") or [] if isinstance(entry, Mapping) and entry.get("kind") == "test_refreshed"
+    )
+    retained = len([item for item in migrated.get("tests") or [] if isinstance(item, Mapping)])
+    migrated["trials_lower_bound"] = journal_runs > retained
     return migrated
 
 

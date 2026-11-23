@@ -12,12 +12,14 @@
   import IdeaReviewMode from "../components/IdeaReviewMode.svelte";
   import IdeaReviewSection from "../components/IdeaReviewSection.svelte";
   import IdeaTrackingPanel from "../components/IdeaTrackingPanel.svelte";
+  import IdeaSignalPanel from "../components/IdeaSignalPanel.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import WhatIsThis from "../components/WhatIsThis.svelte";
   import type {
     CrossTabHandoffEnvelope,
     Idea,
     IdeaClosePayload,
+    IdeaSignalPayload,
     IdeaCreatePayload,
     IdeaCriterionPayload,
     IdeaEvidence,
@@ -106,6 +108,11 @@
   export let analysisError = "";
   export let onRunTest: (ideaId: string) => Promise<unknown> | void = () => {};
   export let onRunRisk: (ideaId: string) => Promise<unknown> | void = () => {};
+  // I4a: the quant layer (a Script run or imported rows), collapsed by default.
+  export let signalBusy = false;
+  export let signalError = "";
+  export let onAttachSignal: (ideaId: string, payload: IdeaSignalPayload) => Promise<unknown> | void = () => {};
+  export let onDetachSignal: (ideaId: string) => Promise<unknown> | void = () => {};
 
   const modes: Array<{ id: "board" | "idea" | "review"; label: string }> = [
     { id: "board", label: "Board" },
@@ -793,6 +800,8 @@
         />
 
         <IdeaAnalysisPanel {idea} busy={analysisBusy} error={analysisError} {onRunTest} {onRunRisk} />
+
+        <IdeaSignalPanel {idea} {tracking} busy={signalBusy} error={signalError} onAttach={onAttachSignal} onDetach={onDetachSignal} />
 
         <IdeaTrackingPanel
           {idea}

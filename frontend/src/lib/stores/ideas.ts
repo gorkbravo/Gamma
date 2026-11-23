@@ -1,4 +1,4 @@
-// Ideas store (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
+// Ideas store (Workstream 12, checkpoints I1, I2, I3a, I3b, I3c and I4a).
 //
 // One place that talks to /ideas, so the Ideas tab, the shared Pin to idea
 // action, Sitrep ("Promote to idea", "Your ideas") and the notification center
@@ -24,6 +24,7 @@ import type {
   IdeaPatchPayload,
   IdeaPinResponse,
   IdeaReviewStatsResponse,
+  IdeaSignalPayload,
   IdeaSummary,
   IdeaIntradayView,
   IdeaTrackingResponse,
@@ -52,6 +53,9 @@ export const ideaReviewStats = writable<IdeaReviewStatsResponse | null>(null);
 /** I3c: which snapshot is running for the selected idea, and the last run error. */
 export const ideaAnalysisBusy = writable<"" | "test" | "risk">("");
 export const ideaAnalysisError = writable("");
+/** I4a: attaching or detaching a signal on the selected idea, and the last error from it. */
+export const ideaSignalBusy = writable(false);
+export const ideaSignalError = writable("");
 
 /** Every idea the board knows about, newest change first. */
 export const ideaSummaries = derived(ideaList, ($list): IdeaSummary[] => $list?.items ?? []);
@@ -215,6 +219,33 @@ export function runIdeaTest(ideaId: string): Promise<Idea | null> {
 /** Run Risk on the idea's research book and keep the snapshot. */
 export function runIdeaRisk(ideaId: string): Promise<Idea | null> {
   return runSnapshot(ideaId, "risk");
+}
+
+async function runSignal(ideaId: string, action: () => Promise<Idea>): Promise<Idea | null> {
+  ideaSignalBusy.set(true);
+  ideaSignalError.set("");
+  try {
+    const idea = await action();
+    applyIdea(idea);
+    await Promise.all([loadIdeas(), loadIdeaTracking(ideaId)]);
+    return idea;
+  } catch (error) {
+    // Un CSV o una ejecución rechazados se explican en la sección de la señal.
+    ideaSignalError.set(messageOf(error));
+    return null;
+  } finally {
+    ideaSignalBusy.set(false);
+  }
+}
+
+/** Attach a Script run or imported CSV rows as the idea's signal (data only; nothing is executed). */
+export function attachIdeaSignal(ideaId: string, payload: IdeaSignalPayload): Promise<Idea | null> {
+  return runSignal(ideaId, () => postJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/signal`, payload));
+}
+
+/** Detach the current signal; it stays in the record and the trial count keeps its value. */
+export function detachIdeaSignal(ideaId: string): Promise<Idea | null> {
+  return runSignal(ideaId, () => deleteJson<Idea>(`/ideas/${encodeURIComponent(ideaId)}/signal`));
 }
 
 export async function loadIdeaReview(): Promise<IdeaReviewStatsResponse | null> {

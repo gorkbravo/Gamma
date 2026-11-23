@@ -18,7 +18,6 @@
   import {
     COST_CLASS_SHORT_LABELS,
     LEG_COST_CLASSES,
-    SEGMENT_START_LABELS,
     SEGMENT_STATUS_LABELS,
     TRACKING_LABEL,
     TRACKING_STATUS_LABELS,
@@ -34,6 +33,8 @@
     trackingMetaText,
   } from "../lib/idea-tracking";
   import { formatIdeaInstant } from "../lib/ideas";
+  import { changedLegBp, legBpDraftError, legBpText, segmentNoteText } from "../lib/idea-tracking";
+  import { trialsTag, trialsText } from "../lib/idea-signals";
   import type { ProvenanceBadgeData } from "../lib/provenance";
 
   export let idea: Idea;
@@ -141,6 +142,8 @@
   let costError = "";
   let draft: Record<string, string> = {};
   let legDraft: Record<string, IdeaTrackingCostClass> = {};
+  // I4: coste por lado propio de cada pierna; vacío = el de su clase.
+  let legBpDraft: Record<string, string> = {};
 
   $: legRows = uniqueLegs(current);
 
@@ -164,11 +167,12 @@
       (current?.cost_model.classes ?? []).filter((item) => item.editable).map((item) => [item.asset_class, String(item.per_side_bp ?? "")])
     );
     legDraft = Object.fromEntries(legRows.map((row) => [row.key, row.current]));
+    legBpDraft = Object.fromEntries(legRows.map((row) => [row.key, legBpText(current?.cost_model.leg_bp?.[row.key])]));
     costError = "";
     costsOpen = true;
   }
 
-  $: draftError = costsOpen ? costDraftError(draft) : "";
+  $: draftError = costsOpen ? costDraftError(draft) || legBpDraftError(legBpDraft) : "";
 
   async function saveCosts() {
     if (!current || saving) return;
@@ -185,7 +189,9 @@
       if (chosen && chosen !== row.current) classes[row.key] = chosen === row.detected ? null : chosen;
     }
     if (Object.keys(classes).length) payload.leg_classes = classes;
-    if (!payload.per_side_bp && !payload.leg_classes) {
+    const legBp = changedLegBp(current.cost_model.leg_bp ?? {}, legBpDraft);
+    if (legBp) payload.leg_bp = legBp;
+    if (!payload.per_side_bp && !payload.leg_classes && !payload.leg_bp) {
       costsOpen = false;
       return;
     }
@@ -199,6 +205,7 @@
     }
   }
 
+  $: openSignalSegment = Boolean((idea.tracking?.segments ?? []).at(-1)?.signal_id && !(idea.tracking?.segments ?? []).at(-1)?.ended_at);
   $: warnings = current?.warnings ?? [];
   $: shownWarnings = showAllWarnings ? warnings : warnings.slice(0, WARNINGS_SHOWN);
 </script>
@@ -208,6 +215,8 @@
     <h3>Tracking <WhatIsThis key="stat.forward_return" stance={idea.stance} /></h3>
     <div class="title-actions">
       <span class="tag is-tinted context">{TRACKING_LABEL}</span>
+      {#if openSignalSegment}<span class="tag accent" title="The open segment holds the attached signal's frozen book">Follows signal</span>{/if}
+      {#if idea.trial_count}<span class="tag accent" title={`${trialsText(idea.trial_count, idea.trials_lower_bound)} recorded for this idea`}>{trialsTag(idea.trial_count, idea.trials_lower_bound)}</span>{/if}
       {#if meta}<span class="header-meta">{meta}</span>{/if}
       {#if badge}<ProvenanceBadge data={badge} variant="dot" />{/if}
       <button type="button" class="btn is-small is-ghost" aria-expanded={costsOpen} disabled={!current} on:click={openCosts}>Costs</button>
@@ -278,7 +287,7 @@
           <tr>
             <th class="num">Segment</th>
             <th>Closes</th>
-            <th>Legs (share of gross)</th>
+            <th>Legs (weight)</th>
             <th class="num">Gross</th>
             <th class="num">Costs</th>
             <th class="num">Net</th>
@@ -291,11 +300,7 @@
               <td class="num">S{segment.number}</td>
               <td class="period-cell">
                 <strong>{segmentPeriodText(segment)}</strong>
-                <span class="meta">
-                  {SEGMENT_START_LABELS[segment.start_reason] ?? segment.start_reason} {formatIdeaInstant(segment.started_at)}{#if segment.ended_at}
-                    · ended {formatIdeaInstant(segment.ended_at)}{/if}{#if segment.gaps}
-                    · {segment.gaps} {segment.gaps === 1 ? "gap" : "gaps"}{/if}
-                </span>
+                <span class="meta">{segmentNoteText(segment, formatIdeaInstant)}</span>
                 {#if segment.status !== "tracking" && segment.status !== "closed"}
                   <span class="tag" class:warning={segment.status === "unavailable" || segment.status === "untracked"}>{SEGMENT_STATUS_LABELS[segment.status]}</span>
                 {/if}
@@ -349,7 +354,7 @@
         {#if legRows.length}
           <div class="table-scroll">
             <table class="data-table is-compact leg-class-table">
-              <thead><tr><th>Leg</th><th>Cost class</th></tr></thead>
+              <thead><tr><th>Leg</th><th>Cost class</th><th class="num">Own cost per side</th></tr></thead>
               <tbody>
                 {#each legRows as row (row.key)}
                   <tr>
@@ -360,6 +365,15 @@
                           <option value={option}>{COST_CLASS_SHORT_LABELS[option]}</option>
                         {/each}
                       </select>
+                    </td>
+                    <td class="num">
+                      <input
+                        class="form-control is-small bp-input"
+                        inputmode="decimal"
+                        placeholder="Class"
+                        bind:value={legBpDraft[row.key]}
+                        aria-label={`${row.label}, own basis points per side (blank uses the class cost)`}
+                      />
                     </td>
                   </tr>
                 {/each}

@@ -1,4 +1,4 @@
-"""``/ideas`` routes (Workstream 12, checkpoints I1, I2, I3a, I3b and I3c).
+"""``/ideas`` routes (Workstream 12, checkpoints I1, I2, I3a-I3d and I4a).
 
 Local research records plus read-only criterion evaluation and hypothetical
 forward tracking. Evaluation and tracking read prices and observables through
@@ -22,6 +22,7 @@ from src.api.schemas.ideas import (
     IdeaCloseRequestModel,
     IdeaIntradayModel,
     IdeaReviewStatsResponseModel,
+    IdeaSignalRequestModel,
     IdeaCreateRequestModel,
     IdeaCriterionModel,
     IdeaCriterionRequestModel,
@@ -76,6 +77,13 @@ def _tracking(request: Request):
 
 def _analysis(request: Request):
     return request.app.state.runtime.idea_analysis
+
+
+def _signals(request: Request):
+    signals = getattr(request.app.state.runtime, "idea_signals", None)
+    if signals is None:
+        raise HTTPException(status_code=503, detail="Signals are not available in this runtime.")
+    return signals
 
 
 def _idea_response(idea: Idea) -> IdeaModel:
@@ -305,6 +313,28 @@ def run_idea_risk(idea_id: str, request: Request) -> IdeaModel:
     """Run Risk on the idea's research book (VaR, expected shortfall, stress replay) and keep the snapshot."""
     try:
         idea = _analysis(request).run_risk(idea_id)
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.post("/ideas/{idea_id}/signal", response_model=IdeaModel)
+def attach_idea_signal(idea_id: str, payload: IdeaSignalRequestModel, request: Request) -> IdeaModel:
+    """Attach a Script run or an imported series (validated like Strategy Lab imports). Data only, never executed."""
+    signals = _signals(request)
+    try:
+        idea = signals.attach(idea_id, payload.to_domain())
+    except Exception as exc:  # noqa: BLE001
+        _raise(exc)
+    return _idea_response(idea)
+
+
+@router.delete("/ideas/{idea_id}/signal", response_model=IdeaModel)
+def detach_idea_signal(idea_id: str, request: Request) -> IdeaModel:
+    """Detach the current signal; it stays in the record and the trial ledger keeps its count."""
+    signals = _signals(request)
+    try:
+        idea = signals.detach(idea_id)
     except Exception as exc:  # noqa: BLE001
         _raise(exc)
     return _idea_response(idea)
