@@ -2,7 +2,17 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-05
+Last updated: 2026-11-23
+
+### Official guidance reviewed 2026-11-23 — Ideas in Copilot (Workstream 12, I5)
+
+Fetched the current official [function calling](https://developers.openai.com/api/docs/guides/function-calling), [Agents running](https://developers.openai.com/api/docs/guides/agents/running-agents), [guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) guides directly (no Developer Docs connector was available in this session; the former `agents/human-in-the-loop` path now returns 404). Review date: **2026-11-23**. Relevant points:
+
+- Function calling: the application executes each call and returns its output, keyed by `call_id`; strict schemas require `additionalProperties: false` and every property in `required`, with optional values expressed as nullable types.
+- Guardrails and approvals: a tool marked as needing approval records an approval interruption instead of executing; the run state is approved or rejected and resumed, and approvals are treated as paused runs, not new turns.
+- Structured Outputs: use function calling to connect the model to tools and `text.format` for the response shape; refusals and incomplete responses still need handling.
+
+**Decision.** Gamma keeps the custom Responses loop and its server-owned authority. The Ideas domain adds a context builder and three strict function tools: `review_idea` and `explain_criterion_state` (`read_context`, Gamma-computed facts) and `draft_idea_from_context` (`draft_change`, `automatic_draft`). The draft does not execute anything the user has not approved: Gamma validates it, binds it as a pending `CopilotDraftMutation` through the existing confirmation service, and the user accepts it from the card (`ideas.apply_idea_draft`, `apply_change`, `confirmation_required`, token, session and proposal hash), which creates a draft idea only. This is the same pause-for-approval pattern the Agents SDK documents, held in Gamma's own state rather than in SDK run state, because the Agent card ends its turn and the approval may come much later. The Agents SDK Operator route still excludes draft changes and no Operator approval flow changes. No model, provider storage, budget or permission change; the read-only product boundary is unchanged (an idea carries no order, account, wallet or execution authority). Covered by `tests/test_idea_copilot.py`, `tests/test_copilot_ideas.py` and `tests/test_copilot_operator_attached_context.py`; live acceptance with the configured model is pending the owner's go-ahead, since it spends API credit.
 
 ### Official guidance reviewed 2026-11-05 — Runs that die while assembling context (GUA-20261105-1)
 

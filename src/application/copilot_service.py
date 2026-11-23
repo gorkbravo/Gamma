@@ -33,6 +33,7 @@ from src.application.copilot_model_policy import (
     CUSTOM_OPERATOR_PATH,
     CopilotModelPolicy,
 )
+from src.application import copilot_ideas
 from src.application.copilot_confirmation_service import CopilotConfirmationService
 from src.application.copilot_run_recovery import CopilotRunRecovery
 from src.application.copilot_context_contracts import (
@@ -323,6 +324,9 @@ class CopilotService:
         maritime_service: MaritimeService | None = None,
         news_service: NewsService | None = None,
         sitrep_service: SitrepService | None = None,
+        idea_service: Any | None = None,
+        idea_tracking: Any | None = None,
+        idea_observables: Any | None = None,
         provider: CopilotProvider,
         model_policy: CopilotModelPolicy | None = None,
         store: CopilotStore | None = None,
@@ -341,6 +345,10 @@ class CopilotService:
         self.maritime_service = maritime_service
         self.news_service = news_service
         self.sitrep_service = sitrep_service
+        # I5: Ideas como contexto de Copilot y sus herramientas (borrador con aceptación, revisión, explicación).
+        self.idea_service = idea_service
+        self.idea_tracking = idea_tracking
+        self.idea_observables = idea_observables
         self.provider = provider
         self.model_policy = model_policy or CopilotModelPolicy.from_environment(provider)
         self.store = store
@@ -368,6 +376,7 @@ class CopilotService:
             "risk": self._build_risk_context,
             "iv": self._build_iv_context,
             "external_context": self._build_external_context,
+            "ideas": lambda request: copilot_ideas.build_ideas_context(self, request),
             "synthesis": self._build_synthesis_context,
         }
         self._context_builders = {
@@ -2007,6 +2016,14 @@ class CopilotService:
                 test_coverage_owner="tests/test_copilot.py",
             ),
         ]
+        # I5: herramientas de Ideas (dos de lectura y un borrador que el usuario acepta) y su acción de aplicar.
+        for definition in copilot_ideas.tool_definitions(self, _CopilotToolDefinition, tuple(self._context_builders)):
+            self._tools[definition.name] = definition
+        self._mutation_action_definitions = [
+            *self._mutation_action_definitions,
+            copilot_ideas.propose_action_definition(),
+            copilot_ideas.apply_action_definition(),
+        ]
         self.action_registry = ResearchActionRegistry(self._action_definitions())
 
     def generate_research_card(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
@@ -2313,6 +2330,13 @@ class CopilotService:
     ) -> CopilotResearchCardResult:
         if self.store is None:
             return result
+        proposals = copilot_ideas.proposals_for_result(self, result, normalized_request.user_session_id, run_id)
+        if proposals:
+            result = replace(
+                result,
+                proposals=proposals,
+                proposal_ids=list(dict.fromkeys([*result.proposal_ids, *(item.mutation_id for item in proposals)])),
+            )
         try:
             self.store.record_turn(
                 session_id=normalized_request.user_session_id,
@@ -3723,6 +3747,13 @@ class CopilotService:
             },
             warnings=list(applied.warnings),
         )
+
+    def apply_copilot_mutation(self, *, mutation_id: str, **confirmation: Any) -> CopilotMutationApplyResult:
+        """Apply a confirmed draft by its apply action: a DCF update or (I5) a Copilot idea draft."""
+        existing = self.store.get_mutation(mutation_id) if self.store is not None else None
+        if existing is not None and existing.apply_tool_id == copilot_ideas.APPLY_ACTION:
+            return copilot_ideas.apply_idea_draft(self, mutation_id=mutation_id, **confirmation)
+        return self.apply_fundamentals_dcf_update(mutation_id=mutation_id, **confirmation)
 
     def reject_copilot_mutation(
         self,
@@ -8902,6 +8933,7 @@ class CopilotService:
             "risk": ["run_risk_contribution_analysis", "run_risk_scenario_analysis"],
             "iv": ["inspect_options_structure", "run_options_realized_implied_comparison"],
             "external_context": ["get_news_items_context"],
+            "ideas": ["review_idea"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
         }.get(domain, [])
 
@@ -9284,6 +9316,7 @@ class CopilotService:
             "fundamentals": "Fundamentals is omitted unless a company, filing, DCF, financial statement, or valuation question is central.",
             "iv": "Options is omitted unless volatility, skew, event risk, or an active IV surface is relevant.",
             "external_context": "External context is omitted unless freshness from approved read-only providers is needed.",
+            "ideas": "Ideas are omitted from automatic routing; select an idea as context to include it.",
             "synthesis": "Synthesis is omitted unless the request needs comparison across already-loaded Gamma contexts.",
         }
         if intent == "active_context_research":

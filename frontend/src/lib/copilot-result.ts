@@ -1,4 +1,5 @@
 import type {
+  CopilotDraftMutation,
   CopilotDomain,
   CopilotModelPolicyResolution,
   CopilotOperatorProgressEvent,
@@ -250,7 +251,12 @@ export function normalizeCopilotResearchCardResult(
         : null,
     usage: normalizeUsage(row.usage),
     observability: normalizeObservability(row.observability),
-    safe_provider_error: normalizeSafeError(row.safe_provider_error)
+    safe_provider_error: normalizeSafeError(row.safe_provider_error),
+    // I5: borradores de idea pendientes de aceptación; los ids sobreviven a recargar la sesión.
+    proposal_ids: asStringArray(row.proposal_ids),
+    proposals: Array.isArray(row.proposals)
+      ? (row.proposals.filter((item) => item != null && typeof item === "object" && !Array.isArray(item)) as CopilotDraftMutation[])
+      : []
   };
 }
 

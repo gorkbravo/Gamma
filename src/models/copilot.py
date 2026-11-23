@@ -177,6 +177,8 @@ class CopilotRequestContext:
     risk_state: dict[str, Any] | None = None
     iv_state: dict[str, Any] | None = None
     maritime_state: dict[str, Any] | None = None
+    # I5 (Ideas): la idea abierta en la pestaña Ideas, para el contexto de Copilot.
+    idea_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -574,6 +576,9 @@ class CopilotResearchCardResult:
     usage: "CopilotUsageRecord" = field(default_factory=lambda: CopilotUsageRecord())
     observability: CopilotRunObservability = field(default_factory=CopilotRunObservability)
     safe_provider_error: CopilotSafeProviderError | None = None
+    # I5: propuestas pendientes (borradores de idea) que el usuario acepta o rechaza; se guardan por id.
+    proposal_ids: list[str] = field(default_factory=list)
+    proposals: list["CopilotDraftMutation"] = field(default_factory=list)
 
 
 COPILOT_RUN_EVENT_TYPES = {

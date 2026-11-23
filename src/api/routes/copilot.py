@@ -300,7 +300,7 @@ def apply_copilot_mutation(
 ) -> CopilotMutationApplyResultModel:
     runtime = request.app.state.runtime
     try:
-        result = runtime.copilot_service.apply_fundamentals_dcf_update(
+        result = runtime.copilot_service.apply_copilot_mutation(
             mutation_id=mutation_id,
             confirmation_token=payload.confirmation_token,
             session_id=payload.user_session_id,

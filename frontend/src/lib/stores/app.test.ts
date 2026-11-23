@@ -2894,6 +2894,7 @@ function emptyCopilotCards() {
     fundamentals: null,
     risk: null,
     iv: null,
+    ideas: null,
     synthesis: null
   };
 }
@@ -2913,6 +2914,7 @@ function emptyCopilotThreads() {
     fundamentals: { domain: "fundamentals" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     risk: { domain: "risk" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     iv: { domain: "iv" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    ideas: { domain: "ideas" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     synthesis: { domain: "synthesis" as const, contextFingerprint: null, latestResponseId: null, entries: [] }
   };
 }

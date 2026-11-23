@@ -2194,6 +2194,7 @@ class CopilotStore:
     @staticmethod
     def _result_to_json(result: CopilotResearchCardResult) -> dict[str, Any]:
         return {
+            "proposal_ids": list(result.proposal_ids),
             "domain": result.domain,
             "current_tab": result.current_tab,
             "status": result.status,
@@ -2307,6 +2308,7 @@ class CopilotStore:
             safe_provider_error=cls._safe_provider_error_from_json(
                 payload.get("safe_provider_error")
             ),
+            proposal_ids=[str(item) for item in list(payload.get("proposal_ids") or []) if str(item).strip()],
         )
         return resolve_result_evidence(result)
 

@@ -59,6 +59,10 @@ def operator_attached_context(
         ("run_strategy_lab_portfolio_backtest", "strategy_lab_composition", _attached_composition),
         ("run_research_basket_analysis", "research_scope", _attached_research_scope),
         ("get_synthesis_domain_context", "synthesis_scope", _attached_synthesis_scope),
+        # I5 (Ideas): la idea abierta, para revisar, explicar un criterio o redactar a partir de ella.
+        ("review_idea", "ideas_selection", _attached_idea),
+        ("explain_criterion_state", "ideas_selection", _attached_idea),
+        ("draft_idea_from_context", "ideas_selection", _attached_idea),
     )
     for tool_id, key, builder in builders:
         if tool_id in tools:
@@ -130,6 +134,17 @@ def _attached_script(
         attached["canonical_source"] = source[:MAX_ATTACHED_SCRIPT_SOURCE_CHARS]
         attached["canonical_source_truncated"] = len(source) > MAX_ATTACHED_SCRIPT_SOURCE_CHARS
     return attached
+
+
+def _attached_idea(request: CopilotResearchCardRequest) -> dict[str, Any] | None:
+    context = _domain_context(request, "ideas")
+    idea_id = _text(getattr(context, "idea_id", None) if context is not None else None)
+    if idea_id is None:
+        return None
+    return {
+        "selected_idea_id": idea_id,
+        "usage": "Idea open in the Ideas tab. Pass null as idea_id to use it; a drafted idea is only a proposal the user accepts.",
+    }
 
 
 def _attached_crypto(request: CopilotResearchCardRequest) -> dict[str, Any] | None:
