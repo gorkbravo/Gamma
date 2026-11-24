@@ -2,7 +2,30 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-23
+Last updated: 2026-11-24
+
+### I5 live acceptance, 2026-11-24 — Ideas in Copilot (Workstream 12)
+
+**Official guidance re-checked 2026-11-24.** Fetched directly (no Developer Docs connector was available in this session): [function calling](https://developers.openai.com/api/docs/guides/function-calling), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) and [guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), all HTTP 200. Relevant points, unchanged from the 2026-11-23 review:
+
+- Function calling: strict schemas need `additionalProperties: false` and every property in `required`, with optional values as nullable types; `tool_choice` is `auto` by default and can require a call, name one function or restrict the turn to an allowed subset; by default the model decides whether to call a tool.
+- Guardrails and approvals: an approval-gated tool records an interruption instead of executing, and the run resumes after approval or rejection. Applications on the Responses API build this review into their own system.
+
+**Live runs** (configured default `gpt-6.1-sol`, profile `auto` → `standard`, reasoning `medium`, `responses_custom_loop`; five of six allowed runs, on a backend without TWS):
+
+| Run | Prompt | Tools | Tokens in / out / reasoning | Latency |
+| --- | --- | --- | --- | --- |
+| 1 | Ideas, Research Agent: "Review this idea" | none | 7,410 / 1,055 / 84 | 21.1 s |
+| 2 | Same thread: "Draft a follow-up idea" | `draft_idea_from_context` ×1 | 17,835 / 977 / 47 | 19.1 s |
+| 3 | Commodities: "What is driving Brent and WTI this week…" | `inspect_commodity_curve_fundamentals` ×1 | 23,609 / 998 / 72 | 23.9 s |
+| 4 | Commodities: "Draft an idea from this commodities context…" | `draft_idea_from_context` ×1 | 22,361 / 982 / 81 | 21.1 s |
+| 5 | Ideas, Research Operator: "Review this idea" | none (planner asked which "Idea" issuer was meant) | 1,153 / 333 / 0 | 12.2 s |
+
+No refusals and no provider errors. Both drafts filled the strict schema and passed registry validation; accepting run 2's proposal created one draft idea and rejecting run 4's created nothing. Runs 1 and 3 did not draft; runs 2 and 4 drafted once each.
+
+**Result.** The draft-only-on-request, validation, confirmation and cross-context behaviour is accepted. The expectation that "Review this idea" calls `review_idea` and `explain_criterion_state` is not met: with `tool_choice: auto` the model answered from the Ideas context, which already carries what those tools return, and the Operator planner still does not route to Ideas.
+
+**Decision (2026-11-24).** No harness change on this branch. Gamma remains the authority for tool exposure, validation, approval and audit state; the review was grounded in Gamma-computed facts, which is what decision 1 of I5 requires. Making the review path call the read-only tools is left to the owner: either accept context-grounded reviews, or restrict the first turn of an explicit Ideas review to the two read-only tools (`allowed_tools`, required), or have Gamma run `review_idea` itself as a default plan tool. Any of these needs one confirming live run; the sixth allowed run was kept for it. Details: the spec's [I5 live acceptance](./idea_workspace_spec.md#i5-live-acceptance-2026-11-24).
 
 ### Official guidance reviewed 2026-11-23 — Ideas in Copilot (Workstream 12, I5)
 

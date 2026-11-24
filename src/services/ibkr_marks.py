@@ -147,6 +147,19 @@ def only_prior_close(ticker: Any) -> bool:
     )
 
 
+def _forget_ticker(ib: Any, contract: Any) -> None:
+    """Drop ib_insync's cached ``Ticker`` for this contract object.
+
+    ``Wrapper.startTicker`` keys tickers by ``id(contract)`` and keeps their
+    last, bid and ask between requests. The reader caches qualified contracts,
+    so without this a new snapshot would read the previous pass's prices at
+    once, before TWS answers.
+    """
+    tickers = getattr(getattr(ib, "wrapper", None), "tickers", None)
+    if isinstance(tickers, dict):
+        tickers.pop(id(contract), None)
+
+
 class IbkrMarkReader:
     """Snapshot marks through the read-only IBKR client the runtime already holds."""
 
@@ -211,7 +224,17 @@ class IbkrMarkReader:
                 batch.marks[request.key] = LegMark(key=request.key, price=None, reason=reason)
             else:
                 wanted.append((request, contract))
-        size = BATCH_SIZE_WHILE_OPTIONS_STREAM if self.options_streaming() else BATCH_SIZE
+        options_streaming = self.options_streaming()
+        size = BATCH_SIZE_WHILE_OPTIONS_STREAM if options_streaming else BATCH_SIZE
+        if wanted:
+            # Una línea por pasada: permite comprobar en vivo el tamaño de lote mientras Options emite.
+            logger.info(
+                "Intraday marks: %d instrument(s) in %d batch(es) of at most %d (Options stream %s)",
+                len(wanted),
+                -(-len(wanted) // size),
+                size,
+                "running" if options_streaming else "idle",
+            )
         for offset in range(0, len(wanted), size):
             chunk = wanted[offset : offset + size]
             try:
@@ -323,6 +346,9 @@ class IbkrMarkReader:
         tickers: list[tuple[MarkRequest, Any, Any, bool]] = []
         for request, contract in members:
             streaming = request.sec_type == "CRYPTO"
+            # ib_insync reutiliza el Ticker de un mismo objeto de contrato y conserva sus precios: sin
+            # olvidarlo, la pasada siguiente leería al instante la marca de la anterior (visto en vivo).
+            _forget_ticker(ib, contract)
             try:
                 # Las acciones piden instantánea; la cripto de IBKR no la admite y se suscribe un momento.
                 ticker = ib.reqMktData(contract, "", not streaming, False)
@@ -360,6 +386,8 @@ class IbkrMarkReader:
                     ib.wrapper.endTicker(ticker, "mktData")
             except Exception:  # noqa: BLE001
                 pass
+            # Después de cancelar (cancelMktData busca el Ticker por contrato): no queda caché que crezca.
+            _forget_ticker(ib, contract)
         return found
 
     def _mark(self, request: MarkRequest, ticker: Any, price: float, price_field: str | None, requested: int) -> LegMark:

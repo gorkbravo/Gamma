@@ -783,16 +783,23 @@ def _gaps(
         add_pieces(_split_gap(start, end, statuses, "not_recorded", not_before), open_ended=ongoing)
         return gaps
 
+    def missed(start: datetime, end: datetime) -> bool:
+        # Una fila de estado dentro del tramo dice que una pasada debida no pudo marcar: es un hueco
+        # aunque el tramo sea más corto que el umbral (visto en vivo: 10 minutos sin TWS se perdían).
+        return any(start < _parse(row["at"]) < end for row in statuses)
+
     first = marks[0]
     first_at = _parse(first["at"])
     first_cadence = int(first.get("cadence") or INTRADAY_PASS_SECONDS)
-    if lead_from is not None and first_at - lead_from > timedelta(seconds=GAP_FACTOR * first_cadence):
+    if lead_from is not None and (
+        first_at - lead_from > timedelta(seconds=GAP_FACTOR * first_cadence) or missed(lead_from - timedelta(microseconds=1), first_at)
+    ):
         add_pieces(_split_gap(lead_from, first_at, statuses, "not_recorded", not_before))
     for previous, current in zip(marks, marks[1:]):
         start = _parse(previous["at"])
         end = _parse(current["at"])
         cadence = int(previous.get("cadence") or INTRADAY_PASS_SECONDS)
-        if end - start > timedelta(seconds=GAP_FACTOR * cadence):
+        if end - start > timedelta(seconds=GAP_FACTOR * cadence) or missed(start, end):
             restarted = previous.get("run") and current.get("run") and previous.get("run") != current.get("run")
             base = ("not_running", "Gamma was not running.") if restarted else (
                 "not_recorded",
@@ -802,7 +809,7 @@ def _gaps(
     last = marks[-1]
     last_at = _parse(last["at"])
     last_cadence = int(last.get("cadence") or INTRADAY_PASS_SECONDS)
-    if horizon - last_at > timedelta(seconds=GAP_FACTOR * last_cadence):
+    if horizon - last_at > timedelta(seconds=GAP_FACTOR * last_cadence) or missed(last_at, horizon + timedelta(microseconds=1)):
         add_pieces(_split_gap(last_at, horizon, statuses, "not_recorded", not_since), open_ended=ongoing)
     return gaps
 

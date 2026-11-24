@@ -270,6 +270,36 @@ def test_a_disconnection_and_a_restart_are_explicit_gaps(tmp_path):
     assert [point["session"] for point in _canonical(tracker, service, idea_id)["points"]] == ["2026-11-09"]
 
 
+def test_a_short_disconnection_is_a_gap_even_below_the_threshold(tmp_path):
+    """Seen live on 2026-11-24: 10 minutes without TWS (one missed pass) left no gap and the line joined across it."""
+    marks = FakeMarks()
+    clock, service, _tracker, intraday, idea_id = _setup(tmp_path, marks=marks)
+    for minute in (0, 5):
+        clock.set(TUE_OPEN + timedelta(minutes=minute))
+        intraday.record_pass()
+    marks.connected_flag = False
+    clock.set(TUE_OPEN + timedelta(minutes=10))
+    assert intraday.record_pass().status == "disconnected"
+    # Mientras sigue desconectado, el hueco ya se ve y queda abierto.
+    clock.set(TUE_OPEN + timedelta(minutes=12))
+    ongoing = intraday.view(service.get_idea(idea_id))["gaps"]
+    assert (ongoing[-1]["start"], ongoing[-1]["end"], ongoing[-1]["kind"]) == ("2026-11-10T15:05:00", None, "disconnected")
+    marks.connected_flag = True
+    clock.set(TUE_OPEN + timedelta(minutes=15))
+    intraday.record_pass()
+
+    view = intraday.view(service.get_idea(idea_id))
+    lead, *gaps = view["gaps"]
+    assert lead["kind"] == "not_recorded"
+    # Diez minutos entre marcas (por debajo de 2,5 veces la cadencia), pero una pasada no pudo marcar.
+    assert [(gap["start"], gap["end"], gap["kind"]) for gap in gaps] == [("2026-11-10T15:05:00", "2026-11-10T15:15:00", "disconnected")]
+    assert "Trader Workstation disconnected" in gaps[0]["reason"]
+    # Sin filas de estado, un tramo igual de corto sigue sin ser hueco (tolerancia a la cadencia).
+    clock.set(TUE_OPEN + timedelta(minutes=25))
+    intraday.record_pass()
+    assert len(intraday.view(service.get_idea(idea_id))["gaps"]) == 2
+
+
 def test_a_gap_is_split_at_the_stretches_gamma_saw():
     from src.application.idea_intraday import _split_gap
 
@@ -578,6 +608,46 @@ def test_the_reader_asks_frozen_data_for_a_closed_market_and_respects_the_option
     assert reader.fetch(requests).unavailable_reason == "Trader Workstation is not connected."
 
 
+class _CachingIB(_FakeIB):
+    """Like ib_insync: one Ticker per contract object, kept between requests; ticks arrive on sleep."""
+
+    def __init__(self, prices) -> None:
+        super().__init__({})
+        self.tickers = {}
+        self.prices = prices
+        self.pending: list[tuple[_Ticker, float]] = []
+
+    def reqMktData(self, contract, generic, snapshot, regulatory):
+        self.requests.append((contract.symbol, self.types[-1], snapshot))
+        ticker = self.tickers.get(id(contract))
+        if ticker is None:
+            ticker = _Ticker(marketDataType=self.types[-1])
+            self.tickers[id(contract)] = ticker
+        # La respuesta de TWS llega después, durante la espera.
+        self.pending.append((ticker, self.prices[contract.symbol]))
+        return ticker
+
+    def sleep(self, seconds):
+        for ticker, price in self.pending:
+            ticker.last = price
+        self.pending.clear()
+
+
+def test_a_new_pass_never_reads_the_previous_pass_price_from_the_cached_ticker():
+    """Seen live on 2026-11-24: the second pass repeated the first pass's prices to the cent."""
+    from src.services.ibkr_marks import MarkRequest
+
+    ib = _CachingIB({"AAPL": 351.75})
+    reader = IbkrMarkReader(_FakeClient(ib), market_data_mode="auto", timeout_seconds=0.05)
+    request = MarkRequest(key="equity:AAPL", label="AAPL", sec_type="STK", symbol="AAPL", market_open=True)
+    assert reader.fetch([request]).marks["equity:AAPL"].price == 351.75
+    ib.prices["AAPL"] = 352.10
+    # El contrato cualificado está en caché; el Ticker de la pasada anterior no debe responder por TWS.
+    assert reader.fetch([request]).marks["equity:AAPL"].price == 352.10
+    # Y no queda ningún Ticker guardado que crezca pasada tras pasada.
+    assert ib.tickers == {}
+
+
 def test_a_contract_without_a_data_subscription_is_named_and_not_asked_again_for_an_hour():
     from src.services.ibkr_marks import MarkRequest
 
@@ -765,6 +835,48 @@ def test_the_evaluation_service_says_when_an_intraday_rule_falls_back_to_the_clo
     assert second.trigger_evaluation.provenance.source_provider == "IBKR/TWS (live)"
     # La marca no toca la serie diaria de la idea.
     assert all(point.session <= TUE for point in intraday.tracking_service.compute(idea_id, persist=False).points)
+
+
+class _ResearchWithTodaysBar(_Research):
+    """Like Yahoo during the session: today's bar carries the latest price, above the threshold."""
+
+    def load_instrument_history_result(self, reference, lookback, max_age_seconds=None):
+        import pandas as pd
+
+        result = super().load_instrument_history_result(reference, lookback, max_age_seconds)
+        result.series = pd.Series({**{pd.Timestamp(day): value for day, value in AAPL.items()}, pd.Timestamp(TUE): 209.0})
+        return result
+
+
+def test_todays_provisional_bar_never_triggers_a_close_rule_and_the_mark_does(tmp_path):
+    """Seen live on 2026-11-24: a rule armed mid-session triggered from Yahoo's in-progress bar, not a mark."""
+    marks = FakeMarks(prices={"AAPL": 210.0, "MSFT": 396.0})
+    clock, _service, _, intraday, idea_id = _setup(tmp_path, marks=marks)
+    registry = ObservableRegistry(research_provider=_ResearchWithTodaysBar(), client=_Client(), clock=clock)
+    registry.intraday_quotes = intraday.latest_quote
+    ref = registry.validate(ObservableRef(observable_id="equity_close", params={"symbol": "AAPL"}), condition="above", cadence="intraday")
+    criterion = IdeaCriterion(
+        criterion_id="c1", idea_id=idea_id, kind="confirm", label="AAPL above 205", observable=ref, condition="above",
+        threshold=205.0, cadence="intraday", created_at=TUE_OPEN, armed_at=TUE_OPEN, baseline_as_of=datetime(2026, 11, 9), baseline_for=TUE_OPEN,
+    )
+
+    # En sesión, sin marca: la barra de hoy (209) no es un cierre; el último cierre definitivo es el del lunes.
+    daily = registry.read(ref, now=clock(), intraday=True)
+    assert daily.value == 200.0 and daily.as_of == datetime(2026, 11, 9)
+    assert any("2026-11-10 bar is not a close yet" in warning for warning in daily.warnings)
+    assert evaluate_criterion(criterion, daily, armed_from=criterion.armed_at, now=clock(), effective_cadence="intraday").state != "triggered"
+
+    # Una marca en vivo posterior al armado sí dispara, y queda como la observación que lo cumplió.
+    clock.set(TUE_OPEN + timedelta(minutes=5))
+    intraday.record_pass()
+    reading = registry.read(ref, now=clock(), intraday=True)
+    evaluation = evaluate_criterion(criterion, reading, armed_from=criterion.armed_at, now=clock(), effective_cadence="intraday")
+    assert evaluation.state == "triggered"
+    assert evaluation.first_met_at == TUE_OPEN + timedelta(minutes=5) and evaluation.met_value == 210.0
+
+    # Tras el cierre (16:20 en Nueva York) la barra del martes ya es un cierre.
+    after = registry.read(ref, now=datetime(2026, 11, 10, 21, 25), intraday=False)
+    assert after.value == 209.0 and after.as_of == datetime(2026, 11, 10)
 
 
 def test_the_scheduler_records_marks_before_the_intraday_criteria_pass():
