@@ -54,8 +54,8 @@ DRAFT = {
     "thesis": "XOM underperforms Brent while OPEC adds supply.",
     "stance": "relative",
     "legs": [
-        {"entity_type": "equity", "symbol": "XOM", "label": "Exxon Mobil", "weight": -1},
-        {"entity_type": "etf", "symbol": "USO", "label": "US Oil Fund", "weight": 1},
+        {"entity_type": "equity", "symbol": "XOM", "weight": -1},
+        {"entity_type": "etf", "symbol": "USO", "weight": 1},
     ],
     "criteria": [
         {"kind": "invalidate", "observable_id": "equity_close", "params": [{"name": "symbol", "value": "XOM"}],
@@ -92,7 +92,7 @@ def test_a_draft_is_validated_against_the_registry_and_changes_nothing(tmp_path)
     [
         ({"criteria": DRAFT["criteria"][:1]}, "between 2 and 4"),
         ({"stance": "bullish"}, "stance"),
-        ({"legs": [{"entity_type": "future", "symbol": "CL", "label": "", "weight": 1}]}, "equity, ETF or crypto"),
+        ({"legs": [{"entity_type": "future", "symbol": "CL", "weight": 1}]}, "equity, ETF or crypto"),
         ({"criteria": [{**DRAFT["criteria"][0], "observable_id": "script_signal"}, DRAFT["criteria"][1]]}, "not one Copilot can propose"),
         ({"criteria": [{**DRAFT["criteria"][0], "threshold": None}, DRAFT["criteria"][1]]}, "needs a threshold"),
         ({"criteria": [{**DRAFT["criteria"][0], "params": []}, DRAFT["criteria"][1]]}, "needs"),
@@ -132,6 +132,29 @@ def test_accepting_a_draft_creates_a_draft_idea_with_its_criteria_in_one_write(t
     with pytest.raises(IdeaValidationError):
         service.create_idea_from_draft(bad, origin=IdeaOrigin(kind="copilot"))
     assert len(service.list_ideas().items) == 1
+
+
+def test_a_drafted_leg_is_named_by_its_ticker_not_by_the_model(tmp_path):
+    """GUA-20261124-9: the energy draft showed the model's note ("Proposed oil ETF proxy; …") as the leg."""
+    note = "Proposed oil ETF proxy; verify tracking error against Brent before use"
+    legs = [
+        {"entity_type": "etf", "symbol": "uso", "label": note, "weight": 1},
+        {"entity_type": "crypto", "symbol": "Bitcoin", "label": "Digital gold proxy", "weight": None},
+    ]
+    proposal = build_idea_draft({**DRAFT, "legs": legs}, _Registry())
+    assert [leg.entity.label for leg in proposal.legs] == ["USO", "bitcoin"]
+    assert [leg.entity.normalized_id for leg in proposal.legs] == ["USO", "BITCOIN"]
+    payload = proposal.to_dict()
+    assert [(leg["symbol"], leg["label"]) for leg in payload["legs"]] == [("USO", "USO"), ("bitcoin", "bitcoin")]
+    assert note not in str(payload)
+    # Una propuesta guardada antes del cambio conserva la nota en su JSON: aceptarla crea la pata con el ticker.
+    stored = {**payload, "legs": [{**payload["legs"][0], "label": note}]}
+    _, service = _service(tmp_path)
+    idea = service.create_idea_from_draft(draft_from_dict(stored), origin=IdeaOrigin(kind="copilot", source_ref="run-4"))
+    assert [leg.entity.label for leg in idea.legs] == ["USO"]
+    # El modelo ya no rellena la etiqueta: el esquema solo pide tipo, símbolo y peso.
+    leg_schema = draft_tool_schema()["properties"]["legs"]["items"]
+    assert sorted(leg_schema["properties"]) == ["entity_type", "symbol", "weight"]
 
 
 def test_the_tool_schema_is_strict():

@@ -4,6 +4,16 @@ _Living planning document. Future agents should update the status checklist and 
 
 Last updated: 2026-11-25
 
+### Draft leg names, 2026-11-25 — GUA-20261124-9 (Workstream 12)
+
+**Official guidance re-checked 2026-11-25.** Fetched directly (no Developer Docs connector was available in this session): [function calling](https://developers.openai.com/api/docs/guides/function-calling), HTTP 200. Its function-definition best practices still ask to use code where possible and say: "Don't make the model fill arguments you already know." Strict schemas still need `additionalProperties: false` and every property in `required`.
+
+**Problem.** In live I5 run 4 (2026-11-24) the energy draft's leg was shown with the model's free-text `label` ("Proposed oil ETF proxy; verify tracking…") instead of its ticker. The leg schema asked the model for a label, and Gamma stored it as the leg's name, so a note became a record field shown on the card and, once accepted, across the Ideas tab.
+
+**Decision.** Gamma names a drafted leg by its validated identifier: the ticker in upper case for an equity or ETF, the CoinGecko id for a crypto leg, as `GET /ideas/history` already does. The `draft_idea_from_context` leg schema drops `label` (it now asks for `entity_type`, `symbol` and `weight`, all required, `additionalProperties: false`), and the mock provider follows it. A proposal stored before the change keeps its note in its JSON, but the card shows the symbol and accepting it creates the leg with the ticker, because acceptance rebuilds the legs through the same validation. The user can still rename a leg in the Ideas editor after accepting. No tool exposure, approval, permission or model change; the tool stays `draft_change` and Gamma-validated.
+
+**Verification.** A regression test in `tests/test_idea_copilot.py` (the energy note on a USO leg and a crypto leg become `USO` and `bitcoin`; a stored proposal with the note creates the idea with `USO`; the leg schema has no `label`) and the stored-note case in `CopilotIdeaProposals.test.ts`, both failing without the fix; a headless-Chromium check of the proposal card against the mock backend in light and dark at 1440, 1000 and 390 px (legs "AAPL +1 · MSFT -1" from an idea whose legs are labelled Apple and Microsoft; no page overflow). No live run: the six allowed runs were used, so the schema change has not been exercised by `gpt-6.1-sol`.
+
 ### Operator routing to Ideas, 2026-11-25 — GUA-20261124-9 (Workstream 12)
 
 **Official guidance re-checked 2026-11-25.** Fetched directly (no Developer Docs connector was available in this session): [function calling](https://developers.openai.com/api/docs/guides/function-calling), [agents](https://developers.openai.com/api/docs/guides/agents) and [orchestration and handoffs](https://developers.openai.com/api/docs/guides/agents/orchestration), all HTTP 200. Relevant points:
