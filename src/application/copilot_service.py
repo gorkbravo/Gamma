@@ -3192,6 +3192,10 @@ class CopilotService:
         # issuer here would reject valid baskets or misread strategy labels.
         if (
             self._prompt_requests_script_workflow(prompt.lower(), request.context)
+            # La idea abierta en Ideas ya fija sus instrumentos (sus patas): "Review this idea"
+            # no nombra un emisor, y buscarlo en la SEC ofrecía emisores llamados "Idea"
+            # (GUA-20261124-9, ejecución en vivo del 2026-11-24).
+            or self._prompt_refers_to_open_idea(prompt, request)
             or self._working_evidence_intent(prompt)
             or self._prompt_requests_prediction_comparison(prompt)
             or self._prompt_requests_research_basket(prompt)
@@ -8667,6 +8671,16 @@ class CopilotService:
                 )
             )
 
+        # La idea seleccionada como contexto va la primera: si la petición se refiere a ella, el
+        # Operator la revisa aunque el resto del plan salga de otra intención, y el presupuesto
+        # de dominios nunca la deja fuera (GUA-20261124-9).
+        if self._prompt_refers_to_open_idea(prompt, request):
+            add(
+                "ideas",
+                "medium" if depth_profile != "quick" else "light",
+                "The request refers to the idea selected as context; Gamma reviews it from its own record and tracking.",
+            )
+
         if intent in {"macro_series_analysis", "crypto_token_analysis", "retained_analysis_research"}:
             domain, tool = {
                 "macro_series_analysis": ("macro", "run_macro_series_analysis"),
@@ -8828,6 +8842,30 @@ class CopilotService:
                 for item in domain_plan
             ]
         return domain_plan
+
+    @staticmethod
+    def _prompt_refers_to_open_idea(prompt: str, request: CopilotResearchCardRequest) -> bool:
+        """La petición se refiere a la idea abierta ("this idea", "my idea", "the current idea").
+
+        Solo cuenta si hay una idea seleccionada, en el contexto de la petición o en un ámbito
+        de síntesis de Ideas. "A new idea on Nvidia" no se refiere a ella y sigue resolviendo
+        el emisor.
+        """
+        contexts = [request.context]
+        if request.synthesis is not None:
+            contexts.extend(
+                scope.context
+                for scope in request.synthesis.included_scopes
+                if str(scope.domain or "").strip() == "ideas"
+            )
+        if not any(str(getattr(context, "idea_id", None) or "").strip() for context in contexts if context is not None):
+            return False
+        return bool(
+            re.search(
+                r"\b(?:this|that|the|my|our)\s+(?:(?:current|open|opened|selected|active|tracked|trade|research)\s+)?idea\b",
+                str(prompt or "").lower(),
+            )
+        )
 
     @staticmethod
     def _prompt_requests_script_workflow(
