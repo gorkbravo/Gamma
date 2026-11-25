@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-24
+Last updated: 2026-11-25
 
 ### I5 live acceptance, 2026-11-24 — Ideas in Copilot (Workstream 12)
 
@@ -25,7 +25,7 @@ No refusals and no provider errors. Both drafts filled the strict schema and pas
 
 **Result.** The draft-only-on-request, validation, confirmation and cross-context behaviour is accepted. The expectation that "Review this idea" calls `review_idea` and `explain_criterion_state` is not met: with `tool_choice: auto` the model answered from the Ideas context, which already carries what those tools return, and the Operator planner still does not route to Ideas.
 
-**Decision (2026-11-24).** No harness change on this branch. Gamma remains the authority for tool exposure, validation, approval and audit state; the review was grounded in Gamma-computed facts, which is what decision 1 of I5 requires. Making the review path call the read-only tools is left to the owner: either accept context-grounded reviews, or restrict the first turn of an explicit Ideas review to the two read-only tools (`allowed_tools`, required), or have Gamma run `review_idea` itself as a default plan tool. Any of these needs one confirming live run; the sixth allowed run was kept for it. Details: the spec's [I5 live acceptance](./idea_workspace_spec.md#i5-live-acceptance-2026-11-24).
+**Decision (owner, 2026-11-25).** Accept context-grounded reviews; no harness change. Gamma remains the authority for tool exposure, validation, approval and audit state, and the run-1 review was grounded in Gamma-computed facts, which is what decision 1 of I5 requires: the Ideas context already carries the criteria evaluations and the tracking summary that `review_idea` and `explain_criterion_state` return. `tool_choice` stays `auto`, and both read-only tools stay exposed for questions the context does not answer. Not adopted: restricting the first turn of an explicit Ideas review to the two tools (`allowed_tools`, required) and having Gamma run `review_idea` itself as a default plan tool. With no harness change there was nothing to confirm live, so the sixth allowed run was not used. Routing the Research Operator to Ideas stays a P2 follow-up (GUA-20261124-9 in the [I6 audit](./audits/ideas_persona_audits_2026-11-24.md)). Details: the spec's [I5 live acceptance](./idea_workspace_spec.md#i5-live-acceptance-2026-11-24).
 
 ### Official guidance reviewed 2026-11-23 — Ideas in Copilot (Workstream 12, I5)
 
@@ -1621,6 +1621,7 @@ Future agents should update this section.
 | Local state changes | Allowed only for research state and confirmation-required when an existing durable object will be changed. | Approval pauses and resumes the same run. Never permit market/account/wallet execution. |
 | DCF | Important first confirmed-mutation use case, but not the agent's whole identity. | The agent should be domain-broad. |
 | Official OpenAI guidance | Refresh before material agentic work and record the review. | Current framework/model guidance informs the design but does not override Gamma's evals or product boundary. |
+| Ideas review path | Context-grounded reviews accepted (owner, 2026-11-25): `tool_choice` stays `auto`; `review_idea` and `explain_criterion_state` stay exposed for questions the Ideas context does not answer. | Decided after the I5 live acceptance, where "Review this idea" answered from the context without calling the tools. Revisit if live reviews stop being grounded in the context or the context stops carrying the criteria evaluations and tracking summary. |
 
 ## Agent Handoff Notes
 
