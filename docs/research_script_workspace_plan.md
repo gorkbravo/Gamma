@@ -92,11 +92,18 @@ Follow-up changes (acceptance unchanged):
 
 **Live rerun with `exact_copy_v3`, 2026-11-25 (owner-approved; stopped at the first incomplete run).** The same script, inputs and parameters, on a new container, ended `incomplete`: a single call, `statements_differ` at line 1, 56 output tokens (38 reasoning), container quarantined. `wrapper_check.calls` showed directly what ran: `import os` / `os.listdir('/mnt/data')`, and nothing else. The explicit ban on inspecting first did not change the behaviour, so the prompt cannot fix it. The model consistently inspects the container before anything else, and with one allowed call the wrapper never runs. The model id has no dated snapshot, and the 2026-10-20 E5 gate passed on it, so this behaviour appeared since then.
 
-**Next step (owner decision).** Recommended: pin the Script runtime to `gpt-5.6-luna` through `GAMMA_RESEARCH_SCRIPT_MODEL`. It is a supported runtime setting, available to this key on 2026-11-25, and it completed live Script runs on 2026-08-31 and 2026-10-15. The acceptance rule and adapter stay as they are. Not recommended without further evidence:
+**Next step (owner decision; approved the same day, see below).** Recommended: pin the Script runtime to `gpt-5.6-luna` through `GAMMA_RESEARCH_SCRIPT_MODEL`. It is a supported runtime setting, available to this key on 2026-11-25, and it completed live Script runs on 2026-08-31 and 2026-10-15. The acceptance rule and adapter stay as they are. Not recommended without further evidence:
 - Lowering reasoning effort on `gpt-6.1-sol` needs an adapter change, and the inspection used only 38 reasoning tokens.
 - Allowing an exact allow-listed inspection call before a verbatim wrapper (with `max_tool_calls=2`) loosens the gate: any executed code before the wrapper shares its kernel. It would also depend on the model always choosing that exact snippet.
 
-**Live verification.** Pending the owner's approval; each execution spends API credit.
+**Live verification with `gpt-5.6-luna`, 2026-11-25 (owner-approved: one run plus a three-point sweep).** The model was pinned through `GAMMA_RESEARCH_SCRIPT_MODEL` on the verification backend only. Same script, inputs, adapter, limits and acceptance rule (`exact_copy_v3`).
+
+- The single run (`lookback` 20) completed in 27 s. `wrapper_check` was `verbatim`: one call, `completed`, 23 lines. Its `gamma_analytics.json` validated and was eligible (`returns_aapl`, `weight_aapl`, `returns_msft`, `weight_msft`), and the causal weight book opened with 1,011 rows (lag 1, 5 bp).
+- The sweep (`lookback` 10, 20, 40) completed: three of three points `verbatim`, 15 to 17 s each.
+- The anchored walk-forward on the weight book (train 250, test 60, Sharpe, lag 1, 5 bp) reported 3 trials and verified causality. It had 13 folds, the last one partial. Out of sample (2023-12-13 to 2026-11-25, 741 observations) the Sharpe ratio was −0.46, total return −21.6% and maximum drawdown −36.2%. It warned that the selection was unstable (two distinct points), and a repeat produced the same `report_sha256`. This is a hypothetical research book, not a recommendation.
+- The single run attached to a new idea as a `weights` signal with that validation: legs AAPL +0.5 and MSFT −0.5 as of 2026-11-25. Every completed run counts: the idea and the signal read `trial_count` 4 (one run plus three sweep points), and the validation reads 3 (the sweep points). The two incomplete `gpt-6.1-sol` runs are not counted.
+
+So the adapter and the strict gate work; the regression is in `gpt-6.1-sol`. Product default: `.env.example` and the root `.env` still name `gpt-6.1-sol`. Pinning `gpt-5.6-luna` there is the owner's decision, so until it changes, Script runs with the default configuration still end `incomplete`, and the persisted diagnosis says why.
 
 ### E4 implementation and acceptance — 2026-10-15
 
