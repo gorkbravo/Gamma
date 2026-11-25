@@ -2,7 +2,18 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-24
+Last updated: 2026-11-25
+
+### Official guidance reviewed 2026-11-25 — Script runtime completion (GUA-20261124-10)
+
+Fetched directly (no Developer Docs connector in this session): [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter), [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [reasoning](https://developers.openai.com/api/docs/guides/reasoning) and [shell](https://developers.openai.com/api/docs/guides/tools-shell). Review date: **2026-11-25**. Relevant points:
+
+- The model writes the code Code Interpreter runs. No documented mode executes caller-supplied code as given; `tool_choice: "required"` forces a call, not its content.
+- GPT-6.1 Sol lists Code Interpreter and a hosted shell. Reasoning effort is `low` to `max`, default `medium`. The only snapshot listed is `gpt-6.1-sol` itself, with no dated id.
+- `max_output_tokens` includes reasoning tokens; reaching it returns `incomplete` with reason `max_output_tokens`.
+- The hosted shell also runs model-written commands, so it would not remove the need to verify what ran.
+
+**Decision.** Keep the custom Responses adapter, the configured model and every limit, and keep the acceptance rule: only a normalized character-for-character copy of Gamma's wrapper associates outputs with the visible revision. The changes are a stricter transport prompt, a persisted classification of every mismatch and retiring a container after unverified code. Accepting AST-equivalent wrappers, lowering reasoning effort or pinning another model are owner decisions, to be taken on evidence from a diagnosed live run. No Copilot or Operator tool, scope or authority changes. Details and evidence: the Script plan, section "Script runtime completion (GUA-20261124-10)".
 
 ### I5 live acceptance, 2026-11-24 — Ideas in Copilot (Workstream 12)
 

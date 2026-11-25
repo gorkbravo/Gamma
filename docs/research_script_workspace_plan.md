@@ -3,7 +3,7 @@
 _Living implementation and handoff document._
 
 - Decision approved: 2026-08-29
-- Last reviewed: 2026-10-20
+- Last reviewed: 2026-11-25
 - Implementation status: Slices 1-5 remain verified; E1/E2 have deterministic/mock acceptance; E3 complete with live Operator closure (2026-10-16); E4 complete (weight handoff closed through the causal weight book, 2026-10-20); E5 in progress (parameters, sweeps, comparison and walk-forward delivered with deterministic/browser acceptance and a passed live parameter/book/walk-forward gate, 2026-10-20); E6 planned
 - Roadmap owner: Workstream 2A in [`../roadmap.md`](../roadmap.md)
 - Primary product surface: `Strategy Lab / Script`
@@ -55,6 +55,29 @@ Implementation order: E1 establishes the foundation; E2 now supplies discoverabl
 **Live gate, 2026-10-20 (run at the user's request, unchanged configuration: `openai` runtime, `gpt-6.1-sol`, network disabled):** `GAMMA_RUN_LIVE_SCRIPT_E5=true .venv/Scripts/python.exe -m pytest tests/test_script_e5_live.py -q -rs` **passed (1 passed in 34.92s)**. It ran two real isolated Code Interpreter executions of one unchanged source over a supplied synthetic `prices.csv`, as a 2-point sweep (`lookback` 3 and 8). Each run completed with `executed_code`, bound the point's exact parameter hash, carried that hash in the returned verbatim wrapper and printed its own `lookback`; `gamma_parameters.json` was not retained as an output, and source and manifest hashes were identical across points. The retained analytical file was valid and eligible. The causal weight book (lag 1, 5 bps) matched an independent recomputation from the same CSV values within `1e-12`, and walk-forward (20/5) reported verified causal folds over both trials. The first attempt failed inside the test's own reference, after all runtime assertions had passed: it compared with unrounded prices while the CSV holds 6-decimal prices (differences ~7e-9). The reference now uses the CSV values. Four live executions were spent in total. `tests/conftest.py` now exempts this E5 gate, like E4's, from the routine mock pin; it still runs only behind its own flag. Prices are synthetic: this is not market-data or provider certification, and token usage was not itemized by the test.
 
 **Open for E5:** Operator tools do not set parameters or create sweeps, and that needs its own decision. Costs and lag apply only to the weight book; author-computed return streams keep their declared timing.
+
+### Script runtime completion (GUA-20261124-10) — 2026-11-25
+
+**Symptom.** In the 2026-11-24 quant persona audit both executions on the configured runtime (`openai_code_interpreter_v1`, `gpt-6.1-sol`) ended `incomplete` with `executed_code: false`: "The provider did not return one verbatim execution wrapper". Gamma withheld the outputs, as designed. This blocked Script signals and walk-forward.
+
+**Retained evidence.** The run records were deleted with the audit worktree's data, and responses are not stored (`store=False`), so the code the model sent cannot be recovered. What remains:
+
+- The audit backend log shows that each execution created exactly four new container files after the Responses call: two input copies, the parameter copy and `gamma_analytics.json`. Every hash `assert` in the wrapper passed and the source ran, so the model executed a functional equivalent of the wrapper.
+- The single run's usage: 823 output tokens, 63 of them reasoning, and no `incomplete_details`. The response was not truncated. The count fits a near-complete copy of the 1,880-character wrapper (two JSON inputs plus parameters, seven hex hashes) and a short reply, not a rewrite.
+- The adapter is unchanged since the passing 2026-10-20 E5 gate on the same model (one CSV input). E3's 2026-10-16 closure passed with three inputs.
+
+Conclusion: the model sent code whose text differs from the wrapper but which ran the same way. Whether the difference was formatting, comments or extra statements is unknown. `gpt-6.1-sol` lists no dated snapshot, so behaviour can drift under the same id.
+
+**Changes (no limit, model or acceptance change).**
+
+- Transport prompt `exact_copy_v2`: one call, copied character for character, with no comments, blank lines, extra statements, reformatting or omissions. Gamma lists generated files itself, so the old request for download links, which invited extra code, is gone.
+- Every run records `wrapper_check`: number of calls, a classification (`verbatim`, `no_code_call`, `multiple_code_calls`, `unparseable`, `comments_or_formatting_only`, `statements_differ`), the first differing line and a sanitized diff capped at 24 lines. It also records `provider_response_status`, `provider_incomplete_reason` and `transport_prompt`, and a warning names the classification. Classification parses the code but never executes or accepts it; only `verbatim` associates outputs.
+- After unverified code has run, the container binding and its parameter uploads are dropped (`container_quarantined`). Hash asserts protect files, not the Python kernel state that persists within a container. The next run uses a new container.
+- Tests (`tests/test_openai_research_script_runtime.py`): each classification (comment, wrapped long line, trailing space, added statement, split import, Jupyter magic, no call, two calls); the I6 shape (two JSON inputs plus parameters) completing only when copied verbatim; quarantine and re-upload; the diagnosis persisted through the service with outputs withheld; and the prompt.
+
+**Owner decisions if the next live run still fails**, by classification. `comments_or_formatting_only`: accept AST-equivalent wrappers (same statements and literals, so the same hash-verified source runs), recorded as a distinct match kind. `statements_differ`: lower reasoning effort or pin a model that copies verbatim (`gpt-5.6-luna` completed live Script runs on 2026-08-31 and 2026-10-15). `no_code_call` or `multiple_code_calls`: provider behaviour. Separate latent edge: the fixed 2,048-token output ceiling includes reasoning, and the wrapper for a 20-file bundle may approach it.
+
+**Live verification.** Pending the owner's approval; each execution spends API credit.
 
 ### E4 implementation and acceptance — 2026-10-15
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 from src.services.openai_usage_audit import audit_response
 
+import ast
 import base64
 import csv
+import difflib
 import hashlib
 import io
 import json
@@ -39,6 +41,36 @@ _ALLOWED_ARTIFACT_MIME_TYPES = {
     "text/plain",
 }
 _CODE_INTERPRETER_MODEL = re.compile(r"^(?:gpt-5\.(?:4|5|6)(?:$|-)|gpt-6\.1-sol$)", re.IGNORECASE)
+
+# Instrucciones de transporte. La v2 (2026-11-25) pide copia carácter a carácter sin comentarios ni
+# reformateo, y ya no pide enlaces de descarga: Gamma descubre los ficheros generados listando el
+# contenedor, y pedir enlaces invitaba al modelo a añadir código propio (GUA-20261124-10).
+_TRANSPORT_PROMPT_VERSION = "exact_copy_v2"
+_TRANSPORT_INSTRUCTIONS = (
+    "Act only as Gamma's deterministic Python execution transport. "
+    "Make exactly one Code Interpreter call whose code is the wrapper from the user message, copied character "
+    "for character. Do not add comments, blank lines, imports, prints or any other code; do not reformat, wrap, "
+    "reorder or omit any line. Gamma compares the executed code with the wrapper and discards the run if they "
+    "differ. Do not use network access, install packages, rewrite the research source, or substitute different inputs."
+)
+_TRANSPORT_INPUT_PREFIX = (
+    "Run this wrapper exactly as written, in one Code Interpreter call. Gamma lists and retains the generated "
+    "files itself, so no extra code or download links are needed. After it finishes, reply with one short sentence."
+)
+
+# Diagnóstico de la comprobación del wrapper: qué hizo el proveedor cuando no hubo copia literal.
+_WRAPPER_CHECK_WARNINGS = {
+    "no_code_call": "Wrapper check: the provider made no Code Interpreter call.",
+    "multiple_code_calls": "Wrapper check: the provider made more than one Code Interpreter call.",
+    "unparseable": "Wrapper check: the code the provider executed is not valid Python.",
+    "comments_or_formatting_only": (
+        "Wrapper check: the provider reformatted the wrapper or added comments without changing its statements."
+    ),
+    "statements_differ": "Wrapper check: the provider added, removed or changed wrapper statements.",
+}
+# El diff viaja en `usage`, que también recibe el Operator: se acota (24 líneas de 320 caracteres).
+_WRAPPER_DIFF_MAX_LINES = 24
+_WRAPPER_DIFF_MAX_LINE_CHARS = 320
 
 
 @dataclass(frozen=True)
@@ -302,17 +334,8 @@ class OpenAICodeInterpreterRuntime:
         with audit_response("strategy_lab.script", self.model) as audit:
             response = self._client.responses.create(
                 model=self.model,
-                instructions=(
-                    "Act only as Gamma's deterministic Python execution transport. "
-                    "Use exactly one Code Interpreter call. Do not use network access, install packages, "
-                    "rewrite the research source, or substitute different inputs."
-                ),
-                input=(
-                    "Execute the following wrapper verbatim in Code Interpreter. Do not add, remove, or "
-                    "change any Python statement. After it finishes, return a download link for every "
-                    "generated file using its exact filename so each file is present as a container-file citation.\n\n"
-                    f"```python\n{wrapper}\n```"
-                ),
+                instructions=_TRANSPORT_INSTRUCTIONS,
+                input=f"{_TRANSPORT_INPUT_PREFIX}\n\n```python\n{wrapper}\n```",
                 tools=[{"type": "code_interpreter", "container": binding.container_id}],
                 include=["code_interpreter_call.outputs"],
                 tool_choice="required",
@@ -330,12 +353,20 @@ class OpenAICodeInterpreterRuntime:
 
         code_calls = [item for item in list(getattr(response, "output", []) or []) if getattr(item, "type", None) == "code_interpreter_call"]
         returned_codes = [str(getattr(item, "code", "") or "") for item in code_calls]
-        exact_wrapper = len(returned_codes) == 1 and self._normalized_code(returned_codes[0]) == self._normalized_code(wrapper)
+        # La aceptación sigue siendo la copia literal (texto normalizado). La clasificación solo explica
+        # por qué falló; nunca acepta un wrapper distinto aunque sea equivalente.
+        wrapper_check = self._wrapper_check(returned_codes, wrapper)
+        exact_wrapper = wrapper_check["classification"] == "verbatim"
         warnings: list[str] = []
+        container_quarantined = False
         if not exact_wrapper:
             warnings.append(
                 "The provider did not return one verbatim execution wrapper; exact-source association was not established."
             )
+            warnings.append(self._wrapper_check_warning(wrapper_check))
+            if code_calls:
+                # Se ejecutó código no verificado: pudo alterar el estado del kernel o ficheros del contenedor.
+                container_quarantined = self._quarantine_binding(request, binding)
 
         outputs: list[ResearchScriptRuntimeOutput] = []
         provider_execution_failed = False
@@ -525,6 +556,11 @@ class OpenAICodeInterpreterRuntime:
                 "executed_wrapper_sha256": hashlib.sha256(self._normalized_code(returned_codes[0]).encode("utf-8")).hexdigest() if len(returned_codes) == 1 else None,
                 "expected_wrapper_sha256": hashlib.sha256(self._normalized_code(wrapper).encode("utf-8")).hexdigest(),
                 "wrapper_hash_basis": "normalized_code",
+                "wrapper_check": wrapper_check,
+                "transport_prompt": _TRANSPORT_PROMPT_VERSION,
+                "provider_response_status": str(getattr(response, "status", "") or "") or None,
+                "provider_incomplete_reason": self._incomplete_reason(response),
+                "container_quarantined": container_quarantined,
                 "source_sha256": request.source_sha256,
                 "input_manifest_sha256": request.input_manifest_sha256,
                 "parameters_sha256": request.parameters_sha256,
@@ -697,6 +733,83 @@ class OpenAICodeInterpreterRuntime:
         elif text.startswith("```") and text.endswith("```"):
             text = text[3:-3].strip()
         return text.replace("\r\n", "\n")
+
+    @classmethod
+    def _wrapper_check(cls, returned_codes: list[str], wrapper: str) -> dict[str, Any]:
+        """Clasifica el código devuelto frente al wrapper esperado, sin ejecutar nada.
+
+        Solo ``verbatim`` establece la asociación exacta. El resto de clases son diagnóstico: el
+        análisis sintáctico (``ast.parse``) nunca ejecuta el código y se limita a distinguir un cambio
+        de formato o comentarios de un cambio de sentencias. El diff se sanea y se acota.
+        """
+        expected = cls._normalized_code(wrapper)
+        expected_lines = expected.split("\n")
+        check: dict[str, Any] = {
+            "code_calls": len(returned_codes),
+            "classification": "verbatim",
+            "first_differing_line": None,
+            "expected_line_count": len(expected_lines),
+            "returned_line_count": None,
+            "diff": [],
+            "diff_truncated": False,
+        }
+        if not returned_codes:
+            check["classification"] = "no_code_call"
+            return check
+        if len(returned_codes) > 1:
+            check["classification"] = "multiple_code_calls"
+            return check
+        returned = cls._normalized_code(returned_codes[0])
+        returned_lines = returned.split("\n")
+        check["returned_line_count"] = len(returned_lines)
+        if returned == expected:
+            return check
+        check["first_differing_line"] = next(
+            (index + 1 for index, (left, right) in enumerate(zip(expected_lines, returned_lines)) if left != right),
+            min(len(expected_lines), len(returned_lines)) + 1,
+        )
+        # Diff unificado sin contexto; se omiten las dos cabeceras («---»/«+++»).
+        diff = list(difflib.unified_diff(expected_lines, returned_lines, "expected", "returned", n=0, lineterm=""))[2:]
+        check["diff_truncated"] = len(diff) > _WRAPPER_DIFF_MAX_LINES
+        check["diff"] = [
+            cls._sanitize_wrapper(line)[:_WRAPPER_DIFF_MAX_LINE_CHARS] for line in diff[:_WRAPPER_DIFF_MAX_LINES]
+        ]
+        try:
+            same_statements = ast.dump(ast.parse(returned)) == ast.dump(ast.parse(expected))
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            check["classification"] = "unparseable"
+            return check
+        check["classification"] = "comments_or_formatting_only" if same_statements else "statements_differ"
+        return check
+
+    @staticmethod
+    def _wrapper_check_warning(check: dict[str, Any]) -> str:
+        message = _WRAPPER_CHECK_WARNINGS.get(str(check.get("classification")), "Wrapper check: unexpected provider code.")
+        line = check.get("first_differing_line")
+        return f"{message[:-1]} (first difference at wrapper line {line})." if line else message
+
+    def _quarantine_binding(self, request: ResearchScriptRuntimeRequest, binding: _ContainerBinding) -> bool:
+        """Retira el contenedor tras ejecutar código no verificado; la siguiente ejecución usa uno nuevo.
+
+        Los asserts de hash del wrapper protegen los ficheros, pero no el estado del kernel de Python,
+        que persiste entre llamadas del mismo contenedor (p. ej. un módulo parcheado).
+        """
+        key = self._binding_key(request)
+        with self._lock:
+            removed = self._bindings.get(key) is binding
+            if removed:
+                del self._bindings[key]
+            for upload_key in [item for item in self._parameter_uploads if item[0] == binding.container_id]:
+                del self._parameter_uploads[upload_key]
+        return removed
+
+    @staticmethod
+    def _incomplete_reason(response: Any) -> str | None:
+        details = getattr(response, "incomplete_details", None)
+        if details is None:
+            return None
+        reason = details.get("reason") if isinstance(details, dict) else getattr(details, "reason", None)
+        return str(reason or "") or "unspecified"
 
     @staticmethod
     def _sanitize_wrapper(value: str) -> str:
