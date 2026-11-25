@@ -90,7 +90,13 @@ Follow-up changes (acceptance unchanged):
 - `wrapper_check.calls` records, for every call, its provider status, whether it is the verbatim wrapper and its line count. Non-verbatim calls also get a sanitized three-line head. For several calls, the warning names the statuses and which call matched. The next failure explains itself without a forensic pass.
 - Test: the live shape (an executed listing, then a verbatim wrapper that never ran) stays `incomplete`, and the per-call diagnosis is persisted.
 
-**Live verification.** Pending the owner's approval of another run with `exact_copy_v3`; each execution spends API credit.
+**Live rerun with `exact_copy_v3`, 2026-11-25 (owner-approved; stopped at the first incomplete run).** The same script, inputs and parameters, on a new container, ended `incomplete`: a single call, `statements_differ` at line 1, 56 output tokens (38 reasoning), container quarantined. `wrapper_check.calls` showed directly what ran: `import os` / `os.listdir('/mnt/data')`, and nothing else. The explicit ban on inspecting first did not change the behaviour, so the prompt cannot fix it. The model consistently inspects the container before anything else, and with one allowed call the wrapper never runs. The model id has no dated snapshot, and the 2026-10-20 E5 gate passed on it, so this behaviour appeared since then.
+
+**Next step (owner decision).** Recommended: pin the Script runtime to `gpt-5.6-luna` through `GAMMA_RESEARCH_SCRIPT_MODEL`. It is a supported runtime setting, available to this key on 2026-11-25, and it completed live Script runs on 2026-08-31 and 2026-10-15. The acceptance rule and adapter stay as they are. Not recommended without further evidence:
+- Lowering reasoning effort on `gpt-6.1-sol` needs an adapter change, and the inspection used only 38 reasoning tokens.
+- Allowing an exact allow-listed inspection call before a verbatim wrapper (with `max_tool_calls=2`) loosens the gate: any executed code before the wrapper shares its kernel. It would also depend on the model always choosing that exact snippet.
+
+**Live verification.** Pending the owner's approval; each execution spends API credit.
 
 ### E4 implementation and acceptance — 2026-10-15
 
