@@ -66,7 +66,7 @@ Implementation order: E1 establishes the foundation; E2 now supplies discoverabl
 - The single run's usage: 823 output tokens, 63 of them reasoning, and no `incomplete_details`. The response was not truncated. The count fits a near-complete copy of the 1,880-character wrapper (two JSON inputs plus parameters, seven hex hashes) and a short reply, not a rewrite.
 - The adapter is unchanged since the passing 2026-10-20 E5 gate on the same model (one CSV input). E3's 2026-10-16 closure passed with three inputs.
 
-Conclusion: the model sent code whose text differs from the wrapper but which ran the same way. Whether the difference was formatting, comments or extra statements is unknown. `gpt-6.1-sol` lists no dated snapshot, so behaviour can drift under the same id.
+Initial conclusion: the model sent code whose text differs from the wrapper but which ran the same way. Whether the difference was formatting, comments or extra statements is unknown. (The live rerun below points instead to a second Code Interpreter call; see "Live rerun, 2026-11-25".) `gpt-6.1-sol` lists no dated snapshot, so behaviour can drift under the same id.
 
 **Changes (no limit, model or acceptance change).**
 
@@ -77,7 +77,20 @@ Conclusion: the model sent code whose text differs from the wrapper but which ra
 
 **Owner decisions if the next live run still fails**, by classification. `comments_or_formatting_only`: accept AST-equivalent wrappers (same statements and literals, so the same hash-verified source runs), recorded as a distinct match kind. `statements_differ`: lower reasoning effort or pin a model that copies verbatim (`gpt-5.6-luna` completed live Script runs on 2026-08-31 and 2026-10-15). `no_code_call` or `multiple_code_calls`: provider behaviour. Separate latent edge: the fixed 2,048-token output ceiling includes reasoning, and the wrapper for a 20-file bundle may approach it.
 
-**Live verification.** Pending the owner's approval; each execution spends API credit.
+**Live rerun, 2026-11-25 (owner-approved; stopped at the first incomplete run).** One execution of an AAPL/MSFT weights script (two JSON exports plus `{"lookback": 20}`) with `exact_copy_v2` ended `incomplete`: `multiple_code_calls`, response status `completed`, no incomplete reason, 108 output tokens (89 reasoning), container quarantined. A free forensic pass (container file listing, wrapper rebuilt from the persisted hashes and compared with the persisted per-call `code_sha256`) showed:
+
+- Call 1, the only one executed (`completed`), was `import os` / `os.listdir('/mnt/data')`. The container held only the five uploads afterwards, so the wrapper never ran.
+- Call 2 (`interpreting`, no outputs) was the wrapper copied verbatim plus a trailing newline. `max_tool_calls=1` stopped it from executing.
+
+So with `gpt-6.1-sol` the copy itself is exact. The failure is an inspection call made before the wrapper, and the strict rule (one call, and it must be the wrapper) correctly withheld the outputs. The 2026-11-24 evidence (the wrapper ran, yet the run was rejected) fits the mirror case: wrapper first, then an extra call that never ran, possibly prompted by the old request for download links. That is unproven because those records are gone. The sweep was not started.
+
+Follow-up changes (acceptance unchanged):
+
+- Transport prompt `exact_copy_v3`: the wrapper must be the first and only tool call, with no listing, opening or checking of files beforehand, because the wrapper verifies every path and hash itself and only one call is executed.
+- `wrapper_check.calls` records, for every call, its provider status, whether it is the verbatim wrapper and its line count. Non-verbatim calls also get a sanitized three-line head. For several calls, the warning names the statuses and which call matched. The next failure explains itself without a forensic pass.
+- Test: the live shape (an executed listing, then a verbatim wrapper that never ran) stays `incomplete`, and the per-call diagnosis is persisted.
+
+**Live verification.** Pending the owner's approval of another run with `exact_copy_v3`; each execution spends API credit.
 
 ### E4 implementation and acceptance — 2026-10-15
 

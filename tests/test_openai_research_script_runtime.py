@@ -104,11 +104,17 @@ class FakeResponses:
         cite_uploaded_inputs: bool = False,
         code_transform=None,
         call_count: int = 1,
+        prior_calls: tuple[str, ...] = (),
+        wrapper_status: str = "completed",
     ) -> None:
         # code_transform: el «modelo» modifica el wrapper real (reformatea, comenta, añade sentencias).
         # call_count: número de llamadas a Code Interpreter que devuelve la respuesta (0, 1 o varias).
+        # prior_calls: código de llamadas que el «modelo» hace antes del wrapper (p. ej. inspeccionar
+        # /mnt/data); wrapper_status: estado de la llamada del wrapper («interpreting» = no ejecutada).
         self.code_transform = code_transform
         self.call_count = call_count
+        self.prior_calls = prior_calls
+        self.wrapper_status = wrapper_status
         # extra_files: (ruta bajo /mnt/data, contenido, citado) que la ejecución deja en el contenedor,
         # p. ej. las copias de entrada que el wrapper hace en el workspace de la ejecución.
         self.extra_files = extra_files
@@ -168,10 +174,15 @@ class FakeResponses:
         call = SimpleNamespace(
             type="code_interpreter_call",
             id=f"ci-{len(self.create_calls)}",
-            status="completed",
+            status=self.wrapper_status,
             code=code,
-            outputs=[SimpleNamespace(type="logs", logs="exact source executed")],
+            outputs=[SimpleNamespace(type="logs", logs="exact source executed")] if self.wrapper_status == "completed" else [],
         )
+        prior = [
+            SimpleNamespace(type="code_interpreter_call", id=f"ci-prior-{index}", status="completed", code=prior_code,
+                            outputs=[SimpleNamespace(type="logs", logs="['inputs.csv']")])
+            for index, prior_code in enumerate(self.prior_calls, start=1)
+        ]
         message = SimpleNamespace(
             type="message",
             id=f"message-{len(self.create_calls)}",
@@ -190,7 +201,7 @@ class FakeResponses:
         return SimpleNamespace(
             id=f"response-{len(self.create_calls)}",
             status=self.status,
-            output=[*([call] * self.call_count), message],
+            output=[*prior, *([call] * self.call_count), message],
             usage=SimpleNamespace(input_tokens=20, output_tokens=10, total_tokens=30),
             incomplete_details=None,
             error=None,
@@ -523,8 +534,33 @@ def test_missing_or_repeated_code_calls_are_classified(call_count, classificatio
     check = result.usage["wrapper_check"]
     assert check["classification"] == classification and check["code_calls"] == call_count
     assert "Wrapper check: the provider made" in " ".join(result.warnings)
+    assert [call["verbatim"] for call in check["calls"]] == [True] * call_count
     # Sin código ejecutado el contenedor sigue limpio; con código no verificado se retira.
     assert result.usage["container_quarantined"] is (call_count > 0)
+
+
+def test_inspection_before_the_wrapper_is_rejected_and_explained_per_call() -> None:
+    # Forma de la reejecución en vivo del 2026-11-25 (gpt-6.1-sol): la única llamada ejecutada fue
+    # `os.listdir('/mnt/data')`; la copia literal del wrapper llegó después y quedó sin ejecutar.
+    client = FakeOpenAIClient(
+        prior_calls=("import os\nos.listdir('/mnt/data')\n",),
+        code_transform=lambda code: code + "\n",
+        wrapper_status="interpreting",
+    )
+    result = runtime(client).start_run(_i6_shaped_request("inspect-first-run"))
+
+    # La garantía no cambia: aunque una llamada sea literal, no se acepta si no fue la única.
+    assert result.status == "incomplete" and result.executed_source_sha256 is None
+    assert result.usage["executed_code"] is False and result.usage["container_quarantined"] is True
+    check = result.usage["wrapper_check"]
+    assert check["classification"] == "multiple_code_calls" and check["code_calls"] == 2
+    assert check["calls"] == [
+        {"index": 1, "status": "completed", "verbatim": False, "line_count": 2,
+         "code_head": ["import os", "os.listdir('{container_root}')"]},
+        {"index": 2, "status": "interpreting", "verbatim": True, "line_count": check["expected_line_count"]},
+    ]
+    assert "(2 calls, statuses completed, interpreting; call 2 matched the wrapper verbatim)." in " ".join(result.warnings)
+    assert "/mnt/data" not in json.dumps(result.usage)
 
 
 def test_unverified_code_quarantines_the_container_for_the_next_run() -> None:
@@ -596,19 +632,24 @@ def test_transport_prompt_asks_for_an_exact_copy_without_extra_code() -> None:
 
     assert "character for character" in call["instructions"]
     assert "Do not add comments" in call["instructions"]
+    # v3: el wrapper debe ser la primera y única llamada, sin inspeccionar antes el contenedor.
+    assert "first and only tool call" in call["instructions"]
+    assert "do not list, open or check any file beforehand" in call["instructions"]
+    assert "without inspecting the container first" in call["input"]
     # Ya no se piden enlaces de descarga: Gamma lista el contenedor y los enlaces invitaban a añadir código.
     assert "return a download link" not in call["input"]
     # El bloque de código del mensaje es exactamente el wrapper cuyo hash se registra como esperado.
     fenced = re.search(r"```python\n(.*)\n```$", call["input"], re.DOTALL)
     assert fenced and hashlib.sha256(fenced.group(1).encode("utf-8")).hexdigest() == result.usage["expected_wrapper_sha256"]
-    assert result.usage["transport_prompt"] == "exact_copy_v2"
+    assert result.usage["transport_prompt"] == "exact_copy_v3"
     assert result.usage["provider_response_status"] == "completed"
     assert result.usage["provider_incomplete_reason"] is None
+    line_count = result.usage["wrapper_check"]["expected_line_count"]
     assert result.usage["wrapper_check"] == {
         "code_calls": 1, "classification": "verbatim", "first_differing_line": None,
-        "expected_line_count": result.usage["wrapper_check"]["expected_line_count"],
-        "returned_line_count": result.usage["wrapper_check"]["expected_line_count"],
+        "expected_line_count": line_count, "returned_line_count": line_count,
         "diff": [], "diff_truncated": False,
+        "calls": [{"index": 1, "status": "completed", "verbatim": True, "line_count": line_count}],
     }
 
 

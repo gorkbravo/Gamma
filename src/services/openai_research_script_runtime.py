@@ -45,17 +45,23 @@ _CODE_INTERPRETER_MODEL = re.compile(r"^(?:gpt-5\.(?:4|5|6)(?:$|-)|gpt-6\.1-sol$
 # Instrucciones de transporte. La v2 (2026-11-25) pide copia carácter a carácter sin comentarios ni
 # reformateo, y ya no pide enlaces de descarga: Gamma descubre los ficheros generados listando el
 # contenedor, y pedir enlaces invitaba al modelo a añadir código propio (GUA-20261124-10).
-_TRANSPORT_PROMPT_VERSION = "exact_copy_v2"
+# La v3 (2026-11-25, tras la reejecución en vivo) exige además que el wrapper sea la primera llamada:
+# gpt-6.1-sol inspeccionó antes el contenedor (`os.listdir('/mnt/data')`), esa fue la única llamada
+# ejecutada por `max_tool_calls=1` y la copia literal del wrapper quedó en una segunda llamada sin ejecutar.
+_TRANSPORT_PROMPT_VERSION = "exact_copy_v3"
 _TRANSPORT_INSTRUCTIONS = (
     "Act only as Gamma's deterministic Python execution transport. "
     "Make exactly one Code Interpreter call whose code is the wrapper from the user message, copied character "
-    "for character. Do not add comments, blank lines, imports, prints or any other code; do not reformat, wrap, "
+    "for character. That call must be your first and only tool call: do not list, open or check any file "
+    "beforehand, because the wrapper verifies every path and hash itself and only one call is executed. "
+    "Do not add comments, blank lines, imports, prints or any other code; do not reformat, wrap, "
     "reorder or omit any line. Gamma compares the executed code with the wrapper and discards the run if they "
     "differ. Do not use network access, install packages, rewrite the research source, or substitute different inputs."
 )
 _TRANSPORT_INPUT_PREFIX = (
-    "Run this wrapper exactly as written, in one Code Interpreter call. Gamma lists and retains the generated "
-    "files itself, so no extra code or download links are needed. After it finishes, reply with one short sentence."
+    "Run this wrapper exactly as written as your first and only Code Interpreter call, without inspecting the "
+    "container first. Gamma lists and retains the generated files itself, so no extra code or download links are "
+    "needed. After it finishes, reply with one short sentence."
 )
 
 # Diagnóstico de la comprobación del wrapper: qué hizo el proveedor cuando no hubo copia literal.
@@ -71,6 +77,10 @@ _WRAPPER_CHECK_WARNINGS = {
 # El diff viaja en `usage`, que también recibe el Operator: se acota (24 líneas de 320 caracteres).
 _WRAPPER_DIFF_MAX_LINES = 24
 _WRAPPER_DIFF_MAX_LINE_CHARS = 320
+# Cabecera saneada de cada llamada que no es el wrapper (3 líneas de 160 caracteres): basta para ver
+# qué ejecutó el modelo en su lugar sin reconstruir el wrapper ni comparar hashes a mano.
+_WRAPPER_CALL_HEAD_LINES = 3
+_WRAPPER_CALL_HEAD_CHARS = 160
 
 
 @dataclass(frozen=True)
@@ -355,7 +365,9 @@ class OpenAICodeInterpreterRuntime:
         returned_codes = [str(getattr(item, "code", "") or "") for item in code_calls]
         # La aceptación sigue siendo la copia literal (texto normalizado). La clasificación solo explica
         # por qué falló; nunca acepta un wrapper distinto aunque sea equivalente.
-        wrapper_check = self._wrapper_check(returned_codes, wrapper)
+        wrapper_check = self._wrapper_check(
+            returned_codes, wrapper, [str(getattr(item, "status", "") or "") for item in code_calls]
+        )
         exact_wrapper = wrapper_check["classification"] == "verbatim"
         warnings: list[str] = []
         container_quarantined = False
@@ -735,15 +747,35 @@ class OpenAICodeInterpreterRuntime:
         return text.replace("\r\n", "\n")
 
     @classmethod
-    def _wrapper_check(cls, returned_codes: list[str], wrapper: str) -> dict[str, Any]:
+    def _wrapper_check(
+        cls, returned_codes: list[str], wrapper: str, statuses: list[str] | None = None
+    ) -> dict[str, Any]:
         """Clasifica el código devuelto frente al wrapper esperado, sin ejecutar nada.
 
         Solo ``verbatim`` establece la asociación exacta. El resto de clases son diagnóstico: el
         análisis sintáctico (``ast.parse``) nunca ejecuta el código y se limita a distinguir un cambio
         de formato o comentarios de un cambio de sentencias. El diff se sanea y se acota.
+        ``calls`` describe cada llamada (estado del proveedor, si es copia literal y, si no lo es, una
+        cabecera saneada), de modo que varias llamadas se explican sin reconstruir el wrapper.
         """
         expected = cls._normalized_code(wrapper)
         expected_lines = expected.split("\n")
+        statuses = list(statuses or [])
+        calls: list[dict[str, Any]] = []
+        for index, code in enumerate(returned_codes):
+            normalized = cls._normalized_code(code)
+            lines = normalized.split("\n")
+            call: dict[str, Any] = {
+                "index": index + 1,
+                "status": (statuses[index] if index < len(statuses) else "") or None,
+                "verbatim": normalized == expected,
+                "line_count": len(lines),
+            }
+            if not call["verbatim"]:
+                call["code_head"] = [
+                    cls._sanitize_wrapper(line)[:_WRAPPER_CALL_HEAD_CHARS] for line in lines[:_WRAPPER_CALL_HEAD_LINES]
+                ]
+            calls.append(call)
         check: dict[str, Any] = {
             "code_calls": len(returned_codes),
             "classification": "verbatim",
@@ -752,6 +784,7 @@ class OpenAICodeInterpreterRuntime:
             "returned_line_count": None,
             "diff": [],
             "diff_truncated": False,
+            "calls": calls,
         }
         if not returned_codes:
             check["classification"] = "no_code_call"
@@ -785,6 +818,15 @@ class OpenAICodeInterpreterRuntime:
     @staticmethod
     def _wrapper_check_warning(check: dict[str, Any]) -> str:
         message = _WRAPPER_CHECK_WARNINGS.get(str(check.get("classification")), "Wrapper check: unexpected provider code.")
+        if check.get("classification") == "multiple_code_calls":
+            calls = list(check.get("calls") or [])
+            statuses = ", ".join(str(call.get("status") or "unknown") for call in calls)
+            verbatim = [str(call.get("index")) for call in calls if call.get("verbatim")]
+            detail = (
+                f"call {', '.join(verbatim)} matched the wrapper verbatim" if verbatim
+                else "none matched the wrapper verbatim"
+            )
+            return f"{message[:-1]} ({len(calls)} calls, statuses {statuses}; {detail})."
         line = check.get("first_differing_line")
         return f"{message[:-1]} (first difference at wrapper line {line})." if line else message
 
