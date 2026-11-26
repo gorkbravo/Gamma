@@ -19,6 +19,7 @@ Gamma currently lets a user:
 - monitor a live or sample portfolio in a chosen base currency
 - study portfolio performance, exposures, and local history
 - open a dense SITREP surface for cross-asset situation awareness
+- keep research ideas: a written thesis, evidence pinned from other tabs, criteria stated in advance, hypothetical forward tracking, a journal, and a closing review
 - build single-name or synthetic research scopes
 - forward research scopes into Risk and IV
 - explore a multi-mode Macro workspace
@@ -55,7 +56,7 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
 - `Portfolio View`: `PORTFOLIO`, `RISK`, `OPTIONS`
-- `Research View`: `SITREP`, `EQUITY RESEARCH`, `STRATEGY LAB`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `COPILOT`, `RISK`, `OPTIONS`
+- `Research View`: `SITREP`, `IDEAS`, `EQUITY RESEARCH`, `STRATEGY LAB`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `COPILOT`, `RISK`, `OPTIONS`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -90,18 +91,23 @@ The architecture follows a fairly clean pattern:
 
 The current API surface is grouped by workspace:
 
-- `/system/*`: runtime status, connection state, diagnostics, settings, provider capability metadata
+- `/health`: liveness check, the only route that does not need the session token
+- `/system/*`: runtime status, connection state, market-data mode, base currency, first-run setup, provider capability and usage metadata, read-only boundary
+- `/diagnostics`: diagnostics report and on-demand checks
 - `/portfolio/*`: snapshot, local history, performance
-- `/research/*`: single-name and synthetic-scope analysis
+- `/research/*`: Equity Research (overview, single-name and synthetic-scope analysis, comparables and scenarios, saved research), Strategy Lab (analyze, compose, handoffs) and the Script workspace (scripts, revisions, inputs, runs, outputs, datasets, parameter sweeps, walk-forward)
+- `/sitrep/*`: aggregated SITREP workspace and backend-persisted follow-ups
+- `/news/latest`: news and event feed
+- `/ideas/*`: ideas, pinned evidence, criteria and observables, evaluation notifications, hypothetical tracking (daily and intraday), test and risk snapshots, signals, review, and history
 - `/macro/*`: snapshot payload, divergences, event feed, series history
-- `/commodities/*`: workspace payload, market summaries, price history, curves, spreads, inventories, events, and cross-domain links
-- `/prediction-markets/*`: screener, detail, windowed probability history (`?range=&resolution=&outcome_id=`), per-outcome history, multi-contract comparison, wallet summary, related markets, calibration
-- `/crypto/*`: workspace screener, token detail, price history, DEX liquidity, comparison
-- `/fundamentals/*`: company search, overview, financials, DCF model, peer baskets
-- `/maritime/*`: Sealanes workspace, AIS position samples, chokepoints, flows, and event windows
-- `/copilot/*`: structured research-card generation from app context
-- `/risk/*`: risk computation
-- `/iv/*`: IV snapshot and session loop
+- `/commodities/*`: workspace payload, market summaries, price history, curves, spreads, inventories, events, cross-domain links, saved curve captures, and calendar spreads
+- `/prediction-markets/*`: screener, detail, windowed probability history (`?range=&resolution=&outcome_id=`), per-outcome history, multi-contract comparison, wallet summary, related markets, calibration, order-book depth, event books, cross-domain handoffs, and saved watchlists and comparison sets
+- `/crypto/*`: workspace screener, token detail, price history, DEX liquidity, flow, comparison, synthetic portfolios
+- `/fundamentals/*`: company search, overview, financials, peer baskets, DCF model and snapshots, reverse valuation, filing reference
+- `/maritime/*`: Sealanes workspace (the `mode` parameter selects live map, chokepoints, flows, fleet, or event-window content), vessel tracks, and the live AIS relay WebSocket `/maritime/live/ws`
+- `/copilot/*`: research cards, synthesis, and Operator plans and runs (NDJSON streaming, cancellation, approval decisions, recovery), sessions, artifacts, memos, draft changes, and temporary working analyses
+- `/risk/*`: risk computation and historical stress replay
+- `/iv/*`: IV surface and session loop, underlying history, and saved manual surface captures
 
 ### Paid Research Acceptance And Accounting
 
@@ -362,6 +368,31 @@ It provides:
 
 SITREP is intentionally an orientation layer rather than a replacement for specialist tabs. Paid/institutional news breadth and fresher provider coverage can expand later, while the current first-pass product contract is complete.
 
+#### Ideas tab
+
+Ideas (roadmap Workstream 12; spec in [`docs/idea_workspace_spec.md`](./docs/idea_workspace_spec.md)) joins a thesis that otherwise lives in fragments across tabs. Its registered modes are:
+
+- `Board`
+- `Idea`
+- `Review`
+
+It provides:
+
+- ideas with a written thesis and evidence pinned with its provenance frozen from Commodities, Equity Research, Fundamentals, Options, Prediction Markets, and SITREP; Strategy Lab and Risk results attached to an idea; SITREP follow-ups promoted to ideas
+- criteria stated in advance and evaluated read-only over a registry of observables: equity close, macro series and events, prediction-market probability, crypto price, commodity price and spread, calendar date, Script signal, ATM IV, and skew. Missing data is `unavailable`, never `holding`
+- in-app notifications and a "Your ideas" section in SITREP
+- hypothetical forward tracking that never backfills: a canonical daily series rebuilt from provider closes with per-asset-class costs, plus an intraday layer of IBKR marks while TWS is connected
+- test and risk snapshots of the legs, signals from Script runs or CSV imports with walk-forward validation and a trial count, a journal, and a closing review
+- Copilot drafts that become ideas only after the user accepts them
+
+Under the hood:
+
+- a background scheduler evaluates criteria shortly after start, once per US session after 16:20 New York time, and every five minutes while TWS is connected and an intraday criterion exists; it runs only while Gamma runs, and `GAMMA_IDEAS_EVALUATION=off` turns it off
+- ideas are stored under `<PORTFOLIO_HISTORY_DIR>/ideas`
+- the read-only Python client in [`clients/python/`](./clients/python/README.md) reads ideas, tracking, and macro history; its only write is a signal import
+
+An idea never places orders, stages trades, or sets broker alerts.
+
 #### Equity Research tab
 
 This tab owns equity market overview, scope analysis, comparables, scenario/context framing, and saved equity research. Its modes are:
@@ -523,14 +554,14 @@ Main surfaces:
 
 Provider behavior:
 
-- default `COMMODITIES_PROVIDER=sample` uses generated offline sample prices, curves, inventories, and events
+- default `COMMODITIES_PROVIDER=sample` uses generated offline sample prices, curves, inventories, and events in demo mode; in live mode sample data is disabled and the tab reports the provider as unavailable
 - `COMMODITIES_PROVIDER=eia` enables selected EIA official energy fundamentals when `EIA_API_KEY` is present
 - optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure, including broad monthly metal proxies for aluminum, zinc, nickel, lead, tin, iron ore, uranium, and configured precious/industrial metals
 - `COMMODITIES_PROVIDER=ibkr` builds read-only futures curves from individual IBKR/TWS `FUT` contract details and market-data snapshots when TWS is connected and the account has the needed futures market-data entitlements
 - IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_STARTUP_ENABLED`, `IBKR_COMMODITIES_BREADTH_ENABLED`, `IBKR_COMMODITIES_ON_DEMAND`, `IBKR_COMMODITIES_SELECTED_CACHE_SECONDS`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
 - when `COMMODITIES_PROVIDER=ibkr` and `EIA_API_KEY` is present, Gamma uses EIA/FRED as the low-cost SITREP reference layer and overlays shallow IBKR breadth curves plus deeper selected-root coverage; EIA product spot defaults cover RBOB gasoline and heating oil via `EIA_RBOB_GASOLINE_PRICE_SERIES_ID` and `EIA_HEATING_OIL_PRICE_SERIES_ID`
 - IBKR futures rows carry either a usable daily reference history (`IBKR` front-contract bars, `FRED`/`EIA` spot proxies, or another continuous/spot proxy) or an explicit no-daily-reference placeholder with a warning; Gamma does not silently validate futures rows with sample histories
-- if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the sample or EIA/FRED fallback payload and returns explicit coverage warnings
+- if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the EIA/FRED fallback payload (the sample payload in demo mode) and returns explicit coverage warnings; in live mode without `EIA_API_KEY` the fallback is the instrument list without prices
 
 What Gamma computes:
 
@@ -712,7 +743,7 @@ Current behavior:
 - distinguishes selected, inactive, running, and archived conversations; switching away from a streaming run does not cancel it
 - clears the composer once a submission is accepted and keeps the draft when it is rejected before acceptance, with Retry driven by the persisted turn
 - reports non-destructive storage recovery in an in-flow, dismissible status strip that stays rediscoverable from the workspace `Storage` control
-- exposes a feature-flagged operator path for bounded read-only research actions
+- runs the Research Operator on Gamma's own Responses loop by default; `GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk` switches to the feature-flagged Agents SDK path with the same registry and budgets (runs with drafts or resumed approvals stay on Gamma's loop)
 - lets Research Operator resolve supported unloaded companies and create visibly temporary Fundamentals, hypothetical Portfolio/Risk, and Options realized-versus-implied working analyses through strict Gamma-owned tools
 - materializes supported temporary analyses into their owning tabs without silently saving durable user state
 
@@ -720,7 +751,7 @@ Important caveats:
 
 - Research Agent only interprets attached/current context; it cannot load missing entities or run app workflows
 - Research Operator can acquire supported inputs and run authorized app-native research tools, but Gamma's server owns schemas, permissions, budgets, state, approvals, persistence, and terminal truth
-- Checkpoint 8 still needs option-set drafts, Strategy Lab inputs, temporary assumptions, and remaining tab-owned analyses; generalized approval/resume/recovery and the final live/accessibility/first-run release gate follow
+- Checkpoint 8 (entity acquisition and working analyses, including option-set drafts, Strategy Lab inputs, and temporary assumptions) and Checkpoint 9 (same-run approval, resume, and recovery) are complete; the Checkpoint 10 acceptance and release gate is partially verified, with native screen-reader acceptance and full release certification still open (see `roadmap.md`, Workstream 7)
 - voice and opt-in long-running external deep research remain later extensions, not current completion blockers
 
 ## Current Roadmap Position
@@ -730,15 +761,16 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 1 - Prediction Markets`: complete at a first-pass level
 - `Phase 2 - Macro`: paused around 84% in the archived phase roadmap, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes as the first-pass checkpoint; the current roadmap has since expanded the live tab to include Trade Partners and Country Compare
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
-- `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; current Workstream 7 is now approximately 87% toward the clarified end state, with the dedicated workspace, provider streaming, local sessions and artifacts, a closed-loop Operator, and temporary working analyses complete through Checkpoint 8D
+- `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; current Workstream 7 is now approximately 94% toward the clarified end state, with the dedicated workspace, provider streaming, local sessions and artifacts, a closed-loop Operator, temporary working analyses, and same-run approval and recovery complete through Checkpoint 9; the Checkpoint 10 release gate is partially verified
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: archived phase checkpoint paused around 83%; current-roadmap Fundamentals V2 is complete for this pass with six modes, filing inspection, peer/DCF/reverse-valuation workflows, cross-tab handoffs, and reliability coverage
 - `Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
 - `Workstream 2A - Research Script Workspace`: complete for this pass with a no-network isolated runtime, immutable source/input binding, retained typed outputs, Copilot drafting/materialization, and verified mock/live/disabled paths
 - `Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 - `Workstream 9 - Maritime Intelligence`: paused around 45% with all five Sealanes modes registered; Live Map and provider boundaries exist, while historical AIS and richer vessel/port/cargo data block deeper analysis
+- `Workstream 12 - Ideas`: checkpoints I1-I5 merged (the Idea object and tab, criteria, forward tracking, the quant layer and Python client, Copilot drafts); of the I6 persona audits, retail passed and the quant audit awaits a UI re-score after the Script runtime fix of 2026-11-26
 
-That means the app already has meaningful portfolio/risk/options capabilities, a complete-for-this-pass SITREP entry surface, specialist research surfaces across Equity Research, Strategy Lab, Macro, Prediction Markets, Crypto, Fundamentals, Commodities, and the paused Sealanes prototype, plus a live Copilot workspace and shell layer. Remaining deepening work is tracked as current-roadmap scope.
+That means the app already has meaningful portfolio/risk/options capabilities, a complete-for-this-pass SITREP entry surface, specialist research surfaces across Equity Research, Strategy Lab, Macro, Prediction Markets, Crypto, Fundamentals, Commodities, and the paused Sealanes prototype, plus an Ideas workspace that ties evidence from those tabs to a written thesis, and a live Copilot workspace and shell layer. Remaining deepening work is tracked as current-roadmap scope.
 
 ## Current Roadmap Direction
 
@@ -758,7 +790,8 @@ The likely feature direction is:
 - `IV`: harden the shipped volatility lab around selectable surface models, skew / term views, Gamma-owned Greeks, realized-vs-implied overlays, Implied Distribution slices, strategy payoff flow, source transparency, history, and cross-tab handoffs
 - `Crypto`: add real wallet analytics, stronger pool / transaction monitoring, richer peer and basket comparisons, and later derivatives overlays
 - `Fundamentals`: preserve the complete current pass and treat broader non-US filing/reference coverage and consensus-estimate depth as optional expansion
-- `Copilot`: finish the remaining temporary analysis families, generalized approval/resume/recovery, and the live/accessibility/first-run release gate; keep voice as a later extension
+- `Copilot`: finish the Checkpoint 10 acceptance and release gate (native screen-reader acceptance and full release certification are still open); keep voice as a later extension
+- `Ideas`: re-score the quant persona audit in the UI now that Script runs complete, then close checkpoint I6
 - `Commodities`: deepen the shipped full research tab with historical futures curves, continuous/roll-adjusted mapping, provider-backed spread history, real metals warehouse data, seasonal inventory models, and cross-domain handoffs
 - `Maritime Intelligence`: deepen the shipped Sealanes prototype only after historical AIS, port-call/cargo context, durable caching, and provider-quality evidence are available
 
@@ -797,7 +830,7 @@ First-run setup and demo mode:
 - Choices are saved in `<PORTFOLIO_HISTORY_DIR>/setup/setup.json` (default `data/setup/setup.json`; the desktop app uses its app-data directory). API keys are never stored there; they stay in environment variables or `.env`.
 - Precedence is environment or `.env` (`MOCK_DATA`, `BASE_CURRENCY`, `IB_MARKET_DATA_MODE`, `GAMMA_SEC_USER_NAME` / `GAMMA_SEC_USER_EMAIL`) > saved setup > defaults (demo, EUR, delayed). Values fixed by the environment are shown as locked in the dialog. Unset `MOCK_DATA` to let the saved choice decide.
 - Switching between demo and live data takes effect after a restart, because the IBKR client and providers are built for one mode. Base currency and market-data mode apply immediately; changing them in `Settings` is now saved too.
-- Demo mode means a sample account, synthetic prices and option surfaces, and sample commodities, maritime and news data. Free public sources (FRED, US Treasury, DB.nomics, Polymarket, Kalshi, CoinGecko, GeckoTerminal, SEC EDGAR) stay live when the network is reachable. Copilot still needs `OPENAI_API_KEY`, or `GAMMA_COPILOT_PROVIDER=mock` for canned demo answers.
+- Demo mode means a sample account, synthetic prices and option surfaces, and sample commodities, maritime and news data. Free public sources (FRED, US Treasury, DB.nomics, Polymarket, Kalshi, CoinGecko, GeckoTerminal, SEC EDGAR) stay live when the network is reachable. Copilot still needs `OPENAI_API_KEY`, or `GAMMA_COPILOT_PROVIDER=mock` for canned demo answers. Listed-market provider lists set in the environment also apply in demo mode: `.env.example` sets `RESEARCH_MARKET_DATA_PROVIDERS=yfinance,ibkr` and `SITREP_MARKET_DATA_PROVIDERS=yfinance`, so Research and SITREP still request Yahoo Finance in demo. Remove those two lines for sample-only histories.
 - SEC EDGAR asks automated tools to identify the requester, so Gamma has no default SEC identity. Until the user saves a name and email in Setup (or sets both `GAMMA_SEC_USER_NAME` and `GAMMA_SEC_USER_EMAIL`), Gamma makes no request to sec.gov: Fundamentals routes answer HTTP 428 with `code: sec_identity_missing` and the tab shows a `Set SEC identity` action that opens Setup on that step; Copilot company-name lookup, Script Fundamentals discovery/preview and the SEC press-release RSS feed report the same missing identity instead of failing generically. The identity is sent only to sec.gov, in the User-Agent header.
 - API: `GET /system/setup` returns the readiness report (key presence only, never key values); `POST /system/setup` saves choices.
 
@@ -829,7 +862,7 @@ $env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Without `EIA_API_KEY`, Commodities degrades to the sample provider and returns explicit coverage warnings. Provider credentials stay server-side.
+Without `EIA_API_KEY`, Commodities falls back to the sample provider in demo mode; in live mode it reports the provider as unavailable instead of loading sample data. Provider credentials stay server-side.
 
 Optional Commodities IBKR futures curves:
 
