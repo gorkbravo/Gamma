@@ -105,7 +105,7 @@ Follow-up changes (acceptance unchanged):
 
 So the adapter and the strict gate work; the regression is in `gpt-6.1-sol`.
 
-**Model correction, 2026-11-26.** At the owner's explicit request, `.env.example` now sets `GAMMA_RESEARCH_SCRIPT_MODEL=gpt-5.6-luna`. This supersedes the 2026-10-15 selection of `gpt-6.1-sol` for Script; Copilot keeps `GAMMA_COPILOT_MODEL=gpt-6.1-sol`. The opt-in live E4 lifecycle gate now asserts the configured model instead of a fixed id. The owner's local root `.env` is theirs to change: until it names `gpt-5.6-luna`, local Script runs still end `incomplete`, and the persisted diagnosis says why.
+**Model correction, 2026-11-26.** At the owner's explicit request, `.env.example` now sets `GAMMA_RESEARCH_SCRIPT_MODEL=gpt-5.6-luna`. This supersedes the 2026-10-15 selection of `gpt-6.1-sol` for Script; Copilot keeps `GAMMA_COPILOT_MODEL=gpt-6.1-sol`. The opt-in live E4 lifecycle gate now asserts the configured model instead of a fixed id. The owner's local root `.env` is theirs to change: until it names `gpt-5.6-luna`, local Script runs still end `incomplete`, and the persisted diagnosis says why. Merged into main on 2026-11-26 (merge commit b46041f); backend 1,392 passed and 5 skipped, frontend 758 passed on the merged tree.
 
 ### E4 implementation and acceptance — 2026-10-15
 
