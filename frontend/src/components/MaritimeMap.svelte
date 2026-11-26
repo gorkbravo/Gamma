@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import maplibregl from "maplibre-gl";
   import "maplibre-gl/dist/maplibre-gl.css";
-  import { WS_BASE } from "../lib/api/client";
+  import { WS_BASE, sessionWebSocketProtocols } from "../lib/api/client";
   import { apiInstantDate } from "../lib/time";
   import { resolvedTheme } from "../lib/stores/appearance";
   import type {
@@ -441,7 +441,8 @@
     }
     liveStatus = "connecting";
     liveMessage = null;
-    const socket = new WebSocket(`${WS_BASE}/maritime/live/ws`);
+    // El relay AIS exige el token de sesión, que viaja como subprotocolo.
+    const socket = new WebSocket(`${WS_BASE}/maritime/live/ws`, sessionWebSocketProtocols());
     liveSocket = socket;
     socket.onopen = () => {
       liveStatus = "connected";

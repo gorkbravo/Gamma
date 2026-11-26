@@ -6,7 +6,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.json_response import GammaJSONResponse
-from src.api.session_auth import GAMMA_SESSION_HEADER, GammaSessionMiddleware, resolve_session_token
+from src.api.session_auth import (
+    GAMMA_SESSION_HEADER,
+    LOCAL_BROWSER_ORIGINS,
+    GammaSessionMiddleware,
+    GammaWebSocketSessionMiddleware,
+    resolve_session_token,
+)
 from src.api.routes import (
     copilot_router,
     commodities_router,
@@ -68,22 +74,19 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
     app.state.gamma_session_token = resolved_session_token
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-            "http://127.0.0.1:5174",
-            "http://localhost:5174",
-            "http://127.0.0.1:4173",
-            "http://localhost:4173",
-            "tauri://localhost",
-            "http://tauri.localhost",
-            "https://tauri.localhost",
-        ],
+        allow_origins=list(LOCAL_BROWSER_ORIGINS),
         allow_credentials=False,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", GAMMA_SESSION_HEADER],
     )
     app.add_middleware(GammaSessionMiddleware, session_token=resolved_session_token)
+    # El middleware HTTP no ve los WebSocket: sin esta guardia, /maritime/live/ws aceptaba
+    # cualquier conexión (también desde otra página del navegador) y usaba la clave AISstream.
+    app.add_middleware(
+        GammaWebSocketSessionMiddleware,
+        session_token=resolved_session_token,
+        allowed_origins=LOCAL_BROWSER_ORIGINS,
+    )
     # Sin identidad SEC no se llama a sec.gov: se responde 428 con un código estable para
     # que la interfaz ofrezca abrir el asistente en el paso de identidad.
     app.add_exception_handler(SecIdentityMissingError, _sec_identity_missing_response)

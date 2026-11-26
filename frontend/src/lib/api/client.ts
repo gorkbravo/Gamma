@@ -223,11 +223,36 @@ export async function getBlob(path: string): Promise<Blob> {
   return response.blob();
 }
 
-function sessionHeaders(): Record<string, string> {
+function sessionToken(): string {
   const runtimeToken =
     typeof window !== "undefined" ? window.__GAMMA_SESSION_TOKEN__ : undefined;
-  const token = runtimeToken ?? import.meta.env.VITE_GAMMA_SESSION_TOKEN ?? "";
+  return runtimeToken ?? import.meta.env.VITE_GAMMA_SESSION_TOKEN ?? "";
+}
+
+function sessionHeaders(): Record<string, string> {
+  const token = sessionToken();
   return token ? { [SESSION_HEADER]: token } : {};
+}
+
+// Mismos valores que GAMMA_WS_SUBPROTOCOL y GAMMA_WS_TOKEN_PREFIX en src/api/session_auth.py.
+export const SESSION_WS_SUBPROTOCOL = "gamma.session";
+const SESSION_WS_TOKEN_PREFIX = "gamma.session.token.";
+
+/**
+ * Subprotocolos para `new WebSocket(url, protocols)`. El navegador no permite cabeceras propias
+ * en un WebSocket, así que el token de sesión viaja como subprotocolo en base64url (siempre un
+ * token válido de RFC 7230, sea cual sea el texto del token). El servidor responde solo con
+ * `gamma.session`, nunca con el token.
+ */
+export function sessionWebSocketProtocols(token: string = sessionToken()): string[] {
+  if (!token) return [SESSION_WS_SUBPROTOCOL];
+  const bytes = new TextEncoder().encode(token);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  const encoded = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return [SESSION_WS_SUBPROTOCOL, `${SESSION_WS_TOKEN_PREFIX}${encoded}`];
 }
 
 async function httpError(response: Response): Promise<Error> {
