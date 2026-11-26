@@ -103,7 +103,9 @@ Follow-up changes (acceptance unchanged):
 - The anchored walk-forward on the weight book (train 250, test 60, Sharpe, lag 1, 5 bp) reported 3 trials and verified causality. It had 13 folds, the last one partial. Out of sample (2023-12-13 to 2026-11-25, 741 observations) the Sharpe ratio was −0.46, total return −21.6% and maximum drawdown −36.2%. It warned that the selection was unstable (two distinct points), and a repeat produced the same `report_sha256`. This is a hypothetical research book, not a recommendation.
 - The single run attached to a new idea as a `weights` signal with that validation: legs AAPL +0.5 and MSFT −0.5 as of 2026-11-25. Every completed run counts: the idea and the signal read `trial_count` 4 (one run plus three sweep points), and the validation reads 3 (the sweep points). The two incomplete `gpt-6.1-sol` runs are not counted.
 
-So the adapter and the strict gate work; the regression is in `gpt-6.1-sol`. Product default: `.env.example` and the root `.env` still name `gpt-6.1-sol`. Pinning `gpt-5.6-luna` there is the owner's decision, so until it changes, Script runs with the default configuration still end `incomplete`, and the persisted diagnosis says why.
+So the adapter and the strict gate work; the regression is in `gpt-6.1-sol`.
+
+**Model correction, 2026-11-26.** At the owner's explicit request, `.env.example` now sets `GAMMA_RESEARCH_SCRIPT_MODEL=gpt-5.6-luna`. This supersedes the 2026-10-15 selection of `gpt-6.1-sol` for Script; Copilot keeps `GAMMA_COPILOT_MODEL=gpt-6.1-sol`. The opt-in live E4 lifecycle gate now asserts the configured model instead of a fixed id. The owner's local root `.env` is theirs to change: until it names `gpt-5.6-luna`, local Script runs still end `incomplete`, and the persisted diagnosis says why.
 
 ### E4 implementation and acceptance — 2026-10-15
 

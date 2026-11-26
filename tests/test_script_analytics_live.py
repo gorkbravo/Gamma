@@ -146,7 +146,10 @@ def test_live_complete_script_lifecycle(monkeypatch):
     service = runtime.research_script_service
     capabilities = service.capabilities()
     assert capabilities.available and capabilities.executes_source, capabilities.sanitized_provider_status
-    assert capabilities.model == "gpt-6.1-sol"
+    # El modelo es exactamente el configurado, sin sustitución (desde 2026-11-26 el ejemplo fija
+    # gpt-5.6-luna; gpt-6.1-sol inspecciona el contenedor antes del wrapper, GUA-20261124-10).
+    expected_model = os.getenv("GAMMA_RESEARCH_SCRIPT_MODEL") or configured.get("GAMMA_RESEARCH_SCRIPT_MODEL")
+    assert expected_model and capabilities.model == expected_model
     evidence = {"started_at": now_utc().isoformat(), "model": capabilities.model, "runtime": capabilities.runtime_kind,
                 "network_access": capabilities.network_access, "configured_history_providers": providers,
                 "checks": {}, "runs": [], "limitations": ["This is not E3 model-driven Operator certification or cross-domain provider certification.", "Hypothetical weights remain standalone because no faithful owning-service mapping exists."]}
