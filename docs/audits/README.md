@@ -6,6 +6,7 @@ Use this area for findings that should remain discoverable after the immediate b
 
 ## Categories
 
+- [Ideas persona audits (I6), 2026-11-24](./ideas_persona_audits_2026-11-24.md): retail audit without TWS (accepted after one P0 fix) and quant audit with live data (not accepted: Script runs on the configured runtime never complete), scored like the usability audit.
 - [Script E3 live Operator closure, 2026-10-16](./script_e3_live_closure_2026-10-16.md): three passing live acquire → review → accept → isolated Python → synthesis journeys, five defects found live and fixed, remaining E2/runtime follow-ups.
 - [Script E4 live lifecycle, 2026-10-15](./script_e4_live_lifecycle_2026-10-15.md): actual isolated-Python analytical results, retention, opening/saving and export evidence.
 

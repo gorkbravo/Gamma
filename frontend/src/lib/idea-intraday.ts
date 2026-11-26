@@ -116,8 +116,11 @@ export function cadenceText(view: IdeaIntradayView): string {
 }
 
 /** The strip polls while it records today's session; otherwise the figures do not move. */
-export function shouldPollIntraday(view: IdeaIntradayView | null | undefined): boolean {
-  return view?.status === "recording";
+export function shouldPollIntraday(view: IdeaIntradayView | null | undefined, now: Date = new Date()): boolean {
+  if (view?.status === "recording") return true;
+  // Con TWS desconectado durante la sesión de hoy se sigue releyendo: el hueco crece y la
+  // reconexión aparece sin reabrir la idea (visto en vivo el 2026-11-24).
+  return Boolean(view && view.status === "idle" && !view.tws_connected && view.session === now.toISOString().slice(0, 10));
 }
 
 /** A mark's source as shown in the legs table: "Last", "Mid", "Prior close"… */

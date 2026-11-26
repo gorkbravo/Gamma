@@ -90,6 +90,8 @@ POLYMARKET_MAX_WINDOW_DAYS = 14
 # Settled outcome prices are not always exact integers; see
 # `_resolve_polymarket_outcome`.
 POLYMARKET_SETTLEMENT_EPSILON = 1e-3
+# Polymarket muestra el punto medio del libro mientras el diferencial no supere 0,10.
+POLYMARKET_DISPLAY_SPREAD_MAX = 0.10
 # The gamma `/markets` endpoint caps a page at 100 rows whatever limit is asked
 # for, so a deeper pull has to page (verified 2026-07-27).
 POLYMARKET_PAGE_SIZE = 100
@@ -944,6 +946,8 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             raw.get("lastTradePrice"),
             outcome_prices,
             resolution_outcome=resolution_outcome,
+            best_bid=raw.get("bestBid"),
+            best_ask=raw.get("bestAsk"),
         )
         resolved_probability = _to_float(outcome_prices[0]) if outcome_prices else None
         nested_event = (raw.get("events") or [None])[0] or {}
@@ -1014,7 +1018,11 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             source_provider=self.provider,
             retrieved_at=retrieved_at,
             origin=origin,
-            transformation_note="Current probability tracks the first listed outcome, prefers lastTradePrice, and excludes resolved settlement-style outcomePrices as a predictive proxy.",
+            transformation_note=(
+                "Current probability tracks the first listed outcome with Polymarket's displayed-price rule: the "
+                "order-book midpoint, or lastTradePrice when the spread is wider than 0.10; resolved "
+                "settlement-style outcomePrices are excluded as a predictive proxy."
+            ),
         )
 
 
@@ -1933,7 +1941,16 @@ def _polymarket_probability_proxy(
     outcome_prices: list[Any],
     *,
     resolution_outcome: bool | None,
+    best_bid: Any = None,
+    best_ask: Any = None,
 ) -> float | None:
+    # Regla de precio mostrado de Polymarket (help.polymarket.com, "How are prices calculated?",
+    # revisada el 2026-11-24): el punto medio del libro, salvo que el diferencial supere 0,10; entonces
+    # el último precio negociado. Visto en vivo: una operación suelta a 0,341 con el libro 0,09/0,139.
+    bid, ask = _to_float(best_bid), _to_float(best_ask)
+    if resolution_outcome is None and bid is not None and ask is not None and 0.0 <= bid <= ask <= 1.0:
+        if ask - bid <= POLYMARKET_DISPLAY_SPREAD_MAX + 1e-9:
+            return round((bid + ask) / 2.0, 6)
     probability = _to_float(last_trade_price)
     if probability is not None:
         return probability

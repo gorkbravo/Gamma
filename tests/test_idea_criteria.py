@@ -784,3 +784,46 @@ def test_routes_manage_criteria_evaluate_and_notify(tmp_path):
 
     exported = client.get(f"/ideas/{idea_id}/export?format=md", headers=headers).text
     assert "## Criteria" in exported
+
+
+def test_a_prediction_outcome_is_found_by_its_label():
+    """Retail audit 2026-11-24: typing the outcome "Yes" left the rule unavailable; only the internal id matched."""
+    from types import SimpleNamespace
+
+    from src.application.idea_observables import ObservableRegistry
+
+    detail = SimpleNamespace(
+        source_provider="polymarket",
+        venue="polymarket",
+        retrieved_at=datetime(2026, 11, 24, 20, 43),
+        origin="tests",
+        transformation_note=None,
+        current_probability=0.1145,
+        status="open",
+        resolved_probability=None,
+        freshness=None,
+        close_time=None,
+        end_time=datetime(2027, 1, 1, 5, 59),
+        outcomes=[
+            SimpleNamespace(outcome_id="6994526:0", label="Yes", probability=0.1145, resolved=False, winner=None),
+            SimpleNamespace(outcome_id="6994526:1", label="No", probability=0.8855, resolved=False, winner=None),
+        ],
+    )
+
+    class _Predictions:
+        def get_market_detail(self, market_id):
+            return detail
+
+        def get_history_series(self, market_id, **kwargs):
+            # El historial se pide para el id del resultado, no para la etiqueta escrita.
+            assert kwargs["outcome_id"] in {"6994526:0", "6994526:1"}
+            return None
+
+    registry = ObservableRegistry(prediction_service=_Predictions(), clock=lambda: datetime(2026, 11, 24, 21, 0))
+    now = datetime(2026, 11, 24, 21, 0)
+    by_label = registry.read(ObservableRef("prediction_probability", {"market_id": "polymarket:6994526", "outcome_id": "yes"}), now=now)
+    assert by_label.value == pytest.approx(11.45)
+    by_id = registry.read(ObservableRef("prediction_probability", {"market_id": "polymarket:6994526", "outcome_id": "6994526:1"}), now=now)
+    assert by_id.value == pytest.approx(88.55)
+    missing = registry.read(ObservableRef("prediction_probability", {"market_id": "polymarket:6994526", "outcome_id": "Maybe"}), now=now)
+    assert missing.value is None and "its outcomes: Yes, No" in missing.unavailable_reason

@@ -350,12 +350,25 @@ class ObservableRegistry:
         if series is None or len(series) == 0:
             reason = warnings[0] if warnings else f"No configured history provider returned closes for {symbol}."
             return ObservableReading.unavailable(reason, provenance=provenance, warnings=warnings[1:])
+        # Durante la sesión el proveedor añade la barra de hoy con el último precio: no es un cierre.
+        # Solo cuentan las sesiones cuyo cierre ya es definitivo, con la misma regla que el seguimiento.
+        horizon = _final_session(symbol, now)
         points = []
+        provisional = None
         for index, value in series.items():
             number = _finite(value)
             if number is None:
                 continue
-            points.append(ObservablePoint(at=_session_instant(index), value=number))
+            at = _session_instant(index)
+            if at.date() > horizon:
+                provisional = at.date()
+                continue
+            points.append(ObservablePoint(at=at, value=number))
+        if provisional is not None:
+            warnings.append(
+                f"The {provisional.isoformat()} bar is not a close yet (the session's close is not final); "
+                "it is ignored until it is."
+            )
         if not points:
             return ObservableReading.unavailable(f"The closes for {symbol} had no usable values.", provenance=provenance)
         label = str(getattr(result.freshness_label, "value", result.freshness_label) or "")
@@ -418,9 +431,17 @@ class ObservableRegistry:
         probability = detail.current_probability
         outcome = None
         if outcome_id:
-            outcome = next((item for item in detail.outcomes if item.outcome_id == outcome_id), None)
+            # El resultado se reconoce por su id o por su etiqueta ("Yes"), que es lo que escribe una persona.
+            wanted = str(outcome_id).strip().casefold()
+            outcome = next((item for item in detail.outcomes if item.outcome_id == outcome_id), None) or next(
+                (item for item in detail.outcomes if str(item.label or "").strip().casefold() == wanted), None
+            )
             if outcome is None:
-                return ObservableReading.unavailable(f"Outcome {outcome_id} is not on {market_id}.", provenance=provenance)
+                labels = ", ".join(str(item.label) for item in detail.outcomes if item.label) or "none listed"
+                return ObservableReading.unavailable(
+                    f"Outcome {outcome_id} is not on {market_id} (its outcomes: {labels}).", provenance=provenance
+                )
+            outcome_id = outcome.outcome_id
             probability = outcome.probability
         warnings: list[str] = []
         points: list[ObservablePoint] = []
@@ -1099,6 +1120,20 @@ def _naive_utc(value: Any) -> datetime:
     if moment.tzinfo is not None:
         moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
     return moment
+
+
+def _final_session(symbol: str, now: datetime) -> date:
+    """The latest session of ``symbol``'s market whose close is final at ``now``.
+
+    Same rule as forward tracking (``market_horizon``): a US close counts from
+    16:20 New York time; an unknown exchange only from the next UTC day.
+    """
+    from src.application.idea_tracking import market_horizon
+    from src.models.handoff import HandoffEntity
+    from src.models.ideas import tracking_market
+
+    market = tracking_market(HandoffEntity(entity_type="equity", label=symbol, normalized_id=symbol))
+    return market_horizon(market, now)
 
 
 def _session_instant(value: Any) -> datetime:

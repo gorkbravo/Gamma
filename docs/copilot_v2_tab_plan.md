@@ -2,7 +2,41 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-23
+Last updated: 2026-11-25
+
+### Official guidance reviewed 2026-11-25 — Script runtime completion (GUA-20261124-10)
+
+Fetched directly (no Developer Docs connector in this session): [Code Interpreter](https://developers.openai.com/api/docs/guides/tools-code-interpreter), [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [reasoning](https://developers.openai.com/api/docs/guides/reasoning) and [shell](https://developers.openai.com/api/docs/guides/tools-shell). Review date: **2026-11-25**. Relevant points:
+
+- The model writes the code Code Interpreter runs. No documented mode executes caller-supplied code as given; `tool_choice: "required"` forces a call, not its content.
+- GPT-6.1 Sol lists Code Interpreter and a hosted shell. Reasoning effort is `low` to `max`, default `medium`. The only snapshot listed is `gpt-6.1-sol` itself, with no dated id.
+- `max_output_tokens` includes reasoning tokens; reaching it returns `incomplete` with reason `max_output_tokens`.
+- The hosted shell also runs model-written commands, so it would not remove the need to verify what ran.
+
+**Decision.** Keep the custom Responses adapter, the configured model and every limit, and keep the acceptance rule: only a normalized character-for-character copy of Gamma's wrapper associates outputs with the visible revision. The changes are a stricter transport prompt, a persisted classification of every mismatch and retiring a container after unverified code. Accepting AST-equivalent wrappers, lowering reasoning effort or pinning another model are owner decisions, to be taken on evidence from a diagnosed live run. No Copilot or Operator tool, scope or authority changes. Details and evidence: the Script plan, section "Script runtime completion (GUA-20261124-10)". Addendum, same day: a live rerun showed the model inspecting the container before a verbatim wrapper call that never ran. The prompt is now `exact_copy_v3` (wrapper as the first and only call), and `usage.wrapper_check.calls` reaches the Operator with a sanitized per-call diagnosis. The acceptance rule and the Operator's authority are unchanged. A second live rerun with v3 showed the inspection persists even when the prompt forbids it. The recommended next step is a model pin (`gpt-5.6-luna`) through `GAMMA_RESEARCH_SCRIPT_MODEL`, which is the owner's decision. The owner approved it the same day. With the same adapter and gate, the run, a three-point sweep, the walk-forward and an Ideas weights signal all completed. On 2026-11-26, at the owner's request, `.env.example` set the Script model to `gpt-5.6-luna`. The Copilot model (`GAMMA_COPILOT_MODEL=gpt-6.1-sol`) is unchanged.
+
+### I5 live acceptance, 2026-11-24 — Ideas in Copilot (Workstream 12)
+
+**Official guidance re-checked 2026-11-24.** Fetched directly (no Developer Docs connector was available in this session): [function calling](https://developers.openai.com/api/docs/guides/function-calling), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) and [guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), all HTTP 200. Relevant points, unchanged from the 2026-11-23 review:
+
+- Function calling: strict schemas need `additionalProperties: false` and every property in `required`, with optional values as nullable types; `tool_choice` is `auto` by default and can require a call, name one function or restrict the turn to an allowed subset; by default the model decides whether to call a tool.
+- Guardrails and approvals: an approval-gated tool records an interruption instead of executing, and the run resumes after approval or rejection. Applications on the Responses API build this review into their own system.
+
+**Live runs** (configured default `gpt-6.1-sol`, profile `auto` → `standard`, reasoning `medium`, `responses_custom_loop`; five of six allowed runs, on a backend without TWS):
+
+| Run | Prompt | Tools | Tokens in / out / reasoning | Latency |
+| --- | --- | --- | --- | --- |
+| 1 | Ideas, Research Agent: "Review this idea" | none | 7,410 / 1,055 / 84 | 21.1 s |
+| 2 | Same thread: "Draft a follow-up idea" | `draft_idea_from_context` ×1 | 17,835 / 977 / 47 | 19.1 s |
+| 3 | Commodities: "What is driving Brent and WTI this week…" | `inspect_commodity_curve_fundamentals` ×1 | 23,609 / 998 / 72 | 23.9 s |
+| 4 | Commodities: "Draft an idea from this commodities context…" | `draft_idea_from_context` ×1 | 22,361 / 982 / 81 | 21.1 s |
+| 5 | Ideas, Research Operator: "Review this idea" | none (planner asked which "Idea" issuer was meant) | 1,153 / 333 / 0 | 12.2 s |
+
+No refusals and no provider errors. Both drafts filled the strict schema and passed registry validation; accepting run 2's proposal created one draft idea and rejecting run 4's created nothing. Runs 1 and 3 did not draft; runs 2 and 4 drafted once each.
+
+**Result.** The draft-only-on-request, validation, confirmation and cross-context behaviour is accepted. The expectation that "Review this idea" calls `review_idea` and `explain_criterion_state` is not met: with `tool_choice: auto` the model answered from the Ideas context, which already carries what those tools return, and the Operator planner still does not route to Ideas.
+
+**Decision (2026-11-24).** No harness change on this branch. Gamma remains the authority for tool exposure, validation, approval and audit state; the review was grounded in Gamma-computed facts, which is what decision 1 of I5 requires. Making the review path call the read-only tools is left to the owner: either accept context-grounded reviews, or restrict the first turn of an explicit Ideas review to the two read-only tools (`allowed_tools`, required), or have Gamma run `review_idea` itself as a default plan tool. Any of these needs one confirming live run; the sixth allowed run was kept for it. Details: the spec's [I5 live acceptance](./idea_workspace_spec.md#i5-live-acceptance-2026-11-24).
 
 ### Official guidance reviewed 2026-11-23 — Ideas in Copilot (Workstream 12, I5)
 

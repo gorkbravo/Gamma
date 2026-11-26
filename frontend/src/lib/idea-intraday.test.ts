@@ -66,6 +66,12 @@ describe("idea intraday helpers", () => {
     expect(cadenceText(INTRADAY_VIEW)).toBe("Every 5 min while a leg's market is open, every hour while all are closed");
     expect(shouldPollIntraday(INTRADAY_VIEW)).toBe(true);
     expect(shouldPollIntraday({ ...INTRADAY_VIEW, status: "idle" })).toBe(false);
+    // TWS desconectado en la sesión de hoy: se sigue releyendo para ver el hueco y la reconexión.
+    const sessionDay = new Date(`${INTRADAY_VIEW.session}T16:00:00Z`);
+    const disconnected = { ...INTRADAY_VIEW, status: "idle" as const, tws_connected: false };
+    expect(shouldPollIntraday(disconnected, sessionDay)).toBe(true);
+    expect(shouldPollIntraday(disconnected, new Date(`2026-11-11T16:00:00Z`))).toBe(false);
+    expect(shouldPollIntraday({ ...disconnected, tws_connected: true }, sessionDay)).toBe(false);
     expect(markFieldText("close")).toBe("Prior close");
     expect(markFieldText("delayedLast")).toBe("Last");
     expect(formatMark(1234.5)).toBe("1,234.50");

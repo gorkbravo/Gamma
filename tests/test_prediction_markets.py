@@ -31,6 +31,38 @@ from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAda
 from src.services.prediction_research_store import PREDICTION_WATCHLIST_LIMIT, PredictionResearchStore
 
 
+def test_polymarket_probability_follows_the_venue_display_rule(tmp_path):
+    """Seen live on 2026-11-24: a single trade at 0.341 headlined a market whose book was 0.09/0.139."""
+
+    def raw(market_id: str, bid: float, ask: float, last: float) -> dict:
+        return {
+            "id": market_id,
+            "question": f"Market {market_id}?",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": f'["{(bid + ask) / 2:.4f}", "{1 - (bid + ask) / 2:.4f}"]',
+            "clobTokenIds": f'["{market_id}-yes", "{market_id}-no"]',
+            "active": True,
+            "closed": False,
+            "bestBid": bid,
+            "bestAsk": ask,
+            "spread": round(ask - bid, 4),
+            "lastTradePrice": last,
+            "endDate": "2026-12-31T00:00:00Z",
+        }
+
+    def fake_fetch(url: str, params: dict | None = None):
+        # Libro estrecho con una operacion suelta lejos de el, y libro ancho (mas de 0,10).
+        return [raw("6994526", 0.09, 0.139, 0.341), raw("777", 0.20, 0.45, 0.30)]
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    markets = {market.market_id: market for market in adapter.list_markets(status="open", limit=10)}
+    # Diferencial de 0,049: el punto medio del libro, no la operacion suelta.
+    assert markets["polymarket:6994526"].current_probability == pytest.approx(0.1145)
+    # Diferencial de 0,25: Polymarket muestra el ultimo precio negociado.
+    assert markets["polymarket:777"].current_probability == pytest.approx(0.30)
+    assert "midpoint" in markets["polymarket:777"].transformation_note
+
+
 def test_polymarket_adapter_normalizes_and_caches_screener_results(tmp_path):
     calls: defaultdict[str, int] = defaultdict(int)
 
