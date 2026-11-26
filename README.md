@@ -858,7 +858,7 @@ $env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-AISstream is treated as partial live AIS only. Gamma samples configured chokepoint bounding boxes, keeps the key server-side, and does not infer cargo, risk, sanctions, routing, or operational labels from the live stream.
+AISstream is treated as partial live AIS only. Gamma samples configured chokepoint bounding boxes, keeps the key server-side, and does not infer cargo, risk, sanctions, routing, or operational labels from the live stream. The live relay `/maritime/live/ws` requires the same session token as the HTTP API (browsers send it as the WebSocket subprotocol `gamma.session.token.<base64url>`, other clients as the `X-Gamma-Session` header) and rejects browser origins other than the Vite and Tauri origins.
 
 Frontend:
 

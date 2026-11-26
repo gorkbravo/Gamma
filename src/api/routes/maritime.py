@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 
+from src.api.session_auth import websocket_subprotocol
 from src.api.schemas.maritime import (
     MaritimeTrackResponseModel,
     MaritimeTrackSnippetModel,
@@ -54,7 +55,9 @@ def maritime_vessel_track(
 
 @router.websocket("/maritime/live/ws")
 async def maritime_live_ws(websocket: WebSocket) -> None:
-    await websocket.accept()
+    # El token y el origen ya los valida GammaWebSocketSessionMiddleware; aquí solo se devuelve
+    # el subprotocolo de sesión que ofreció el navegador, o este cerraría la conexión.
+    await websocket.accept(subprotocol=websocket_subprotocol(websocket.scope))
     api_key = (os.getenv("AISSTREAM_API_KEY", "") or "").strip()
     if not api_key:
         await websocket.send_json(

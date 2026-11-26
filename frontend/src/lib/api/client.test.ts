@@ -1,6 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { API_BASE, getBlob, getJson, postJson } from "./client";
+import { API_BASE, SESSION_WS_SUBPROTOCOL, getBlob, getJson, postJson, sessionWebSocketProtocols } from "./client";
+
+describe("sessionWebSocketProtocols", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("offers the session subprotocol and the token as base64url", () => {
+    // Debe coincidir con la decodificación de src/api/session_auth.py.
+    expect(sessionWebSocketProtocols("expected-session")).toEqual([
+      SESSION_WS_SUBPROTOCOL,
+      "gamma.session.token.ZXhwZWN0ZWQtc2Vzc2lvbg"
+    ]);
+  });
+
+  it("produces a valid subprotocol token for any token text", () => {
+    const [, tokenProtocol] = sessionWebSocketProtocols("<dev-only token> ñ/+=");
+    expect(tokenProtocol).toMatch(/^gamma\.session\.token\.[A-Za-z0-9_-]+$/);
+    const encoded = tokenProtocol.slice("gamma.session.token.".length).replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(encoded + "=".repeat((4 - (encoded.length % 4)) % 4)), (c) => c.charCodeAt(0));
+    expect(new TextDecoder().decode(bytes)).toBe("<dev-only token> ñ/+=");
+  });
+
+  it("uses the runtime token injected by the desktop shell", () => {
+    // El entorno de tests es node: se simula el window de la WebView de Tauri.
+    vi.stubGlobal("window", { __GAMMA_SESSION_TOKEN__: "abc123" });
+    expect(sessionWebSocketProtocols()).toEqual([SESSION_WS_SUBPROTOCOL, "gamma.session.token.YWJjMTIz"]);
+  });
+});
 
 describe("api client errors", () => {
   afterEach(() => {
