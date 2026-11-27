@@ -2,7 +2,22 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-25
+Last updated: 2026-11-27
+
+### Official guidance reviewed 2026-11-27 — provider storage default and Research Agent authority
+
+Fetched directly (no Developer Docs connector in this session): [conversation state](https://developers.openai.com/api/docs/guides/conversation-state), [Responses create reference](https://developers.openai.com/api/docs/api-reference/responses/create), [your data](https://developers.openai.com/api/docs/guides/your-data) and [reasoning](https://developers.openai.com/api/docs/guides/reasoning). Review date: **2026-11-27**. Reason: an app-wide map of the code against the docs found that this plan said Gamma runs with provider storage disabled by default while the code enables it, and that the Research Agent's real tools exceed the role described here.
+
+- `store` defaults to `true` when omitted. Stored response objects are kept for 30 days by default; abuse-monitoring logs are kept for up to 30 days whatever `store` says.
+- Without storage, a continuation passes the previous output items back as input. Reasoning items carry `encrypted_content` by default, so a stateless replay can keep them within one model family.
+- Zero Data Retention projects always treat `store` as `false`.
+
+**Decision (owner, 2026-11-27).**
+
+1. Provider storage stays enabled by default (`configured_provider_storage` in `src/application/copilot_model_policy.py`; `GAMMA_COPILOT_STORE_RESPONSES=true` in `.env.example`), matching the API default and enabling `previous_response_id` continuation. Gamma-local session, working-analysis, approval and recovery records remain authoritative, and Copilot keeps working with storage disabled (`GAMMA_COPILOT_STORE_RESPONSES=false` or `GAMMA_COPILOT_PROVIDER_STORAGE=disabled`). Script runs always send `store=false`. This corrects the earlier statement that Gamma runs with storage disabled by default.
+2. The Research Agent keeps its current tools, and this plan now describes them. The Agent receives the strict tools registered for the selected domain (`copilot_service.py` `generate_research_card`, `_execute_tool`): read-only `get_*`/`inspect_*` tools, that domain's `run_*` analyses (which may fetch provider data the tab has not loaded), news items, Ideas review tools, and `draft_idea_from_context`, whose draft applies only after the user accepts it. It does not plan, resolve new entities by name, create or materialize working analyses (those attach only on Operator paths), draft or run Scripts, propose DCF updates, or apply any change. The role definition, the capability table and completion item 3 below were updated to match.
+
+No orchestration, model, budget or permission change: Gamma's server still owns tool exposure, validation, approvals and persistence.
 
 ### Official guidance reviewed 2026-11-25 — Script runtime completion (GUA-20261124-10)
 
@@ -71,7 +86,7 @@ Fetched the current official [reasoning guide](https://developers.openai.com/api
 - `max_output_tokens` is an upper bound on generated tokens and covers reasoning, visible output and formatting tokens. Reasoning tokens are billed as output and reported in `output_tokens_details.reasoning_tokens`.
 - Hitting the bound returns `status: "incomplete"` with `incomplete_details.reason: "max_output_tokens"` (other reasons: `content_filter`, `max_messages`, `steered`). The response may carry partial `output_text`, or none when the budget went to reasoning. The reasoning guide still recommends reserving at least 25,000 tokens for reasoning and output.
 - Structured Outputs warns that an incomplete response may not match the JSON schema and should be handled separately from a parse failure.
-- No endpoint resumes an incomplete response in place. Continuation is a new request: chained with `previous_response_id` when the response was stored, or by replaying the full input statelessly. Gamma runs with provider storage disabled by default.
+- No endpoint resumes an incomplete response in place. Continuation is a new request: chained with `previous_response_id` when the response was stored, or by replaying the full input statelessly. Gamma runs with provider storage disabled by default. _(Corrected 2026-11-27: the code default is storage enabled, and the owner kept it; see the 2026-11-27 entry.)_
 
 **Defect.** A five-context, four-part Research Agent synthesis stopped at the fixed 1,400-token cap (1,422 output tokens, 114 reasoning) after 49 s. It returned an empty `incomplete` card with no Continue control. The Commodities evidence held only the selected WTI curve, although the workspace payload already carried a 12-node Brent curve and Brent was a Strategy Lab leg.
 
@@ -340,7 +355,7 @@ Copilot should develop into two related roles. They are not separate products an
 
 ### 1. Research Agent
 
-The Research Agent is the context-bounded interpretation role. It helps form, structure, and challenge a thesis from the context the user supplied or selected. It identifies supporting evidence, counter-evidence, missing data, and outputs an opinion, explanation, thesis, memo, or report without operating the app on the user's behalf.
+The Research Agent is the context-bounded interpretation role. It helps form, structure, and challenge a thesis from the context the user supplied or selected. It identifies supporting evidence, counter-evidence, missing data, and outputs an opinion, explanation, thesis, memo, or report without operating the app on the user's behalf. It may call the read-only tools registered for the selected domain, including that domain's `run_*` analyses, and may draft an idea that applies only after the user accepts it. It does not plan, resolve new entities by name, create working analyses, draft or run Scripts, or apply changes (owner decision, 2026-11-27).
 
 Examples:
 
@@ -399,11 +414,12 @@ The two roles are differentiated by authority, not by how verbose or capable the
 |---|---|---|
 | Interpret attached/current Gamma context | Yes | Yes |
 | Produce analysis, opinions, theses, and reports | Yes | Yes |
-| Acquire an entity that is not loaded | No; disclose the missing context and offer Operator | Yes, through entity-addressable Gamma tools |
-| Run DCF, risk, portfolio, options, or strategy workflows | No | Yes |
+| Acquire an entity that is not loaded | Not through entity resolution or planning; disclose the missing context and offer Operator. The selected domain's read-only tools may still fetch provider data the tab has not loaded, such as a macro series or a ticker named in an Equity Research prompt | Yes, through entity-addressable Gamma tools |
+| Run DCF, risk, portfolio, options, or strategy workflows | Only the read-only `run_*` analyses registered for the selected domain, on demand; no working analyses, DCF proposals or Script | Yes |
 | Set temporary/session-scoped analytical inputs | No | Yes, automatically and visibly |
-| Adapt the plan after observing tool output | No | Yes, within budgets and the action registry |
+| Adapt the plan after observing tool output | No plan; at most five tool-using model turns within the selected domain | Yes, within budgets and the action registry |
 | Persist a new artifact explicitly requested by the user | Yes | Yes |
+| Draft a change that applies only after the user accepts it | An idea drafted from context | Ideas, DCF updates and Script revisions |
 | Change existing durable research state | No | Only through the applicable confirmation policy |
 | Trade, rebalance, route orders, mutate accounts/wallets, or execute unrestricted/host code | Never | Never; Operator may use only the isolated Script Workspace contract |
 
@@ -721,7 +737,7 @@ Copilot is complete for the clarified Gamma pass when a user can do all of the f
 
 1. Start, search, rename, archive, restore, and delete a research conversation.
 2. See exactly which Gamma contexts, entities, timeframes, freshness states, and warnings ground the turn.
-3. Use Research Agent to interpret only the attached/current context without silently loading entities, running workflows, or changing app state.
+3. Use Research Agent to interpret the attached/current context, calling only the selected domain's read-only tools and drafting changes the user must accept, without planning, resolving new entities, creating working analyses, using Script, or changing app state.
 4. Ask Research Operator a goal such as “What is the fair value of LMT?” when the entity is not loaded and have it resolve the entity, create an ephemeral working analysis, run the required app-native workflows, adapt to results, and answer.
 5. Ask Research Operator to compose a hypothetical portfolio, run a specified risk scenario, run a DCF/reverse valuation, or invoke another supported tab-owned research workflow without manually pre-staging every tab.
 6. Inspect the plan, temporary assumptions, parameters, tool calls, progress, results, warnings, and stopping reason; stop the run safely when desired.
@@ -1626,7 +1642,7 @@ Future agents should update this section.
 | Desired Operator harness | Closed-loop model-tool-model execution with strict server-owned authority, budgets, state, and stopping rules. | Deterministic plans remain useful fallbacks/primitives, but cannot satisfy the clarified adaptive Operator end state alone. |
 | UI control vs backend tools | Backend tools are authoritative; UI navigation is convenience only. | This preserves auditability and avoids fragile DOM automation. |
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
-| Copilot roles | Research Agent plus Research Operator, differentiated by authority. | Agent interprets attached context without operating Gamma; Operator acquires inputs and runs app-native research workflows. Authority changes are visible, never silent. |
+| Copilot roles | Research Agent plus Research Operator, differentiated by authority. | Agent interprets the selected context with that domain's read-only tools and drafts the user must accept, without planning or operating Gamma; Operator acquires inputs and runs app-native research workflows. Authority changes are visible, never silent. |
 | Working analysis | Operator may create and modify explicit session-scoped ephemeral state automatically. | Hypothetical portfolios, DCFs, scenarios, assumptions, and intermediate outputs must not be confused with durable saved objects. |
 | Research Script Workspace | Complete as a narrow Strategy Lab mode behind a provider-neutral isolated runtime; mock and network-disabled Code Interpreter paths passed the exact-source/hash and retained-output gates. | Operator may draft and explicitly run, but has no unrestricted code authority. Canonical post-materialization edits are user-controlled and later Operator changes are staged. See `research_script_workspace_plan.md`. |
 | Local state changes | Allowed only for research state and confirmation-required when an existing durable object will be changed. | Approval pauses and resumes the same run. Never permit market/account/wallet execution. |
