@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
+from src.utils.atomic_io import atomic_write_text
 
 
 class CacheService:
@@ -83,9 +84,9 @@ class CacheService:
         meta_path = self._meta_path(key)
         df = series.to_frame(name="close")
         df.index.name = "date"
-        df.to_csv(data_path)
+        atomic_write_text(data_path, df.to_csv())
         meta = {"timestamp": datetime.utcnow().isoformat()}
-        meta_path.write_text(json.dumps(meta))
+        atomic_write_text(meta_path, json.dumps(meta))
 
     def get_frame(self, key: str) -> Optional[pd.DataFrame]:
         data_path = self._data_path(key)
@@ -107,9 +108,9 @@ class CacheService:
         meta_path = self._meta_path(key)
         df = frame.copy()
         df.index.name = "date"
-        df.to_csv(data_path)
+        atomic_write_text(data_path, df.to_csv())
         meta = {"timestamp": datetime.utcnow().isoformat()}
-        meta_path.write_text(json.dumps(meta))
+        atomic_write_text(meta_path, json.dumps(meta))
 
     def get_value(self, key: str) -> Optional[float]:
         value_path = self._value_path(key)
@@ -128,7 +129,7 @@ class CacheService:
     def set_value(self, key: str, value: float) -> None:
         value_path = self._value_path(key)
         meta = {"timestamp": datetime.utcnow().isoformat(), "value": float(value)}
-        value_path.write_text(json.dumps(meta))
+        atomic_write_text(value_path, json.dumps(meta))
 
     def get_json_entry(self, key: str, *, max_age: timedelta | None = None) -> Optional[dict[str, Any]]:
         json_path = self._json_path(key)
@@ -153,7 +154,7 @@ class CacheService:
     def set_json(self, key: str, value: Any) -> None:
         json_path = self._json_path(key)
         payload = {"timestamp": datetime.utcnow().isoformat(), "value": value}
-        json_path.write_text(json.dumps(payload))
+        atomic_write_text(json_path, json.dumps(payload))
 
     @staticmethod
     def make_key(*parts: str) -> str:

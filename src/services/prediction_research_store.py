@@ -25,6 +25,7 @@ from src.models.prediction_markets import (
     PredictionWatchlistEntry,
 )
 from src.utils.time import now_utc
+from src.utils.atomic_io import atomic_write_text
 
 PREDICTION_WATCHLIST_LIMIT = 60
 PREDICTION_COMPARISON_SET_LIMIT = 24
@@ -270,7 +271,8 @@ class PredictionResearchStore:
 
     def _write_watchlist_entry(self, entry: PredictionWatchlistEntry) -> None:
         path = self.watchlist_dir / f"{_safe_id(entry.id)}.json"
-        path.write_text(
+        atomic_write_text(
+            path,
             json.dumps(
                 {
                     "schema_version": PREDICTION_RESEARCH_SCHEMA_VERSION,
@@ -291,7 +293,8 @@ class PredictionResearchStore:
 
     def _write_comparison_set(self, record: PredictionComparisonSet) -> None:
         path = self.comparison_dir / f"{_safe_id(record.id)}.json"
-        path.write_text(
+        atomic_write_text(
+            path,
             json.dumps(
                 {
                     "schema_version": PREDICTION_RESEARCH_SCHEMA_VERSION,
