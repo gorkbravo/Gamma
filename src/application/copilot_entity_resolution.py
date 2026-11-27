@@ -77,6 +77,8 @@ _DOMAIN_NON_COMPANY_WORDS = {
     "october", "november", "december",
     # Pestañas y venues de Gamma: "from Commodities" no nombra una empresa (verificación 2026-10-27).
     "commodities", "copilot", "gamma", "kalshi", "operator", "polymarket", "sealanes", "sitrep",
+    # "Review this idea" o "from Ideas" tampoco: la búsqueda SEC devolvía emisores llamados "Idea" (GUA-20261124-9).
+    "idea", "ideas",
 }
 # Fin de frase o de cláusula: la mayúscula que sigue es tipográfica, no un nombre propio.
 _SENTENCE_BREAK_CHARS = ".!?;:\n"
@@ -122,6 +124,8 @@ _QUERY_STOPWORDS = {
     "fundamental",
     "fundamentals",
     "give",
+    "idea",
+    "ideas",
     "is",
     "me",
     "of",

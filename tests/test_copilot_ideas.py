@@ -175,3 +175,89 @@ def test_the_draft_tool_refuses_a_proposal_the_registry_rejects(demo):
     }, bundle)
     assert "error" in execution.output and "needs" in execution.output["error"].lower()
     assert service.store.list_mutations() == [] or all(item.domain != "ideas" for item in service.store.list_mutations())
+
+
+# --- GUA-20261124-9: el Research Operator llega a Ideas -------------------------------------
+# En vivo (2026-11-24), "Review this idea" con el Operator buscó "idea" en la SEC y pidió elegir
+# entre emisores llamados "Idea" en lugar de revisar la idea abierta.
+
+
+def _idea_issuer_search(queries):
+    """Búsqueda SEC simulada que, como la real, devuelve emisores con "Idea" en el nombre."""
+    from src.models.fundamentals import FundamentalsSearchResult
+
+    def search(query, *args, **kwargs):
+        queries.append(str(query))
+        issuers = (("IACO", "Idea Acquisition Corp", "0000000001"), ("IDTL", "Idea Tech Ltd", "0000000002"))
+        return [FundamentalsSearchResult(ticker=t, name=n, cik=c) for t, n, c in issuers if "idea" in str(query).lower()]
+
+    return search
+
+
+def _operator(prompt, context, synthesis=None):
+    from src.models.copilot import CopilotResearchCardRequest
+
+    return CopilotResearchCardRequest(
+        domain="synthesis" if synthesis is not None else "ideas", prompt=prompt, role="research_operator",
+        context=context, synthesis=synthesis,
+    )
+
+
+def test_the_operator_reviews_the_open_idea_instead_of_searching_for_an_issuer(demo):
+    from src.models.copilot import CopilotRequestContext
+
+    idea_id = _idea(demo)
+    service = demo.runtime.copilot_service
+    queries: list[str] = []
+    service.fundamentals_service.search_companies = _idea_issuer_search(queries)
+    request = _operator("Review this idea", CopilotRequestContext(current_tab="ideas", workspace_mode="research", idea_id=idea_id))
+    plan = service.plan_research_operator(request)
+    assert plan.intent != "entity_disambiguation"
+    assert [(step.tool_id, step.domain) for step in plan.steps] == [(REVIEW_TOOL, "ideas")]
+    assert queries == []
+    result = service.execute_research_operator_plan(request)
+    assert result.status == "ready", (result.message, result.warnings)
+    assert [trace.tool_name for trace in result.tool_traces] == [REVIEW_TOOL]
+    assert {"ideas.idea", "ideas.tracking"} <= {source.source_id for source in result.sources}
+
+
+def test_the_operator_adds_the_selected_idea_to_a_copilot_tab_plan(demo):
+    from src.models.copilot import CopilotRequestContext, CopilotSynthesisRequest, CopilotSynthesisScope
+
+    idea_id = _idea(demo)
+    service = demo.runtime.copilot_service
+    queries: list[str] = []
+    service.fundamentals_service.search_companies = _idea_issuer_search(queries)
+    synthesis = CopilotSynthesisRequest(active_tab="copilot", included_scopes=[
+        CopilotSynthesisScope(domain="ideas", label="Idea", context=CopilotRequestContext(current_tab="ideas", idea_id=idea_id)),
+        CopilotSynthesisScope(domain="commodities", label="Commodities", context=CopilotRequestContext(current_tab="commodities")),
+    ])
+    for prompt in ("Review this idea", "Review my trade idea against the oil curve"):
+        request = _operator(prompt, CopilotRequestContext(current_tab="copilot", workspace_mode="research"), synthesis)
+        plan = service.plan_research_operator(request)
+        # La idea va la primera: el presupuesto de dominios recorta por el final.
+        assert (plan.steps[0].tool_id, plan.steps[0].domain) == (REVIEW_TOOL, "ideas"), prompt
+    assert queries == []
+    result = service.execute_research_operator_plan(request)
+    review = next(trace for trace in result.tool_traces if trace.tool_name == REVIEW_TOOL)
+    assert "ideas.idea" in review.source_ids and "ideas.tracking" in review.source_ids
+
+
+def test_a_prompt_that_does_not_refer_to_the_open_idea_keeps_its_company(demo):
+    from src.application.copilot_entity_resolution import _company_queries
+    from src.models.copilot import CopilotRequestContext
+
+    idea_id = _idea(demo)
+    service = demo.runtime.copilot_service
+    queries: list[str] = []
+    service.fundamentals_service.search_companies = _idea_issuer_search(queries)
+    # "A new idea on Nvidia" no es la idea abierta: el emisor se sigue resolviendo, sin consultar "idea".
+    service.plan_research_operator(_operator(
+        "Draft a new idea on Nvidia", CopilotRequestContext(current_tab="ideas", workspace_mode="research", idea_id=idea_id)))
+    assert any("Nvidia" in query for query in queries)
+    assert not any("idea" in query.lower() for query in queries)
+    assert not any("idea" in query.lower() for query in _company_queries("Compare Ideas from Apple"))
+    # Sin idea seleccionada, "this idea" no salta la resolución ni añade Ideas al plan.
+    plan = service.plan_research_operator(_operator(
+        "Review this idea", CopilotRequestContext(current_tab="macro", workspace_mode="research")))
+    assert all(step.domain != "ideas" for step in plan.steps)

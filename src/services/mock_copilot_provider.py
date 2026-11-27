@@ -262,7 +262,7 @@ class MockCopilotProvider(CopilotProvider):
                     "thesis": f"The case behind “{summary.get('title') or 'this idea'}” holds over the next quarter.",
                     "stance": str(summary.get("stance") or "long"),
                     "legs": [
-                        {"entity_type": str(leg.get("entity_type")), "symbol": str(leg.get("id")), "label": str(leg.get("label") or leg.get("id")), "weight": leg.get("weight")}
+                        {"entity_type": str(leg.get("entity_type")), "symbol": str(leg.get("id")), "weight": leg.get("weight")}
                         for leg in legs
                     ],
                     "criteria": [

@@ -423,14 +423,18 @@ def _leg(raw: Mapping[str, Any]) -> IdeaLeg:
     symbol = str(raw.get("symbol") or "").strip()
     if not SYMBOL_PATTERN.match(symbol):
         raise IdeaValidationError(f"{symbol!r} is not a ticker or a CoinGecko id.")
-    label = " ".join(str(raw.get("label") or "").split())[:80] or symbol.upper()
     weight = raw.get("weight")
     number = None if weight is None else float(weight)
+    # Gamma nombra la pata por su identificador validado (el ticker, o el id de CoinGecko), igual que
+    # /ideas/history; el modelo ya no propone etiqueta. Una etiqueta libre se leía como nota
+    # ("Proposed oil ETF proxy; verify tracking…") en lugar del ticker (GUA-20261124-9). Una propuesta
+    # guardada antes de este cambio puede traer "label": se ignora también al aceptarla.
     if entity_type == "crypto":
         token = symbol.lower()
-        entity = HandoffEntity(entity_type="crypto", label=label, normalized_id=token.upper(), native_id=token, metadata={"coingecko_id": token})
+        entity = HandoffEntity(entity_type="crypto", label=token, normalized_id=token.upper(), native_id=token, metadata={"coingecko_id": token})
     else:
-        entity = HandoffEntity(entity_type=entity_type, label=label, normalized_id=symbol.upper())
+        ticker = symbol.upper()
+        entity = HandoffEntity(entity_type=entity_type, label=ticker, normalized_id=ticker)
     return IdeaLeg(entity=entity, weight=number)
 
 
@@ -533,15 +537,16 @@ def draft_from_dict(payload: Mapping[str, Any]) -> IdeaDraftProposal:
 def draft_tool_schema() -> dict[str, Any]:
     """Strict function schema for ``draft_idea_from_context`` (every field required; nullable where optional)."""
     param = {"type": "object", "properties": {"name": {"type": "string"}, "value": {"type": "string"}}, "required": ["name", "value"], "additionalProperties": False}
+    # Sin "label": Gamma nombra la pata por su identificador (GUA-20261124-9); la guía oficial pide no
+    # hacer rellenar al modelo lo que el código ya sabe.
     leg = {
         "type": "object",
         "properties": {
             "entity_type": {"type": "string", "enum": list(DRAFT_LEG_TYPES)},
-            "symbol": {"type": "string", "description": "Ticker (AAPL, SPY) or CoinGecko id (bitcoin)."},
-            "label": {"type": "string"},
+            "symbol": {"type": "string", "description": "Ticker (AAPL, SPY) or CoinGecko id (bitcoin); Gamma shows the leg by it."},
             "weight": {"type": ["number", "null"], "description": "Signed weight; null for an equal-weight long or short book."},
         },
-        "required": ["entity_type", "symbol", "label", "weight"],
+        "required": ["entity_type", "symbol", "weight"],
         "additionalProperties": False,
     }
     criterion = {

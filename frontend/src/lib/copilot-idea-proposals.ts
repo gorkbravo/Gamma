@@ -24,13 +24,16 @@ export function proposalStatusLabel(status: string): string {
   )[status] ?? status;
 }
 
-/** "Exxon Mobil −1 · US Oil Fund +1" from the proposal's legs. */
+/** "XOM -1 · USO +1" from the proposal's legs. */
 export function proposalLegs(payload: Record<string, unknown>): string {
   const legs = Array.isArray(payload.legs) ? (payload.legs as Array<Record<string, unknown>>) : [];
   return legs
     .map((leg) => {
       const weight = leg.weight == null ? "" : ` ${Number(leg.weight) > 0 ? "+" : ""}${Number(leg.weight)}`;
-      return `${String(leg.label ?? leg.symbol ?? "")}${weight}`;
+      // El ticker validado manda; la etiqueta solo si falta. Una propuesta guardada antes del
+      // 2026-11-25 puede traer una etiqueta libre del modelo ("Proposed oil ETF proxy; …", GUA-20261124-9).
+      const symbol = String(leg.symbol ?? "").trim();
+      return `${symbol || String(leg.label ?? "")}${weight}`;
     })
     .join(" · ");
 }

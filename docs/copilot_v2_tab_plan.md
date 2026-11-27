@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-11-27
+Last updated: 2026-11-28
 
 ### Official guidance reviewed 2026-11-27 — provider storage default and Research Agent authority
 
@@ -18,6 +18,29 @@ Fetched directly (no Developer Docs connector in this session): [conversation st
 2. The Research Agent keeps its current tools, and this plan now describes them. The Agent receives the strict tools registered for the selected domain (`copilot_service.py` `generate_research_card`, `_execute_tool`): read-only `get_*`/`inspect_*` tools, that domain's `run_*` analyses (which may fetch provider data the tab has not loaded), news items, Ideas review tools, and `draft_idea_from_context`, whose draft applies only after the user accepts it. It does not plan, resolve new entities by name, create or materialize working analyses (those attach only on Operator paths), draft or run Scripts, propose DCF updates, or apply any change. The role definition, the capability table and completion item 3 below were updated to match.
 
 No orchestration, model, budget or permission change: Gamma's server still owns tool exposure, validation, approvals and persistence.
+
+### Draft leg names, 2026-11-25 — GUA-20261124-9 (Workstream 12)
+
+**Official guidance re-checked 2026-11-25.** Fetched directly (no Developer Docs connector was available in this session): [function calling](https://developers.openai.com/api/docs/guides/function-calling), HTTP 200. Its function-definition best practices still ask to use code where possible and say: "Don't make the model fill arguments you already know." Strict schemas still need `additionalProperties: false` and every property in `required`.
+
+**Problem.** In live I5 run 4 (2026-11-24) the energy draft's leg was shown with the model's free-text `label` ("Proposed oil ETF proxy; verify tracking…") instead of its ticker. The leg schema asked the model for a label, and Gamma stored it as the leg's name, so a note became a record field shown on the card and, once accepted, across the Ideas tab.
+
+**Decision.** Gamma names a drafted leg by its validated identifier: the ticker in upper case for an equity or ETF, the CoinGecko id for a crypto leg, as `GET /ideas/history` already does. The `draft_idea_from_context` leg schema drops `label` (it now asks for `entity_type`, `symbol` and `weight`, all required, `additionalProperties: false`), and the mock provider follows it. A proposal stored before the change keeps its note in its JSON, but the card shows the symbol and accepting it creates the leg with the ticker, because acceptance rebuilds the legs through the same validation. The user can still rename a leg in the Ideas editor after accepting. No tool exposure, approval, permission or model change; the tool stays `draft_change` and Gamma-validated.
+
+**Verification.** A regression test in `tests/test_idea_copilot.py` (the energy note on a USO leg and a crypto leg become `USO` and `bitcoin`; a stored proposal with the note creates the idea with `USO`; the leg schema has no `label`) and the stored-note case in `CopilotIdeaProposals.test.ts`, both failing without the fix; a headless-Chromium check of the proposal card against the mock backend in light and dark at 1440, 1000 and 390 px (legs "AAPL +1 · MSFT -1" from an idea whose legs are labelled Apple and Microsoft; no page overflow). No live run: the six allowed runs were used, so the schema change has not been exercised by `gpt-6.1-sol`.
+
+### Operator routing to Ideas, 2026-11-25 — GUA-20261124-9 (Workstream 12)
+
+**Official guidance re-checked 2026-11-25.** Fetched directly (no Developer Docs connector was available in this session): [function calling](https://developers.openai.com/api/docs/guides/function-calling), [agents](https://developers.openai.com/api/docs/guides/agents) and [orchestration and handoffs](https://developers.openai.com/api/docs/guides/agents/orchestration), all HTTP 200. Relevant points:
+
+- Function calling: `tool_choice` defaults to `auto` and can be narrowed per turn (`required`, a named function, or `allowed_tools`); keep the functions available at the start of a turn few, and say in the instructions when to use each one. The `tool_choice` details were read from a summary of the page's last section and match the 2026-11-24 reading.
+- Agents and orchestration: start with one agent and split into specialists (handoffs or agents as tools) only when the next branch needs different instructions, tools or policy.
+
+**Problem.** In live I5 run 5 (2026-11-24), "Review this idea" with the Research Operator from the Ideas shelf never reached Ideas: the entity preflight read "idea" as a company name, the SEC search returned issuers named "Idea", and the run stopped at an issuer disambiguation.
+
+**Decision.** Keep routing in Gamma's deterministic planner and one Operator loop: no new agent, no handoff and no `tool_choice` restriction. When an idea is selected (open in the Ideas tab, or an Ideas scope in a Copilot-tab synthesis) and the prompt refers to it ("this idea", "my trade idea", "the current idea"), the entity preflight skips the SEC issuer search, because the idea's legs already fix its instruments (as for baskets and Script workflows), and the domain plan puts `ideas` first with `review_idea`, so the domain budget never drops it. "idea" and "ideas" are Gamma tab words, not company names. A prompt about another idea ("a new idea on Nvidia") still resolves its company. The tools stay read-only and Gamma-authorized; the permission model is unchanged.
+
+**Verification.** Three regression tests in `tests/test_copilot_ideas.py`, each failing without the fix; a headless-Chromium check against a mock backend (the shelf sent `role: research_operator` with the open `idea_id`, the Operator ran `review_idea`, and no SEC search was made); and the sixth allowed live run, on 2026-11-25, on a backend without TWS: Ideas shelf, Research Operator, "Review this idea" → `gpt-6.1-sol`, profile `auto` resolved to `quick`, reasoning `low`, Gamma custom loop; 2,789 input / 450 output / 0 reasoning tokens, 2 provider calls, 26.5 s; one `review_idea` call with the idea's id; sources `ideas.idea` and `ideas.tracking`; no warnings and no SEC search. The card concluded that the idea was too early to assess (no priced session yet), which is what its tracking showed.
 
 ### Official guidance reviewed 2026-11-25 — Script runtime completion (GUA-20261124-10)
 
@@ -49,9 +72,9 @@ Fetched directly (no Developer Docs connector in this session): [Code Interprete
 
 No refusals and no provider errors. Both drafts filled the strict schema and passed registry validation; accepting run 2's proposal created one draft idea and rejecting run 4's created nothing. Runs 1 and 3 did not draft; runs 2 and 4 drafted once each.
 
-**Result.** The draft-only-on-request, validation, confirmation and cross-context behaviour is accepted. The expectation that "Review this idea" calls `review_idea` and `explain_criterion_state` is not met: with `tool_choice: auto` the model answered from the Ideas context, which already carries what those tools return, and the Operator planner still does not route to Ideas.
+**Result.** The draft-only-on-request, validation, confirmation and cross-context behaviour is accepted. The expectation that "Review this idea" calls `review_idea` and `explain_criterion_state` is not met: with `tool_choice: auto` the model answered from the Ideas context, which already carries what those tools return, and the Operator planner still did not route to Ideas (fixed on 2026-11-25, see "Operator routing to Ideas, 2026-11-25").
 
-**Decision (2026-11-24).** No harness change on this branch. Gamma remains the authority for tool exposure, validation, approval and audit state; the review was grounded in Gamma-computed facts, which is what decision 1 of I5 requires. Making the review path call the read-only tools is left to the owner: either accept context-grounded reviews, or restrict the first turn of an explicit Ideas review to the two read-only tools (`allowed_tools`, required), or have Gamma run `review_idea` itself as a default plan tool. Any of these needs one confirming live run; the sixth allowed run was kept for it. Details: the spec's [I5 live acceptance](./idea_workspace_spec.md#i5-live-acceptance-2026-11-24).
+**Decision (owner, 2026-11-25).** Accept context-grounded reviews; no harness change. Gamma remains the authority for tool exposure, validation, approval and audit state, and the run-1 review was grounded in Gamma-computed facts, which is what decision 1 of I5 requires: the Ideas context already carries the criteria evaluations and the tracking summary that `review_idea` and `explain_criterion_state` return. `tool_choice` stays `auto`, and both read-only tools stay exposed for questions the context does not answer. Not adopted: restricting the first turn of an explicit Ideas review to the two tools (`allowed_tools`, required) and having Gamma run `review_idea` itself as a default plan tool. With no harness change there was nothing to confirm live, so the sixth allowed run was not used. Routing the Research Operator to Ideas (GUA-20261124-9 in the [I6 audit](./audits/ideas_persona_audits_2026-11-24.md)) was fixed the same day; see "Operator routing to Ideas, 2026-11-25". Details: the spec's [I5 live acceptance](./idea_workspace_spec.md#i5-live-acceptance-2026-11-24).
 
 ### Official guidance reviewed 2026-11-23 — Ideas in Copilot (Workstream 12, I5)
 
@@ -1648,6 +1671,7 @@ Future agents should update this section.
 | Local state changes | Allowed only for research state and confirmation-required when an existing durable object will be changed. | Approval pauses and resumes the same run. Never permit market/account/wallet execution. |
 | DCF | Important first confirmed-mutation use case, but not the agent's whole identity. | The agent should be domain-broad. |
 | Official OpenAI guidance | Refresh before material agentic work and record the review. | Current framework/model guidance informs the design but does not override Gamma's evals or product boundary. |
+| Ideas review path | Context-grounded reviews accepted (owner, 2026-11-25): `tool_choice` stays `auto`; `review_idea` and `explain_criterion_state` stay exposed for questions the Ideas context does not answer. | Decided after the I5 live acceptance, where "Review this idea" answered from the context without calling the tools. Revisit if live reviews stop being grounded in the context or the context stops carrying the criteria evaluations and tracking summary. |
 
 ## Agent Handoff Notes
 

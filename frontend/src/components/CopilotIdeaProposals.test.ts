@@ -61,7 +61,11 @@ describe("copilot idea proposal helpers", () => {
     expect(RESULT.proposals?.[0].mutation_id).toBe("mutation-1");
     expect(normalizeCopilotResearchCardResult("macro", { status: "ready" }).proposals).toEqual([]);
     expect(proposalsForResult(RESULT, [PROPOSAL, { ...PROPOSAL, mutation_id: "dcf", domain: "fundamentals" }]).map((item) => item.mutation_id)).toEqual(["mutation-1"]);
-    expect(proposalLegs(PROPOSAL.proposed_payload)).toBe("Exxon Mobil -1 · US Oil Fund +1");
+    expect(proposalLegs(PROPOSAL.proposed_payload)).toBe("XOM -1 · USO +1");
+    // GUA-20261124-9: una propuesta guardada con la nota libre del modelo como etiqueta muestra el ticker.
+    const stored = { legs: [{ entity_type: "etf", symbol: "USO", label: "Proposed oil ETF proxy; verify tracking error", weight: 1 }] };
+    expect(proposalLegs(stored)).toBe("USO +1");
+    expect(proposalLegs({ legs: [{ entity_type: "equity", label: "XOM", weight: null }] })).toBe("XOM");
     expect(proposalCriteria(PROPOSAL.proposed_payload)[0]).toEqual({ kind: "Invalidate", label: "XOM close up 8.00% or more over 1 month", rationale: "A rally breaks the lag." });
     expect(proposalStatusLabel("pending")).toBe("Awaiting your decision");
     expect(proposalStatusLabel("applied")).toBe("Draft idea created");
