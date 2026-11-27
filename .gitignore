@@ -34,3 +34,6 @@ output/playwright/
 .superpowers/
 .worktrees/
 /package-lock.json
+
+# Scripts y datos de depuración ad hoc en la raíz (no se versionan).
+/tmp_*
