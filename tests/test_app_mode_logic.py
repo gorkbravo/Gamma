@@ -5,6 +5,11 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
+
+# Estado de escritorio del cliente PySide antiguo (AppDataContext es un QObject): PySide6 es opcional
+# desde 2026-11-27 (extra legacy-desktop, incluido en dev); sin él este módulo se omite.
+pytest.importorskip("PySide6")
 
 from src.application.runtime import build_desktop_runtime, build_runtime
 from src.models.app_mode import AppMode, ResearchScopeType, SyntheticPosition

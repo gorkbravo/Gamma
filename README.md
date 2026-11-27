@@ -2,7 +2,7 @@
 
 For future product expansion work, start with [`roadmap.md`](./roadmap.md). It is the single active source of truth for current product direction, historical phase checkpoints, next hardening work, extension work, and new-domain planning.
 
-Gamma is a read-only market research application built as a FastAPI backend, a Svelte frontend, and a Tauri desktop shell. Tauri is the primary desktop path today, while the older PySide client still exists as an explicit fallback. In practice, the product currently combines two things:
+Gamma is a read-only market research application built as a FastAPI backend, a Svelte frontend, and a Tauri desktop shell. Tauri is the primary desktop path today, while the older PySide client still exists as an explicit fallback; its dependencies (PySide6, matplotlib, plotly, kaleido) are the optional `legacy-desktop` extra (`pip install -e ".[legacy-desktop]"`), which `.[dev]` includes. In practice, the product currently combines two things:
 
 - an existing IBKR-connected portfolio, risk, and implied-volatility workstation
 - a newer research workspace centered on macro, prediction-market, crypto, fundamentals, commodities, and AI-assisted analysis

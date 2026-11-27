@@ -6,6 +6,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+try:
+    import PySide6  # noqa: F401
+    import matplotlib  # noqa: F401
+except ImportError:  # pragma: no cover - depende del entorno
+    # PySide6 y matplotlib son opcionales desde 2026-11-27: solo los usa este cliente antiguo.
+    sys.exit(
+        "The legacy PySide desktop client needs its optional dependencies: "
+        'pip install -e ".[legacy-desktop]"'
+    )
+
 from src.ui.plot_theme import apply_terminal_mpl_theme
 from src.utils.logging_config import setup_logging
 

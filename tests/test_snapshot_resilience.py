@@ -3,7 +3,6 @@ import pytest
 from src.models.portfolio import PortfolioSnapshot
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
-from src.ui.widgets.worker import Worker
 from src.utils.time import now_utc
 
 
@@ -115,6 +114,9 @@ def test_fetch_snapshot_returns_warning_when_ibkr_disconnected():
 
 
 def test_worker_error_includes_type_and_traceback():
+    pytest.importorskip("PySide6")  # cliente PySide opcional (extra legacy-desktop)
+    from src.ui.widgets.worker import Worker
+
     messages: list[str] = []
     worker = Worker(lambda: (_ for _ in ()).throw(AssertionError()))
     worker.signals.error.connect(messages.append)
