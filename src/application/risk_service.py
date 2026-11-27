@@ -198,6 +198,13 @@ class CachedEquityHistory:
     source_provider: str = "market_data_cache"
 
 
+AGGREGATE_ONLY_BOOK_WARNING = (
+    "This research book carries no per-leg data (for example a Script result whose weights change daily): "
+    "risk figures use the aggregate daily return stream only; per-leg contributions, the correlation network "
+    "and the efficient frontier are not computed."
+)
+
+
 @dataclass(frozen=True)
 class RiskDependencyNetworkNode:
     symbol: str
@@ -481,6 +488,7 @@ class RiskService:
             beta_window=request.beta_window,
             base_currency=request.base_currency,
             benchmark_symbol=request.benchmark_symbol,
+            data_provider=data_provider,
         )
         warnings.extend(benchmark.warnings or [])
         if benchmark.beta is None or benchmark.correlation is None:
@@ -982,6 +990,7 @@ class RiskService:
             base_currency=request.base_currency,
             benchmark_symbol=request.benchmark_symbol,
             retained_benchmark_returns=request.research_book_benchmark_returns,
+            data_provider=data_provider,
         )
         warnings.extend(benchmark.warnings or [])
         if benchmark.beta is None or benchmark.correlation is None:
@@ -1122,6 +1131,19 @@ class RiskService:
                 contributions=contributions,
                 warnings=warnings,
             )
+        elif not request.research_book_legs:
+            # Libro sin patas (p. ej. un resultado de Script cuyos pesos cambian cada día): solo hay una
+            # serie agregada, así que frontera, red de dependencias y correlaciones no significarían nada.
+            warnings.append(AGGREGATE_ONLY_BOOK_WARNING)
+            frontier_points = []
+            dependency_network = RiskDependencyNetwork(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                methodology="Unavailable",
+                warnings=["Dependency network unavailable: the research book carries no per-leg data."],
+            )
+            correlation_matrix = pd.DataFrame()
         else:
             frontier_universe_returns = None
             risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
@@ -2728,6 +2750,23 @@ class RiskService:
         lookback_days: int,
         data_provider: AppDataProvider | None = None,
     ) -> pd.Series | None:
+        return self._load_reference_history(symbol, lookback_days, data_provider)
+
+    def _load_reference_history(
+        self,
+        symbol: str,
+        lookback_days: int,
+        data_provider: AppDataProvider | None = None,
+    ) -> pd.Series | None:
+        """Histórico de precios en divisa nativa de un instrumento de referencia (benchmark, frontera).
+
+        Orden: demo → muestras; si no, el proveedor de datos de la ruta (cadena por política de
+        ResearchDataProvider o la lista de PortfolioDataProvider) y, como último recurso, IBKR.
+        """
+        if self.client.mock:
+            series = self.mock_service.load_history(symbol)
+            return None if series is None or series.empty else series.astype(float)
+
         instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
 
         load_instrument_history_result = getattr(data_provider, "load_instrument_history_result", None)
@@ -2741,7 +2780,7 @@ class RiskService:
                 if result.series is not None and not result.series.empty:
                     return result.series.astype(float)
             except Exception:
-                return None
+                pass  # Un fallo del proveedor no corta la cadena: se prueba IBKR más abajo.
 
         history_providers = getattr(data_provider, "history_providers", None)
         for provider in history_providers or []:
@@ -2752,11 +2791,8 @@ class RiskService:
             if result.series is not None and not result.series.empty:
                 return result.series.astype(float)
 
-        if self.client.mock:
-            series = self.mock_service.load_history(symbol)
-        else:
-            contract = contract_for_instrument(instrument)
-            series = self.market_data.fetch_history(contract, lookback_days)
+        contract = contract_for_instrument(instrument)
+        series = self.market_data.fetch_history(contract, lookback_days)
         return None if series is None or series.empty else series.astype(float)
 
     @staticmethod
@@ -2790,10 +2826,13 @@ class RiskService:
         base_currency: str,
         benchmark_symbol: str,
         retained_benchmark_returns: pd.Series | None = None,
+        data_provider: AppDataProvider | None = None,
     ) -> BenchmarkMetricsResult:
         result = BenchmarkMetricsResult()
         if retained_benchmark_returns is None:
-            benchmark_returns, benchmark_warnings = self._load_benchmark_returns(lookback_days, base_currency, benchmark_symbol)
+            benchmark_returns, benchmark_warnings = self._load_benchmark_returns(
+                lookback_days, base_currency, benchmark_symbol, data_provider=data_provider
+            )
         else:
             benchmark_returns = pd.to_numeric(retained_benchmark_returns, errors="coerce").dropna()
             benchmark_returns = benchmark_returns[np.isfinite(benchmark_returns)].sort_index()
@@ -2867,14 +2906,13 @@ class RiskService:
         lookback_days: int,
         base_currency: str,
         symbol: str,
+        data_provider: AppDataProvider | None = None,
     ) -> tuple[pd.Series | None, List[str]]:
         warnings: List[str] = []
         benchmark_instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
-        if self.client.mock:
-            series = self.mock_service.load_history(symbol)
-        else:
-            contract = contract_for_instrument(benchmark_instrument)
-            series = self.market_data.fetch_history(contract, lookback_days)
+        # Misma cadena de proveedores que las posiciones (p. ej. yfinance sin TWS); antes el
+        # benchmark iba solo a IBKR y beta, correlación y alfa desaparecían sin TWS.
+        series = self._load_reference_history(symbol, lookback_days, data_provider)
         if series is None or series.empty:
             warnings.append(f"Benchmark history unavailable for {symbol}")
             return None, warnings

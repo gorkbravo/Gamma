@@ -1,11 +1,12 @@
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PortfolioSnapshot, RiskResult, TabId } from "./api/types";
-import { activeTab, computeRisk, lastError, loading, riskResult, type RiskComputeOptions, type StrategyLabResearchBook } from "./stores/app";
+import type { PortfolioSnapshot, RiskResult, StrategyLabResult, TabId } from "./api/types";
+import { activeTab, computeRisk, lastError, loading, riskResult, researchBookForScriptResult, SCRIPT_RISK_BOOK_NOTE, type RiskComputeOptions, type StrategyLabResearchBook } from "./stores/app";
 import {
   NO_RETAINED_BENCHMARK_LABEL,
   buildStrategyLabRiskRequest,
   createRiskHandoffController,
+  sharedEquityFeedsRisk,
   strategyLabBenchmarkLabel,
   strategyLabBenchmarkPoints,
   strategyLabBookControls,
@@ -402,3 +403,67 @@ function ok(body: unknown) {
     }
   };
 }
+
+
+describe("sharedEquityFeedsRisk", () => {
+  it("lets the equity chip drive Risk only in the Research workspace", () => {
+    // En Portfolio, Risk analiza la cuenta: el chip no debe lanzar un análisis de scope.
+    expect(sharedEquityFeedsRisk("portfolio")).toBe(false);
+    expect(sharedEquityFeedsRisk("research")).toBe(true);
+    expect(sharedEquityFeedsRisk(null)).toBe(true);
+  });
+});
+
+
+describe("Script results in Risk (aggregate only)", () => {
+  function scriptResult(overrides: Record<string, unknown> = {}) {
+    return {
+      name: "Causal weight book",
+      value_kind: "return",
+      benchmark_column: null,
+      benchmark_value_kind: "return",
+      metrics: {},
+      returns_points: [
+        { timestamp: "2026-01-02T00:00:00", value: 0.01 },
+        { timestamp: "2026-01-05T00:00:00", value: -0.005 },
+        { timestamp: "2026-01-06T00:00:00", value: 0.002 }
+      ],
+      equity_curve_points: [],
+      drawdown_points: [],
+      benchmark_points: [],
+      benchmark_equity_curve_points: [],
+      rolling_points: [],
+      monthly_returns: [],
+      annual_returns: [],
+      warnings: ["Temporary Script-derived analysis."],
+      source_provider: "gamma_script_analytics",
+      retrieved_at: "2026-11-27T10:00:00",
+      origin: "script_analytics.open_strategy_lab",
+      transformation_note: null,
+      freshness_label: "fresh",
+      analytical_provenance: { run_id: "run-1", preview_sha256: "abc123", mapping: { rows: [1, 2, 3] } },
+      ...overrides
+    } as unknown as StrategyLabResult;
+  }
+
+  it("builds a legless book whose Risk request carries only the aggregate stream", () => {
+    const book = researchBookForScriptResult(scriptResult());
+    expect(book).not.toBeNull();
+    expect(book!.composition).toBeNull();
+    expect(book!.object.risk_legs).toEqual([]);
+    expect(book!.warnings).toContain(SCRIPT_RISK_BOOK_NOTE);
+    expect(book!.object.provenance).not.toHaveProperty("mapping");
+    const request = buildStrategyLabRiskRequest(book!);
+    expect(request.sourceScope).toBe("research_book");
+    expect(request.researchBookRiskLegs).toEqual([]);
+    expect(request.researchBookReturnPoints).toHaveLength(3);
+    expect(request.researchBookBenchmarkPoints).toBeNull();
+    expect(request.riskSourceOrigin).toBe("script_analytics.open_strategy_lab");
+  });
+
+  it("returns no book for non-Script results or too short series", () => {
+    expect(researchBookForScriptResult(scriptResult({ analytical_provenance: null }))).toBeNull();
+    expect(researchBookForScriptResult(scriptResult({ returns_points: [{ timestamp: "2026-01-02T00:00:00", value: 0.01 }] }))).toBeNull();
+    expect(researchBookForScriptResult(null)).toBeNull();
+  });
+});

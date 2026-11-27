@@ -290,7 +290,8 @@ export interface StrategyLabResearchBook {
   object: GammaResearchObject;
   snapshot: PortfolioSnapshot;
   validation: StrategyLabBookValidation;
-  composition: StrategyLabCompositionResult;
+  /** null para libros que no vienen de Composer (resultados de Script). */
+  composition: StrategyLabCompositionResult | null;
   benchmarkSymbol: string | null;
   createdAt: string;
   warnings: string[];
@@ -2168,7 +2169,28 @@ function buildStrategyLabResearchBook(
   }
   const createdAt = new Date().toISOString();
   const sourceLabel = `Strategy Lab book: ${composition.name}`;
-  const snapshot: PortfolioSnapshot = {
+  const snapshot = researchBookSnapshot(object, composition.name || "Strategy Lab Book", sourceLabel, createdAt);
+  return {
+    bookId: object.object_id,
+    sourceLabel,
+    object,
+    snapshot,
+    validation,
+    composition,
+    benchmarkSymbol,
+    createdAt,
+    warnings: object.warnings
+  };
+}
+
+/** Snapshot sintético de una sola posición que representa el libro como flujo de rentabilidad. */
+function researchBookSnapshot(
+  object: GammaResearchObject,
+  displayName: string,
+  sourceLabel: string,
+  createdAt: string
+): PortfolioSnapshot {
+  return {
     timestamp: createdAt,
     base_currency: "USD",
     account_summary: {
@@ -2190,7 +2212,7 @@ function buildStrategyLabResearchBook(
         base_market_value: 100000,
         fx_rate: 1,
         instrument_id: object.object_id,
-        display_symbol: composition.name || "Strategy Lab Book",
+        display_symbol: displayName,
         exchange: null,
         primary_exchange: null,
         provider: "gamma_strategy_lab",
@@ -2205,16 +2227,79 @@ function buildStrategyLabResearchBook(
     day_pnl_source: "strategy_lab_validated_return_stream",
     warnings: object.warnings
   };
+}
+
+// Un resultado de Script abierto en Backtest / Analyze solo trae el flujo diario agregado y sus
+// pesos cambian cada día: Risk lo analiza sin patas (decisión del propietario, 2026-11-27).
+export const SCRIPT_RISK_BOOK_NOTE =
+  "Script result: its weights change daily, so Risk uses only the aggregate daily return stream; per-leg " +
+  "decomposition, the correlation network and the efficient frontier are not computed.";
+
+const SCRIPT_PROVENANCE_KEYS = ["run_id", "script_id", "revision_id", "source_sha256", "result_id", "preview_sha256", "target"];
+
+/** Libro de Risk para un resultado de Script (o null si no es de Script o no hay serie útil). */
+export function researchBookForScriptResult(result: StrategyLabResult | null): StrategyLabResearchBook | null {
+  const provenance = result?.analytical_provenance;
+  if (!result || !provenance) return null;
+  const returnPoints = (result.returns_points ?? [])
+    .filter((point) => Number.isFinite(point.value))
+    .map((point) => ({ timestamp: point.timestamp, value: point.value }));
+  if (returnPoints.length < 2) return null;
+  const identity = String(provenance.preview_sha256 ?? provenance.run_id ?? result.name).slice(0, 32);
+  const objectId = `script_result:${identity}`;
+  const warnings = Array.from(new Set([...(result.warnings ?? []), SCRIPT_RISK_BOOK_NOTE]));
+  const keptProvenance: Record<string, unknown> = {};
+  for (const key of SCRIPT_PROVENANCE_KEYS) {
+    if (provenance[key] != null) keptProvenance[key] = provenance[key];
+  }
+  const object: GammaResearchObject = {
+    object_id: objectId,
+    object_type: "script_result",
+    display_name: result.name,
+    source_tab: "strategy_lab",
+    source_mode: "script",
+    resolver_capabilities: ["return_leg"],
+    symbols: [],
+    constituents: [],
+    weights: [],
+    available_start: returnPoints[0].timestamp,
+    available_end: returnPoints[returnPoints.length - 1].timestamp,
+    provider_summary: "Gamma Script analytics",
+    provenance: {
+      ...keptProvenance,
+      origin: result.origin,
+      source_provider: result.source_provider,
+      retrieved_at: result.retrieved_at,
+      transformation_note: result.transformation_note
+    },
+    warnings,
+    return_points: returnPoints,
+    risk_legs: []
+  };
+  const createdAt = new Date().toISOString();
+  const sourceLabel = `Strategy Lab Script result: ${result.name}`;
+  const validation: StrategyLabBookValidation = {
+    valid: true,
+    errors: [],
+    warnings: [SCRIPT_RISK_BOOK_NOTE],
+    usable_leg_count: 0,
+    requested_leg_count: 0,
+    aligned_observation_count: returnPoints.length,
+    min_observations: 2,
+    alignment_diagnostics: {},
+    retrieved_at: result.retrieved_at,
+    origin: result.origin
+  };
   return {
-    bookId: object.object_id,
+    bookId: objectId,
     sourceLabel,
     object,
-    snapshot,
+    snapshot: researchBookSnapshot(object, result.name || "Script result", sourceLabel, createdAt),
     validation,
-    composition,
-    benchmarkSymbol,
+    composition: null,
+    benchmarkSymbol: null,
     createdAt,
-    warnings: object.warnings
+    warnings
   };
 }
 
@@ -2373,7 +2458,8 @@ export function acceptResolvedStrategyLabHandoff(id: string) {
 export function restoreStrategyLabResult(result: StrategyLabResult) {
   strategyLabResult.set(result);
   strategyLabComposition.set(null);
-  strategyLabResearchBook.set(null);
+  // Los resultados de Script pueden ir a Risk con métricas agregadas; el resto no trae libro.
+  strategyLabResearchBook.set(researchBookForScriptResult(result));
   researchCompareResult.set(null);
   resetCopilotCard("research");
   lastError.set("");

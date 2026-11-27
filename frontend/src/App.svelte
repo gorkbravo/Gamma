@@ -21,7 +21,7 @@
     type NavigationRouteMatch,
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
-  import { createRiskHandoffController } from "./lib/risk-handoff";
+  import { createRiskHandoffController, sharedEquityFeedsRisk } from "./lib/risk-handoff";
   import {
     buildCopilotSourceHandoff,
     validatedExternalSourceUrl,
@@ -2000,7 +2000,9 @@
     } else if (nextTab === "maritime") {
       await loadMaritimeWorkspace({ mode: maritimeMode });
     } else if (nextTab === "risk") {
-      await applySharedEquityToTab(nextTab);
+      if (sharedEquityFeedsRisk(workspaceMode)) {
+        await applySharedEquityToTab(nextTab);
+      }
     } else if (nextTab === "iv") {
       if (await applySharedEquityToTab(nextTab)) {
         return;
