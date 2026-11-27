@@ -87,8 +87,8 @@ def test_browser_websocket_with_token_subprotocol_is_accepted(client, origin):
         assert websocket.accepted_subprotocol == GAMMA_WS_SUBPROTOCOL
         payload = websocket.receive_json()
 
+    # En demo el relay responde «unavailable» sin abrir AISstream; aquí solo importa el handshake.
     assert payload["status"] == "unavailable"
-    assert "AISSTREAM_API_KEY" in payload["message"]
 
 
 def test_non_browser_websocket_with_session_header_is_accepted(client):

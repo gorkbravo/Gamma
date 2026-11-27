@@ -58,17 +58,12 @@ async def maritime_live_ws(websocket: WebSocket) -> None:
     # El token y el origen ya los valida GammaWebSocketSessionMiddleware; aquí solo se devuelve
     # el subprotocolo de sesión que ofreció el navegador, o este cerraría la conexión.
     await websocket.accept(subprotocol=websocket_subprotocol(websocket.scope))
-    api_key = (os.getenv("AISSTREAM_API_KEY", "") or "").strip()
-    if not api_key:
-        await websocket.send_json(
-            {
-                "type": "status",
-                "status": "unavailable",
-                "message": "AISSTREAM_API_KEY is not configured on the backend.",
-            }
-        )
+    unavailable_reason = _live_relay_unavailable_reason(getattr(websocket.app.state, "runtime", None))
+    if unavailable_reason:
+        await websocket.send_json({"type": "status", "status": "unavailable", "message": unavailable_reason})
         await websocket.close(code=1000)
         return
+    api_key = (os.getenv("AISSTREAM_API_KEY", "") or "").strip()
 
     try:
         import websockets
@@ -212,6 +207,26 @@ async def maritime_live_ws(websocket: WebSocket) -> None:
         if client_recv_task is not None:
             client_recv_task.cancel()
         await close_upstream()
+
+
+# Mismos alias que _build_maritime_provider en src/application/runtime.py.
+_AISSTREAM_PROVIDER_IDS = {"aisstream", "aisstream_live", "live"}
+
+
+def _live_relay_unavailable_reason(runtime: Any) -> str | None:
+    """Motivo por el que el relay AIS en vivo no debe abrirse, o None si puede.
+
+    El relay seguía el resto de Sealanes solo a medias: ignoraba el modo demo y MARITIME_PROVIDER
+    y abría AISstream siempre que hubiera clave (2026-11-27).
+    """
+    if runtime is not None and getattr(runtime, "mock_mode", False):
+        return "The live AIS relay is off in demo mode; Sealanes shows sample vessels instead."
+    provider = (os.getenv("MARITIME_PROVIDER", "sample") or "sample").strip().lower()
+    if provider not in _AISSTREAM_PROVIDER_IDS:
+        return f"MARITIME_PROVIDER={provider} does not enable the live AIS relay; set it to aisstream."
+    if not (os.getenv("AISSTREAM_API_KEY", "") or "").strip():
+        return "AISSTREAM_API_KEY is not configured on the backend."
+    return None
 
 
 def _normalize_live_bounding_box(message: dict[str, Any]) -> list[list[float]] | None:
