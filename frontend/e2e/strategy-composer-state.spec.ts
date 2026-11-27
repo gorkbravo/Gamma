@@ -39,3 +39,14 @@ test("a removed leg stays removed across the round trip", async ({ page }) => {
 
   await expect(page.getByPlaceholder("Ticker / contract id")).toHaveCount(before + 1);
 });
+
+
+// GUA-20260708-8: «Compose Portfolio» era un no-op silencioso hasta pulsar «Validate Book».
+test("Compose Portfolio runs without Validate Book and reports the result", async ({ page }) => {
+  await page.goto("/e2e/strategy-composer-harness.html");
+
+  await page.getByRole("button", { name: "Compose Portfolio" }).click();
+
+  await expect(page.getByTestId("compose-calls")).toHaveText("1");
+  await expect(page.getByRole("status").filter({ hasText: "Composed" }).first()).toBeVisible();
+});

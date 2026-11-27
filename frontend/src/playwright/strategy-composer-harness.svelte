@@ -7,6 +7,12 @@
   // the shell swaps the component out, and anything held in component state is
   // gone unless it lives somewhere the shell keeps (GUA-20260903-9).
   let mounted = true;
+  // Cuenta las composiciones pedidas: «Compose Portfolio» no debe depender de «Validate Book».
+  let composeCalls = 0;
+  async function composeStub() {
+    composeCalls += 1;
+    return regimeStressComposition();
+  }
 
   const mode = (new URLSearchParams(window.location.search).get("mode") ?? "composer") as ComposerMode;
   const composition = mode === "regime_stress" ? regimeStressComposition() : null;
@@ -86,6 +92,7 @@
     {mode}
     strategyComposition={composition}
     onAnalyzeStrategy={async () => null}
+    onComposePortfolioStrategy={composeStub}
     onLoadSaved={async () => []}
     onSaveResearch={async () => null}
     onDeleteSaved={async () => false}
@@ -93,3 +100,4 @@
 {:else}
   <p data-testid="away">Away from Strategy Lab</p>
 {/if}
+<p data-testid="compose-calls">{composeCalls}</p>
