@@ -1842,3 +1842,30 @@ def test_linked_policy_contracts_skip_resolved_and_expired_markets(monkeypatch):
     assert [row.market_id for row in snapshot.rates_policy.linked_markets] == ["polymarket:december-hike"]
     # "increase interest rates by 25 bps" is a tighter outcome, not a neutral one.
     assert snapshot.rates_policy.linked_markets[0].macro_stance == "policy-tighter"
+
+
+# --- FX de IBKR vacío (2026-11-27): la serie se omite con aviso, no en silencio ---
+
+
+class _EmptyFXMacroAdapter:
+    """Como IBKRMacroFXAdapter sin TWS: devuelve una lista vacía y no lanza."""
+
+    def get_series(self, display_base_currency, display_quote_currency, *, start, end, force_refresh=False):
+        return [], NOW
+
+
+def test_empty_ibkr_fx_series_is_skipped_with_a_warning(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    service = MacroService(
+        fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=_FakeEventsAdapter(),
+        fx_adapter=_EmptyFXMacroAdapter(),
+        prediction_market_service=_FakePredictionMarketService(),
+    )
+
+    history, warnings = service.get_series_history_result("fx-eurusd", timeframe="6M")
+
+    assert history is None
+    assert len(warnings) == 1
+    assert "EUR/USD could not be loaded from IBKR" in warnings[0]

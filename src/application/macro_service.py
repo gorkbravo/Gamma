@@ -1644,6 +1644,12 @@ class MacroService:
                 end=end,
                 force_refresh=force_refresh,
             )
+        window_points = [point for point in points if point.timestamp >= start]
+        if not window_points:
+            # El adaptador FX de IBKR devuelve [] sin excepción (sin TWS, sin permisos o sin datos), y la
+            # serie desaparecía sin aviso. Se trata como fallo para que _load_histories la omita con el
+            # aviso por serie, como las de FRED (2026-11-27).
+            raise LookupError(f"IBKR FX history unavailable for {meta['base_currency']}{meta['quote_currency']}")
         return MacroSeriesHistory(
             series_id=series_id,
             title=meta["title"],
@@ -1652,7 +1658,7 @@ class MacroService:
             frequency=meta["frequency"],
             theme=meta["theme"],
             mode_tags=list(meta["mode_tags"]),
-            points=[point for point in points if point.timestamp >= start],
+            points=window_points,
             source_provider="ibkr",
             retrieved_at=retrieved_at,
             origin=f"ibkr.fx_history:{meta['base_currency']}{meta['quote_currency']}",

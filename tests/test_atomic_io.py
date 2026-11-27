@@ -48,3 +48,26 @@ def test_cache_round_trips_series_and_json_through_atomic_writes(tmp_path):
     assert loaded is not None and list(loaded.values) == [1.0, 2.5]
     assert cache.get_json("payload") == {"a": [1, 2]}
     assert not [path for path in (tmp_path / "cache").rglob("*.tmp")]
+
+
+def test_spot_fx_cache_is_limited_to_thirty_minutes(tmp_path):
+    """El «spot» en disco valía el TTL general de 24 h (2026-11-27)."""
+    from datetime import datetime as _dt, timedelta as _td
+
+    from src.services.fx import FXService
+
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    service = FXService(None, cache=cache)
+    key = service._cache_key("EUR", "USD")
+    cache.set_value(key, 1.1)
+
+    assert service.get_rate("EUR", "USD") == pytest.approx(1.1)
+
+    path = cache._value_path(key)
+    meta = json.loads(path.read_text())
+    meta["timestamp"] = (_dt.utcnow() - _td(hours=2)).isoformat()
+    path.write_text(json.dumps(meta))
+    service._memory_cache.clear()
+
+    assert cache.get_value(key) == pytest.approx(1.1)  # el TTL general (24 h) sigue valiendo para otros usos
+    assert service.get_rate("EUR", "USD") is None  # sin TWS y con el spot caducado no hay tipo de cambio

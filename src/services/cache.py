@@ -112,14 +112,15 @@ class CacheService:
         meta = {"timestamp": datetime.utcnow().isoformat()}
         atomic_write_text(meta_path, json.dumps(meta))
 
-    def get_value(self, key: str) -> Optional[float]:
+    def get_value(self, key: str, *, max_age: timedelta | None = None) -> Optional[float]:
         value_path = self._value_path(key)
         if not value_path.exists():
             return None
         try:
             meta = json.loads(value_path.read_text())
             ts = datetime.fromisoformat(meta.get("timestamp"))
-            if datetime.utcnow() - ts > self.ttl:
+            ttl = self.ttl if max_age is None else max_age
+            if datetime.utcnow() - ts > ttl:
                 return None
             value = meta.get("value")
             return float(value) if value is not None else None

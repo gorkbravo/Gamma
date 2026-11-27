@@ -5,7 +5,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -17,6 +17,10 @@ from src.services.throttle import ThrottleQueue
 
 
 logger = logging.getLogger(__name__)
+
+# Antigüedad máxima de un tipo de cambio spot en caché (2026-11-27): antes valía el TTL general de
+# 24 h, así que un «spot» podía tener un día. Los históricos diarios conservan su TTL.
+FX_SPOT_MAX_AGE = timedelta(minutes=30)
 
 _FX_PRIORITY = {
     "EUR": 100,
@@ -357,7 +361,7 @@ class MarketDataService:
             return None
         contract, invert = spec
         key = self.cache.make_key("fx", base_ccy, quote_ccy)
-        cached = self.cache.get_value(key)
+        cached = self.cache.get_value(key, max_age=FX_SPOT_MAX_AGE)
         if cached is not None:
             return cached
         if not self._is_connected():

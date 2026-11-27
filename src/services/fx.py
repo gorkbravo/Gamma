@@ -126,7 +126,9 @@ class FXService:
             if now - ts <= self.ttl:
                 return value
         if self.cache is not None:
-            return self.cache.get_value(key)
+            # El disco comparte clave con MarketDataService; sin max_age valía 24 h y el «spot»
+            # podía tener un día. Se aplica la misma ventana de 30 min que en memoria (2026-11-27).
+            return self.cache.get_value(key, max_age=self.ttl)
         return None
 
     def _store_rate(self, key: str, value: float) -> None:
