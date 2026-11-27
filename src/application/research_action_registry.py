@@ -145,8 +145,16 @@ class ResearchActionRegistry:
         normalized_id = str(definition.tool_id or "").strip().lower()
         if not normalized_id:
             raise ResearchActionRegistryError("Research action tool_id is required.")
-        tokens = set(normalized_id.replace("-", "_").replace(".", "_").split("_"))
-        prohibited = sorted(tokens.intersection(cls.PROHIBITED_ACTION_TERMS))
+        flattened = normalized_id.replace("-", "_").replace(".", "_")
+        tokens = set(flattened.split("_"))
+        # Los términos de una palabra se comparan con cada token; los compuestos ("execute_code",
+        # "arbitrary_code") con la secuencia completa: al trocear por "_" nunca coincidían (2026-11-27).
+        padded = f"_{flattened}_"
+        prohibited = sorted(
+            term
+            for term in cls.PROHIBITED_ACTION_TERMS
+            if (term in tokens if "_" not in term else f"_{term}_" in padded)
+        )
         if prohibited:
             raise ResearchActionRegistryError(
                 f"Execution-capable action family is prohibited in Gamma: {definition.tool_id}"

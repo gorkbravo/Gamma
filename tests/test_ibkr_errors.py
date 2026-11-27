@@ -56,3 +56,40 @@ def test_diagnostics_preserve_raw_request_ids_codes_and_contract_attribution():
     assert "reqId=41 code=200 symbol=LMT" in diagnostics[0]
     assert raw_message in diagnostics[0]
     assert "reqId=42 code=200 symbol=LMT" in diagnostics[1]
+
+
+class _FakeIB:
+    """IB simulado: registra las llamadas a connect y no abre ningún socket."""
+
+    def __init__(self, *, reject_readonly: bool) -> None:
+        self.reject_readonly = reject_readonly
+        self.calls: list[dict] = []
+
+    def connect(self, host, port, clientId=None, timeout=None, **kwargs):
+        self.calls.append(dict(kwargs))
+        if self.reject_readonly and "readonly" in kwargs:
+            raise TypeError("connect() got an unexpected keyword argument 'readonly'")
+        raise ConnectionRefusedError("TWS is not running")
+
+    def isConnected(self):
+        return False
+
+
+def test_connect_never_falls_back_to_a_session_without_readonly():
+    """Antes, un TypeError por `readonly` provocaba una reconexión sin él (2026-11-27)."""
+    client = IBKRClient(host="127.0.0.1", port=7497, client_id=991, mock=True)
+    fake = _FakeIB(reject_readonly=True)
+    client.ib = fake
+
+    assert client._connect_impl() is False
+    assert fake.calls == [{"readonly": True}]
+    assert client._readonly_requested is True
+
+
+def test_connect_always_requests_readonly():
+    client = IBKRClient(host="127.0.0.1", port=7497, client_id=991, mock=True)
+    fake = _FakeIB(reject_readonly=False)
+    client.ib = fake
+
+    assert client._connect_impl() is False
+    assert fake.calls == [{"readonly": True}]

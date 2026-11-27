@@ -1588,3 +1588,51 @@ def _display_value(value: float | None, unit: str) -> str:
 
 def _dt(value: str) -> datetime:
     return datetime.fromisoformat(f"{value}T00:00:00+00:00")
+
+
+# --- Etiqueta del precio de valoración (2026-11-27): el proveedor real, no siempre "ibkr" ---
+
+
+def _valuation_adapter_with(history_source: str, snapshot_price: float | None):
+    from types import SimpleNamespace
+
+    import pandas as _pd
+
+    from src.models.instruments import InstrumentDefaults
+    from src.services.fundamentals_adapters import IbkrValuationAdapter
+
+    idx = _pd.date_range("2026-11-02", periods=5, freq="B")
+    series = _pd.Series([100.0, 101.0, 102.0, 103.0, 104.0], index=idx)
+
+    class _ResearchProvider:
+        client = SimpleNamespace(mock=False)
+        instrument_defaults = InstrumentDefaults(provider="research", sec_type="STK", exchange="SMART", currency="USD")
+
+        def load_instrument_history_result(self, instrument, lookback_days, *, defaults=None, bypass_cache=False):
+            return SimpleNamespace(series=series, source_provider=history_source, origin="test.history", ohlcv=None, warnings=[])
+
+    class _MarketData:
+        def quote_key(self, contract):
+            return "key"
+
+        def fetch_snapshot_quotes(self, contracts):
+            if snapshot_price is None:
+                return {}, []
+            return {"key": SimpleNamespace(price=snapshot_price, delayed=False)}, []
+
+    return IbkrValuationAdapter(research_provider=_ResearchProvider(), market_data=_MarketData())
+
+
+def test_valuation_price_is_labeled_with_the_history_provider_without_tws():
+    context = _valuation_adapter_with("yfinance", snapshot_price=None).get_price_context("AAPL")
+
+    assert context.current_price == 104.0
+    assert context.source_provider == "yfinance"
+    assert "yfinance close" in (context.transformation_note or "")
+
+
+def test_valuation_price_is_labeled_ibkr_when_the_snapshot_is_used():
+    context = _valuation_adapter_with("yfinance", snapshot_price=105.5).get_price_context("AAPL")
+
+    assert context.current_price == 105.5
+    assert context.source_provider == "ibkr"
