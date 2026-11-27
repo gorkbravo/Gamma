@@ -92,6 +92,14 @@ POLYMARKET_MAX_WINDOW_DAYS = 14
 POLYMARKET_SETTLEMENT_EPSILON = 1e-3
 # Polymarket muestra el punto medio del libro mientras el diferencial no supere 0,10.
 POLYMARKET_DISPLAY_SPREAD_MAX = 0.10
+# Antigüedad máxima de la caché por tipo de dato (2026-11-27). Antes todo duraba 24 h, el TTL
+# por defecto del CacheService, y el screener podía mostrar probabilidades de ayer. Lo vivo
+# (cotizaciones, libros, operaciones, eventos) envejece en segundos; lo liquidado no cambia.
+LIVE_QUOTE_TTL = timedelta(seconds=60)
+LIVE_HISTORY_TTL = timedelta(minutes=5)
+REFERENCE_TTL = timedelta(minutes=15)
+SETTLED_LIST_TTL = timedelta(hours=1)
+SETTLED_TTL: timedelta | None = None
 # The gamma `/markets` endpoint caps a page at 100 rows whatever limit is asked
 # for, so a deeper pull has to page (verified 2026-07-27).
 POLYMARKET_PAGE_SIZE = 100
@@ -171,9 +179,11 @@ class BasePredictionMarketAdapter:
         params: dict[str, Any] | None = None,
         *,
         force_refresh: bool = False,
+        max_age: timedelta | None = LIVE_QUOTE_TTL,
     ) -> tuple[Any, datetime]:
         if not force_refresh:
-            cached = self.cache.get_json(cache_key)
+            # max_age=None usa el TTL del CacheService (24 h), solo para datos ya liquidados.
+            cached = self.cache.get_json(cache_key, max_age=max_age)
             if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
                 cached_at = _parse_datetime(cached.get("retrieved_at")) or ensure_utc(now_utc())
                 return cached["payload"], cached_at
@@ -344,6 +354,7 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
                 f"{self._gamma_base}/markets",
                 params,
                 force_refresh=force_refresh,
+                max_age=SETTLED_LIST_TTL,
             )
             page = payload if isinstance(payload, list) else []
             if not page:
@@ -620,6 +631,7 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             cache_key,
             f"{self._clob_base}/prices-history",
             params,
+            max_age=LIVE_HISTORY_TTL,
         )
         history = payload.get("history", []) if isinstance(payload, dict) else []
         return [
@@ -899,7 +911,7 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
 
     def _series_detail_records(self, series_id: str, *, open_only: bool) -> list[PredictionMarketRecord]:
         cache_key = self.cache.make_key("prediction_markets", self.provider, "series", series_id)
-        payload, _ = self._fetch_cached_json(cache_key, f"{self._gamma_base}/series/{series_id}")
+        payload, _ = self._fetch_cached_json(cache_key, f"{self._gamma_base}/series/{series_id}", max_age=REFERENCE_TTL)
         if not isinstance(payload, dict):
             return []
         series_stub = {"id": payload.get("id") or series_id, "title": payload.get("title")}
@@ -1200,6 +1212,7 @@ class KalshiAdapter(BasePredictionMarketAdapter):
                 "start_ts": start_time,
                 "end_ts": end_time,
             },
+            max_age=SETTLED_TTL if historical else LIVE_HISTORY_TTL,
         )
         candles = payload.get("candlesticks", []) if isinstance(payload, dict) else []
         origin = "kalshi.historical_candlesticks" if historical else "kalshi.candlesticks"
@@ -1451,6 +1464,7 @@ class KalshiAdapter(BasePredictionMarketAdapter):
                 f"{self._trade_base}/historical/markets",
                 params,
                 force_refresh=force_refresh,
+                max_age=SETTLED_LIST_TTL,
             )
             retrieved_at = max(retrieved_at, response_time)
             page_rows = payload.get("markets", []) if isinstance(payload, dict) else []
@@ -1471,7 +1485,9 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         for scope, url in attempts:
             cache_key = self.cache.make_key("prediction_markets", self.provider, "detail", scope, provider_market_id)
             try:
-                payload, retrieved_at = self._fetch_cached_json(cache_key, url)
+                payload, retrieved_at = self._fetch_cached_json(
+                    cache_key, url, max_age=SETTLED_TTL if scope == "historical" else LIVE_QUOTE_TTL
+                )
             except Exception as exc:
                 last_error = exc
                 continue
@@ -1487,6 +1503,7 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         payload, _ = self._fetch_cached_json(
             cache_key,
             f"{self._trade_base}/historical/cutoff",
+            max_age=SETTLED_LIST_TTL,
         )
         if not isinstance(payload, dict):
             return None
@@ -1571,13 +1588,23 @@ class KalshiAdapter(BasePredictionMarketAdapter):
     ) -> PredictionMarketRecord:
         event = (event_payload or {}).get("event", {}) if event_payload else {}
         series_ticker = str(event.get("series_ticker") or "").strip() or None
-        current_probability = _first_float(
-            raw.get("last_price_dollars"),
-            _midpoint(raw.get("yes_bid_dollars"), raw.get("yes_ask_dollars")),
-            raw.get("yes_bid_dollars"),
-            raw.get("yes_ask_dollars"),
-        )
         resolution_outcome = _resolve_kalshi_outcome(raw.get("result"))
+        # Kalshi no publica regla de probabilidad mostrada (help.kalshi.com y docs.kalshi.com, revisados
+        # el 2026-11-27); Gamma le aplica la de Polymarket para que una operación suelta en un mercado fino
+        # no sea el titular: punto medio del libro Yes salvo diferencial > 0,10, entonces el último precio.
+        current_probability = _polymarket_probability_proxy(
+            raw.get("last_price_dollars"),
+            [],
+            resolution_outcome=resolution_outcome,
+            best_bid=raw.get("yes_bid_dollars"),
+            best_ask=raw.get("yes_ask_dollars"),
+        )
+        if current_probability is None and resolution_outcome is None:
+            current_probability = _first_float(
+                _midpoint(raw.get("yes_bid_dollars"), raw.get("yes_ask_dollars")),
+                raw.get("yes_bid_dollars"),
+                raw.get("yes_ask_dollars"),
+            )
         resolved_probability = 1.0 if resolution_outcome is True else 0.0 if resolution_outcome is False else None
         return PredictionMarketRecord(
             market_id=f"{self.provider}:{raw.get('ticker')}",
@@ -1644,7 +1671,10 @@ class KalshiAdapter(BasePredictionMarketAdapter):
             source_provider=self.provider,
             retrieved_at=retrieved_at,
             origin=origin,
-            transformation_note="Current probability tracks the normalized Yes side and prefers last_price_dollars before bid/ask fallbacks.",
+            transformation_note=(
+                "Current probability is the Yes order-book midpoint, or last_price_dollars when the spread is wider "
+                "than 0.10 (Gamma applies Polymarket's published display rule; Kalshi publishes none)."
+            ),
         )
 
 

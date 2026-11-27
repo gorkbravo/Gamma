@@ -102,11 +102,11 @@ def test_maritime_api_routes_return_sample_workspace_and_track(tmp_path, monkeyp
         runtime.shutdown()
 
 
-def test_maritime_live_ws_without_key_reports_unavailable(tmp_path, monkeypatch):
-    monkeypatch.setenv("MARITIME_PROVIDER", "sample")
+def _live_ws_first_payload(tmp_path, monkeypatch, *, mock_mode: bool, provider: str) -> dict:
+    monkeypatch.setenv("MARITIME_PROVIDER", provider)
     monkeypatch.setenv("AISSTREAM_API_KEY", "")
     runtime = build_runtime(
-        mock_mode=True,
+        mock_mode=mock_mode,
         cache_dir=tmp_path / "cache",
         history_dir=tmp_path / "data",
         sample_data_dir="sample_data",
@@ -114,13 +114,43 @@ def test_maritime_live_ws_without_key_reports_unavailable(tmp_path, monkeypatch)
     client = TestClient(create_app(runtime))
     try:
         with client.websocket_connect("/maritime/live/ws") as websocket:
-            payload = websocket.receive_json()
-
-        assert payload["type"] == "status"
-        assert payload["status"] == "unavailable"
-        assert "AISSTREAM_API_KEY" in payload["message"]
+            return websocket.receive_json()
     finally:
         runtime.shutdown()
+
+
+def test_maritime_live_ws_without_key_reports_unavailable(tmp_path, monkeypatch):
+    payload = _live_ws_first_payload(tmp_path, monkeypatch, mock_mode=False, provider="aisstream")
+
+    assert payload["type"] == "status"
+    assert payload["status"] == "unavailable"
+    assert "AISSTREAM_API_KEY" in payload["message"]
+
+
+def test_maritime_live_ws_is_off_in_demo_mode(tmp_path, monkeypatch):
+    payload = _live_ws_first_payload(tmp_path, monkeypatch, mock_mode=True, provider="aisstream")
+
+    assert payload["status"] == "unavailable"
+    assert "demo mode" in payload["message"]
+
+
+def test_maritime_live_ws_follows_the_configured_provider(tmp_path, monkeypatch):
+    payload = _live_ws_first_payload(tmp_path, monkeypatch, mock_mode=False, provider="sample")
+
+    assert payload["status"] == "unavailable"
+    assert "MARITIME_PROVIDER=sample" in payload["message"]
+
+
+def test_maritime_workspace_transformation_note_matches_coverage(tmp_path):
+    sample = MaritimeService(provider=SampleMaritimeDataProvider()).get_workspace(mode="live_map")
+    assert "sample maritime records" in sample.transformation_note
+
+    unavailable = MaritimeService(
+        provider=AisstreamMaritimeDataProvider(api_key="", reference_provider=StaticMaritimeReferenceProvider())
+    ).get_workspace(mode="live_map")
+    assert unavailable.coverage.coverage_status == "unavailable"
+    assert "sample" not in unavailable.transformation_note
+    assert "static chokepoint and port reference geography" in unavailable.transformation_note
 
 
 def test_aisstream_provider_without_key_returns_unavailable_reference_snapshot():

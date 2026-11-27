@@ -334,14 +334,11 @@ class IBKRClient:
         self._account_ready_event.clear()
         self._positions_ready_event.clear()
         try:
-            try:
-                self.ib.connect(
-                    self.host, self.port, clientId=self.client_id, timeout=5, readonly=True
-                )
-                self._readonly_requested = True
-            except TypeError:
-                self.ib.connect(self.host, self.port, clientId=self.client_id, timeout=5)
-                self._readonly_requested = False
+            # Siempre en solo lectura. Antes, si ib_insync no aceptaba readonly (TypeError), se
+            # reconectaba sin él; ib_insync>=0.9.86 (requisito del proyecto) lo admite, así que un
+            # TypeError ahora es un fallo de conexión y nunca una sesión con permisos de escritura.
+            self.ib.connect(self.host, self.port, clientId=self.client_id, timeout=5, readonly=True)
+            self._readonly_requested = True
             self._register_events()
             connected = bool(self.ib.isConnected())
             self._set_connected_state(connected)

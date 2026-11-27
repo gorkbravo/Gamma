@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.utils.atomic_io import atomic_write_text
+
 
 class FundamentalsResearchStore:
     def __init__(self, base_dir: str | Path = "data/fundamentals") -> None:
@@ -87,8 +89,7 @@ class FundamentalsResearchStore:
             return None
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
 
     def _safe_key(self, ticker: str) -> str:
         return str(ticker or "").strip().upper().replace("/", "_").replace("\\", "_")

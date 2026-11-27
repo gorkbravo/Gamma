@@ -54,10 +54,7 @@ class MaritimeService:
             source_provider="gamma",
             retrieved_at=_max_datetime(snapshot.retrieved_at, snapshot.coverage.retrieved_at),
             origin="gamma.maritime.workspace",
-            transformation_note=(
-                "Gamma builds chokepoint and trade-flow research summaries from normalized sample maritime records; "
-                "outputs are read-only and coverage-labeled."
-            ),
+            transformation_note=_workspace_transformation_note(snapshot.coverage),
         )
 
     def get_vessel_track(
@@ -279,6 +276,24 @@ def _flow_summary_text(
 def _slug(value: str | None) -> str:
     text = str(value or "unknown").strip().lower()
     return "-".join(part for part in "".join(char if char.isalnum() else "-" for char in text).split("-") if part)
+
+
+def _workspace_transformation_note(coverage) -> str:
+    """Nota de procedencia según lo que de verdad cargó el proveedor.
+
+    Antes decía siempre «sample maritime records», también con AIS en vivo o sin datos.
+    """
+    status = str(getattr(coverage, "coverage_status", "") or "").lower()
+    label = str(getattr(coverage, "provider_label", "") or "the maritime provider")
+    suffix = "; outputs are read-only and coverage-labeled."
+    if status in {"sample", "mock"}:
+        return "Gamma builds chokepoint and trade-flow research summaries from normalized sample maritime records" + suffix
+    if status == "unavailable":
+        return (
+            "No vessel records were loaded; Gamma shows only static chokepoint and port reference geography"
+            + suffix
+        )
+    return f"Gamma builds chokepoint and trade-flow research summaries from normalized {label} records ({status})" + suffix
 
 
 def _max_datetime(*values: datetime | None) -> datetime | None:

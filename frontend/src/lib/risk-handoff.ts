@@ -1,4 +1,4 @@
-import type { ResearchResult, TabId, TimeSeriesPoint } from "./api/types";
+import type { ResearchResult, TabId, TimeSeriesPoint, WorkspaceMode } from "./api/types";
 import type { RiskComputeOptions, StrategyLabResearchBook } from "./stores/app";
 import { buildRiskRequestFromResearch } from "./workspace";
 
@@ -8,6 +8,15 @@ export type RiskHandoffController = {
 };
 
 export const NO_RETAINED_BENCHMARK_LABEL = "No retained benchmark";
+
+/**
+ * El chip de equity solo alimenta Risk en el espacio Research. En Portfolio, Risk analiza la
+ * cuenta: aplicar el chip lanzaba un análisis de scope y lo calculaba bajo la cabecera de la
+ * cuenta (el refresco ya lo comprobaba; abrir la pestaña no).
+ */
+export function sharedEquityFeedsRisk(workspaceMode: WorkspaceMode | null | undefined): boolean {
+  return workspaceMode !== "portfolio";
+}
 
 export function strategyLabBookBenchmarkSymbol(book: StrategyLabResearchBook): string {
   return (book.benchmarkSymbol ?? "").trim().toUpperCase() || "SPY";

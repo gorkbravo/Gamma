@@ -21,6 +21,7 @@ from src.models.sitrep import (
     SitrepFollowUpUpdateRequest,
 )
 from src.utils.time import now_utc
+from src.utils.atomic_io import atomic_write_text
 
 SITREP_FOLLOW_UP_LIMIT = 48
 
@@ -164,7 +165,7 @@ class SitrepFollowUpStore:
 
     def _write_item(self, item: SitrepFollowUp) -> None:
         path = self.items_dir / f"{self._safe_id(item.id)}.json"
-        path.write_text(json.dumps(self._to_json(item), indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(path, json.dumps(self._to_json(item), indent=2, sort_keys=True))
 
     @staticmethod
     def _to_json(item: SitrepFollowUp) -> dict[str, Any]:

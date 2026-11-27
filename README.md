@@ -285,9 +285,11 @@ It provides:
 - annualized volatility and drawdown
 - rolling beta and rolling correlation views
 - Jensen alpha when the base currency is USD and the risk-free series is available
+- benchmark beta, correlation, and alpha from the same provider chain as the positions (Yahoo Finance without TWS), with IBKR as the last resort
 - contribution-to-risk tables and rankings
 - risk coverage diagnostics and excluded assets
 - research-book handoff with idempotent automatic computation when Strategy Lab supplies a valid book
+- Script results opened in Strategy Lab can also go to Risk; because their weights change daily, Risk uses only the aggregate daily return stream and states that per-leg contributions, the correlation network, and the efficient frontier are not computed
 
 Under the hood:
 
@@ -631,6 +633,8 @@ Related-market linking is heuristic:
 
 Wallet and calibration notes:
 
+- the headline probability is the order-book midpoint, or the last trade when the spread is wider than 0.10, for both venues: this is Polymarket's published rule, and Gamma applies it to Kalshi, which publishes none
+- venue responses are cached for 60 seconds (quotes, books, trades, events), 5 minutes (live price history), 15 minutes (series metadata), 1 hour (settled-market lists), and 24 hours (settled history)
 - Polymarket can expose participant-level flow summaries from public data
 - Kalshi public endpoints do not expose wallet identities, so Gamma shows aggregate taker-flow style rows instead
 - participant `current_edge` is current normalized probability minus average paid price for buys, and the inverse for sells
@@ -892,7 +896,7 @@ $env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-AISstream is treated as partial live AIS only. Gamma samples configured chokepoint bounding boxes, keeps the key server-side, and does not infer cargo, risk, sanctions, routing, or operational labels from the live stream. The live relay `/maritime/live/ws` requires the same session token as the HTTP API (browsers send it as the WebSocket subprotocol `gamma.session.token.<base64url>`, other clients as the `X-Gamma-Session` header) and rejects browser origins other than the Vite and Tauri origins.
+AISstream is treated as partial live AIS only. Gamma samples configured chokepoint bounding boxes, keeps the key server-side, and does not infer cargo, risk, sanctions, routing, or operational labels from the live stream. The live relay `/maritime/live/ws` requires the same session token as the HTTP API (browsers send it as the WebSocket subprotocol `gamma.session.token.<base64url>`, other clients as the `X-Gamma-Session` header) and rejects browser origins other than the Vite and Tauri origins. The relay is off in demo mode and when `MARITIME_PROVIDER` is not `aisstream`.
 
 Frontend:
 

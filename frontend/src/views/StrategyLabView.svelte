@@ -1193,6 +1193,18 @@
             </div>
             <div class="builder-actions compact">
               {#if activeStrategyResult?.analytical_provenance}<button type="button" class="btn is-large" on:click={exportScriptAnalysis}>Export analysis JSON</button>{/if}
+              {#if activeStrategyResult?.analytical_provenance && !strategyComposition}
+                <!-- Resultado de Script: Risk usa solo el flujo agregado (sus pesos cambian cada día). -->
+                <button
+                  type="button"
+                  class="btn is-large is-ghost"
+                  on:click={() => onOpenRisk?.()}
+                  disabled={riskHandoffLoading}
+                  title="Aggregate risk only: Script weights change daily, so per-leg decomposition is not computed."
+                >
+                  {riskHandoffLoading ? "Opening…" : "Open In Risk"}
+                </button>
+              {/if}
               <button type="button" class="btn is-large" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
               <AttachToIdea target={ideaAttach.target} disabledReason={ideaAttach.reason} />
             </div>

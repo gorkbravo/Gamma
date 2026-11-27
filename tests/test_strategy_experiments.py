@@ -107,3 +107,26 @@ def test_experiment_rejects_weight_mismatch_or_missing_inputs(tmp_path):
         assert client.post("/research/saved", json={"object_type": "strategy_lab", "title": "Bad", "payload": payload}).status_code == 422
     finally:
         running.shutdown()
+
+
+def test_script_result_book_without_legs_gets_aggregate_risk_only(tmp_path):
+    """Un resultado de Script (pesos diarios) llega a Risk sin patas: solo métricas agregadas (2026-11-27)."""
+    from src.application.risk_service import AGGREGATE_ONLY_BOOK_WARNING
+
+    rt = runtime(tmp_path)
+    try:
+        client = TestClient(create_app(rt))
+        risk = client.post("/risk/compute", json={
+            "snapshot": snapshot(), "source_scope": "research_book",
+            "source_label": "Strategy Lab Script result: weights", "source_object_id": "script_result:abc",
+            "source_origin": "script_analytics.open_strategy_lab",
+            "research_book_return_points": points(), "research_book_legs": [],
+            "benchmark_symbol": "SPY", "lookback_days": 252, "beta_window": 60, "include_monte_carlo": False})
+        assert risk.status_code == 200, risk.text
+        body = risk.json()
+        assert body["source_scope"] == "research_book"
+        assert body["metrics"]["annual_vol"] is not None
+        assert AGGREGATE_ONLY_BOOK_WARNING in body["warnings"]
+        assert body["frontier_points"] == []
+    finally:
+        rt.shutdown()

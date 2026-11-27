@@ -1699,8 +1699,11 @@ class IbkrValuationAdapter:
         warnings: list[str] = list(history_result.warnings)
         retrieved_at = price_points[-1].retrieved_at if price_points else now_utc()
         origin = history_origin
+        # El precio se etiqueta con el proveedor que lo dio de verdad: antes decía siempre "ibkr"
+        # aunque el último cierre viniera de yfinance (2026-11-27).
+        price_source = history_source
         transformation_note = (
-            "Gamma falls back to the latest available close when a live IBKR snapshot is unavailable."
+            f"Gamma uses the latest available {history_source} close because no live IBKR snapshot was available."
             if current_price is not None
             else None
         )
@@ -1715,6 +1718,7 @@ class IbkrValuationAdapter:
                 current_price = float(snapshot.price)
                 retrieved_at = now_utc()
                 origin = "fundamentals.ibkr.snapshot"
+                price_source = "ibkr"
                 transformation_note = (
                     "Gamma uses the current IBKR snapshot price for market-aware valuation fields."
                     if snapshot.delayed
@@ -1725,7 +1729,7 @@ class IbkrValuationAdapter:
             current_price=current_price,
             price_history=price_points,
             warnings=warnings,
-            source_provider="mock" if self.research_provider.client.mock else "ibkr",
+            source_provider="mock" if self.research_provider.client.mock else price_source,
             retrieved_at=retrieved_at,
             origin=origin,
             transformation_note=transformation_note,

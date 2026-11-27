@@ -1154,3 +1154,138 @@ def test_compute_portfolio_historical_es_contributions_add_up_to_historical_cvar
     assert payload.component_es is not None
     assert set(payload.component_es.index) == {"A", "B"}
     assert payload.component_es.sum() == pytest.approx(payload.results.historical_cvar, rel=1e-12)
+
+
+# --- Benchmark sin TWS (2026-11-27): beta, correlación y alfa usan la cadena de proveedores ---
+
+
+class _LiveClient:
+    mock = False
+
+
+class _RecordingMarketData(_StubMarketData):
+    """IBKR simulado: registra cada petición de histórico y devuelve la serie configurada."""
+
+    def __init__(self, history: pd.Series | None = None) -> None:
+        super().__init__()
+        self._history = history
+        self.history_requests = 0
+
+    def fetch_history(self, contract, lookback_days):
+        self.history_requests += 1
+        return self._history
+
+
+class _ChainProvider:
+    def __init__(self, series: pd.Series | None) -> None:
+        self._series = series
+
+    def load_history(self, instrument, lookback_days):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(series=self._series)
+
+
+class _PortfolioLikeDataProvider:
+    """Como PortfolioDataProvider: expone la lista de proveedores (p. ej. ibkr, yfinance)."""
+
+    def __init__(self, *series: pd.Series | None) -> None:
+        self.history_providers = [_ChainProvider(item) for item in series]
+
+
+class _ResearchLikeDataProvider:
+    """Como ResearchDataProvider: resuelve el instrumento con su propia cadena por política."""
+
+    def __init__(self, series: pd.Series | None, *, fail: bool = False) -> None:
+        self._series = series
+        self._fail = fail
+
+    def load_instrument_history_result(self, instrument, lookback_days, *, defaults=None):
+        from types import SimpleNamespace
+
+        if self._fail:
+            raise RuntimeError("provider down")
+        return SimpleNamespace(series=self._series)
+
+
+def _live_risk_service(market_data):
+    return RiskService(
+        client=_LiveClient(),
+        market_data=market_data,
+        mock_service=_StubMockService(),
+        risk_free_service=None,
+        benchmark_defaults=InstrumentDefaults(provider="benchmark", sec_type="STK", exchange="SMART", currency="USD"),
+    )
+
+
+def _benchmark_prices(periods: int = 80) -> pd.Series:
+    idx = pd.date_range("2026-01-02", periods=periods, freq="B")
+    rng = np.random.default_rng(7)
+    return pd.Series(100.0 * np.cumprod(1.0 + rng.normal(0.0004, 0.01, periods)), index=idx)
+
+
+def test_benchmark_uses_provider_chain_without_tws():
+    prices = _benchmark_prices()
+    ibkr = _RecordingMarketData(history=None)  # TWS desconectado: IBKR no devuelve nada
+    service = _live_risk_service(ibkr)
+
+    returns, warnings = service._load_benchmark_returns(
+        60, "USD", "SPY", data_provider=_PortfolioLikeDataProvider(None, prices)
+    )
+
+    assert warnings == []
+    pd.testing.assert_series_equal(returns, prices.pct_change().dropna(), check_names=False)
+    assert ibkr.history_requests == 0
+
+
+def test_benchmark_uses_research_provider_policy_chain():
+    prices = _benchmark_prices()
+    ibkr = _RecordingMarketData(history=None)
+    service = _live_risk_service(ibkr)
+
+    returns, _ = service._load_benchmark_returns(60, "USD", "SPY", data_provider=_ResearchLikeDataProvider(prices))
+
+    assert returns is not None and len(returns) == len(prices) - 1
+    assert ibkr.history_requests == 0
+
+
+def test_benchmark_falls_back_to_ibkr_when_the_provider_chain_fails():
+    prices = _benchmark_prices()
+    ibkr = _RecordingMarketData(history=prices)
+    service = _live_risk_service(ibkr)
+
+    returns, warnings = service._load_benchmark_returns(
+        60, "USD", "SPY", data_provider=_ResearchLikeDataProvider(None, fail=True)
+    )
+
+    assert warnings == []
+    assert returns is not None and not returns.empty
+    assert ibkr.history_requests == 1
+
+
+def test_benchmark_without_any_history_reports_unavailable():
+    service = _live_risk_service(_RecordingMarketData(history=None))
+
+    returns, warnings = service._load_benchmark_returns(60, "USD", "SPY", data_provider=_PortfolioLikeDataProvider(None))
+
+    assert returns is None
+    assert warnings == ["Benchmark history unavailable for SPY"]
+
+
+def test_beta_and_correlation_available_without_tws_through_the_data_provider():
+    prices = _benchmark_prices(120)
+    bench_ret = prices.pct_change().dropna()
+    port_ret = (1.2 * bench_ret).rename("portfolio")
+    service = _live_risk_service(_RecordingMarketData(history=None))
+
+    result = service._beta_corr_alpha(
+        port_ret=port_ret,
+        lookback_days=100,
+        beta_window=60,
+        base_currency="USD",
+        benchmark_symbol="SPY",
+        data_provider=_PortfolioLikeDataProvider(prices),
+    )
+
+    assert result.beta == pytest.approx(1.2, rel=1e-6)
+    assert result.correlation == pytest.approx(1.0, rel=1e-6)

@@ -3886,3 +3886,92 @@ def test_open_screener_hides_resolved_and_closed_markets():
 
     assert [row.market_id for row in opened] == ["polymarket:fed-dec"]
     assert {row.market_id for row in everything} == {"polymarket:fed-dec", "polymarket:fed-dec-2025", "polymarket:fed-dec-2024"}
+
+
+# --- Caché por tipo de dato (2026-11-27): lo vivo caduca en 60 s, lo liquidado dura más ---
+
+
+def _age_cache_entry(cache, key: str, *, seconds: int) -> None:
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td
+
+    path = cache._json_path(key)
+    payload = _json.loads(path.read_text())
+    payload["timestamp"] = (_dt.utcnow() - _td(seconds=seconds)).isoformat()
+    path.write_text(_json.dumps(payload))
+
+
+def test_live_prediction_market_quotes_expire_after_a_minute(tmp_path):
+    from src.services.cache import CacheService
+    from src.services.prediction_market_adapters import PolymarketAdapter
+
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    calls: list[str] = []
+
+    def fetch(url, params=None):
+        calls.append(url)
+        return {"n": len(calls)}
+
+    adapter = PolymarketAdapter(cache, fetch_json=fetch)
+    key = cache.make_key("prediction_markets", "polymarket", "screener", "open", "50")
+    first, _ = adapter._fetch_cached_json(key, "https://example.invalid/markets")
+    again, _ = adapter._fetch_cached_json(key, "https://example.invalid/markets")
+    assert first == again == {"n": 1}
+
+    _age_cache_entry(cache, key, seconds=120)
+    refreshed, _ = adapter._fetch_cached_json(key, "https://example.invalid/markets")
+    assert refreshed == {"n": 2}
+
+
+def test_settled_prediction_market_lists_keep_a_longer_cache(tmp_path):
+    from src.services.cache import CacheService
+    from src.services.prediction_market_adapters import SETTLED_LIST_TTL, PolymarketAdapter
+
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    calls: list[str] = []
+
+    def fetch(url, params=None):
+        calls.append(url)
+        return {"n": len(calls)}
+
+    adapter = PolymarketAdapter(cache, fetch_json=fetch)
+    key = cache.make_key("prediction_markets", "polymarket", "screener", "closed", "recent", "0")
+    adapter._fetch_cached_json(key, "https://example.invalid/markets", max_age=SETTLED_LIST_TTL)
+    _age_cache_entry(cache, key, seconds=120)
+
+    cached, _ = adapter._fetch_cached_json(key, "https://example.invalid/markets", max_age=SETTLED_LIST_TTL)
+    assert cached == {"n": 1}
+    assert len(calls) == 1
+
+
+# --- Kalshi sigue la regla de Polymarket (decisión del propietario, 2026-11-27) ---
+
+
+def _kalshi_record(tmp_path, **fields):
+    from datetime import datetime as _dt, timezone as _tz
+
+    from src.services.cache import CacheService
+    from src.services.prediction_market_adapters import KalshiAdapter
+
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=lambda url, params=None: {})
+    raw = {"ticker": "KXTEST-YES", "title": "Test market", "status": "active", **fields}
+    return adapter._normalize_market(raw, retrieved_at=_dt(2026, 11, 27, tzinfo=_tz.utc), origin="test")
+
+
+def test_kalshi_headline_uses_the_book_midpoint_when_the_spread_is_tight(tmp_path):
+    record = _kalshi_record(tmp_path, last_price_dollars="0.3410", yes_bid_dollars="0.0900", yes_ask_dollars="0.1390")
+
+    assert record.current_probability == pytest.approx(0.1145)
+    assert "midpoint" in record.transformation_note
+
+
+def test_kalshi_headline_uses_the_last_trade_when_the_spread_is_wide(tmp_path):
+    record = _kalshi_record(tmp_path, last_price_dollars="0.4200", yes_bid_dollars="0.2000", yes_ask_dollars="0.6000")
+
+    assert record.current_probability == pytest.approx(0.42)
+
+
+def test_kalshi_headline_without_trades_falls_back_to_the_book(tmp_path):
+    record = _kalshi_record(tmp_path, yes_bid_dollars="0.2000", yes_ask_dollars="0.6000")
+
+    assert record.current_probability == pytest.approx(0.40)
