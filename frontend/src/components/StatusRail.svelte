@@ -38,6 +38,8 @@
   export let onToggleSettings: () => void = () => {};
   export let onOpenKeyBindings: () => void = () => {};
   export let onOpenSetup: () => void = () => {};
+  export let onOpenGuide: (section: "guide" | "privacy") => void = () => {};
+  export let onReportProblem: () => void = () => {};
 
   const baseCurrencyOptions = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"];
   let selectedBaseCurrency = status?.base_currency ?? "USD";
@@ -139,6 +141,16 @@
           </div>
           <small>Choose demo or live data, check providers and set your SEC identity.</small>
           <button class="ghost wide" type="button" on:click={onOpenSetup}>Run Setup</button>
+        </div>
+
+        <div class="settings-section">
+          <span class="label">Help</span>
+          <small>Workflows to try, what stays on this computer, and a problem report you send yourself.</small>
+          <div class="help-actions">
+            <button class="ghost" type="button" on:click={() => onOpenGuide("guide")}>Getting started</button>
+            <button class="ghost" type="button" on:click={() => onOpenGuide("privacy")}>Privacy</button>
+            <button class="ghost" type="button" on:click={onReportProblem}>Report a problem</button>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -476,6 +488,12 @@
 
   .wide {
     width: 100%;
+  }
+
+  .help-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
   }
 
   .usage-list {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -267,6 +268,7 @@ class SetupCopilotStateModel(BaseModel):
     provider: str
     detail: str
     env_vars: list[str] = Field(default_factory=list)
+    pending_restart: bool = False
 
 
 class SetupProviderRowModel(BaseModel):
@@ -275,6 +277,7 @@ class SetupProviderRowModel(BaseModel):
     configured: bool
     env_vars: list[str] = Field(default_factory=list)
     unlocks: str
+    pending_restart: bool = False
 
 
 class SetupCoverageRowModel(BaseModel):
@@ -329,3 +332,22 @@ class SetupUpdateRequestModel(BaseModel):
 
 class SetupUpdateResponseModel(SetupReportModel):
     lines: list[str] = Field(default_factory=list)
+
+
+class SetupKeysUpdateRequestModel(BaseModel):
+    """Claves de API que el usuario escribe en Setup. Un valor vacío o null borra la variable.
+
+    Los valores solo viajan de la interfaz al backend: ninguna respuesta los devuelve.
+    """
+
+    keys: dict[str, str | None] = Field(default_factory=dict, max_length=24)
+
+
+class DiagnosticReportRequestModel(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+    client: dict[str, str] = Field(default_factory=dict, max_length=8)
+
+
+class DiagnosticReportResponseModel(BaseModel):
+    report: dict[str, Any]
+    path: str | None = None

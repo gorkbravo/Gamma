@@ -83,6 +83,10 @@ describe("StatusRail", () => {
     expect(body).toContain("AISstream live AIS");
     expect(body).toContain("Idle by design");
     expect(body).toContain("zoom past level 4");
+    // Beta: ayuda, privacidad e informe junto a Run Setup.
+    expect(body).toContain("Getting started");
+    expect(body).toContain("Privacy");
+    expect(body).toContain("Report a problem");
   });
 
   it("shows every provider row, an explicit unattributed row and a total that matches (GUA-20260903-10)", () => {

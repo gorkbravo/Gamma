@@ -9,6 +9,8 @@ from src.api.schemas.system import (
     BaseCurrencyResponseModel,
     ConnectionRequestModel,
     ConnectionStateModel,
+    DiagnosticReportRequestModel,
+    DiagnosticReportResponseModel,
     DiagnosticsResponseModel,
     HealthResponseModel,
     MarketDataModeRequestModel,
@@ -16,13 +18,16 @@ from src.api.schemas.system import (
     ProviderCapabilityModel,
     ProviderUsageResponseModel,
     ReadOnlyBoundaryModel,
+    SetupKeysUpdateRequestModel,
     SetupReportModel,
     SetupUpdateRequestModel,
     SetupUpdateResponseModel,
     SystemStatusResponseModel,
 )
+from src.application.diagnostic_report import build_diagnostic_report, save_diagnostic_report
 from src.application.setup_service import (
     SetupUpdate,
+    apply_key_update,
     apply_setup_update,
     build_setup_report,
     persist_runtime_preference,
@@ -176,6 +181,43 @@ def update_setup(payload: SetupUpdateRequestModel, request: Request) -> SetupUpd
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     report = SetupReportModel.from_domain(build_setup_report(runtime))
     return SetupUpdateResponseModel(**report.model_dump(), lines=lines)
+
+
+@router.post("/system/setup/keys", response_model=SetupUpdateResponseModel)
+def update_setup_keys(payload: SetupKeysUpdateRequestModel, request: Request) -> SetupUpdateResponseModel:
+    """Guarda claves de API en el .env que Gamma lee al arrancar (beta, 2026-11-28).
+
+    Solo acepta las variables de los proveedores opcionales y del Copilot; la respuesta nunca
+    incluye los valores, solo qué está configurado y si falta reiniciar.
+    """
+    runtime = request.app.state.runtime
+    try:
+        lines = apply_key_update(runtime, payload.keys)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Gamma could not write its .env file: {exc.__class__.__name__}.") from exc
+    report = SetupReportModel.from_domain(build_setup_report(runtime))
+    return SetupUpdateResponseModel(**report.model_dump(), lines=lines)
+
+
+@router.post("/system/diagnostic-report/preview", response_model=DiagnosticReportResponseModel)
+def preview_diagnostic_report(payload: DiagnosticReportRequestModel, request: Request) -> DiagnosticReportResponseModel:
+    """Informe de «Report a problem» sin guardarlo: el tester lo ve entero antes de compartirlo."""
+    runtime = request.app.state.runtime
+    return DiagnosticReportResponseModel(report=build_diagnostic_report(runtime, note=payload.note, client=payload.client))
+
+
+@router.post("/system/diagnostic-report", response_model=DiagnosticReportResponseModel)
+def save_diagnostic_report_route(payload: DiagnosticReportRequestModel, request: Request) -> DiagnosticReportResponseModel:
+    """Guarda el informe en la carpeta local de informes y devuelve la ruta; no lo envía a ningún sitio."""
+    runtime = request.app.state.runtime
+    report = build_diagnostic_report(runtime, note=payload.note, client=payload.client)
+    try:
+        path = save_diagnostic_report(runtime, report)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Gamma could not save the report: {exc.__class__.__name__}.") from exc
+    return DiagnosticReportResponseModel(report=report, path=str(path))
 
 
 def _system_status_response(runtime) -> SystemStatusResponseModel:

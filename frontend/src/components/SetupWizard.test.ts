@@ -57,6 +57,28 @@ describe("SetupWizard", () => {
     expect(body).not.toContain("development identity");
   });
 
+  it("offers a masked field per key and marks keys saved but not yet loaded (beta)", () => {
+    const base = setupReportFixture();
+    const report = setupReportFixture({
+      copilot: { ...base.copilot, pending_restart: true },
+      providers: [{ ...base.providers[0], pending_restart: true }]
+    });
+    const { body } = render(SetupWizard, {
+      props: { ...handlers, report, status: null, firstRun: false, initialStep: "sources" }
+    });
+
+    expect(body.match(/type="password"/g)?.length).toBe(2);
+    expect(body).toContain('autocomplete="off"');
+    expect(body).toContain("OPENAI_API_KEY");
+    expect(body).toContain("FRED_API_KEY");
+    expect(body.match(/Restart to apply/g)?.length).toBe(2);
+    expect(body).toContain("Save key");
+    expect(body).toContain("C:/Gamma/.env");
+    expect(body).toContain("(created on first save)");
+    expect(body).toContain("takes precedence over the file");
+    expect(body).not.toContain("never stores them");
+  });
+
   it("warns on Review what an empty SEC identity disables even with no changes (GUA-20261021-14b)", () => {
     const { body } = render(SetupWizard, {
       props: { ...handlers, report: setupReportFixture(), status: null, firstRun: true, initialStep: "review" }

@@ -7,6 +7,7 @@
   export let onEnterPortfolio: () => void;
   export let onEnterResearch: () => void;
   export let onOpenSetup: () => void = () => {};
+  export let onOpenGuide: () => void = () => {};
 
   const connectedLabel = (status: SystemStatus | null) => {
     if (!status) {
@@ -108,7 +109,10 @@
 
     <div class="boundary">
       <p>Read-only. Gamma never places orders or moves funds.</p>
-      <button type="button" class="link" on:click={onOpenSetup}>Run setup</button>
+      <div class="boundary-actions">
+        <button type="button" class="link" on:click={onOpenGuide}>Getting started</button>
+        <button type="button" class="link" on:click={onOpenSetup}>Run setup</button>
+      </div>
     </div>
   </article>
 </section>
@@ -315,6 +319,13 @@
     font-size: var(--text-xs);
     padding-top: var(--space-5);
     border-top: 1px solid var(--panel-border);
+  }
+
+  .boundary-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-3);
   }
 
   .boundary .link {

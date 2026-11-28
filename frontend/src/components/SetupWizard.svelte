@@ -24,7 +24,7 @@
     type SetupDraft,
     type SetupStepId
   } from "../lib/setup-wizard";
-  import type { SetupFinishResult } from "../lib/stores/setup";
+  import type { SetupFinishResult, SetupKeysResult } from "../lib/stores/setup";
 
   export let report: SetupReport | null = null;
   export let status: SystemStatus | null = null;
@@ -39,6 +39,12 @@
   export let onFinish: (choices: SetupChoices) => Promise<SetupFinishResult>;
   export let onTestConnection: () => Promise<void>;
   export let onRetry: () => void;
+  // Guarda claves de API en el .env al momento, sin esperar a «Finish setup».
+  export let onSaveKeys: (keys: Record<string, string | null>) => Promise<SetupKeysResult> = async () => ({
+    ok: false,
+    lines: [],
+    error: "Keys cannot be saved from here."
+  });
 
   const STEP_TITLES: Record<SetupStepId, string> = {
     mode: "How do you want to start?",
@@ -58,6 +64,12 @@
   let dialogEl: HTMLDivElement | null = null;
   let doneEl: HTMLButtonElement | null = null;
   let previouslyFocused: HTMLElement | null = null;
+  // Claves tecleadas en el paso de fuentes: solo viven aquí hasta guardarlas y nunca se rellenan.
+  let keyDrafts: Record<string, string> = {};
+  let keySaving = false;
+  let keyLines: string[] = [];
+  let keyError = "";
+  let keyLinesEl: HTMLUListElement | null = null;
 
   // El borrador se crea una sola vez con el primer informe; refrescos posteriores no lo pisan.
   $: if (report && draft == null) {
@@ -81,6 +93,7 @@
       : loadError
         ? "Setup unavailable"
         : "Reading setup status";
+  $: filledKeys = Object.entries(keyDrafts).filter(([, value]) => (value ?? "").trim() !== "");
   $: isLast = stepIndex === steps.length - 1;
   $: canAdvance = !(step === "identity" && identityError);
 
@@ -179,12 +192,37 @@
     }
   }
 
+  async function saveKeys() {
+    if (keySaving || !filledKeys.length) return;
+    keySaving = true;
+    keyError = "";
+    keyLines = [];
+    const outcome = await onSaveKeys(Object.fromEntries(filledKeys.map(([name, value]) => [name, value.trim()])));
+    keySaving = false;
+    if (!outcome.ok) {
+      keyError = outcome.error ?? "The keys could not be saved.";
+      return;
+    }
+    keyDrafts = {};
+    keyLines = outcome.lines;
+    // El botón se desactiva al vaciar los campos: el foco pasa al resultado para no caer en
+    // el body, donde Escape y la trampa de foco del diálogo dejan de funcionar.
+    await tick();
+    keyLinesEl?.focus();
+  }
+
+  function keyStatusLabel(configured: boolean, pendingRestart: boolean | undefined): string {
+    if (pendingRestart) return "Restart to apply";
+    return configured ? "Configured" : "Not set";
+  }
+
   function ibkrStatusLabel(current: SetupReport): string {
     if (current.data_mode.current === "demo") return "Checked after restart";
     return current.ibkr.status === "connected" ? "Connected" : "Not connected";
   }
 
   function copilotStatusLabel(current: SetupReport): string {
+    if (current.copilot.pending_restart) return "Restart to apply";
     switch (current.copilot.status) {
       case "configured":
         return "Configured";
@@ -396,37 +434,90 @@
           </tbody>
         </table>
 
-        <table class="grid">
+        <table class="grid keys">
           <caption>Optional keys</caption>
           <thead>
             <tr>
               <th scope="col">Provider</th>
               <th scope="col">Status</th>
               <th scope="col">Adds</th>
-              <th scope="col">Variable</th>
+              <th scope="col">Key</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <th scope="row">Copilot</th>
-              <td class:positive={report.copilot.status === "configured"}>{copilotStatusLabel(report)}</td>
+              <td
+                class:positive={report.copilot.status === "configured" && !report.copilot.pending_restart}
+                class:warning-text={report.copilot.pending_restart}
+              >
+                {copilotStatusLabel(report)}
+              </td>
               <td>Model-backed research answers in Copilot. Requests are billed to your OpenAI account.</td>
-              <td class="mono">OPENAI_API_KEY</td>
+              <td>
+                <label class="key-field">
+                  <span class="mono">OPENAI_API_KEY</span>
+                  <input class="form-control"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    maxlength="512"
+                    placeholder={report.copilot.status === "configured" ? "Replace key" : "Paste key"}
+                    bind:value={keyDrafts.OPENAI_API_KEY}
+                  />
+                </label>
+              </td>
             </tr>
             {#each report.providers as provider}
               <tr>
                 <th scope="row">{provider.display_name}</th>
-                <td class:positive={provider.configured}>{provider.configured ? "Configured" : "Not set"}</td>
+                <td
+                  class:positive={provider.configured && !provider.pending_restart}
+                  class:warning-text={provider.pending_restart}
+                >
+                  {keyStatusLabel(provider.configured, provider.pending_restart)}
+                </td>
                 <td>{provider.unlocks}</td>
-                <td class="mono">{provider.env_vars.join(", ")}</td>
+                <td>
+                  {#each provider.env_vars as name}
+                    <label class="key-field">
+                      <span class="mono">{name}</span>
+                      <input class="form-control"
+                        type="password"
+                        autocomplete="off"
+                        spellcheck="false"
+                        maxlength="512"
+                        placeholder={provider.configured ? "Replace key" : "Paste key"}
+                        bind:value={keyDrafts[name]}
+                      />
+                    </label>
+                  {/each}
+                </td>
               </tr>
             {/each}
           </tbody>
         </table>
+        <div class="key-actions">
+          <button type="button" class="btn is-ghost" on:click={() => void saveKeys()} disabled={!filledKeys.length}>
+            {keySaving ? "Saving…" : filledKeys.length > 1 ? `Save ${filledKeys.length} keys` : "Save key"}
+          </button>
+          {#if keyLines.length}
+            <ul class="lines key-lines" role="status" tabindex="-1" bind:this={keyLinesEl}>
+              {#each keyLines as line}
+                <li>{line}</li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+        {#if keyError}
+          <p class="notice warning" role="alert">{keyError}</p>
+        {/if}
         <p class="note">
-          Gamma reads API keys from environment variables or the .env file
+          Save key writes the key now, without finishing setup, to the .env file
           {#if report.config.env_file_path}<span class="mono path">{report.config.env_file_path}</span>{/if}
-          {report.config.env_file_present ? "" : "(not created yet)"} and never stores them. Restart Gamma after editing keys.
+          {report.config.env_file_present ? "" : "(created on first save)"} on this computer. Gamma never shows a saved key
+          again and sends it only to the provider it belongs to. Restart Gamma to use a new key. A system environment
+          variable with the same name takes precedence over the file.
         </p>
       {:else if step === "identity"}
         <p class="muted">
@@ -851,6 +942,43 @@
     border-color: var(--warning);
   }
 
+  /* Claves: campo enmascarado por variable dentro de la tabla de fuentes. */
+  .key-field {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 12rem;
+  }
+
+  .key-field + .key-field {
+    margin-top: var(--space-3);
+  }
+
+  .key-field .mono {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+  }
+
+  input[type="password"] {
+    width: 100%;
+    min-width: 0;
+    font-family: var(--font-num);
+    font-size: var(--text-sm);
+  }
+
+  .key-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .key-lines {
+    flex: 1 1 18rem;
+    outline: none;
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+
   .check {
     display: inline-flex;
     align-items: center;
@@ -960,6 +1088,36 @@
     .fields,
     .facts {
       grid-template-columns: 1fr;
+    }
+
+    /* El campo de clave encoge con la columna; si no, la tabla ensancha todo el cuerpo a 390 px. */
+    .key-field {
+      min-width: 0;
+    }
+
+    /* Claves en pantalla estrecha: cada proveedor en bloque (nombre y estado arriba, qué añade
+       y el campo debajo a todo el ancho) en lugar de cuatro columnas de 70 px. */
+    .grid.keys thead {
+      display: none;
+    }
+
+    .grid.keys tbody tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: var(--space-2) var(--space-4);
+      padding: var(--space-4) 0;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    .grid.keys tbody th,
+    .grid.keys tbody td {
+      padding: 0;
+      border-bottom: 0;
+    }
+
+    .grid.keys tbody td:nth-child(3),
+    .grid.keys tbody td:nth-child(4) {
+      grid-column: 1 / -1;
     }
 
     /* En móvil la tabla mantiene su semántica pero parte el texto en lugar de desbordar. */

@@ -64,6 +64,8 @@ class SetupCopilotState:
     provider: str
     detail: str
     env_vars: list[str] = field(default_factory=list)
+    # La clave está guardada en el .env pero este backend arrancó sin ella: hay que reiniciar.
+    pending_restart: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,8 @@ class SetupProviderRow:
     configured: bool
     env_vars: list[str]
     unlocks: str
+    # Guardada en el .env desde Setup, pero no cargada hasta el próximo arranque.
+    pending_restart: bool = False
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import CopilotResearchCard from "./components/CopilotResearchCard.svelte";
+  import GettingStartedDialog, { type GuideSection } from "./components/GettingStartedDialog.svelte";
   import LandingPage from "./components/LandingPage.svelte";
+  import ReportProblemDialog from "./components/ReportProblemDialog.svelte";
   import SetupWizard from "./components/SetupWizard.svelte";
   import Shell from "./components/Shell.svelte";
   import ViewErrorBoundary from "./components/ViewErrorBoundary.svelte";
@@ -299,6 +301,7 @@
   import {
     finishSetup,
     loadSetupReport,
+    saveSetupKeys,
     setupError,
     setupReport,
     skipSetup,
@@ -433,6 +436,11 @@
   let setupFirstRun = false;
   let setupAutoOpened = false;
   let setupInitialStep: SetupStepId | null = null;
+  // Beta: guía de primeros pasos con nota de privacidad, y «Report a problem».
+  let guideOpen = false;
+  let guideSection: GuideSection = "guide";
+  let reportOpen = false;
+  let reportClient: Record<string, string> = {};
   // La identidad SEC falta según el informe del asistente o porque la búsqueda respondió 428.
   $: secIdentityMissing =
     $setupReport?.sec_identity.status === "missing" || isSecIdentityMissingError($fundamentalsSearchState.error);
@@ -1621,6 +1629,27 @@
 
   function handleCloseSetup() {
     setupOpen = false;
+  }
+
+  async function handleOpenGuide(section: GuideSection = "guide") {
+    settingsOpen = false;
+    reportOpen = false;
+    guideSection = section;
+    guideOpen = true;
+    // La ruta del .env sale del informe de Setup; se lee si aún no está.
+    if (!$setupReport) await loadSetupReport();
+  }
+
+  function handleOpenReportProblem() {
+    // Solo lo que el backend acepta en client; él lo vuelve a filtrar y sanear.
+    reportClient = {
+      user_agent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+      active_tab: workspaceMode == null ? "landing" : $activeTab,
+      last_error: $lastError.trim()
+    };
+    settingsOpen = false;
+    guideOpen = false;
+    reportOpen = true;
   }
 
   async function handleSetupFinish(choices: SetupChoices) {
@@ -3221,6 +3250,7 @@
     onEnterPortfolio={() => enterWorkspace("portfolio")}
     onEnterResearch={() => enterWorkspace("research")}
     onOpenSetup={handleOpenSetup}
+    onOpenGuide={() => void handleOpenGuide("guide")}
   />
 {:else}
   <Shell
@@ -3275,6 +3305,8 @@
         onToggleSettings={handleToggleSettings}
         onOpenKeyBindings={handleOpenKeyBindings}
         onOpenSetup={handleOpenSetup}
+        onOpenGuide={(section) => void handleOpenGuide(section)}
+        onReportProblem={handleOpenReportProblem}
       />
     </svelte:fragment>
 
@@ -3720,7 +3752,25 @@
     onFinish={handleSetupFinish}
     onTestConnection={handleSetupTestConnection}
     onRetry={() => void loadSetupReport()}
+    onSaveKeys={saveSetupKeys}
   />
+{/if}
+
+{#if guideOpen}
+  <GettingStartedDialog
+    initialSection={guideSection}
+    envFilePath={$setupReport?.config.env_file_path ?? null}
+    onClose={() => (guideOpen = false)}
+    onOpenSetup={() => {
+      guideOpen = false;
+      handleOpenSetup();
+    }}
+    onReportProblem={handleOpenReportProblem}
+  />
+{/if}
+
+{#if reportOpen}
+  <ReportProblemDialog client={reportClient} onClose={() => (reportOpen = false)} />
 {/if}
 
 <style>

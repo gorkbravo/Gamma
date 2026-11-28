@@ -354,6 +354,8 @@ export interface SetupCopilotState {
   provider: string;
   detail: string;
   env_vars: string[];
+  /** La clave está guardada en el .env pero este backend arrancó sin ella. */
+  pending_restart?: boolean;
 }
 
 export interface SetupProviderRow {
@@ -362,6 +364,7 @@ export interface SetupProviderRow {
   configured: boolean;
   env_vars: string[];
   unlocks: string;
+  pending_restart?: boolean;
 }
 
 export interface SetupCoverageRow {
@@ -403,6 +406,20 @@ export interface SetupUpdateRequest {
 
 export interface SetupUpdateResponse extends SetupReport {
   lines: string[];
+}
+
+/** Informe de «Report a problem»: solo estado no sensible, generado en local (ver diagnostic_report.py). */
+export interface DiagnosticReport {
+  schema: string;
+  generated_at: string;
+  excluded: string[];
+  note: string | null;
+  [key: string]: unknown;
+}
+
+export interface DiagnosticReportResponse {
+  report: DiagnosticReport;
+  path: string | null;
 }
 
 export interface DiagnosticsResponse {

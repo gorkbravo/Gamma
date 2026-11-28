@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.application.env_file import read_env_assignments, update_env_file, validate_env_value
 from src.application.system_service import normalize_market_data_mode
 from src.models.setup import (
     SetupConfigLocation,
@@ -369,30 +370,30 @@ def _sec_identity_state(runtime: "ApplicationRuntime", preferences: SetupPrefere
 def _copilot_state(mock_mode: bool) -> SetupCopilotState:
     provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
     env_vars = ["GAMMA_COPILOT_PROVIDER", "OPENAI_API_KEY"]
+    pending = _pending_restart(["OPENAI_API_KEY"])
     if provider in {"disabled", "none", "off"}:
-        return SetupCopilotState("disabled", provider, "Copilot is disabled by GAMMA_COPILOT_PROVIDER.", env_vars)
+        return SetupCopilotState("disabled", provider, "Copilot is disabled by GAMMA_COPILOT_PROVIDER.", env_vars, pending_restart=pending)
     if provider in {"mock", "demo", "offline"}:
         if mock_mode:
             return SetupCopilotState(
-                "demo", provider, "Canned demo answers from the mock provider; no model is called.", env_vars
-            )
+                "demo", provider, "Canned demo answers from the mock provider; no model is called.", env_vars, pending_restart=pending)
         return SetupCopilotState(
             "unavailable",
             provider,
             "The mock Copilot provider is disabled on live data. Set GAMMA_COPILOT_PROVIDER=openai and OPENAI_API_KEY.",
-            env_vars,
-        )
+            env_vars, pending_restart=pending)
     if provider != "openai":
-        return SetupCopilotState("unavailable", provider, f"Unsupported Copilot provider: {provider}.", env_vars)
+        return SetupCopilotState("unavailable", provider, f"Unsupported Copilot provider: {provider}.", env_vars, pending_restart=pending)
     if (os.getenv("OPENAI_API_KEY", "") or "").strip():
         return SetupCopilotState(
-            "configured", provider, "OpenAI key configured. Copilot requests are billed to that account.", env_vars
+            "configured", provider, "OpenAI key configured. Copilot requests are billed to that account.", env_vars, pending_restart=pending,
         )
     return SetupCopilotState(
         "missing_key",
         provider,
         "Copilot needs OPENAI_API_KEY. In demo mode, GAMMA_COPILOT_PROVIDER=mock gives canned answers instead.",
         env_vars,
+        pending_restart=pending,
     )
 
 
@@ -412,9 +413,56 @@ def _provider_rows(runtime: "ApplicationRuntime") -> list[SetupProviderRow]:
                 configured=any((os.getenv(name, "") or "").strip() for name in key_vars),
                 env_vars=key_vars,
                 unlocks=unlocks,
+                pending_restart=_pending_restart(key_vars),
             )
         )
     return rows
+
+
+def _pending_restart(names: list[str]) -> bool:
+    """True si el .env guarda un valor para alguna variable que este backend no cargó al arrancar."""
+    try:
+        saved = read_env_assignments(resolve_env_file_path())
+    except OSError:
+        return False
+    return any(saved.get(name) and saved.get(name) != (os.getenv(name) or "").strip() for name in names)
+
+
+COPILOT_KEY_ENV_VARS = ["OPENAI_API_KEY"]
+
+
+def configurable_key_names(runtime: "ApplicationRuntime") -> list[str]:
+    """Variables de clave que Setup puede escribir: las de los proveedores opcionales y la del Copilot."""
+    names = [name for row in _provider_rows(runtime) for name in row.env_vars]
+    return list(dict.fromkeys([*COPILOT_KEY_ENV_VARS, *names]))
+
+
+def apply_key_update(runtime: "ApplicationRuntime", keys: dict[str, str | None]) -> list[str]:
+    """Guarda claves de API en el .env que lee Gamma al arrancar. Valida todo antes de escribir.
+
+    Un valor vacío o None borra la variable del fichero. Nunca registra ni devuelve los valores.
+    """
+    allowed = set(configurable_key_names(runtime))
+    updates: dict[str, str | None] = {}
+    for raw_name, raw_value in (keys or {}).items():
+        name = str(raw_name or "").strip().upper()
+        if name not in allowed:
+            raise ValueError(f"{name or 'This variable'} cannot be set from Setup.")
+        value = None if raw_value is None or not str(raw_value).strip() else validate_env_value(name, str(raw_value))
+        updates[name] = value
+    if not updates:
+        return ["No keys were changed."]
+    path = resolve_env_file_path()
+    update_env_file(path, updates)
+    saved = sorted(name for name, value in updates.items() if value is not None)
+    removed = sorted(name for name, value in updates.items() if value is None)
+    lines = []
+    if saved:
+        lines.append(f"Saved {', '.join(saved)} to {path}.")
+    if removed:
+        lines.append(f"Removed {', '.join(removed)} from {path}.")
+    lines.append("Restart Gamma to apply the change.")
+    return lines
 
 
 def _provider_unlocks(provider_id: str) -> str | None:

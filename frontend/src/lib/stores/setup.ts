@@ -1,6 +1,6 @@
 import { get, writable } from "svelte/store";
 import { getJson, postJson } from "../api/client";
-import type { SetupReport, SetupUpdateRequest, SetupUpdateResponse } from "../api/types";
+import type { DiagnosticReportResponse, SetupReport, SetupUpdateRequest, SetupUpdateResponse } from "../api/types";
 import { queryCache } from "../query-cache";
 import type { SetupChoices } from "../setup-wizard";
 import { setBaseCurrency } from "./app";
@@ -51,6 +51,45 @@ export async function saveSetup(update: SetupUpdateRequest): Promise<SetupUpdate
   } finally {
     setLoading("setup", false);
   }
+}
+
+export interface SetupKeysResult {
+  ok: boolean;
+  lines: string[];
+  error: string | null;
+}
+
+/**
+ * Guarda claves de API en el .env que Gamma lee al arrancar. Un valor null o vacío borra la
+ * variable. La respuesta nunca contiene los valores: solo el informe actualizado.
+ */
+export async function saveSetupKeys(keys: Record<string, string | null>): Promise<SetupKeysResult> {
+  setLoading("setup", true);
+  try {
+    const response = await postJson<SetupUpdateResponse>("/system/setup/keys", { keys });
+    setupReport.set(response);
+    setupError.set("");
+    return { ok: true, lines: response.lines, error: null };
+  } catch (error) {
+    return { ok: false, lines: [], error: errorMessage(error) };
+  } finally {
+    setLoading("setup", false);
+  }
+}
+
+export interface DiagnosticReportRequest {
+  note?: string | null;
+  client?: Record<string, string>;
+}
+
+/** Informe de diagnóstico sin guardar, para que el tester lo lea antes de compartirlo. */
+export async function previewDiagnosticReport(request: DiagnosticReportRequest): Promise<DiagnosticReportResponse> {
+  return postJson<DiagnosticReportResponse>("/system/diagnostic-report/preview", request);
+}
+
+/** Guarda el informe en la carpeta local de informes; Gamma no lo envía a ningún sitio. */
+export async function saveDiagnosticReport(request: DiagnosticReportRequest): Promise<DiagnosticReportResponse> {
+  return postJson<DiagnosticReportResponse>("/system/diagnostic-report", request);
 }
 
 /** Salta el asistente: lo marca como completado sin cambiar ninguna preferencia. */
